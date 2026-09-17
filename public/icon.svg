@@ -1,0 +1,18 @@
+<svg width="64" height="64" viewBox="0 0 64 64" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="folderGrad" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0%" stop-color="#1e88d6"/>
+      <stop offset="100%" stop-color="#0a4f8c"/>
+    </linearGradient>
+  </defs>
+  <path d="M6 18c0-2.2 1.8-4 4-4h12l4 5h28c2.2 0 4 1.8 4 4v29c0 2.2-1.8 4-4 4H10c-2.2 0-4-1.8-4-4V18z"
+        fill="url(#folderGrad)"/>
+  <rect x="18" y="24" width="24" height="30" rx="2" fill="#ffffff"/>
+  <rect x="22" y="30" width="16" height="2.4" rx="1.2" fill="#7fb3e0"/>
+  <rect x="22" y="35" width="16" height="2.4" rx="1.2" fill="#7fb3e0"/>
+  <rect x="22" y="40" width="11" height="2.4" rx="1.2" fill="#7fb3e0"/>
+  <rect x="26" y="21" width="24" height="30" rx="2" fill="#eaf4fc" stroke="#0a4f8c" stroke-width="1.2"/>
+  <rect x="30" y="27" width="16" height="2.4" rx="1.2" fill="#1e88d6"/>
+  <rect x="30" y="32" width="16" height="2.4" rx="1.2" fill="#1e88d6"/>
+  <rect x="30" y="37" width="11" height="2.4" rx="1.2" fill="#1e88d6"/>
+</svg>

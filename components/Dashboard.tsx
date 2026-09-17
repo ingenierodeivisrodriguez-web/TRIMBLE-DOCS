@@ -1,0 +1,164 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { formatBytes } from "../lib/format";
+import { groupTopN } from "../lib/grouping";
+import { SummaryResponse } from "../lib/types";
+import DetailModal from "./DetailModal";
+import GrowthTimelineChart from "./GrowthTimelineChart";
+import StatCard from "./StatCard";
+import TypeDonutChart from "./TypeDonutChart";
+import TypeSizeBarChart from "./TypeSizeBarChart";
+
+const TOP_N = 7;
+
+type ModalView = { kind: "others"; items: SummaryResponse["byType"] } | { kind: "files"; ext: string };
+
+export default function Dashboard({
+  projectId,
+  projectName,
+  accessToken,
+}: {
+  projectId: string;
+  projectName: string;
+  accessToken: string;
+}) {
+  const [summary, setSummary] = useState<SummaryResponse | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string>("");
+  const [modalView, setModalView] = useState<ModalView | null>(null);
+
+  useEffect(() => {
+    if (!projectId || !accessToken) return;
+    let cancelled = false;
+    setLoading(true);
+    setError("");
+    fetch(`/api/summary?projectId=${encodeURIComponent(projectId)}`, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    })
+      .then(async (res) => {
+        if (!res.ok) throw new Error((await res.json()).error ?? "Error al cargar el resumen.");
+        return res.json();
+      })
+      .then((json: SummaryResponse) => {
+        if (!cancelled) setSummary(json);
+      })
+      .catch((err) => {
+        if (!cancelled) setError(err.message);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, accessToken]);
+
+  const countChart = useMemo(
+    () => (summary ? groupTopN(summary.byType, "count", TOP_N) : null),
+    [summary]
+  );
+  const sizeChart = useMemo(
+    () => (summary ? groupTopN(summary.byType, "size", TOP_N) : null),
+    [summary]
+  );
+
+  if (loading) {
+    return <CenteredMessage>Analizando los documentos del proyecto...</CenteredMessage>;
+  }
+  if (error) {
+    return <CenteredMessage isError>{error}</CenteredMessage>;
+  }
+  if (!summary || !countChart || !sizeChart) {
+    return <CenteredMessage>Sin datos disponibles.</CenteredMessage>;
+  }
+
+  return (
+    <div style={{ padding: 24, display: "flex", flexDirection: "column", gap: 20 }}>
+      <header>
+        <h1 style={{ color: "var(--tc-blue-900)", margin: "0 0 4px" }}>Resumen Archivos</h1>
+        <p style={{ color: "var(--tc-gray-500)", margin: 0 }}>
+          {projectName || summary.project.name}
+        </p>
+      </header>
+
+      <section style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+        <StatCard label="Total de archivos" value={summary.totals.filesCount.toLocaleString("es")} />
+        <StatCard label="Tipos distintos" value={summary.totals.typesCount.toLocaleString("es")} />
+        <StatCard label="Tamano total" value={formatBytes(summary.totals.totalSize)} />
+      </section>
+
+      <section style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
+        <Card title="Archivos por tipo" flex={1}>
+          <TypeDonutChart
+            data={countChart.chartData}
+            onSliceClick={(item) =>
+              item.isOthers
+                ? setModalView({ kind: "others", items: countChart.othersItems })
+                : setModalView({ kind: "files", ext: item.ext })
+            }
+          />
+        </Card>
+        <Card title="Tamano ocupado por tipo" flex={1}>
+          <TypeSizeBarChart
+            data={sizeChart.chartData}
+            onBarClick={(item) =>
+              item.isOthers
+                ? setModalView({ kind: "others", items: sizeChart.othersItems })
+                : setModalView({ kind: "files", ext: item.ext })
+            }
+          />
+        </Card>
+      </section>
+
+      <Card title="Crecimiento acumulado de documentos">
+        <GrowthTimelineChart weekly={summary.timeline.weekly} monthly={summary.timeline.monthly} />
+      </Card>
+
+      {modalView && (
+        <DetailModal
+          initialView={modalView}
+          projectId={projectId}
+          accessToken={accessToken}
+          onClose={() => setModalView(null)}
+        />
+      )}
+    </div>
+  );
+}
+
+function Card({ title, children, flex }: { title: string; children: React.ReactNode; flex?: number }) {
+  return (
+    <div
+      style={{
+        background: "var(--tc-white)",
+        borderRadius: "var(--tc-radius)",
+        boxShadow: "var(--tc-shadow)",
+        padding: 20,
+        flex: flex ? `${flex} 1 320px` : undefined,
+        minWidth: 320,
+      }}
+    >
+      <h3 style={{ margin: "0 0 12px", color: "var(--tc-blue-800)", fontSize: 16 }}>{title}</h3>
+      {children}
+    </div>
+  );
+}
+
+function CenteredMessage({ children, isError }: { children: React.ReactNode; isError?: boolean }) {
+  return (
+    <div
+      style={{
+        minHeight: "60vh",
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        color: isError ? "#b3261e" : "var(--tc-gray-500)",
+        padding: 24,
+        textAlign: "center",
+      }}
+    >
+      {children}
+    </div>
+  );
+}

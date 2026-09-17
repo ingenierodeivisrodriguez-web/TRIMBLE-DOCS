@@ -1,0 +1,38 @@
+:root {
+  --tc-blue-900: #0a3d62;
+  --tc-blue-800: #0a4f8c;
+  --tc-blue-700: #0b5fa5;
+  --tc-blue-600: #1373c2;
+  --tc-blue-500: #1e88d6;
+  --tc-blue-100: #eaf4fc;
+  --tc-blue-50: #f4f9fd;
+  --tc-gray-700: #3c4550;
+  --tc-gray-500: #6b7684;
+  --tc-gray-300: #d7dee6;
+  --tc-gray-100: #f0f3f6;
+  --tc-white: #ffffff;
+  --tc-radius: 10px;
+  --tc-shadow: 0 1px 3px rgba(10, 61, 98, 0.12), 0 1px 2px rgba(10, 61, 98, 0.08);
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  padding: 0;
+  margin: 0;
+  background: var(--tc-blue-50);
+  color: var(--tc-gray-700);
+  font-family: "Segoe UI", -apple-system, BlinkMacSystemFont, Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+a {
+  color: var(--tc-blue-700);
+}
+
+button {
+  font-family: inherit;
+}
