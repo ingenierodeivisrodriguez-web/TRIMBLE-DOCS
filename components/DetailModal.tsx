@@ -23,6 +23,11 @@ export default function DetailModal({
   onClose: () => void;
 }) {
   const [view, setView] = useState<View>(initialView);
+  const [fileCount, setFileCount] = useState<number | null>(null);
+
+  useEffect(() => {
+    setFileCount(null);
+  }, [view]);
 
   return (
     <div
@@ -60,11 +65,16 @@ export default function DetailModal({
             borderBottom: "1px solid var(--tc-gray-100)",
           }}
         >
-          <h3 style={{ margin: 0, color: "var(--tc-blue-800)" }}>
-            {view.kind === "others" && "Otros tipos de archivo"}
-            {view.kind === "files" && `Archivos: ${extLabel(view.ext)}`}
-            {view.kind === "recent" && `Archivos cargados en los ultimos ${view.days} dias`}
-          </h3>
+          <div>
+            <h3 style={{ margin: 0, color: "var(--tc-blue-800)" }}>
+              {view.kind === "others" && "Otros tipos de archivo"}
+              {view.kind === "files" && `Archivos: ${extLabel(view.ext)}`}
+              {view.kind === "recent" && `Archivos cargados en los ultimos ${view.days} dias`}
+            </h3>
+            {view.kind !== "others" && fileCount !== null && (
+              <span style={countBadgeStyle}>{fileCount.toLocaleString("es")} en total</span>
+            )}
+          </div>
           <button onClick={onClose} style={closeButtonStyle}>
             ✕
           </button>
@@ -75,16 +85,33 @@ export default function DetailModal({
             <OthersTable items={view.items} onSelect={(ext) => setView({ kind: "files", ext })} />
           )}
           {view.kind === "files" && (
-            <FilesTable projectId={projectId} accessToken={accessToken} query={{ ext: view.ext }} />
+            <FilesTable
+              projectId={projectId}
+              accessToken={accessToken}
+              query={{ ext: view.ext }}
+              onCountChange={setFileCount}
+            />
           )}
           {view.kind === "recent" && (
-            <FilesTable projectId={projectId} accessToken={accessToken} query={{ days: view.days }} />
+            <FilesTable
+              projectId={projectId}
+              accessToken={accessToken}
+              query={{ days: view.days }}
+              onCountChange={setFileCount}
+            />
           )}
         </div>
       </div>
     </div>
   );
 }
+
+const countBadgeStyle: React.CSSProperties = {
+  display: "block",
+  marginTop: 2,
+  fontSize: 13,
+  color: "var(--tc-gray-500)",
+};
 
 const closeButtonStyle: React.CSSProperties = {
   border: "none",
@@ -164,10 +191,12 @@ function FilesTable({
   projectId,
   accessToken,
   query,
+  onCountChange,
 }: {
   projectId: string;
   accessToken: string;
   query: FilesQuery;
+  onCountChange: (count: number) => void;
 }) {
   const [allItems, setAllItems] = useState<FileRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -226,6 +255,10 @@ function FilesTable({
   useEffect(() => {
     setPage(1);
   }, [search, sortKey, sortDir]);
+
+  useEffect(() => {
+    onCountChange(filteredSorted.length);
+  }, [filteredSorted.length, onCountChange]);
 
   function handleSort(key: SortKey) {
     if (key === sortKey) {
