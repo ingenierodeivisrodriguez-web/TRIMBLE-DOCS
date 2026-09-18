@@ -90,26 +90,23 @@ public/icon.svg              Icono de la extension
    |---|---|
    | `TRIMBLE_CLIENT_ID` | `31d42c3e-aacc-492e-a3a1-fd9903ae2c50` |
    | `TRIMBLE_CLIENT_SECRET` | (el Client Secret de la app "apibasedatos"; ponlo solo en Vercel, nunca en el repo) |
-   | `TRIMBLE_REDIRECT_URI` | `https://<tu-dominio>.vercel.app/api/auth/callback` (o la que definas) |
+   | `TRIMBLE_REDIRECT_URI` | `https://trimble-docs.vercel.app/api/auth/callback` (o la que definas) |
 
-3. **Despliega.** Vercel te asignara un dominio, por ejemplo
-   `https://resumen-archivos.vercel.app`.
+3. **Despliega.** ✅ Ya desplegado: el dominio de produccion es
+   `https://trimble-docs.vercel.app`.
 
 4. **Actualiza las URLs que dependen del dominio final** (antes de registrar
-   la extension en Trimble Connect):
-   - Edita [`public/manifest.json`](public/manifest.json) y reemplaza
-     `https://TU-DOMINIO.vercel.app` por tu dominio real de Vercel en los
-     campos `url`, `icon` e `infoUrl`.
-   - Vuelve a desplegar (commit + push, o "Redeploy" en Vercel).
+   la extension en Trimble Connect). ✅ Ya hecho: [`public/manifest.json`](public/manifest.json)
+   apunta a `https://trimble-docs.vercel.app` en los campos `url`, `icon` e
+   `infoUrl`.
 
 5. **⚠️ Recordatorio importante — Callback URL en el Trimble Developer
    Console:** la app OAuth "apibasedatos" (Client ID
    `31d42c3e-aacc-492e-a3a1-fd9903ae2c50`) esta registrada hoy con las
    callback URLs `https://oauth.pstmn.io/v1/callback` y `http://localhost`
-   (usadas para pruebas con Postman/local). **Una vez tengas el dominio real
-   de produccion en Vercel, entra al Trimble Developer Console y agrega la
-   URL de callback de produccion** (por ejemplo
-   `https://<tu-dominio>.vercel.app/api/auth/callback`), o escribe a
+   (usadas para pruebas con Postman/local). **Pendiente**: entra al Trimble
+   Developer Console y agrega la URL de callback de produccion
+   `https://trimble-docs.vercel.app/api/auth/callback`, o escribe a
    connect-support@trimble.com si necesitas que agreguen una nueva callback
    URL a la app ya registrada. Esto solo es relevante si en el futuro
    implementas el flujo OAuth Authorization Code completo; el dashboard tal
@@ -121,10 +118,9 @@ public/icon.svg              Icono de la extension
    administrador del proyecto).
 2. Ve a **Configuracion del proyecto → Apps & Capabilities**.
 3. Selecciona **+ Add Custom** (arriba de la lista).
-4. En **Capability Manifest URL**, escribe la URL de tu manifiesto desplegado,
-   por ejemplo:
+4. En **Capability Manifest URL**, escribe la URL de tu manifiesto desplegado:
    ```
-   https://<tu-dominio>.vercel.app/manifest.json
+   https://trimble-docs.vercel.app/manifest.json
    ```
 5. Selecciona **Add**. "Resumen Archivos" deberia aparecer en el menu lateral
    del proyecto, junto a las demas extensiones (con el icono de carpeta azul).

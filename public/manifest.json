@@ -1,8 +1,8 @@
 {
-  "url": "https://TU-DOMINIO.vercel.app/extension",
+  "url": "https://trimble-docs.vercel.app/extension",
   "title": "Resumen Archivos",
   "description": "Panel con estadisticas de los documentos cargados en el proyecto: cantidad y tamano por tipo de archivo, y crecimiento acumulado en el tiempo.",
-  "icon": "https://TU-DOMINIO.vercel.app/icon.svg",
-  "infoUrl": "https://TU-DOMINIO.vercel.app",
+  "icon": "https://trimble-docs.vercel.app/icon.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
   "extensionType": ["project"]
 }
