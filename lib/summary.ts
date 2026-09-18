@@ -34,9 +34,12 @@ function buildTimeline(
     .sort((a, b) => a - b);
 
   const today = new Date();
-  let start = new Date(projectCreatedOn);
+  // Start at the earliest document's own date rather than the project's
+  // creation date: many projects sit empty for a while before the first
+  // upload, which would otherwise stretch the chart with a flat, empty lead-in.
+  let start = sortedDates.length > 0 ? new Date(sortedDates[0]) : new Date(projectCreatedOn);
   if (Number.isNaN(start.getTime())) {
-    start = sortedDates.length > 0 ? new Date(sortedDates[0]) : today;
+    start = today;
   }
 
   const buckets: Date[] = [];

@@ -53,9 +53,7 @@ export interface SummaryResponse {
   cached: boolean;
 }
 
-export interface FilesPageResponse {
+export interface FilesListResponse {
   items: FileRecord[];
   total: number;
-  page: number;
-  pageSize: number;
 }

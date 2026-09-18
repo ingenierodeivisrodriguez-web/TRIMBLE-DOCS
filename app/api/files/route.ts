@@ -1,9 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getProjectData } from "../../../lib/cache";
 import { TrimbleApiError } from "../../../lib/trimbleApi";
-import { FilesPageResponse } from "../../../lib/types";
+import { FilesListResponse } from "../../../lib/types";
 
 export const dynamic = "force-dynamic";
+
+// A single file type realistically has a few hundred files (per the product
+// spec); returning the whole filtered list lets the modal sort/search
+// instantly on the client without a round trip per keystroke or column
+// click. This cap just guards against a pathological outlier.
+const MAX_ITEMS = 5000;
 
 function getBearerToken(req: NextRequest): string | null {
   const header = req.headers.get("authorization") ?? "";
@@ -14,11 +20,6 @@ function getBearerToken(req: NextRequest): string | null {
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get("projectId");
   const ext = req.nextUrl.searchParams.get("ext");
-  const page = Math.max(1, Number(req.nextUrl.searchParams.get("page") ?? "1") || 1);
-  const pageSize = Math.min(
-    200,
-    Math.max(1, Number(req.nextUrl.searchParams.get("pageSize") ?? "25") || 25)
-  );
   const accessToken = getBearerToken(req);
 
   if (!projectId || !ext) {
@@ -35,16 +36,12 @@ export async function GET(req: NextRequest) {
     const { data } = await getProjectData(projectId, accessToken);
     const filtered = data.files
       .filter((f) => f.ext === ext)
-      .sort((a, b) => (a.modifiedOn < b.modifiedOn ? 1 : -1));
+      .sort((a, b) => (a.modifiedOn < b.modifiedOn ? 1 : -1))
+      .slice(0, MAX_ITEMS);
 
-    const start = (page - 1) * pageSize;
-    const items = filtered.slice(start, start + pageSize);
-
-    const response: FilesPageResponse = {
-      items,
+    const response: FilesListResponse = {
+      items: filtered,
       total: filtered.length,
-      page,
-      pageSize,
     };
     return NextResponse.json(response);
   } catch (err) {

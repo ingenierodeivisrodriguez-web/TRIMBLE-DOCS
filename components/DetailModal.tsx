@@ -1,8 +1,8 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { extLabel, formatBytes, formatDate } from "../lib/format";
-import { FileRecord, FilesPageResponse, TypeAggregate } from "../lib/types";
+import { FileRecord, FilesListResponse, TypeAggregate } from "../lib/types";
 
 type View = { kind: "others"; items: TypeAggregate[] } | { kind: "files"; ext: string };
 
@@ -119,6 +119,31 @@ function OthersTable({
   );
 }
 
+type SortKey = "name" | "folderPath" | "size" | "uploadedBy" | "modifiedOn";
+type SortDir = "asc" | "desc";
+
+const DEFAULT_SORT_DIR: Record<SortKey, SortDir> = {
+  name: "asc",
+  folderPath: "asc",
+  size: "desc",
+  uploadedBy: "asc",
+  modifiedOn: "desc",
+};
+
+const COLUMNS: { key: SortKey; label: string }[] = [
+  { key: "name", label: "Nombre" },
+  { key: "folderPath", label: "Carpeta" },
+  { key: "size", label: "Tamano" },
+  { key: "uploadedBy", label: "Subido por" },
+  { key: "modifiedOn", label: "Fecha" },
+];
+
+function compareFiles(a: FileRecord, b: FileRecord, key: SortKey): number {
+  if (key === "size") return a.size - b.size;
+  if (key === "modifiedOn") return a.modifiedOn < b.modifiedOn ? -1 : a.modifiedOn > b.modifiedOn ? 1 : 0;
+  return a[key].localeCompare(b[key], "es", { sensitivity: "base" });
+}
+
 function FilesTable({
   projectId,
   accessToken,
@@ -128,21 +153,19 @@ function FilesTable({
   accessToken: string;
   ext: string;
 }) {
-  const [page, setPage] = useState(1);
-  const [data, setData] = useState<FilesPageResponse | null>(null);
+  const [allItems, setAllItems] = useState<FileRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string>("");
+  const [search, setSearch] = useState("");
+  const [sortKey, setSortKey] = useState<SortKey>("modifiedOn");
+  const [sortDir, setSortDir] = useState<SortDir>("desc");
+  const [page, setPage] = useState(1);
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({
-      projectId,
-      ext,
-      page: String(page),
-      pageSize: String(PAGE_SIZE),
-    });
+    const params = new URLSearchParams({ projectId, ext });
     fetch(`/api/files?${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
@@ -150,8 +173,8 @@ function FilesTable({
         if (!res.ok) throw new Error((await res.json()).error ?? "Error al cargar archivos.");
         return res.json();
       })
-      .then((json: FilesPageResponse) => {
-        if (!cancelled) setData(json);
+      .then((json: FilesListResponse) => {
+        if (!cancelled) setAllItems(json.items);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -162,22 +185,64 @@ function FilesTable({
     return () => {
       cancelled = true;
     };
-  }, [projectId, ext, page]);
+  }, [projectId, ext, accessToken]);
+
+  const filteredSorted = useMemo(() => {
+    if (!allItems) return [];
+    const q = search.trim().toLowerCase();
+    const filtered = q
+      ? allItems.filter(
+          (f) =>
+            f.name.toLowerCase().includes(q) ||
+            f.folderPath.toLowerCase().includes(q) ||
+            f.uploadedBy.toLowerCase().includes(q)
+        )
+      : allItems;
+    const sorted = [...filtered].sort((a, b) => compareFiles(a, b, sortKey));
+    return sortDir === "asc" ? sorted : sorted.reverse();
+  }, [allItems, search, sortKey, sortDir]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [search, sortKey, sortDir]);
+
+  function handleSort(key: SortKey) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir(DEFAULT_SORT_DIR[key]);
+    }
+  }
 
   if (error) return <p style={{ color: "#b3261e" }}>{error}</p>;
 
-  const totalPages = data ? Math.max(1, Math.ceil(data.total / data.pageSize)) : 1;
+  const totalPages = Math.max(1, Math.ceil(filteredSorted.length / PAGE_SIZE));
+  const pageItems = filteredSorted.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
 
   return (
     <div>
+      <input
+        type="text"
+        value={search}
+        onChange={(e) => setSearch(e.target.value)}
+        placeholder="Buscar por nombre, carpeta o usuario..."
+        style={searchInputStyle}
+      />
+
       <table style={tableStyle}>
         <thead>
           <tr>
-            <th style={thStyle}>Nombre</th>
-            <th style={thStyle}>Carpeta</th>
-            <th style={thStyle}>Tamano</th>
-            <th style={thStyle}>Subido por</th>
-            <th style={thStyle}>Fecha</th>
+            {COLUMNS.map((col) => (
+              <th key={col.key} style={thStyle}>
+                <button style={sortButtonStyle} onClick={() => handleSort(col.key)}>
+                  {col.label}
+                  <span style={{ opacity: sortKey === col.key ? 1 : 0.25, marginLeft: 4 }}>
+                    {sortKey === col.key && sortDir === "asc" ? "▲" : "▼"}
+                  </span>
+                </button>
+              </th>
+            ))}
           </tr>
         </thead>
         <tbody>
@@ -189,7 +254,7 @@ function FilesTable({
             </tr>
           )}
           {!loading &&
-            data?.items.map((file: FileRecord) => (
+            pageItems.map((file) => (
               <tr key={file.id}>
                 <td style={tdStyle}>{file.name}</td>
                 <td style={tdStyle}>{file.folderPath}</td>
@@ -198,17 +263,17 @@ function FilesTable({
                 <td style={tdStyle}>{formatDate(file.modifiedOn)}</td>
               </tr>
             ))}
-          {!loading && data?.items.length === 0 && (
+          {!loading && pageItems.length === 0 && (
             <tr>
               <td style={tdStyle} colSpan={5}>
-                No hay archivos.
+                No hay archivos que coincidan con la busqueda.
               </td>
             </tr>
           )}
         </tbody>
       </table>
 
-      {data && data.total > data.pageSize && (
+      {!loading && filteredSorted.length > PAGE_SIZE && (
         <div style={{ display: "flex", justifyContent: "center", gap: 12, marginTop: 14 }}>
           <button
             style={pagerButtonStyle}
@@ -218,7 +283,7 @@ function FilesTable({
             ← Anterior
           </button>
           <span style={{ color: "var(--tc-gray-500)", alignSelf: "center", fontSize: 13 }}>
-            Pagina {page} de {totalPages} ({data.total} archivos)
+            Pagina {page} de {totalPages} ({filteredSorted.length} archivos)
           </span>
           <button
             style={pagerButtonStyle}
@@ -241,7 +306,7 @@ const tableStyle: React.CSSProperties = {
 
 const thStyle: React.CSSProperties = {
   textAlign: "left",
-  padding: "10px 8px",
+  padding: 0,
   borderBottom: "2px solid var(--tc-gray-100)",
   color: "var(--tc-gray-500)",
   fontWeight: 600,
@@ -250,6 +315,31 @@ const thStyle: React.CSSProperties = {
   position: "sticky",
   top: 0,
   background: "var(--tc-white)",
+};
+
+const sortButtonStyle: React.CSSProperties = {
+  display: "flex",
+  alignItems: "center",
+  width: "100%",
+  border: "none",
+  background: "transparent",
+  cursor: "pointer",
+  padding: "10px 8px",
+  color: "inherit",
+  font: "inherit",
+  textTransform: "inherit",
+};
+
+const searchInputStyle: React.CSSProperties = {
+  width: "100%",
+  boxSizing: "border-box",
+  padding: "9px 14px",
+  marginBottom: 14,
+  border: "1px solid var(--tc-gray-300)",
+  borderRadius: 8,
+  fontSize: 14,
+  color: "var(--tc-gray-700)",
+  outline: "none",
 };
 
 const tdStyle: React.CSSProperties = {
