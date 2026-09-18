@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CrawlProgress, fetchWithProgress } from "../lib/apiClient";
 import { formatBytes } from "../lib/format";
 import { groupTopN } from "../lib/grouping";
 import { SummaryResponse } from "../lib/types";
@@ -29,6 +30,7 @@ export default function Dashboard({
 }) {
   const [summary, setSummary] = useState<SummaryResponse | null>(null);
   const [loading, setLoading] = useState(true);
+  const [progress, setProgress] = useState<CrawlProgress | null>(null);
   const [error, setError] = useState<string>("");
   const [modalView, setModalView] = useState<ModalView | null>(null);
 
@@ -37,15 +39,17 @@ export default function Dashboard({
     let cancelled = false;
     setLoading(true);
     setError("");
-    fetch(`/api/summary?projectId=${encodeURIComponent(projectId)}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json()).error ?? "Error al cargar el resumen.");
-        return res.json();
-      })
-      .then((json: SummaryResponse) => {
-        if (!cancelled) setSummary(json);
+    setProgress(null);
+    fetchWithProgress<SummaryResponse>(
+      `/api/summary?projectId=${encodeURIComponent(projectId)}`,
+      accessToken,
+      (p) => {
+        if (!cancelled) setProgress(p);
+      },
+      () => cancelled
+    )
+      .then((json) => {
+        if (!cancelled && json) setSummary(json);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -68,7 +72,19 @@ export default function Dashboard({
   );
 
   if (loading) {
-    return <CenteredMessage>Analizando los documentos del proyecto...</CenteredMessage>;
+    return (
+      <CenteredMessage>
+        Analizando los documentos del proyecto...
+        {progress && progress.folders > 0 && (
+          <div style={{ marginTop: 8, fontSize: 13 }}>
+            {progress.files.toLocaleString("es")} archivos encontrados en{" "}
+            {progress.folders.toLocaleString("es")} carpetas recorridas
+            <br />
+            Los proyectos grandes pueden tardar un poco la primera vez.
+          </div>
+        )}
+      </CenteredMessage>
+    );
   }
   if (error) {
     return <CenteredMessage isError>{error}</CenteredMessage>;

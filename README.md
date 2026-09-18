@@ -58,6 +58,33 @@ proyecto activo, agrupa los documentos por tipo (extension) y muestra:
   recalcula. Es intencionalmente simple (sin Redis/KV externo) para una
   primera version; si el proyecto crece mucho se puede reemplazar por Vercel
   KV sin tocar el resto del codigo.
+- **Proyectos grandes (miles de archivos)**: el recorrido usa un pool de 16
+  llamadas en paralelo (en vez de esperar de a lotes fijos, cada llamada que
+  termina recoge inmediatamente la siguiente carpeta pendiente), y esta
+  particionado en pasos de ~8 segundos (`CRAWL_BUDGET_MS` en `lib/cache.ts`)
+  para no arriesgar el limite de duracion de las funciones serverless de
+  Vercel. Mientras el recorrido no termina, `/api/summary` y `/api/files`
+  responden `202` con el progreso (archivos y carpetas ya visitados), y el
+  frontend (`lib/apiClient.ts`) reintenta automaticamente cada ~1.2s
+  mostrando ese progreso ("N archivos encontrados..."), hasta que el
+  recorrido completo queda cacheado.
+
+## Visor de Trimble Connect
+
+El boton "Abrir" del listado de archivos abre el archivo en una pestaña
+nueva usando el visor web de Trimble Connect:
+
+- Archivos 3D (RVT, IFC, SKP, NWD/NWC, DGN, DWG, STEP, OBJ, FBX, glTF, etc. -
+  ver `THREE_D_EXTENSIONS` en `lib/format.ts`):
+  `https://web.connect.trimble.com/projects/{projectId}/viewer/3d?modelId={fileId}&versionId={versionId}`
+  (segun la seccion "Query parameters" de la documentacion del Workspace API).
+- Cualquier otro archivo (PDF, DOCX, XLSX, imagenes, etc.):
+  `https://web.connect.trimble.com/projects/{projectId}/viewer/2D?id={fileId}&version={versionId}`
+  (confirmado contra una URL real copiada de una sesion de Trimble Connect).
+
+Si encuentras un tipo de archivo 3D que se abre en el visor equivocado,
+solo hay que agregar su extension a `THREE_D_EXTENSIONS` en
+[`lib/format.ts`](lib/format.ts).
 
 ## Estructura del proyecto
 

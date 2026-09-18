@@ -54,7 +54,6 @@ export interface SummaryResponse {
     weekly: TimelinePoint[];
     monthly: TimelinePoint[];
   };
-  cached: boolean;
 }
 
 export interface FilesListResponse {

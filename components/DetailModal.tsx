@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { CrawlProgress, fetchWithProgress } from "../lib/apiClient";
 import { buildFileViewerUrl, extLabel, formatBytes, formatDate } from "../lib/format";
 import { FileRecord, FilesListResponse, TypeAggregate } from "../lib/types";
 
@@ -200,6 +201,7 @@ function FilesTable({
 }) {
   const [allItems, setAllItems] = useState<FileRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [loadingProgress, setLoadingProgress] = useState<CrawlProgress | null>(null);
   const [error, setError] = useState<string>("");
   const [search, setSearch] = useState("");
   const [sortKey, setSortKey] = useState<SortKey>("modifiedOn");
@@ -211,19 +213,21 @@ function FilesTable({
     let cancelled = false;
     setLoading(true);
     setError("");
+    setLoadingProgress(null);
     const params = new URLSearchParams({
       projectId,
       ...("ext" in query ? { ext: query.ext } : { days: String(query.days) }),
     });
-    fetch(`/api/files?${params.toString()}`, {
-      headers: { Authorization: `Bearer ${accessToken}` },
-    })
-      .then(async (res) => {
-        if (!res.ok) throw new Error((await res.json()).error ?? "Error al cargar archivos.");
-        return res.json();
-      })
-      .then((json: FilesListResponse) => {
-        if (!cancelled) setAllItems(json.items);
+    fetchWithProgress<FilesListResponse>(
+      `/api/files?${params.toString()}`,
+      accessToken,
+      (p) => {
+        if (!cancelled) setLoadingProgress(p);
+      },
+      () => cancelled
+    )
+      .then((json) => {
+        if (!cancelled && json) setAllItems(json.items);
       })
       .catch((err) => {
         if (!cancelled) setError(err.message);
@@ -304,7 +308,9 @@ function FilesTable({
           {loading && (
             <tr>
               <td style={tdStyle} colSpan={COLUMN_COUNT}>
-                Cargando...
+                {loadingProgress && loadingProgress.folders > 0
+                  ? `Cargando... (${loadingProgress.files.toLocaleString("es")} archivos encontrados hasta ahora)`
+                  : "Cargando..."}
               </td>
             </tr>
           )}

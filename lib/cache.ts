@@ -1,5 +1,5 @@
 import { ProjectData } from "./types";
-import { walkProjectTree } from "./walkProjectTree";
+import { advanceCrawl, CrawlState, startCrawl } from "./walkProjectTree";
 
 /**
  * In-memory cache, scoped to the lifetime of a single warm serverless
@@ -16,37 +16,83 @@ import { walkProjectTree } from "./walkProjectTree";
  */
 const CACHE_TTL_MS = 8 * 60 * 1000;
 
-interface CacheEntry {
-  data: ProjectData;
-  expiresAt: number;
+// Each call to advanceProjectData does at most this much crawling work before
+// returning, so a single request stays comfortably under any serverless
+// function time limit even for projects with thousands of files. The caller
+// (an API route) reports back "still working" and the client polls again -
+// see fetchWithProgress in lib/apiClient.ts.
+const CRAWL_BUDGET_MS = 8000;
+
+interface Entry {
+  state: CrawlState;
+  expiresAt: number | null; // null until the crawl has finished at least once
 }
 
-const cache = new Map<string, CacheEntry>();
-const inFlight = new Map<string, Promise<ProjectData>>();
+const entries = new Map<string, Entry>();
+const starting = new Map<string, Promise<CrawlState>>();
+const advancing = new Map<string, Promise<void>>();
 
-export async function getProjectData(
+export interface CrawlProgress {
+  files: number;
+  folders: number;
+}
+
+export type AdvanceResult =
+  | { done: true; data: ProjectData; progress: CrawlProgress }
+  | { done: false; progress: CrawlProgress };
+
+function toProjectData(state: CrawlState): ProjectData {
+  return { project: state.project, files: state.files, fetchedAt: Date.now() };
+}
+
+function progressOf(state: CrawlState): CrawlProgress {
+  return { files: state.files.length, folders: state.foldersVisited };
+}
+
+/**
+ * Does up to CRAWL_BUDGET_MS worth of crawling for a project and reports
+ * whether it's done. Safe to call repeatedly (e.g. on every poll from the
+ * client, or from concurrent requests) - a crawl already in progress is
+ * shared rather than duplicated, and a finished crawl is served straight
+ * from cache until it expires.
+ */
+export async function advanceProjectData(
   projectId: string,
   accessToken: string
-): Promise<{ data: ProjectData; cached: boolean }> {
-  const entry = cache.get(projectId);
-  if (entry && entry.expiresAt > Date.now()) {
-    return { data: entry.data, cached: true };
+): Promise<AdvanceResult> {
+  let entry = entries.get(projectId);
+
+  if (entry?.expiresAt && entry.expiresAt > Date.now()) {
+    return { done: true, data: toProjectData(entry.state), progress: progressOf(entry.state) };
   }
 
-  const pending = inFlight.get(projectId);
-  if (pending) {
-    return { data: await pending, cached: false };
+  if (!entry) {
+    let init = starting.get(projectId);
+    if (!init) {
+      init = startCrawl(accessToken, projectId);
+      starting.set(projectId, init);
+      init.finally(() => starting.delete(projectId));
+    }
+    const state = await init;
+    entry = entries.get(projectId) ?? { state, expiresAt: null };
+    entries.set(projectId, entry);
   }
 
-  const task = walkProjectTree(accessToken, projectId)
-    .then((data) => {
-      cache.set(projectId, { data, expiresAt: Date.now() + CACHE_TTL_MS });
-      return data;
-    })
-    .finally(() => {
-      inFlight.delete(projectId);
-    });
+  if (!entry.state.done) {
+    let advance = advancing.get(projectId);
+    if (!advance) {
+      advance = advanceCrawl(entry.state, accessToken, Date.now() + CRAWL_BUDGET_MS).finally(() =>
+        advancing.delete(projectId)
+      );
+      advancing.set(projectId, advance);
+    }
+    await advance;
+  }
 
-  inFlight.set(projectId, task);
-  return { data: await task, cached: false };
+  if (entry.state.done) {
+    entry.expiresAt = Date.now() + CACHE_TTL_MS;
+    return { done: true, data: toProjectData(entry.state), progress: progressOf(entry.state) };
+  }
+
+  return { done: false, progress: progressOf(entry.state) };
 }

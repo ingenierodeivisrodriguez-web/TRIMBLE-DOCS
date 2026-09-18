@@ -1,9 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProjectData } from "../../../lib/cache";
+import { advanceProjectData } from "../../../lib/cache";
 import { TrimbleApiError } from "../../../lib/trimbleApi";
 import { FilesListResponse } from "../../../lib/types";
 
 export const dynamic = "force-dynamic";
+export const maxDuration = 60;
 
 // A single file type (or a recent-days window) realistically has a few
 // hundred files (per the product spec); returning the whole filtered list
@@ -38,14 +39,17 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data } = await getProjectData(projectId, accessToken);
+    const result = await advanceProjectData(projectId, accessToken);
+    if (!result.done) {
+      return NextResponse.json({ status: "processing", progress: result.progress }, { status: 202 });
+    }
 
     let filtered;
     if (days) {
       const cutoff = Date.now() - Number(days) * 24 * 60 * 60 * 1000;
-      filtered = data.files.filter((f) => new Date(f.modifiedOn).getTime() >= cutoff);
+      filtered = result.data.files.filter((f) => new Date(f.modifiedOn).getTime() >= cutoff);
     } else {
-      filtered = data.files.filter((f) => f.ext === ext);
+      filtered = result.data.files.filter((f) => f.ext === ext);
     }
     filtered = filtered
       .sort((a, b) => (a.modifiedOn < b.modifiedOn ? 1 : -1))

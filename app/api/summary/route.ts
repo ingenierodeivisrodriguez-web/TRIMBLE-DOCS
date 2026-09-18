@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
-import { getProjectData } from "../../../lib/cache";
+import { advanceProjectData } from "../../../lib/cache";
 import { buildSummary } from "../../../lib/summary";
 import { TrimbleApiError } from "../../../lib/trimbleApi";
 
 export const dynamic = "force-dynamic";
+// Ask the platform for as much execution time as it allows; each internal
+// crawl step is still budgeted well below this so a single call never
+// actually needs it (see CRAWL_BUDGET_MS in lib/cache.ts).
+export const maxDuration = 60;
 
 function getBearerToken(req: NextRequest): string | null {
   const header = req.headers.get("authorization") ?? "";
@@ -26,8 +30,11 @@ export async function GET(req: NextRequest) {
   }
 
   try {
-    const { data, cached } = await getProjectData(projectId, accessToken);
-    const summary = buildSummary(data.project, data.files, cached);
+    const result = await advanceProjectData(projectId, accessToken);
+    if (!result.done) {
+      return NextResponse.json({ status: "processing", progress: result.progress }, { status: 202 });
+    }
+    const summary = buildSummary(result.data.project, result.data.files);
     return NextResponse.json(summary);
   } catch (err) {
     if (err instanceof TrimbleApiError) {

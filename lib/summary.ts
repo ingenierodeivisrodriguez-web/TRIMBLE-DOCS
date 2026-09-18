@@ -81,11 +81,7 @@ function buildTimeline(
   return points;
 }
 
-export function buildSummary(
-  project: ProjectMeta,
-  files: FileRecord[],
-  cached: boolean
-): SummaryResponse {
+export function buildSummary(project: ProjectMeta, files: FileRecord[]): SummaryResponse {
   const byType = buildByType(files);
   const totalSize = files.reduce((sum, f) => sum + f.size, 0);
 
@@ -101,6 +97,5 @@ export function buildSummary(
       weekly: buildTimeline(files, project.createdOn, "week"),
       monthly: buildTimeline(files, project.createdOn, "month"),
     },
-    cached,
   };
 }
