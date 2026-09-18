@@ -1,0 +1,8 @@
+{
+  "url": "https://trimble-docs.vercel.app/validacion",
+  "title": "Validación",
+  "description": "Valida la nomenclatura de los archivos del proyecto contra reglas configurables por el administrador (dos plantillas: información gráfica y no gráfica).",
+  "icon": "https://trimble-docs.vercel.app/icon-validacion.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project"]
+}

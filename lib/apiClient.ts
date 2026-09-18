@@ -11,17 +11,23 @@ const POLL_INTERVAL_MS = 1200;
  * until the endpoint returns its final 200 response, reporting progress
  * along the way. Returns null if `isCancelled` becomes true (e.g. the
  * component unmounted) while a poll was in flight.
+ *
+ * `firstUrl`, when given, is used only for the first request (e.g. to ask the
+ * server to discard cached data); every later poll uses `url`.
  */
 export async function fetchWithProgress<T>(
   url: string,
   accessToken: string,
   onProgress: (progress: CrawlProgress) => void,
-  isCancelled: () => boolean
+  isCancelled: () => boolean,
+  firstUrl?: string
 ): Promise<T | null> {
+  let nextUrl = firstUrl ?? url;
   for (;;) {
     if (isCancelled()) return null;
 
-    const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+    const res = await fetch(nextUrl, { headers: { Authorization: `Bearer ${accessToken}` } });
+    nextUrl = url;
 
     if (isCancelled()) return null;
 

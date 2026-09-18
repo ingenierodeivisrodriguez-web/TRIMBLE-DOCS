@@ -12,11 +12,16 @@ export default function Home() {
         textAlign: "center",
       }}
     >
-      <h1 style={{ color: "var(--tc-blue-800)" }}>Resumen Archivos</h1>
-      <p style={{ color: "var(--tc-gray-500)", maxWidth: 480 }}>
-        Esta aplicacion es una extension de Trimble Connect. Se usa embebida dentro de un
-        proyecto de Trimble Connect, no como sitio independiente. Registra el manifiesto{" "}
-        <code>/manifest.json</code> desde Configuracion del proyecto → Apps &amp; Capabilities.
+      <h1 style={{ color: "var(--tc-blue-800)" }}>Extensiones para Trimble Connect</h1>
+      <p style={{ color: "var(--tc-gray-500)", maxWidth: 520 }}>
+        Esta aplicacion contiene dos extensiones de Trimble Connect: <strong>Resumen Archivos</strong> y{" "}
+        <strong>Validación</strong>. Se usan embebidas dentro de un proyecto de Trimble Connect, no como
+        sitio independiente. Registra su manifiesto desde Configuracion del proyecto → Apps &amp;
+        Capabilities:
+      </p>
+      <p style={{ color: "var(--tc-gray-700)" }}>
+        <code>/manifest.json</code> (Resumen Archivos) · <code>/manifest-validacion.json</code>{" "}
+        (Validación)
       </p>
     </main>
   );

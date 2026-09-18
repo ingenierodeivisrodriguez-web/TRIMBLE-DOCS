@@ -41,6 +41,16 @@ export type AdvanceResult =
   | { done: true; data: ProjectData; progress: CrawlProgress }
   | { done: false; progress: CrawlProgress };
 
+/**
+ * Forgets a finished crawl so the next advanceProjectData() call walks the
+ * project again (used when the user explicitly asks for fresh data). A crawl
+ * that is still running is left alone: it is already fresh.
+ */
+export function invalidateProjectData(projectId: string): void {
+  const entry = entries.get(projectId);
+  if (entry?.state.done) entries.delete(projectId);
+}
+
 function toProjectData(state: CrawlState): ProjectData {
   return { project: state.project, files: state.files, fetchedAt: Date.now() };
 }
@@ -62,8 +72,13 @@ export async function advanceProjectData(
 ): Promise<AdvanceResult> {
   let entry = entries.get(projectId);
 
-  if (entry?.expiresAt && entry.expiresAt > Date.now()) {
-    return { done: true, data: toProjectData(entry.state), progress: progressOf(entry.state) };
+  if (entry?.expiresAt) {
+    if (entry.expiresAt > Date.now()) {
+      return { done: true, data: toProjectData(entry.state), progress: progressOf(entry.state) };
+    }
+    // Expired: drop it so the project is crawled again instead of being re-served.
+    entries.delete(projectId);
+    entry = undefined;
   }
 
   if (!entry) {

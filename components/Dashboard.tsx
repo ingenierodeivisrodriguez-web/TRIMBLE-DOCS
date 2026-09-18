@@ -5,6 +5,7 @@ import { CrawlProgress, fetchWithProgress } from "../lib/apiClient";
 import { formatBytes } from "../lib/format";
 import { groupTopN } from "../lib/grouping";
 import { SummaryResponse } from "../lib/types";
+import Card from "./Card";
 import DetailModal from "./DetailModal";
 import GrowthTimelineChart from "./GrowthTimelineChart";
 import StatCard from "./StatCard";
@@ -183,24 +184,6 @@ const recentButtonStyle: React.CSSProperties = {
   fontWeight: 600,
   cursor: "pointer",
 };
-
-function Card({ title, children, flex }: { title: string; children: React.ReactNode; flex?: number }) {
-  return (
-    <div
-      style={{
-        background: "var(--tc-white)",
-        borderRadius: "var(--tc-radius)",
-        boxShadow: "var(--tc-shadow)",
-        padding: 20,
-        flex: flex ? `${flex} 1 320px` : undefined,
-        minWidth: 320,
-      }}
-    >
-      <h3 style={{ margin: "0 0 12px", color: "var(--tc-blue-800)", fontSize: 16 }}>{title}</h3>
-      {children}
-    </div>
-  );
-}
 
 function CenteredMessage({ children, isError }: { children: React.ReactNode; isError?: boolean }) {
   return (

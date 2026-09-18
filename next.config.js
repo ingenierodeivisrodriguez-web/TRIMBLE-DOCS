@@ -10,7 +10,7 @@ const nextConfig = {
       {
         // Trimble Connect fetches the manifest cross-origin before installing
         // the extension, so it must be readable from any origin.
-        source: "/manifest.json",
+        source: "/:manifest(manifest|manifest-validacion).json",
         headers: [
           { key: "Access-Control-Allow-Origin", value: "*" },
           { key: "Access-Control-Allow-Methods", value: "GET, OPTIONS" },
