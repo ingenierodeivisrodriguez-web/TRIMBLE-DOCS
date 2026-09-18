@@ -13,6 +13,10 @@ export interface FileRecord {
   modifiedOn: string;
   uploadedBy: string;
   folderPath: string;
+  /** Version id of the latest version, used to deep-link into the TC web viewer. */
+  versionId: string;
+  /** Revision number of the latest version, shown to the user as "v{version}". */
+  version: number;
 }
 
 export interface ProjectMeta {

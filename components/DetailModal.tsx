@@ -1,10 +1,13 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
-import { extLabel, formatBytes, formatDate } from "../lib/format";
+import { buildFileViewerUrl, extLabel, formatBytes, formatDate } from "../lib/format";
 import { FileRecord, FilesListResponse, TypeAggregate } from "../lib/types";
 
-type View = { kind: "others"; items: TypeAggregate[] } | { kind: "files"; ext: string };
+type View =
+  | { kind: "others"; items: TypeAggregate[] }
+  | { kind: "files"; ext: string }
+  | { kind: "recent"; days: number };
 
 const PAGE_SIZE = 25;
 
@@ -58,7 +61,9 @@ export default function DetailModal({
           }}
         >
           <h3 style={{ margin: 0, color: "var(--tc-blue-800)" }}>
-            {view.kind === "others" ? "Otros tipos de archivo" : `Archivos: ${extLabel(view.ext)}`}
+            {view.kind === "others" && "Otros tipos de archivo"}
+            {view.kind === "files" && `Archivos: ${extLabel(view.ext)}`}
+            {view.kind === "recent" && `Archivos cargados en los ultimos ${view.days} dias`}
           </h3>
           <button onClick={onClose} style={closeButtonStyle}>
             ✕
@@ -66,10 +71,14 @@ export default function DetailModal({
         </div>
 
         <div style={{ overflowY: "auto", padding: "0 22px 22px" }}>
-          {view.kind === "others" ? (
+          {view.kind === "others" && (
             <OthersTable items={view.items} onSelect={(ext) => setView({ kind: "files", ext })} />
-          ) : (
-            <FilesTable projectId={projectId} accessToken={accessToken} ext={view.ext} />
+          )}
+          {view.kind === "files" && (
+            <FilesTable projectId={projectId} accessToken={accessToken} query={{ ext: view.ext }} />
+          )}
+          {view.kind === "recent" && (
+            <FilesTable projectId={projectId} accessToken={accessToken} query={{ days: view.days }} />
           )}
         </div>
       </div>
@@ -119,7 +128,7 @@ function OthersTable({
   );
 }
 
-type SortKey = "name" | "folderPath" | "size" | "uploadedBy" | "modifiedOn";
+type SortKey = "name" | "folderPath" | "size" | "uploadedBy" | "modifiedOn" | "version";
 type SortDir = "asc" | "desc";
 
 const DEFAULT_SORT_DIR: Record<SortKey, SortDir> = {
@@ -128,6 +137,7 @@ const DEFAULT_SORT_DIR: Record<SortKey, SortDir> = {
   size: "desc",
   uploadedBy: "asc",
   modifiedOn: "desc",
+  version: "desc",
 };
 
 const COLUMNS: { key: SortKey; label: string }[] = [
@@ -136,22 +146,28 @@ const COLUMNS: { key: SortKey; label: string }[] = [
   { key: "size", label: "Tamano" },
   { key: "uploadedBy", label: "Subido por" },
   { key: "modifiedOn", label: "Fecha" },
+  { key: "version", label: "Version" },
 ];
+
+const COLUMN_COUNT = COLUMNS.length + 1; // + the non-sortable "Abrir" column
 
 function compareFiles(a: FileRecord, b: FileRecord, key: SortKey): number {
   if (key === "size") return a.size - b.size;
+  if (key === "version") return a.version - b.version;
   if (key === "modifiedOn") return a.modifiedOn < b.modifiedOn ? -1 : a.modifiedOn > b.modifiedOn ? 1 : 0;
   return a[key].localeCompare(b[key], "es", { sensitivity: "base" });
 }
 
+type FilesQuery = { ext: string } | { days: number };
+
 function FilesTable({
   projectId,
   accessToken,
-  ext,
+  query,
 }: {
   projectId: string;
   accessToken: string;
-  ext: string;
+  query: FilesQuery;
 }) {
   const [allItems, setAllItems] = useState<FileRecord[] | null>(null);
   const [loading, setLoading] = useState(true);
@@ -160,12 +176,16 @@ function FilesTable({
   const [sortKey, setSortKey] = useState<SortKey>("modifiedOn");
   const [sortDir, setSortDir] = useState<SortDir>("desc");
   const [page, setPage] = useState(1);
+  const queryKey = "ext" in query ? `ext:${query.ext}` : `days:${query.days}`;
 
   useEffect(() => {
     let cancelled = false;
     setLoading(true);
     setError("");
-    const params = new URLSearchParams({ projectId, ext });
+    const params = new URLSearchParams({
+      projectId,
+      ...("ext" in query ? { ext: query.ext } : { days: String(query.days) }),
+    });
     fetch(`/api/files?${params.toString()}`, {
       headers: { Authorization: `Bearer ${accessToken}` },
     })
@@ -185,7 +205,8 @@ function FilesTable({
     return () => {
       cancelled = true;
     };
-  }, [projectId, ext, accessToken]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [projectId, queryKey, accessToken]);
 
   const filteredSorted = useMemo(() => {
     if (!allItems) return [];
@@ -243,12 +264,13 @@ function FilesTable({
                 </button>
               </th>
             ))}
+            <th style={thStyle} />
           </tr>
         </thead>
         <tbody>
           {loading && (
             <tr>
-              <td style={tdStyle} colSpan={5}>
+              <td style={tdStyle} colSpan={COLUMN_COUNT}>
                 Cargando...
               </td>
             </tr>
@@ -261,11 +283,22 @@ function FilesTable({
                 <td style={tdStyle}>{formatBytes(file.size)}</td>
                 <td style={tdStyle}>{file.uploadedBy}</td>
                 <td style={tdStyle}>{formatDate(file.modifiedOn)}</td>
+                <td style={tdStyle}>v{file.version}</td>
+                <td style={tdStyle}>
+                  <a
+                    href={buildFileViewerUrl(projectId, file)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={openLinkStyle}
+                  >
+                    Abrir ↗
+                  </a>
+                </td>
               </tr>
             ))}
           {!loading && pageItems.length === 0 && (
             <tr>
-              <td style={tdStyle} colSpan={5}>
+              <td style={tdStyle} colSpan={COLUMN_COUNT}>
                 No hay archivos que coincidan con la busqueda.
               </td>
             </tr>
@@ -346,6 +379,13 @@ const tdStyle: React.CSSProperties = {
   padding: "10px 8px",
   borderBottom: "1px solid var(--tc-gray-100)",
   color: "var(--tc-gray-700)",
+};
+
+const openLinkStyle: React.CSSProperties = {
+  color: "var(--tc-blue-600)",
+  fontWeight: 600,
+  textDecoration: "none",
+  whiteSpace: "nowrap",
 };
 
 const pagerButtonStyle: React.CSSProperties = {

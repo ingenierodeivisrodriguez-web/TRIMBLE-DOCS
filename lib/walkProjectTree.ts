@@ -57,6 +57,8 @@ export async function walkProjectTree(
             modifiedOn: item.modifiedOn,
             uploadedBy: userLabel(item.modifiedBy),
             folderPath: node.path.length > 0 ? node.path.join(" / ") : "Raíz",
+            versionId: item.versionId ?? item.id,
+            version: item.revision ?? 1,
           });
         }
       }

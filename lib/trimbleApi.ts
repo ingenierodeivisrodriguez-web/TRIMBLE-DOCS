@@ -122,6 +122,10 @@ export interface RawFolderItem {
   modifiedOn: string;
   createdBy?: TrimbleUserRef;
   modifiedBy?: TrimbleUserRef;
+  /** Version id of the item's latest version; used to deep-link into the TC web viewer. */
+  versionId?: string;
+  /** Revision number of the latest version, shown to the user as "v{revision}". */
+  revision?: number;
 }
 
 /**

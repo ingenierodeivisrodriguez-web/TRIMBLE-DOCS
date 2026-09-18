@@ -11,8 +11,12 @@ import TypeDonutChart from "./TypeDonutChart";
 import TypeSizeBarChart from "./TypeSizeBarChart";
 
 const TOP_N = 7;
+const RECENT_DAY_OPTIONS = [7, 15, 30];
 
-type ModalView = { kind: "others"; items: SummaryResponse["byType"] } | { kind: "files"; ext: string };
+type ModalView =
+  | { kind: "others"; items: SummaryResponse["byType"] }
+  | { kind: "files"; ext: string }
+  | { kind: "recent"; days: number };
 
 export default function Dashboard({
   projectId,
@@ -88,6 +92,32 @@ export default function Dashboard({
         <StatCard label="Tamano total" value={formatBytes(summary.totals.totalSize)} />
       </section>
 
+      <section
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          alignItems: "center",
+          gap: 12,
+          background: "var(--tc-white)",
+          borderRadius: "var(--tc-radius)",
+          boxShadow: "var(--tc-shadow)",
+          padding: "14px 20px",
+        }}
+      >
+        <span style={{ color: "var(--tc-gray-500)", fontSize: 13, fontWeight: 600 }}>
+          CARGADOS EN LOS ULTIMOS
+        </span>
+        {RECENT_DAY_OPTIONS.map((days) => (
+          <button
+            key={days}
+            onClick={() => setModalView({ kind: "recent", days })}
+            style={recentButtonStyle}
+          >
+            {days} dias
+          </button>
+        ))}
+      </section>
+
       <section style={{ display: "flex", flexWrap: "wrap", gap: 16 }}>
         <Card title="Archivos por tipo" flex={1}>
           <TypeDonutChart
@@ -126,6 +156,17 @@ export default function Dashboard({
     </div>
   );
 }
+
+const recentButtonStyle: React.CSSProperties = {
+  border: "1px solid var(--tc-blue-500)",
+  background: "var(--tc-blue-50)",
+  color: "var(--tc-blue-700)",
+  borderRadius: 6,
+  padding: "6px 16px",
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: "pointer",
+};
 
 function Card({ title, children, flex }: { title: string; children: React.ReactNode; flex?: number }) {
   return (

@@ -16,3 +16,18 @@ export function extLabel(ext: string): string {
   if (ext === "sin-extension") return "Sin extension";
   return ext.toUpperCase();
 }
+
+/**
+ * Deep-links into the Trimble Connect web viewer for a specific file
+ * version, e.g. https://web.connect.trimble.com/projects/{id}/viewer/2D?id={fileId}&version={versionId}
+ * Confirmed against a real URL copied from the user's own Trimble Connect
+ * session (the "2D" viewer route opens the file preview/details panel
+ * regardless of the underlying file type).
+ */
+export function buildFileViewerUrl(
+  projectId: string,
+  file: { id: string; versionId: string }
+): string {
+  const params = new URLSearchParams({ id: file.id, version: file.versionId });
+  return `https://web.connect.trimble.com/projects/${encodeURIComponent(projectId)}/viewer/2D?${params.toString()}`;
+}

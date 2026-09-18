@@ -5,10 +5,11 @@ import { FilesListResponse } from "../../../lib/types";
 
 export const dynamic = "force-dynamic";
 
-// A single file type realistically has a few hundred files (per the product
-// spec); returning the whole filtered list lets the modal sort/search
-// instantly on the client without a round trip per keystroke or column
-// click. This cap just guards against a pathological outlier.
+// A single file type (or a recent-days window) realistically has a few
+// hundred files (per the product spec); returning the whole filtered list
+// lets the modal sort/search instantly on the client without a round trip
+// per keystroke or column click. This cap just guards against a
+// pathological outlier.
 const MAX_ITEMS = 5000;
 
 function getBearerToken(req: NextRequest): string | null {
@@ -20,10 +21,14 @@ function getBearerToken(req: NextRequest): string | null {
 export async function GET(req: NextRequest) {
   const projectId = req.nextUrl.searchParams.get("projectId");
   const ext = req.nextUrl.searchParams.get("ext");
+  const days = req.nextUrl.searchParams.get("days");
   const accessToken = getBearerToken(req);
 
-  if (!projectId || !ext) {
-    return NextResponse.json({ error: "Faltan los parametros projectId y ext." }, { status: 400 });
+  if (!projectId || (!ext && !days)) {
+    return NextResponse.json(
+      { error: "Falta projectId, y uno de ext o days." },
+      { status: 400 }
+    );
   }
   if (!accessToken) {
     return NextResponse.json(
@@ -34,8 +39,15 @@ export async function GET(req: NextRequest) {
 
   try {
     const { data } = await getProjectData(projectId, accessToken);
-    const filtered = data.files
-      .filter((f) => f.ext === ext)
+
+    let filtered;
+    if (days) {
+      const cutoff = Date.now() - Number(days) * 24 * 60 * 60 * 1000;
+      filtered = data.files.filter((f) => new Date(f.modifiedOn).getTime() >= cutoff);
+    } else {
+      filtered = data.files.filter((f) => f.ext === ext);
+    }
+    filtered = filtered
       .sort((a, b) => (a.modifiedOn < b.modifiedOn ? 1 : -1))
       .slice(0, MAX_ITEMS);
 
