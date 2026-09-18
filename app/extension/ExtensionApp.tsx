@@ -37,6 +37,15 @@ export default function ExtensionApp() {
         if (cancelled) return;
         apiRef.current = api;
 
+        // The manifest only registers the extension under Apps & Capabilities;
+        // it must also call setMenu so Trimble Connect actually adds an icon
+        // for it in the project's left navigation panel.
+        await api.ui.setMenu({
+          title: "Resumen Archivos",
+          icon: `${window.location.origin}/icon.svg`,
+          command: "resumen_archivos_open",
+        });
+
         const project = await api.project.getProject();
         if (cancelled) return;
         setProjectId(project.id);
