@@ -100,9 +100,11 @@ valores en las reglas, separadores no vacíos, etc.) y muestra qué corregir.
 
 ### Cómo se guarda y se recupera la configuración por proyecto
 
-- Se guarda en **Upstash Redis** (la integración de Redis del Marketplace de
-  Vercel, que reemplazó a Vercel KV), como **un valor JSON por proyecto de
-  Trimble Connect**: la clave es `validacion:config:{projectId}`.
+- Se guarda en **Supabase** (Postgres, tabla `validacion_config`) o, si no hay
+  Supabase conectado, en **Upstash Redis** (la integración de Redis del
+  Marketplace de Vercel, que reemplazó a Vercel KV), como **un valor JSON por
+  proyecto de Trimble Connect**: la clave es el ID del proyecto (`project_id` en
+  Supabase, `validacion:config:{projectId}` en Redis).
 - Como la clave es el ID del proyecto, la configuración **persiste entre
   sesiones y la comparten todos los usuarios de ese proyecto**; cada proyecto
   tiene la suya.
@@ -282,7 +284,7 @@ lib/
   trimbleApi.ts, walkProjectTree.ts, cache.ts   API REST y recorrido (compartidos)
   access.ts                   Comprueba que el token sea de un miembro del proyecto
   validacion/                 Analizador, configuracion, filtros, exportacion,
-                              almacenamiento (Upstash Redis) y pruebas
+                              almacenamiento (Supabase o Upstash Redis) y pruebas
 public/
   manifest.json, icon.svg                       Resumen Archivos
   manifest-validacion.json, icon-validacion.svg Validacion
@@ -295,16 +297,24 @@ public/
    automaticamente, no requiere configuracion adicional.
 
 2. **Base de datos para "Validación" (una sola vez).** La configuración de
-   nomenclatura se guarda en Upstash Redis:
-   - En Vercel, abre el proyecto → **Storage** → **Create Database** (o
-     Marketplace → **Upstash → Redis**) → crea la base de datos (el plan
-     gratuito alcanza) y **conéctala a este proyecto** (a los entornos
-     Production y Preview).
-   - Vercel agrega solo las variables `KV_REST_API_URL` y `KV_REST_API_TOKEN`
-     (también se aceptan `UPSTASH_REDIS_REST_URL` / `UPSTASH_REDIS_REST_TOKEN`).
-   - **Vuelve a desplegar** (Deployments → ⋯ → Redeploy) para que el código las
-     lea. Sin esto, «Validación» muestra "La base de datos de configuración no
-     está conectada" (Resumen Archivos no la necesita).
+   nomenclatura se guarda en Supabase (o, alternativamente, en Upstash Redis):
+   - En Vercel, abre el proyecto → **Storage** → **Create Database** →
+     **Supabase** (el plan gratuito alcanza), y luego **Connect to Project** para
+     conectarla a este proyecto (entornos Production y Preview).
+   - Vercel agrega solo las variables (`SUPABASE_URL` o `NEXT_PUBLIC_SUPABASE_URL`,
+     y `SUPABASE_SERVICE_ROLE_KEY`). La clave de servicio se usa únicamente en el
+     servidor y no llega al navegador.
+   - **Crea la tabla** (una sola vez): en Supabase → **SQL Editor**, pega y
+     ejecuta el contenido de [`supabase/validacion_config.sql`](supabase/validacion_config.sql).
+     La tabla queda con RLS activado y sin políticas: solo el servidor (clave de
+     servicio) puede leer o escribir en ella.
+   - **Vuelve a desplegar** (Deployments → ⋯ → Redeploy) para que el código lea
+     las variables. Sin esto, «Validación» muestra "La base de datos de
+     configuración no está conectada" (Resumen Archivos no la necesita).
+   - *Alternativa:* Upstash Redis (Marketplace → **Upstash → Redis**). Agrega
+     `KV_REST_API_URL` y `KV_REST_API_TOKEN` (o `UPSTASH_REDIS_REST_URL` /
+     `UPSTASH_REDIS_REST_TOKEN`) y no necesita crear tablas. Si hay ambas, se usa
+     Supabase.
 
 3. **Variables de entorno opcionales** (Project Settings → Environment
    Variables). No son necesarias para que las extensiones funcionen (ver
@@ -379,10 +389,10 @@ Connect; para probar cambios de verdad, hay que desplegar (o exponer el
 `localhost` con una herramienta como ngrok) y registrar esa URL como
 manifiesto temporal de prueba.
 
-Para "Validación", en `npm run dev` sin variables de Upstash la configuración
-se guarda en memoria (se pierde al reiniciar el servidor); para probar la base
-de datos real, copia `.env.example` a `.env.local` y completa
-`KV_REST_API_URL` y `KV_REST_API_TOKEN`.
+Para "Validación", en `npm run dev` sin variables de base de datos la
+configuración se guarda en memoria (se pierde al reiniciar el servidor); para
+probar la base de datos real, copia `.env.example` a `.env.local` y completa las
+variables de Supabase (o de Upstash).
 
 ## Limitaciones conocidas / decisiones de diseño
 
