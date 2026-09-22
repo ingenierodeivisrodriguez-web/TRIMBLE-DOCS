@@ -15,6 +15,7 @@ interface PermissionEntry {
 interface PermissionsResponse {
   entries: PermissionEntry[];
   inheritanceEnabled: boolean;
+  debug?: unknown;
 }
 
 const ACCESS_LABEL: Record<PermissionEntry["accessLevel"], string> = {
@@ -130,6 +131,30 @@ export default function PermissionsPanel({
               No hay permisos explicitos para esta carpeta.
             </p>
           )}
+
+          {/* TEMP: raw API response, to diagnose folders where Trimble Connect's
+              own UI shows sharing that our /api/folder-permissions doesn't find.
+              Remove once resolved. */}
+          {data?.debug ? (
+            <details style={{ marginTop: 16 }}>
+              <summary style={{ cursor: "pointer", fontSize: 12, color: "var(--tc-gray-500)" }}>
+                Datos crudos (diagnostico temporal)
+              </summary>
+              <pre
+                style={{
+                  fontSize: 10.5,
+                  background: "var(--tc-gray-100)",
+                  padding: 10,
+                  borderRadius: 6,
+                  overflowX: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                {JSON.stringify(data.debug, null, 1)}
+              </pre>
+            </details>
+          ) : null}
 
           {data && data.entries.length > 0 && (
             <ul style={{ listStyle: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 10 }}>

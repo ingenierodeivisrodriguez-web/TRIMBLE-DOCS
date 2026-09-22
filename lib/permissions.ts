@@ -96,7 +96,14 @@ export async function resolveFolderPermissions(
   projectId: string,
   folderId: string,
   ancestors: AncestorRef[]
-): Promise<{ entries: PermissionEntry[]; inheritanceEnabled: boolean }> {
+): Promise<{
+  entries: PermissionEntry[];
+  inheritanceEnabled: boolean;
+  // TEMP: raw Trimble responses, surfaced in the UI while we diagnose why
+  // some real folders come back with no ACL entries at all. Remove once
+  // resolved - see the "Estructura de Carpetas" permissions section of the README.
+  debug: unknown;
+}> {
   const closestFirst = [...ancestors].reverse();
 
   const [direct, effective, directory, ancestorAcls] = await Promise.all([
@@ -145,5 +152,15 @@ export async function resolveFolderPermissions(
     return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
   });
 
-  return { entries, inheritanceEnabled: direct.inheritance };
+  return {
+    entries,
+    inheritanceEnabled: direct.inheritance,
+    debug: {
+      folderId,
+      ancestors: closestFirst,
+      direct,
+      effective,
+      ancestorAcls: closestFirst.map((a, i) => ({ id: a.id, name: a.name, ...ancestorAcls[i] })),
+    },
+  };
 }
