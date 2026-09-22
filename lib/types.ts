@@ -13,10 +13,20 @@ export interface FileRecord {
   modifiedOn: string;
   uploadedBy: string;
   folderPath: string;
+  /** Id of the folder this file lives directly in. */
+  folderId: string;
   /** Version id of the latest version, used to deep-link into the TC web viewer. */
   versionId: string;
   /** Revision number of the latest version, shown to the user as "v{version}". */
   version: number;
+}
+
+/** A folder visited during the crawl (every folder, whether or not it holds files). */
+export interface FolderNode {
+  id: string;
+  name: string;
+  /** null for the project's root folder. */
+  parentId: string | null;
 }
 
 export interface ProjectMeta {
@@ -28,6 +38,7 @@ export interface ProjectMeta {
 export interface ProjectData {
   project: ProjectMeta;
   files: FileRecord[];
+  folders: FolderNode[];
   fetchedAt: number;
 }
 

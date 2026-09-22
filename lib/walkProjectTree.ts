@@ -1,5 +1,5 @@
 import { getProjectDetails, listFolderItems, RawFolderItem, resolveProjectBaseUrl } from "./trimbleApi";
-import { FileRecord, ProjectMeta } from "./types";
+import { FileRecord, FolderNode, ProjectMeta } from "./types";
 
 // How many folders we list in parallel. Trimble's /folders/{id}/items is a
 // small, cheap call, so a project with thousands of files is bottlenecked on
@@ -33,6 +33,7 @@ function toFileRecord(item: RawFolderItem, node: QueueNode): FileRecord {
     modifiedOn: item.modifiedOn,
     uploadedBy: userLabel(item.modifiedBy),
     folderPath: node.path.length > 0 ? node.path.join(" / ") : "Raíz",
+    folderId: node.id,
     versionId: item.versionId ?? item.id,
     version: item.revision ?? 1,
   };
@@ -44,6 +45,8 @@ export interface CrawlState {
   baseUrl: string;
   queue: QueueNode[];
   files: FileRecord[];
+  /** Every folder visited, including the root - used to render the "Estructura de Carpetas" tree. */
+  folders: FolderNode[];
   foldersVisited: number;
   done: boolean;
 }
@@ -58,6 +61,7 @@ export async function startCrawl(accessToken: string, projectId: string): Promis
     baseUrl,
     queue: [{ id: project.rootId, path: [] }],
     files: [],
+    folders: [{ id: project.rootId, name: project.name, parentId: null }],
     foldersVisited: 0,
     done: false,
   };
@@ -112,6 +116,7 @@ export async function advanceCrawl(
           for (const item of items) {
             if (item.type === "FOLDER") {
               state.queue.push({ id: item.id, path: [...node.path, item.name] });
+              state.folders.push({ id: item.id, name: item.name, parentId: node.id });
             } else if (item.type === "FILE") {
               state.files.push(toFileRecord(item, node));
             }

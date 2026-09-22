@@ -15,6 +15,7 @@ recursivo de carpetas ([`lib/walkProjectTree.ts`](lib/walkProjectTree.ts) +
 [`lib/cache.ts`](lib/cache.ts)).
 
 - [Resumen Archivos](#resumen-archivos)
+  - [Estructura de Carpetas (pestaña)](#estructura-de-carpetas-pestaña)
 - [Validación](#validación)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
@@ -39,6 +40,71 @@ proyecto activo, agrupa los documentos por tipo (extension) y muestra:
   busqueda, orden por columna, paginacion y un boton "Abrir" al visor de
   Trimble Connect.
 - Boton "Cargados en los ultimos 7 / 15 / 30 dias".
+
+El panel tiene dos pestañas arriba: **Resumen** (lo anterior) y
+**Estructura de Carpetas**.
+
+### Estructura de Carpetas (pestaña)
+
+Árbol jerárquico (tipo EDT/WBS) de todas las carpetas y archivos del
+proyecto, construido a partir de **los mismos datos** que ya recorre y
+cachea el dashboard "Resumen" (`lib/cache.ts` + `lib/walkProjectTree.ts`) —
+no hay un segundo recorrido, así que los conteos de archivos siempre
+coinciden entre ambas pestañas, y si "Resumen" ya cargó, abrir esta pestaña
+es prácticamente instantáneo. El árbol completo (carpetas + archivos, ya
+anidado y con conteos recursivos) se construye del lado del servidor en
+[`lib/folderTree.ts`](lib/folderTree.ts) (`buildTree`, cubierto por
+`lib/folderTree.test.ts`) y se sirve en una sola respuesta desde
+[`/api/tree`](app/api/tree/route.ts), que sigue el mismo contrato `202` +
+progreso que `/api/summary` mientras el recorrido no ha terminado.
+
+- **Carga diferida real**: como el árbol completo ya viaja en un solo JSON
+  (barato: es la misma data que "Resumen" ya tiene cacheada), la "carga
+  diferida" se aplica donde de verdad importa para el rendimiento — el
+  **renderizado**. El árbol abre con solo el primer nivel visible (nada
+  expandido), cada carpeta se expande/contrae individualmente, y las filas
+  se pintan con `react-window` (lista virtualizada): con miles de nodos
+  expandidos solo se montan en el DOM las filas realmente visibles.
+- **Conteo por carpeta**: recursivo (carpeta + todas sus subcarpetas),
+  mostrado junto al nombre ("124 archivos en total").
+- **Color por nivel**: Nivel 1 (carpetas raíz del proyecto) a Nivel 6, cada
+  uno con un color fijo; Nivel 7 en adelante comparte un único color
+  adicional. Paleta y asignación en `lib/folderTree.ts`
+  (`LEVEL_COLORS` / `colorForLevel`). Leyenda fija arriba del árbol.
+- **Buscador**: por nombre de carpeta o archivo, insensible a
+  mayúsculas/acentos (`normalizeForSearch` en `lib/folderTree.ts`), busca en
+  todo el árbol (no solo lo expandido). Con una sola coincidencia, expande
+  el camino y hace scroll hasta ella; con varias, muestra una lista para
+  elegir.
+- **Persistencia del expand/collapse**: solo en `localStorage` del
+  navegador, con clave por proyecto (`lib/folderTreeClient.ts`) — nunca se
+  manda al backend ni se comparte entre usuarios.
+- **Permisos por carpeta**: el ícono 👤 de cada carpeta abre un panel lateral
+  con quién tiene acceso, su nivel (`READ`, `FULL_ACCESS`, `NO_ACCESS` — la
+  terminología exacta de la API) y si el permiso es directo o heredado (y de
+  qué carpeta). Ver la sección siguiente para el detalle de cómo se resuelve
+  esto contra la API de Trimble Connect.
+
+  **Endpoint confirmado contra la documentación vigente**
+  (https://developer.trimble.com/docs/connect/tools/api/core, OpenAPI del
+  Core API — sección Folders):
+  `GET /folders/fs/{folderId}/permissions` devuelve el ACL directo de esa
+  carpeta; con `?fields=inherited` devuelve el ACL **efectivo** (directo +
+  heredado ya fusionado por Trimble) — pero la API no distingue, dentro de
+  ese resultado fusionado, qué entradas son directas y cuáles heredadas, ni
+  de qué carpeta ancestro viene cada una. Por eso `lib/permissions.ts`:
+  1. Pide el ACL directo y el efectivo de la carpeta en paralelo.
+  2. La diferencia (efectivo menos directo) son las entradas heredadas.
+  3. Para cada entrada heredada, sube por la cadena de carpetas ancestras
+     (que el frontend ya conoce, por venir del árbol que renderizó — no hay
+     que volver a resolverla) pidiendo el ACL directo de cada una, y usa la
+     más cercana que contenga ese mismo usuario/grupo como "carpeta de
+     origen". Si no se encuentra (caso raro), se muestra igual como
+     "Heredado" sin carpeta de origen.
+  4. Los identificadores `users:{id}` / `tc-groups:{id}` (y el grupo virtual
+     `tc-groups:*`, "todos los miembros") se resuelven a nombre/correo con
+     `GET /projects/{projectId}/users` y `GET /groups?projectId=...`,
+     cacheados 5 minutos en memoria por proyecto.
 
 ---
 
@@ -272,6 +338,8 @@ app/
   extension/                  Resumen Archivos (pagina embebida)
   validacion/                 Validacion (pagina embebida)
   api/summary, api/files      API de Resumen Archivos
+  api/tree                    Arbol de carpetas (pestaña "Estructura de Carpetas")
+  api/folder-permissions      Permisos (directos/heredados) de una carpeta
   api/validacion/config       GET/PUT de la configuracion por proyecto
   api/validacion/analyze      Ejecuta el analisis (boton "Analizar")
   api/validacion/results      Pagina de resultados (con filtros)
@@ -279,9 +347,13 @@ app/
 components/
   ExtensionShell.tsx          Conexion con Trimble Connect (compartida)
   Dashboard.tsx, ...          Resumen Archivos
+  folderTree/                 Estructura de Carpetas: arbol, fila, panel de permisos
   validacion/                 Validacion: configuracion, probador, resultados
 lib/
   trimbleApi.ts, walkProjectTree.ts, cache.ts   API REST y recorrido (compartidos)
+  folderTree.ts                Construye el arbol anidado + colores por nivel (server)
+  folderTreeClient.ts          Aplanado para react-window, busqueda, localStorage (cliente)
+  permissions.ts                Resuelve permisos directos/heredados de una carpeta
   access.ts                   Comprueba que el token sea de un miembro del proyecto
   validacion/                 Analizador, configuracion, filtros, exportacion,
                               almacenamiento (Supabase o Upstash Redis) y pruebas

@@ -21,6 +21,7 @@ function file(name: string, folderPath = "Raíz"): FileRecord {
     modifiedOn: "2026-01-01T00:00:00Z",
     uploadedBy: "Test",
     folderPath,
+    folderId: "root",
     versionId: `v-${name}`,
     version: 1,
   };

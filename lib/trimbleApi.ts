@@ -152,3 +152,75 @@ export async function listFolderItems(
   }
   return all;
 }
+
+export type AccessLevel = "READ" | "FULL_ACCESS" | "NO_ACCESS";
+
+export interface FolderPermissions {
+  acl: Partial<Record<AccessLevel, string[]>>;
+  /** Whether this folder inherits permissions from its parent at all. */
+  inheritance: boolean;
+}
+
+/**
+ * GET /folders/fs/{folderId}/permissions - the folder's access control list.
+ * Principals are strings like "users:{id}", "tc-groups:{id}", or the special
+ * "tc-groups:*" (all project members). Without `inherited`, only entries set
+ * directly on this folder are returned; with it, Trimble merges in whatever
+ * this folder inherits from its ancestors - but the merged result doesn't
+ * say which entries came from where, so lib/permissions.ts diffs the two
+ * calls itself to tell direct apart from inherited.
+ * https://developer.trimble.com/docs/connect/tools/api/core (Folders -> Get Folder Permissions)
+ */
+export async function getFolderPermissions(
+  baseUrl: string,
+  accessToken: string,
+  folderId: string,
+  inherited: boolean
+): Promise<FolderPermissions> {
+  const url = `${baseUrl}/folders/fs/${encodeURIComponent(folderId)}/permissions${inherited ? "?fields=inherited" : ""}`;
+  const data = await trimbleFetch(url, accessToken);
+  return { acl: data.acl ?? {}, inheritance: Boolean(data.inheritance) };
+}
+
+export interface ProjectUser {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+}
+
+/** GET /projects/{projectId}/users, paginated the same way as folder items. */
+export async function listProjectUsers(
+  baseUrl: string,
+  accessToken: string,
+  projectId: string
+): Promise<ProjectUser[]> {
+  const all: ProjectUser[] = [];
+  let start = 0;
+  for (;;) {
+    const end = start + FOLDER_PAGE_SIZE - 1;
+    const url = `${baseUrl}/projects/${encodeURIComponent(projectId)}/users`;
+    const batch = (await trimbleFetch(url, accessToken, {
+      Range: `items=${start}-${end}`,
+    })) as ProjectUser[];
+    all.push(...batch);
+    if (batch.length < FOLDER_PAGE_SIZE) break;
+    start += FOLDER_PAGE_SIZE;
+  }
+  return all;
+}
+
+export interface ProjectGroup {
+  id: string;
+  name: string;
+}
+
+/** GET /groups?projectId={projectId} - the project's user groups. */
+export async function listProjectGroups(
+  baseUrl: string,
+  accessToken: string,
+  projectId: string
+): Promise<ProjectGroup[]> {
+  const url = `${baseUrl}/groups?projectId=${encodeURIComponent(projectId)}`;
+  return (await trimbleFetch(url, accessToken)) as ProjectGroup[];
+}

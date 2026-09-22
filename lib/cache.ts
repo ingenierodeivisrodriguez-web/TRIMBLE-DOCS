@@ -52,7 +52,7 @@ export function invalidateProjectData(projectId: string): void {
 }
 
 function toProjectData(state: CrawlState): ProjectData {
-  return { project: state.project, files: state.files, fetchedAt: Date.now() };
+  return { project: state.project, files: state.files, folders: state.folders, fetchedAt: Date.now() };
 }
 
 function progressOf(state: CrawlState): CrawlProgress {
