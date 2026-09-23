@@ -15,10 +15,10 @@ const POLL_INTERVAL_MS = 1200;
  * `firstUrl`, when given, is used only for the first request (e.g. to ask the
  * server to discard cached data); every later poll uses `url`.
  */
-export async function fetchWithProgress<T>(
+export async function fetchWithProgress<T, P = CrawlProgress>(
   url: string,
   accessToken: string,
-  onProgress: (progress: CrawlProgress) => void,
+  onProgress: (progress: P) => void,
   isCancelled: () => boolean,
   firstUrl?: string
 ): Promise<T | null> {

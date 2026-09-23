@@ -16,6 +16,7 @@ recursivo de carpetas ([`lib/walkProjectTree.ts`](lib/walkProjectTree.ts) +
 
 - [Resumen Archivos](#resumen-archivos)
   - [Estructura de Carpetas (pestaña)](#estructura-de-carpetas-pestaña)
+  - [Auditoría de Permisos (pestaña)](#auditoría-de-permisos-pestaña)
 - [Validación](#validación)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
@@ -41,8 +42,8 @@ proyecto activo, agrupa los documentos por tipo (extension) y muestra:
   Trimble Connect.
 - Boton "Cargados en los ultimos 7 / 15 / 30 dias".
 
-El panel tiene dos pestañas arriba: **Resumen** (lo anterior) y
-**Estructura de Carpetas**.
+El panel tiene tres pestañas arriba: **Resumen** (lo anterior),
+**Estructura de Carpetas** y **Auditoría de Permisos**.
 
 ### Estructura de Carpetas (pestaña)
 
@@ -114,6 +115,43 @@ progreso que `/api/summary` mientras el recorrido no ha terminado.
      `tc-groups:*`, "todos los miembros") se resuelven a nombre/correo con
      `GET /projects/{projectId}/users` y `GET /groups?projectId=...`,
      cacheados 5 minutos en memoria por proyecto.
+
+### Auditoría de Permisos (pestaña)
+
+Vista pensada para gerencia/dirección: en lugar de revisar carpeta por
+carpeta con el panel 👤, recorre **todo el proyecto de una vez** y muestra
+solo las carpetas que tienen algún permiso puesto directamente sobre ellas
+(no heredado) — la gran mayoría de las carpetas no tiene ninguno y hereda
+limpio, así que quedan fuera del reporte para no generar ruido.
+
+- Se ejecuta **bajo demanda** con el botón "Ejecutar auditoría" (no corre
+  sola al abrir la pestaña): revisar permisos cuesta una llamada a la API de
+  Trimble por carpeta, así que en proyectos grandes puede tardar. Reutiliza
+  el mismo recorrido de carpetas cacheado que "Resumen" y "Estructura de
+  Carpetas" (`lib/cache.ts`), y solo paga el costo adicional de la propia
+  revisión de permisos.
+- Tres señales, cada una con su propia tarjeta-filtro:
+  - **Abiertas a todo el proyecto**: la carpeta tiene un permiso directo para
+    `tc-groups:*` ("todos los miembros del proyecto").
+  - **Control total directo a una persona**: `FULL_ACCESS` otorgado
+    directamente a un usuario (no a un grupo) — acceso que depende de que
+    alguien recuerde revocarlo manualmente si esa persona cambia de rol o
+    sale del proyecto, en vez de gestionarse por grupo.
+  - **Herencia desactivada**: la propia carpeta reporta `inheritance: false`
+    (ver la sección anterior) — un punto donde alguien rompió deliberadamente
+    la herencia normal de la estructura.
+- Cada carpeta se puede expandir para ver el detalle completo de sus
+  permisos directos (igual que el panel 👤, pero sin necesidad de abrirlo
+  carpeta por carpeta).
+- Igual que "Estructura de Carpetas", el recorrido de permisos es resumible
+  (`lib/permissionAudit.ts`, worker-pool de 16 + presupuesto de 8s por
+  invocación — mismo patrón que `lib/walkProjectTree.ts`), así que proyectos
+  con miles de carpetas se auditan en varias llamadas cortas en vez de una
+  sola que arriesgue el límite de tiempo de la función serverless.
+- Alcance actual: **un proyecto a la vez** (el que está abierto en la
+  extensión). Una vista de portafolio con varios proyectos a la vez, o un
+  envío automático/periódico por correo, quedan fuera de este primer
+  alcance.
 
 ---
 
@@ -349,6 +387,7 @@ app/
   api/summary, api/files      API de Resumen Archivos
   api/tree                    Arbol de carpetas (pestaña "Estructura de Carpetas")
   api/folder-permissions      Permisos (directos/heredados) de una carpeta
+  api/permissions-audit       Auditoria de permisos de todo el proyecto (pestaña)
   api/validacion/config       GET/PUT de la configuracion por proyecto
   api/validacion/analyze      Ejecuta el analisis (boton "Analizar")
   api/validacion/results      Pagina de resultados (con filtros)
@@ -357,12 +396,14 @@ components/
   ExtensionShell.tsx          Conexion con Trimble Connect (compartida)
   Dashboard.tsx, ...          Resumen Archivos
   folderTree/                 Estructura de Carpetas: arbol, fila, panel de permisos
+  permissionAudit/            Auditoria de Permisos: tarjetas, lista, hook de estado
   validacion/                 Validacion: configuracion, probador, resultados
 lib/
   trimbleApi.ts, walkProjectTree.ts, cache.ts   API REST y recorrido (compartidos)
   folderTree.ts                Construye el arbol anidado + colores por nivel (server)
   folderTreeClient.ts          Aplanado para react-window, busqueda, localStorage (cliente)
   permissions.ts                Resuelve permisos directos/heredados de una carpeta
+  permissionAudit.ts           Recorrido resumible + clasificacion para la auditoria
   access.ts                   Comprueba que el token sea de un miembro del proyecto
   validacion/                 Analizador, configuracion, filtros, exportacion,
                               almacenamiento (Supabase o Upstash Redis) y pruebas

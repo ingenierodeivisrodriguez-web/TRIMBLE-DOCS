@@ -4,8 +4,9 @@ import { useState } from "react";
 import Dashboard from "../../components/Dashboard";
 import ExtensionShell from "../../components/ExtensionShell";
 import FolderTreeTab from "../../components/folderTree/FolderTreeTab";
+import PermissionAuditTab from "../../components/permissionAudit/PermissionAuditTab";
 
-type Tab = "resumen" | "estructura";
+type Tab = "resumen" | "estructura" | "auditoria";
 
 export default function ExtensionApp() {
   const [tab, setTab] = useState<Tab>("resumen");
@@ -21,15 +22,21 @@ export default function ExtensionApp() {
             <TabButton active={tab === "estructura"} onClick={() => setTab("estructura")}>
               Estructura de Carpetas
             </TabButton>
+            <TabButton active={tab === "auditoria"} onClick={() => setTab("auditoria")}>
+              Auditoría de Permisos
+            </TabButton>
           </div>
 
-          {/* Both tabs stay mounted (just hidden) so switching back and forth
+          {/* All tabs stay mounted (just hidden) so switching back and forth
               keeps search text, scroll position and expand/collapse state. */}
           <div style={{ display: tab === "resumen" ? "block" : "none" }}>
             <Dashboard projectId={projectId} projectName={projectName} accessToken={accessToken} />
           </div>
           <div style={{ display: tab === "estructura" ? "block" : "none" }}>
             <FolderTreeTab projectId={projectId} accessToken={accessToken} />
+          </div>
+          <div style={{ display: tab === "auditoria" ? "block" : "none" }}>
+            <PermissionAuditTab projectId={projectId} accessToken={accessToken} />
           </div>
         </div>
       )}

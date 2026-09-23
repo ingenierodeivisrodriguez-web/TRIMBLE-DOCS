@@ -1,3 +1,6 @@
+import { getDirectory } from "./permissions";
+import { advanceAudit, AuditState, FolderAuditResult, startAudit } from "./permissionAudit";
+import { resolveProjectBaseUrl } from "./trimbleApi";
 import { ProjectData } from "./types";
 import { advanceCrawl, CrawlState, startCrawl } from "./walkProjectTree";
 
@@ -110,4 +113,96 @@ export async function advanceProjectData(
   }
 
   return { done: false, progress: progressOf(entry.state) };
+}
+
+// Permission lookups are one Trimble API call per folder, so an audit is
+// budgeted the same way as the folder crawl it builds on.
+const AUDIT_BUDGET_MS = 8000;
+
+interface AuditEntry {
+  state: AuditState;
+  expiresAt: number | null;
+}
+
+const auditEntries = new Map<string, AuditEntry>();
+const auditStarting = new Map<string, Promise<AuditState>>();
+const auditAdvancing = new Map<string, Promise<void>>();
+
+export interface AuditProgress {
+  checked: number;
+  total: number;
+}
+
+export type AuditAdvanceResult =
+  | { done: true; results: FolderAuditResult[]; progress: AuditProgress }
+  | { done: false; progress: AuditProgress };
+
+function auditProgressOf(state: AuditState): AuditProgress {
+  return { checked: state.foldersChecked, total: state.folders.length };
+}
+
+/** Forgets a finished audit so the next call re-checks every folder from scratch. */
+export function invalidatePermissionAudit(projectId: string): void {
+  const entry = auditEntries.get(projectId);
+  if (entry?.state.done) auditEntries.delete(projectId);
+}
+
+/**
+ * Does up to AUDIT_BUDGET_MS worth of permission-checking for a project and
+ * reports whether it's done - same resumable pattern as advanceProjectData.
+ * Builds on the project's (already cached) folder crawl, so it only pays for
+ * that walk once even if the audit and the "Estructura de Carpetas" tab are
+ * both open in the same session.
+ */
+export async function advancePermissionAudit(
+  projectId: string,
+  accessToken: string
+): Promise<AuditAdvanceResult> {
+  const tree = await advanceProjectData(projectId, accessToken);
+  if (!tree.done) {
+    return { done: false, progress: { checked: 0, total: 0 } };
+  }
+
+  let entry = auditEntries.get(projectId);
+
+  if (entry?.expiresAt) {
+    if (entry.expiresAt > Date.now()) {
+      return { done: true, results: entry.state.results, progress: auditProgressOf(entry.state) };
+    }
+    auditEntries.delete(projectId);
+    entry = undefined;
+  }
+
+  if (!entry) {
+    let init = auditStarting.get(projectId);
+    if (!init) {
+      init = resolveProjectBaseUrl(accessToken, projectId).then((baseUrl) =>
+        startAudit(baseUrl, projectId, tree.data.folders)
+      );
+      auditStarting.set(projectId, init);
+      init.finally(() => auditStarting.delete(projectId));
+    }
+    const state = await init;
+    entry = auditEntries.get(projectId) ?? { state, expiresAt: null };
+    auditEntries.set(projectId, entry);
+  }
+
+  if (!entry.state.done) {
+    let advance = auditAdvancing.get(projectId);
+    if (!advance) {
+      advance = (async () => {
+        const directory = await getDirectory(entry!.state.baseUrl, accessToken, projectId);
+        await advanceAudit(entry!.state, accessToken, directory, Date.now() + AUDIT_BUDGET_MS);
+      })().finally(() => auditAdvancing.delete(projectId));
+      auditAdvancing.set(projectId, advance);
+    }
+    await advance;
+  }
+
+  if (entry.state.done) {
+    entry.expiresAt = Date.now() + CACHE_TTL_MS;
+    return { done: true, results: entry.state.results, progress: auditProgressOf(entry.state) };
+  }
+
+  return { done: false, progress: auditProgressOf(entry.state) };
 }

@@ -25,7 +25,7 @@ export interface PermissionEntry {
   inheritedFromName?: string;
 }
 
-interface Directory {
+export interface Directory {
   usersById: Map<string, ProjectUser>;
   groupsById: Map<string, ProjectGroup>;
 }
@@ -35,7 +35,8 @@ interface Directory {
 const DIRECTORY_TTL_MS = 5 * 60 * 1000;
 const directoryCache = new Map<string, { directory: Directory; expiresAt: number }>();
 
-async function getDirectory(baseUrl: string, accessToken: string, projectId: string): Promise<Directory> {
+/** Shared with lib/permissionAudit.ts, which also needs to resolve principal ids to names. */
+export async function getDirectory(baseUrl: string, accessToken: string, projectId: string): Promise<Directory> {
   const cached = directoryCache.get(projectId);
   if (cached && cached.expiresAt > Date.now()) return cached.directory;
 
@@ -51,7 +52,7 @@ async function getDirectory(baseUrl: string, accessToken: string, projectId: str
   return directory;
 }
 
-function resolvePrincipal(
+export function resolvePrincipal(
   principal: string,
   directory: Directory
 ): { principalType: PermissionEntry["principalType"]; name: string; email?: string } {
