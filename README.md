@@ -162,8 +162,13 @@ de nomenclatura que define el propio administrador (no hay un estándar fijo:
 la herramienta es configurable). Solo mira el nombre del archivo; no valida
 metadatos ni propiedades personalizadas de Trimble Connect.
 
-Tiene dos pestañas: **Resultados** y **Configuración**, y un botón
-**Analizar** siempre visible arriba a la derecha.
+Tiene tres pestañas: **Resultados**, **Duplicados** y **Configuración**, y un
+botón **Analizar** siempre visible arriba a la derecha. Un solo clic en
+**Analizar** recorre el proyecto una vez y alimenta las dos primeras
+pestañas: la comprobación de nomenclatura (Resultados) necesita una plantilla
+guardada, pero la de **Duplicados** no necesita ninguna configuración, así
+que el botón nunca está bloqueado - si no hay plantillas guardadas solo se
+buscan duplicados.
 
 ### Pantalla de Configuración
 
@@ -300,6 +305,35 @@ texto en el medio…) están cubiertos por pruebas automáticas: `npm test`.
   filtros; el botón muestra cuántas filas exporta). El CSV lleva BOM UTF-8 y
   neutraliza celdas que empiecen con `= + - @` (inyección de fórmulas).
 
+### Duplicados
+
+Archivos con **el mismo nombre (incluida la extensión) en distintas
+carpetas** - el típico "¿cuál de las dos es la vigente?" de los proyectos de
+construcción. Es independiente de la configuración de nomenclatura: funciona
+aunque no haya ninguna plantilla guardada, y usa el mismo recorrido de
+carpetas que Resultados (un clic en **Analizar** llena ambas pestañas sin
+recorrer el proyecto dos veces).
+
+- **Agrupación**: por nombre completo exacto, sin distinguir mayúsculas de
+  minúsculas (`Planta-01.pdf` y `planta-01.PDF` cuentan como el mismo
+  archivo). Como una carpeta no puede tener dos archivos con el mismo nombre
+  en Trimble Connect, todo grupo con más de una copia está necesariamente
+  repartido en carpetas distintas. Dos archivos con el mismo nombre pero
+  distinta extensión (`Planta-01.pdf` y `Planta-01.dwg`) no se agrupan: son
+  formatos distintos del mismo plano, no el mismo archivo duplicado.
+- **Tarjetas**: total de archivos duplicados y grupos de nombres repetidos.
+- **Gráfico** de extensiones con más duplicados, clicable para filtrar.
+- Cada grupo se muestra como una tarjeta con **todas sus copias** (carpeta,
+  fecha de modificación, tamaño, quién la subió y un enlace **Abrir** al
+  visor de Trimble Connect), ordenadas de la más reciente a la más antigua.
+- **"Probable vigente"**: una sugerencia, no una regla - se marca únicamente
+  la copia cuya fecha de modificación es *inequívocamente* la más reciente
+  del grupo; si dos copias empatan en la fecha más reciente, no se marca
+  ninguna (los datos no alcanzan para decidir). El equipo sigue siendo quien
+  decide cuál conservar.
+- **Búsqueda** por nombre o carpeta y **exportación a Excel/CSV** (una fila
+  por copia) con los mismos filtros aplicados.
+
 ---
 
 ## Cómo funciona (común a ambas extensiones)
@@ -392,12 +426,14 @@ app/
   api/validacion/analyze      Ejecuta el analisis (boton "Analizar")
   api/validacion/results      Pagina de resultados (con filtros)
   api/validacion/export       Descarga .xlsx / .csv
+  api/validacion/duplicates         Pagina de grupos duplicados (con filtros)
+  api/validacion/duplicates/export  Descarga .xlsx / .csv de duplicados
 components/
   ExtensionShell.tsx          Conexion con Trimble Connect (compartida)
   Dashboard.tsx, ...          Resumen Archivos
   folderTree/                 Estructura de Carpetas: arbol, fila, panel de permisos
   permissionAudit/            Auditoria de Permisos: tarjetas, lista, hook de estado
-  validacion/                 Validacion: configuracion, probador, resultados
+  validacion/                 Validacion: configuracion, probador, resultados, duplicados
 lib/
   trimbleApi.ts, walkProjectTree.ts, cache.ts   API REST y recorrido (compartidos)
   folderTree.ts                Construye el arbol anidado + colores por nivel (server)
@@ -406,7 +442,7 @@ lib/
   permissionAudit.ts           Recorrido resumible + clasificacion para la auditoria
   access.ts                   Comprueba que el token sea de un miembro del proyecto
   validacion/                 Analizador, configuracion, filtros, exportacion,
-                              almacenamiento (Supabase o Upstash Redis) y pruebas
+                              duplicados, almacenamiento (Supabase o Upstash Redis) y pruebas
 public/
   manifest.json, icon.svg                       Resumen Archivos
   manifest-validacion.json, icon-validacion.svg Validacion
@@ -533,3 +569,8 @@ variables de Supabase (o de Upstash).
 - Las exportaciones se descargan como archivo desde el navegador; si Trimble
   Connect embebiera la extensión en un iframe con `sandbox` sin
   `allow-downloads`, el navegador podría bloquear la descarga.
+- "Duplicados" agrupa por **nombre exacto** (con extensión); no detecta
+  archivos renombrados ni compara el contenido. "Probable vigente" se basa
+  solo en la fecha de modificación que reporta Trimble Connect, no en
+  metadatos ni propiedades personalizadas del archivo - es una sugerencia
+  para que el equipo decida, no una verificación de contenido.

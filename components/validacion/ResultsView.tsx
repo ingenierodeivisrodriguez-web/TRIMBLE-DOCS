@@ -106,12 +106,26 @@ export default function ResultsView({
     );
   }
 
+  // "Analizar" can now run without a saved config (it still finds duplicates),
+  // so a done analysis may carry no validation summary; guard for that rather
+  // than assuming `configured` (checked before running) still holds.
+  if (!state.summary.validation) {
+    return (
+      <Card>
+        <div style={{ ...noticeBase, ...noticeStyles.info }}>
+          El proyecto no tiene una configuración de nomenclatura guardada. Actualiza la página e inténtalo
+          de nuevo.
+        </div>
+      </Card>
+    );
+  }
+
   return (
     <ResultsDone
       key={state.runId}
       projectId={projectId}
       accessToken={accessToken}
-      summary={state.summary}
+      summary={state.summary.validation}
     />
   );
 }

@@ -118,3 +118,53 @@ export interface ResultsPage<T> {
   page: number;
   pageSize: number;
 }
+
+// ---------------------------------------------------------------------------
+// Duplicados: files that share the exact same name (including extension) in
+// different folders of the project - independent of the naming-convention
+// config above, so it works even for a project with no template configured.
+// ---------------------------------------------------------------------------
+
+export interface DuplicateFileRef extends FileRef {
+  size: number;
+  modifiedOn: string;
+  uploadedBy: string;
+  /**
+   * True only for the copy whose modification date is unambiguously the
+   * newest in its group - a suggestion, not a guarantee, and never set when
+   * two or more copies are tied for newest.
+   */
+  probablyCurrent: boolean;
+}
+
+export interface DuplicateGroup {
+  /** Normalized (lower-case) name used to group; `name` keeps the original casing of the newest copy. */
+  key: string;
+  name: string;
+  ext: string;
+  count: number;
+  /** Every copy, newest modified first. */
+  files: DuplicateFileRef[];
+}
+
+export interface DuplicatesSummary {
+  analyzedAt: string;
+  totalFiles: number;
+  /** Number of distinct duplicate-name groups. */
+  groups: number;
+  /** Total files that belong to some group (i.e. sum of each group's count). */
+  duplicateFiles: number;
+  byExt: { ext: string; count: number }[];
+}
+
+export interface DuplicatesResult {
+  summary: DuplicatesSummary;
+  groups: DuplicateGroup[];
+}
+
+/** What one click of "Analizar" produces: name-validation results (if configured) and duplicates (always). */
+export interface AnalysisOverview {
+  configured: boolean;
+  validation: AnalysisSummary | null;
+  duplicates: DuplicatesSummary;
+}

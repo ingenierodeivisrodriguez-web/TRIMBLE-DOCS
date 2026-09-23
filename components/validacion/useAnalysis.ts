@@ -2,19 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { CrawlProgress, fetchWithProgress } from "../../lib/apiClient";
-import type { AnalysisSummary } from "../../lib/validacion/types";
+import type { AnalysisOverview } from "../../lib/validacion/types";
 
 export type AnalysisState =
   | { status: "idle" }
   | { status: "running"; progress: CrawlProgress | null }
-  | { status: "done"; summary: AnalysisSummary; runId: number }
+  | { status: "done"; summary: AnalysisOverview; runId: number }
   | { status: "error"; message: string };
 
 /**
- * Drives the on-demand analysis. Nothing runs until `analyze()` is called
- * (from the "Analizar" button); the first request asks the server to discard
- * its cached folder walk (`refresh=1`) so the result reflects the project as
- * it is right now, then the hook polls until the server reports it is done.
+ * Drives the on-demand analysis (name-validation results and duplicate-name
+ * groups, computed from a single crawl). Nothing runs until `analyze()` is
+ * called (from the "Analizar" button); the first request asks the server to
+ * discard its cached folder walk (`refresh=1`) so the result reflects the
+ * project as it is right now, then the hook polls until the server reports
+ * it is done.
  */
 export function useAnalysis(projectId: string, accessToken: string) {
   const [state, setState] = useState<AnalysisState>({ status: "idle" });
@@ -33,7 +35,7 @@ export function useAnalysis(projectId: string, accessToken: string) {
     const url = `/api/validacion/analyze?projectId=${encodeURIComponent(projectId)}`;
 
     setState({ status: "running", progress: null });
-    fetchWithProgress<AnalysisSummary>(
+    fetchWithProgress<AnalysisOverview>(
       url,
       accessToken,
       (progress) => {

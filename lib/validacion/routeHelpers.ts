@@ -40,6 +40,3 @@ export function errorResponse(err: unknown): NextResponse {
   const message = err instanceof Error ? err.message : "Error desconocido.";
   return NextResponse.json({ error: message }, { status: 500 });
 }
-
-export const NOT_CONFIGURED_MESSAGE =
-  "Guarda la configuración de al menos una plantilla (con extensiones y campos) antes de analizar.";

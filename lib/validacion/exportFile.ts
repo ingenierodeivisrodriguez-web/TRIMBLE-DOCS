@@ -1,6 +1,7 @@
 import ExcelJS from "exceljs";
+import { formatBytes, formatDate } from "../format";
 import type { Selection } from "./select";
-import { NonConformingRow, TEMPLATE_TITLES, UnclassifiedRow } from "./types";
+import { DuplicateGroup, NonConformingRow, TEMPLATE_TITLES, UnclassifiedRow } from "./types";
 
 export interface Table {
   sheetName: string;
@@ -37,6 +38,30 @@ export function tableFor(selection: Selection): Table {
   return selection.tab === "nonconforming"
     ? nonConformingTable(selection.rows)
     : unclassifiedTable(selection.rows);
+}
+
+/** One row per copy (not per group), so every folder/date/size is visible in the sheet. */
+export function duplicatesTable(groups: DuplicateGroup[]): Table {
+  const rows: string[][] = [];
+  for (const group of groups) {
+    for (const file of group.files) {
+      rows.push([
+        group.name,
+        String(group.count),
+        file.folderPath,
+        formatDate(file.modifiedOn),
+        formatBytes(file.size),
+        file.uploadedBy,
+        file.probablyCurrent ? "Sí" : "",
+      ]);
+    }
+  }
+  return {
+    sheetName: "Duplicados",
+    headers: ["Archivo", "Copias", "Carpeta", "Modificado", "Tamaño", "Subido por", "Probable vigente"],
+    columnWidths: [42, 10, 42, 16, 12, 26, 16],
+    rows,
+  };
 }
 
 // A cell starting with one of these is interpreted as a formula by Excel; file

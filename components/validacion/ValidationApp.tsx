@@ -5,11 +5,12 @@ import { isConfigured } from "../../lib/validacion/config";
 import type { ValidationConfig } from "../../lib/validacion/types";
 import Card from "../Card";
 import ConfigEditor from "./ConfigEditor";
+import DuplicatesView from "./DuplicatesView";
 import ResultsView from "./ResultsView";
 import { useAnalysis } from "./useAnalysis";
 import { noticeBase, noticeStyles, primaryButtonStyle } from "./ui";
 
-type Tab = "results" | "config";
+type Tab = "results" | "duplicates" | "config";
 
 export default function ValidationApp({
   projectId,
@@ -53,7 +54,10 @@ export default function ValidationApp({
   const running = state.status === "running";
 
   const handleAnalyze = useCallback(() => {
-    setTab("results");
+    // One click feeds both the Resultados and Duplicados tabs; stay on
+    // whichever the user is looking at instead of forcing a switch, but move
+    // off Configuración (there is nothing to show there while it runs).
+    setTab((t) => (t === "config" ? "results" : t));
     analyze();
   }, [analyze]);
 
@@ -80,10 +84,14 @@ export default function ValidationApp({
             ...primaryButtonStyle,
             fontSize: 15,
             padding: "10px 26px",
-            opacity: !configured || running ? 0.55 : 1,
+            opacity: running ? 0.55 : 1,
           }}
-          disabled={!configured || running}
-          title={configured ? undefined : "Configura y guarda al menos una plantilla para poder analizar"}
+          disabled={running}
+          title={
+            configured
+              ? undefined
+              : "Sin reglas de nomenclatura configuradas: solo se buscarán archivos duplicados."
+          }
           onClick={handleAnalyze}
         >
           {running ? "Analizando..." : "Analizar"}
@@ -93,6 +101,9 @@ export default function ValidationApp({
       <nav style={{ display: "flex", gap: 4, borderBottom: "2px solid var(--tc-gray-100)" }}>
         <TabLink active={tab === "results"} onClick={() => setTab("results")}>
           Resultados
+        </TabLink>
+        <TabLink active={tab === "duplicates"} onClick={() => setTab("duplicates")}>
+          Duplicados
         </TabLink>
         <TabLink active={tab === "config"} onClick={() => setTab("config")}>
           Configuración{dirty ? " •" : ""}
@@ -125,6 +136,9 @@ export default function ValidationApp({
               onAnalyze={handleAnalyze}
               onGoToConfig={() => setTab("config")}
             />
+          </div>
+          <div style={{ display: tab === "duplicates" ? "block" : "none" }}>
+            <DuplicatesView projectId={projectId} accessToken={accessToken} state={state} onAnalyze={handleAnalyze} />
           </div>
           <div style={{ display: tab === "config" ? "block" : "none" }}>
             <ConfigEditor

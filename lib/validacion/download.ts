@@ -4,22 +4,12 @@ const POLL_INTERVAL_MS = 1200;
 const MAX_ATTEMPTS = 90;
 
 /**
- * Downloads the non-conforming (or unclassified) list as .xlsx or .csv, with the
- * same filters the table is showing.
- * The request needs the access token header, so it can't be a plain link: the
- * file is fetched and handed to the browser as a blob. If the server is still
- * refreshing the project data (202) it waits and retries.
+ * Fetches an export endpoint and hands the result to the browser as a
+ * download. The request needs the access token header, so it can't be a
+ * plain link: the file is fetched and turned into a blob URL. If the server
+ * is still refreshing the project data (202) it waits and retries.
  */
-export async function downloadExport(
-  projectId: string,
-  accessToken: string,
-  tab: ResultsTab,
-  format: "xlsx" | "csv",
-  filters: Record<string, string> = {}
-): Promise<void> {
-  const params = new URLSearchParams({ projectId, tab, format, ...filters });
-  const url = `/api/validacion/export?${params.toString()}`;
-
+async function downloadFile(url: string, accessToken: string, fallbackName: string): Promise<void> {
   for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
     const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
 
@@ -34,8 +24,7 @@ export async function downloadExport(
 
     const blob = await res.blob();
     const filename =
-      /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ??
-      `validacion.${format}`;
+      /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? fallbackName;
 
     const objectUrl = URL.createObjectURL(blob);
     const link = document.createElement("a");
@@ -49,4 +38,31 @@ export async function downloadExport(
   }
 
   throw new Error("Se agotó el tiempo de espera mientras se actualizaban los datos del proyecto.");
+}
+
+/** Downloads the non-conforming (or unclassified) list, with the same filters the table is showing. */
+export async function downloadExport(
+  projectId: string,
+  accessToken: string,
+  tab: ResultsTab,
+  format: "xlsx" | "csv",
+  filters: Record<string, string> = {}
+): Promise<void> {
+  const params = new URLSearchParams({ projectId, tab, format, ...filters });
+  await downloadFile(`/api/validacion/export?${params.toString()}`, accessToken, `validacion.${format}`);
+}
+
+/** Downloads the duplicate-name groups (one row per copy), with the same filters the table is showing. */
+export async function downloadDuplicatesExport(
+  projectId: string,
+  accessToken: string,
+  format: "xlsx" | "csv",
+  filters: Record<string, string> = {}
+): Promise<void> {
+  const params = new URLSearchParams({ projectId, format, ...filters });
+  await downloadFile(
+    `/api/validacion/duplicates/export?${params.toString()}`,
+    accessToken,
+    `validacion-duplicados.${format}`
+  );
 }
