@@ -78,13 +78,12 @@ function resolvePrincipal(
  * directly on it from ones it merely inherits, and - best-effort - which
  * ancestor folder an inherited entry traces back to.
  *
- * Trimble's `fields=inherited` permissions call returns the *effective*
- * (already-merged) ACL, but not which entries are direct vs inherited, or
- * where an inherited one originally came from (see getFolderPermissions in
- * lib/trimbleApi.ts). We reconstruct that ourselves: diff the direct-only
- * ACL against the effective one to find the inherited entries, then walk the
- * ancestor chain (closest first) checking each one's own direct-only ACL
- * for the same principal, in any access level, to find its source.
+ * Trimble's `fields=inherited` permissions call already separates direct
+ * entries from inherited ones (see getFolderPermissions in lib/trimbleApi.ts),
+ * so a single call per folder is enough - no diffing needed. The one thing
+ * it doesn't say is *which* ancestor an inherited entry came from, so we
+ * walk the ancestor chain (closest first) checking each one's own direct
+ * ACL for the same principal, in any access level, to find its source.
  *
  * `ancestors` must be ordered root-first, ending at the immediate parent
  * (the caller already has this from the tree it rendered - see
@@ -99,39 +98,28 @@ export async function resolveFolderPermissions(
 ): Promise<{
   entries: PermissionEntry[];
   inheritanceEnabled: boolean;
-  // TEMP: raw Trimble responses, surfaced in the UI while we diagnose why
-  // some real folders come back with no ACL entries at all. Remove once
-  // resolved - see the "Estructura de Carpetas" permissions section of the README.
-  debug: unknown;
 }> {
   const closestFirst = [...ancestors].reverse();
 
-  const [direct, effective, directory, ancestorAcls] = await Promise.all([
-    getFolderPermissions(baseUrl, accessToken, folderId, false),
-    getFolderPermissions(baseUrl, accessToken, folderId, true),
+  const [folderPermissions, directory, ancestorPermissions] = await Promise.all([
+    getFolderPermissions(baseUrl, accessToken, folderId),
     getDirectory(baseUrl, accessToken, projectId),
-    Promise.all(closestFirst.map((a) => getFolderPermissions(baseUrl, accessToken, a.id, false))),
+    Promise.all(closestFirst.map((a) => getFolderPermissions(baseUrl, accessToken, a.id))),
   ]);
 
-  const directKeys = new Set<string>();
   const entries: PermissionEntry[] = [];
 
   for (const level of ACCESS_LEVELS) {
-    for (const principal of direct.acl[level] ?? []) {
-      directKeys.add(`${level}:${principal}`);
+    for (const principal of folderPermissions.direct.acl[level] ?? []) {
       entries.push({ ...resolvePrincipal(principal, directory), accessLevel: level, direct: true });
     }
   }
 
   for (const level of ACCESS_LEVELS) {
-    for (const principal of effective.acl[level] ?? []) {
-      const key = `${level}:${principal}`;
-      if (directKeys.has(key)) continue;
-      directKeys.add(key); // avoid double-counting if the same principal+level repeats
-
+    for (const principal of folderPermissions.inherited[level] ?? []) {
       let inheritedFromName: string | undefined;
       for (let i = 0; i < closestFirst.length; i++) {
-        const ancestorAcl = ancestorAcls[i].acl;
+        const ancestorAcl = ancestorPermissions[i].direct.acl;
         if (ACCESS_LEVELS.some((l) => (ancestorAcl[l] ?? []).includes(principal))) {
           inheritedFromName = closestFirst[i].name;
           break;
@@ -152,15 +140,5 @@ export async function resolveFolderPermissions(
     return a.name.localeCompare(b.name, "es", { sensitivity: "base" });
   });
 
-  return {
-    entries,
-    inheritanceEnabled: direct.inheritance,
-    debug: {
-      folderId,
-      ancestors: closestFirst,
-      direct,
-      effective,
-      ancestorAcls: closestFirst.map((a, i) => ({ id: a.id, name: a.name, ...ancestorAcls[i] })),
-    },
-  };
+  return { entries, inheritanceEnabled: folderPermissions.direct.inheritance };
 }

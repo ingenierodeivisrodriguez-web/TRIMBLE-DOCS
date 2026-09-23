@@ -87,21 +87,30 @@ progreso que `/api/summary` mientras el recorrido no ha terminado.
 
   **Endpoint confirmado contra la documentación vigente**
   (https://developer.trimble.com/docs/connect/tools/api/core, OpenAPI del
-  Core API — sección Folders):
-  `GET /folders/fs/{folderId}/permissions` devuelve el ACL directo de esa
-  carpeta; con `?fields=inherited` devuelve el ACL **efectivo** (directo +
-  heredado ya fusionado por Trimble) — pero la API no distingue, dentro de
-  ese resultado fusionado, qué entradas son directas y cuáles heredadas, ni
-  de qué carpeta ancestro viene cada una. Por eso `lib/permissions.ts`:
-  1. Pide el ACL directo y el efectivo de la carpeta en paralelo.
-  2. La diferencia (efectivo menos directo) son las entradas heredadas.
-  3. Para cada entrada heredada, sube por la cadena de carpetas ancestras
-     (que el frontend ya conoce, por venir del árbol que renderizó — no hay
-     que volver a resolverla) pidiendo el ACL directo de cada una, y usa la
-     más cercana que contenga ese mismo usuario/grupo como "carpeta de
-     origen". Si no se encuentra (caso raro), se muestra igual como
-     "Heredado" sin carpeta de origen.
-  4. Los identificadores `users:{id}` / `tc-groups:{id}` (y el grupo virtual
+  Core API — sección Folders), y verificado con una llamada real (Postman,
+  token OAuth de Authorization Code) contra un proyecto de producción:
+  `GET /folders/fs/{folderId}/permissions?fields=inherited` devuelve, en una
+  sola respuesta, los permisos directos y heredados ya separados:
+  ```json
+  {
+    "directPermissions": { "acl": { "READ": ["users:...", "tc-groups:..."] }, "inheritance": false },
+    "inheritedPermissions": { "acl": {} }
+  }
+  ```
+  (La documentación no deja claro este anidado; se confirmó empíricamente
+  porque la respuesta real no coincidía con el esquema documentado.) Por eso
+  `lib/permissions.ts`:
+  1. Pide el permiso de la carpeta con una sola llamada (`directPermissions`
+     + `inheritedPermissions`, sin necesidad de diffear dos respuestas).
+  2. Trimble ya distingue directo de heredado; lo único que la API no dice es
+     de qué carpeta ancestro viene cada entrada heredada. Para eso se sube
+     por la cadena de carpetas ancestras (que el frontend ya conoce, por
+     venir del árbol que renderizó — no hay que volver a resolverla) pidiendo
+     el `directPermissions.acl` de cada una, y se usa la más cercana que
+     contenga ese mismo usuario/grupo como "carpeta de origen". Si no se
+     encuentra (caso raro), se muestra igual como "Heredado" sin carpeta de
+     origen.
+  3. Los identificadores `users:{id}` / `tc-groups:{id}` (y el grupo virtual
      `tc-groups:*`, "todos los miembros") se resuelven a nombre/correo con
      `GET /projects/{projectId}/users` y `GET /groups?projectId=...`,
      cacheados 5 minutos en memoria por proyecto.

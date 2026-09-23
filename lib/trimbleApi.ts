@@ -156,30 +156,42 @@ export async function listFolderItems(
 export type AccessLevel = "READ" | "FULL_ACCESS" | "NO_ACCESS";
 
 export interface FolderPermissions {
-  acl: Partial<Record<AccessLevel, string[]>>;
-  /** Whether this folder inherits permissions from its parent at all. */
-  inheritance: boolean;
+  /** Entries set directly on this folder. */
+  direct: {
+    acl: Partial<Record<AccessLevel, string[]>>;
+    /** Whether this folder inherits permissions from its parent at all. */
+    inheritance: boolean;
+  };
+  /** Entries this folder inherits from its ancestors, already resolved by Trimble. */
+  inherited: Partial<Record<AccessLevel, string[]>>;
 }
 
 /**
- * GET /folders/fs/{folderId}/permissions - the folder's access control list.
- * Principals are strings like "users:{id}", "tc-groups:{id}", or the special
- * "tc-groups:*" (all project members). Without `inherited`, only entries set
- * directly on this folder are returned; with it, Trimble merges in whatever
- * this folder inherits from its ancestors - but the merged result doesn't
- * say which entries came from where, so lib/permissions.ts diffs the two
- * calls itself to tell direct apart from inherited.
+ * GET /folders/fs/{folderId}/permissions?fields=inherited - the folder's
+ * access control list. Principals are strings like "users:{id}",
+ * "tc-groups:{id}", or the special "tc-groups:*" (all project members).
+ *
+ * The response nests direct and inherited entries separately (confirmed via
+ * a raw API call - see the "Estructura de Carpetas" permissions section of
+ * the README): `{ directPermissions: { acl, inheritance }, inheritedPermissions: { acl } }`.
+ * A single call with `fields=inherited` returns both, so there's no need for
+ * a second direct-only request or for diffing two ACLs ourselves.
  * https://developer.trimble.com/docs/connect/tools/api/core (Folders -> Get Folder Permissions)
  */
 export async function getFolderPermissions(
   baseUrl: string,
   accessToken: string,
-  folderId: string,
-  inherited: boolean
+  folderId: string
 ): Promise<FolderPermissions> {
-  const url = `${baseUrl}/folders/fs/${encodeURIComponent(folderId)}/permissions${inherited ? "?fields=inherited" : ""}`;
+  const url = `${baseUrl}/folders/fs/${encodeURIComponent(folderId)}/permissions?fields=inherited`;
   const data = await trimbleFetch(url, accessToken);
-  return { acl: data.acl ?? {}, inheritance: Boolean(data.inheritance) };
+  return {
+    direct: {
+      acl: data.directPermissions?.acl ?? {},
+      inheritance: Boolean(data.directPermissions?.inheritance),
+    },
+    inherited: data.inheritedPermissions?.acl ?? {},
+  };
 }
 
 export interface ProjectUser {
