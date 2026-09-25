@@ -433,19 +433,46 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
     restauran exactamente los objetos pintados (`color: "reset"`); los demás
     objetos nunca se tocan. Si se cierra el panel con colores activos,
     quedan en el modelo hasta "Restablecer modelo" en Trimble Connect.
-12. **📄 Exportar PDF**: genera en el navegador (con `jspdf`, que se carga solo
-    al exportar) un informe A4 con:
-    - una portada con el proyecto, la fecha, los modelos con su cantidad de
-      objetos, los filtros aplicados y el índice;
-    - una página por gráfico, con la imagen del gráfico coloreado, una
-      captura del **modelo 3D coloreado según ese gráfico** y la tabla de
-      datos, con el color de cada categoría (en el comparativo: A, B y la
-      diferencia).
+12. **📄 Exportar PDF (informe ejecutivo)**: primero abre un pequeño
+    formulario con **título del informe**, **empresa**, **elaborado por**
+    (prellenado con el usuario de Trimble Connect, vía `user.getUser()`) y
+    **logo de la empresa** (PNG o JPG; se reduce a un tamaño liviano).
+    El formulario se recuerda en este navegador, así que solo se llena una
+    vez. Luego genera en el navegador (con `jspdf`, que se carga solo al
+    exportar) un informe A4 corporativo:
+    - **Portada**: banda con el logo y la empresa, título, proyecto, una
+      imagen del modelo con sus colores originales y la ficha del documento
+      (proyecto, fecha de emisión, elaborado por, empresa, modelos, fuente).
+    - **Resumen ejecutivo**: cuatro indicadores (objetos analizados, modelos,
+      gráficos, filtros activos), **hallazgos clave** redactados
+      automáticamente para cada gráfico, alcance del análisis (modelos y
+      filtros) y contenido con números de página.
+    - **Una sección por gráfico**: hallazgos destacados, el gráfico y el
+      **modelo 3D coloreado según ese gráfico** lado a lado, y una tabla con
+      encabezado de color, **% del total** y **fila de totales**. En el
+      comparativo, la tabla trae A, B, diferencia y variación %.
+    - **Notas metodológicas** (fuente, unidades, agrupaciones, filtros) y
+      **control del documento**, con casillas para Elaborado, Revisado y
+      Aprobado (firma y fecha).
+    - Encabezado con el logo y el título, y pie con la empresa,
+      "Confidencial", la fecha y el número de página en todas las páginas
+      salvo la portada.
+
+    Los hallazgos ([`lib/graficos/insights.ts`](lib/graficos/insights.ts),
+    con pruebas) salen de los datos de cada gráfico. Cubren:
+    - la categoría principal y su participación, o los empates cuando no hay
+      una sola;
+    - la concentración de las 3 principales;
+    - en los meses, el pico, la tendencia y el promedio;
+    - en el comparativo, el cambio total entre A y B, el mayor aumento, la
+      mayor disminución y las categorías nuevas.
 
     Para las capturas, la extensión pinta el modelo gráfico por gráfico
     (`viewer.getSnapshot()`, con la cámara que el usuario tenga en ese
     momento) y al final lo deja como estaba. Las capturas se guardan en JPEG
-    para que el archivo pese poco (unos 200 KB con tres gráficos).
+    para que el archivo pese poco (unos 350 KB con tres gráficos y logo).
+    Las cifras usan separador de miles siempre (9.470), para que las tablas
+    se lean alineadas.
 
 **Fechas**: se reconocen las propiedades de tipo fecha del modelo
 (`DateTime`, marcas de tiempo UNIX) y los textos que son **solo** una fecha

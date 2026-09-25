@@ -11,6 +11,8 @@ export type ViewerEventListener = (event: string) => void;
 export interface ViewerProject {
   id: string;
   name: string;
+  /** Signed-in user's name, used as the report's default "Elaborado por". */
+  userName: string;
 }
 
 export interface ViewerContext {
@@ -30,7 +32,7 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
   const [status, setStatus] = useState<Status>("connecting");
   const [errorMessage, setErrorMessage] = useState("");
   const [viewer, setViewer] = useState<ViewerLike | null>(null);
-  const [project, setProject] = useState<ViewerProject>({ id: "", name: "" });
+  const [project, setProject] = useState<ViewerProject>({ id: "", name: "", userName: "" });
   const listeners = useRef(new Set<ViewerEventListener>());
 
   const subscribe = useCallback((listener: ViewerEventListener) => {
@@ -65,9 +67,13 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
           return;
         }
         // Only used to label the PDF and to keep saved views per project.
-        const current = await api.project.getProject().catch(() => null);
+        const [current, user] = await Promise.all([
+          api.project.getProject().catch(() => null),
+          api.user.getUser().catch(() => null),
+        ]);
         if (cancelled) return;
-        setProject({ id: current?.id ?? "", name: current?.name ?? "" });
+        const userName = [user?.firstName, user?.lastName].filter(Boolean).join(" ").trim() || user?.email || "";
+        setProject({ id: current?.id ?? "", name: current?.name ?? "", userName });
         setViewer(api.viewer);
         setStatus("ready");
       } catch (err) {

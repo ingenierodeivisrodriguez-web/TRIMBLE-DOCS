@@ -15,7 +15,7 @@ import {
   mergeMembers,
   ModelDataset,
 } from "../../lib/graficos/modelData";
-import type { ReportTableRow } from "../../lib/graficos/pdfReport";
+import type { ChartReportData } from "../../lib/graficos/insights";
 import type { CardSpec, ChartType } from "../../lib/graficos/savedViews";
 import {
   ColumnChart,
@@ -65,12 +65,7 @@ function acceptsDrag(e: React.DragEvent): boolean {
 }
 
 /** What the PDF report needs from a card, read at export time. */
-export interface CardReport {
-  typeLabel: string;
-  title: string;
-  columns: string[];
-  rows: ReportTableRow[];
-  note: string;
+export interface CardReport extends ChartReportData {
   legend?: { color: string; label: string }[];
   /** How the model is painted "según el gráfico" (the same groups "Colorear" applies). */
   colorGroups: ColorGroup[];
@@ -267,32 +262,41 @@ export default function ChartCard({
       if (!category || !result || !hasRows) return null;
       // The chart's own surface: legend icons are small SVGs with the same class.
       const svg = chartArea.current?.querySelector(".recharts-wrapper > svg.recharts-surface") as SVGSVGElement | null;
-      const note = `${formatNumber(result.objectsWithData)} de ${formatNumber(result.totalObjects)} objetos tienen estos datos${isCompare ? " en los periodos elegidos" : ""}.`;
-      if (isCompare) {
-        return {
-          typeLabel: chartTypeLabel(spec.type),
-          title,
-          columns: [fieldLabel(category), labelA, labelB, "Diferencia (B - A)"],
-          rows: compareRows.map((r) => ({
-            cells: [r.label, formatNumber(r.a), formatNumber(r.b), `${r.b - r.a > 0 ? "+" : ""}${formatNumber(r.b - r.a)}`],
-          })),
-          note,
-          legend: colorGroups.map((g) => ({ color: g.color, label: g.label })),
-          colorGroups,
-          svg,
-        };
-      }
-      return {
+      const base = {
         typeLabel: chartTypeLabel(spec.type),
         title,
-        columns: [fieldLabel(category), valueTitle, "Objetos"],
-        rows: colorGroups.map((group, i) => {
-          const row = (spec.type === "donut" ? chartRows.filter((r) => r.value > 0) : chartRows)[i];
-          return { cells: [row.label, formatNumber(row.value), formatNumber(row.objects)], color: group.color };
-        }),
-        note,
+        categoryTitle: fieldLabel(category),
+        valueTitle,
+        valueName: value?.label ?? null,
+        unit: value ? (value.unit ?? "") : "objetos",
+        chronological,
+        coverage: { withData: result.objectsWithData, total: result.totalObjects },
         colorGroups,
         svg,
+      };
+      if (isCompare) {
+        return {
+          ...base,
+          compare: {
+            labelA: periodLabel(periodA),
+            labelB: periodLabel(periodB),
+            rows: compareRows.map((r) => ({ label: r.label, a: r.a, b: r.b })),
+          },
+          legend: colorGroups.map((g) => ({ color: g.color, label: g.label })),
+        };
+      }
+      const shown = spec.type === "donut" ? chartRows.filter((r) => r.value > 0) : chartRows;
+      return {
+        ...base,
+        single: {
+          rows: shown.map((row, i) => ({
+            key: row.key,
+            label: row.label,
+            value: row.value,
+            objects: row.objects,
+            color: colorGroups[i]?.color ?? rowColors[i],
+          })),
+        },
       };
     });
   });

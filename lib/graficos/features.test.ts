@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import { assignColors, CATEGORY_COLORS, OTHER_COLOR } from "./colors";
 import { OTHER_KEY } from "./modelData";
 import { pdfSafe } from "./pdfReport";
+import { DEFAULT_REPORT_TITLE, parseReportSettings } from "./reportSettings";
 import { addView, MAX_SAVED_VIEWS, parseViews, SavedView } from "./savedViews";
 
 describe("assignColors", () => {
@@ -69,6 +70,34 @@ describe("saved views", () => {
         ["b", "Vista b"],
       ]
     );
+  });
+});
+
+describe("report settings", () => {
+  it("falls back to defaults, with the signed-in user as author", () => {
+    assert.deepEqual(parseReportSettings(null, "Ana Pérez"), {
+      title: DEFAULT_REPORT_TITLE,
+      company: "",
+      preparedBy: "Ana Pérez",
+      logo: null,
+    });
+    assert.equal(parseReportSettings("{broken", "Ana").preparedBy, "Ana");
+  });
+
+  it("keeps saved values and a valid logo", () => {
+    const logo = { dataUrl: "data:image/png;base64,AAAA", width: 120, height: 40 };
+    const saved = JSON.stringify({ title: "Informe mensual", company: "Constructora", preparedBy: "Luis", logo });
+    assert.deepEqual(parseReportSettings(saved, "Ana"), {
+      title: "Informe mensual",
+      company: "Constructora",
+      preparedBy: "Luis",
+      logo,
+    });
+  });
+
+  it("drops a logo that isn't an embedded PNG/JPEG image", () => {
+    const saved = JSON.stringify({ logo: { dataUrl: "https://example.com/logo.svg", width: 1, height: 1 } });
+    assert.equal(parseReportSettings(saved).logo, null);
   });
 });
 

@@ -252,8 +252,10 @@ export function commonFields(datasets: ModelDataset[]): CommonField[] {
 
 // ---------------------------------------------------------------- buckets
 
+// Thousands are always grouped ("9.470", not "9470" as Spanish formatting
+// does by default for 4 digits), so figures line up with 5-digit ones in tables.
 export function formatNumber(value: number): string {
-  return value.toLocaleString("es", { maximumFractionDigits: 2 });
+  return value.toLocaleString("es", { maximumFractionDigits: 2, useGrouping: "always" });
 }
 
 /** The group a value falls in: dates by month, numbers by their rounded value, text as-is. */

@@ -18,6 +18,12 @@ import {
   SlicerSpec,
 } from "../../lib/graficos/modelData";
 import { buildReportPdf, downloadBlob, ReportChart, snapshotToJpeg, svgToPng } from "../../lib/graficos/pdfReport";
+import {
+  defaultReportSettings,
+  loadReportSettings,
+  ReportSettings,
+  storeReportSettings,
+} from "../../lib/graficos/reportSettings";
 import { addView, loadViews, SavedView, storeViews } from "../../lib/graficos/savedViews";
 import {
   listModelObjects,
@@ -29,6 +35,7 @@ import {
 } from "../../lib/graficos/viewerReader";
 import { normalizeForSearch } from "../../lib/folderTree";
 import ChartCard, { CardReport, CardSpec, ChartType, FIELD_DRAG_TYPE, fieldLabel, kindMark } from "./ChartCard";
+import ReportSettingsForm from "./ReportSettingsForm";
 import Slicers from "./Slicers";
 import type { ViewerEventListener, ViewerProject } from "./ViewerShell";
 
@@ -140,6 +147,8 @@ export default function GraficosApp({
   const [pendingModels, setPendingModels] = useState<{ id: string; name: string }[]>([]);
 
   // PDF export.
+  const [reportSettings, setReportSettings] = useState<ReportSettings>(() => defaultReportSettings());
+  const [reportFormOpen, setReportFormOpen] = useState(false);
   const [exportMode, setExportMode] = useState(false);
   const [exportStatus, setExportStatus] = useState("");
   const [exportError, setExportError] = useState("");
@@ -483,6 +492,15 @@ export default function GraficosApp({
 
   // ------------------------------------------------------------ exportar PDF
 
+  useEffect(() => {
+    setReportSettings(loadReportSettings(project.userName));
+  }, [project.userName]);
+
+  function updateReportSettings(next: ReportSettings) {
+    setReportSettings(next);
+    storeReportSettings(next);
+  }
+
   const registerReport = useMemo(
     () =>
       charts.map((_, i) => (getReport: (() => CardReport | null) | null) => {
@@ -516,27 +534,42 @@ export default function GraficosApp({
         .filter((r): r is CardReport => r !== null);
       if (cards.length === 0) throw new Error("Configura al menos un gráfico con datos antes de exportar.");
 
+      const capture = async () => {
+        await wait(VIEWER_REDRAW_MS);
+        const snapshot = await withTimeout(viewer.getSnapshot(), SNAPSHOT_TIMEOUT_MS).catch(() => null);
+        return snapshot ? await snapshotToJpeg(snapshot).catch(() => null) : null;
+      };
+
+      // Cover: the model with its own colors, as the user frames it.
+      setExportStatus("Capturando la vista del modelo para la portada...");
+      await enqueueColors(resetPainted);
+      const coverImage = await capture();
+
       const reportCharts: ReportChart[] = [];
       for (const [i, card] of cards.entries()) {
         // "El modelo según el gráfico": paint the model like this chart, then capture it.
         setExportStatus(`Coloreando el modelo para el gráfico ${i + 1} de ${cards.length}...`);
         await enqueueColors(() => paint(card.colorGroups));
-        await wait(VIEWER_REDRAW_MS);
-        const snapshot = await withTimeout(viewer.getSnapshot(), SNAPSHOT_TIMEOUT_MS).catch(() => null);
-        const modelImage = snapshot ? await snapshotToJpeg(snapshot).catch(() => null) : null;
+        const modelImage = await capture();
         const chartImage = card.svg ? await svgToPng(card.svg).catch(() => null) : null;
-        reportCharts.push({ ...card, chartImage, modelImage });
+        const { svg: _svg, colorGroups: _groups, ...data } = card;
+        reportCharts.push({ ...data, chartImage, modelImage });
       }
 
       setExportStatus("Generando el PDF...");
       const blob = await buildReportPdf({
+        settings: reportSettings,
         projectName: project.name,
         generatedAt: new Date(),
-        models: (activeDatasets ?? []).map((d) => `${d.modelName} (${formatNumber(d.records.length)} objetos)`),
+        models: (activeDatasets ?? []).map((d) => ({ name: d.modelName, objects: d.records.length })),
         filters: describeFilters(),
+        analyzedObjects: countObjects(filteredDatasets),
+        totalObjects: countObjects(activeDatasets),
+        coverImage,
         charts: reportCharts,
       });
-      downloadBlob(blob, `informe-graficos-${new Date().toISOString().slice(0, 10)}.pdf`);
+      const slug = (project.name || "proyecto").normalize("NFD").replace(/[^\w]+/g, "-").replace(/^-|-$/g, "").toLowerCase();
+      downloadBlob(blob, `informe-ejecutivo-${slug}-${new Date().toISOString().slice(0, 10)}.pdf`);
     } catch (err) {
       setExportError(err instanceof Error ? err.message : "No se pudo generar el PDF.");
     } finally {
@@ -632,10 +665,13 @@ export default function GraficosApp({
               </button>
               <button
                 type="button"
-                onClick={exportPdf}
+                onClick={() => setReportFormOpen((v) => !v)}
                 disabled={exportMode || !activeDatasets || fields.length <= 1}
-                style={{ ...smallButtonStyle, opacity: exportMode || !activeDatasets || fields.length <= 1 ? 0.5 : 1 }}
-                title="Informe con cada gráfico, el modelo coloreado según el gráfico y sus datos"
+                style={{
+                  ...(reportFormOpen ? smallButtonActiveStyle : smallButtonStyle),
+                  opacity: exportMode || !activeDatasets || fields.length <= 1 ? 0.5 : 1,
+                }}
+                title="Informe ejecutivo con portada, hallazgos, cada gráfico con el modelo coloreado y sus datos"
               >
                 {exportMode ? "Exportando..." : "📄 Exportar PDF"}
               </button>
@@ -673,6 +709,17 @@ export default function GraficosApp({
           )}
           {viewsOpen && (
             <SavedViewsList views={views} activeId={activeViewId} onOpen={openView} onDelete={deleteView} />
+          )}
+          {reportFormOpen && !exportMode && (
+            <ReportSettingsForm
+              settings={reportSettings}
+              onChange={updateReportSettings}
+              onGenerate={() => {
+                setReportFormOpen(false);
+                exportPdf();
+              }}
+              onCancel={() => setReportFormOpen(false)}
+            />
           )}
           {viewNotice && <Notice onClose={() => setViewNotice("")}>{viewNotice}</Notice>}
           {pendingModels.length > 0 && (
