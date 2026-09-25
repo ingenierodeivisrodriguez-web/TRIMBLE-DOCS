@@ -350,7 +350,7 @@ function addMember(members: Members, modelId: string, runtimeId: number) {
   (members[modelId] ??= []).push(runtimeId);
 }
 
-function mergeMembers(list: Members[]): Members {
+export function mergeMembers(list: Members[]): Members {
   const merged: Members = {};
   for (const members of list) {
     for (const [modelId, ids] of Object.entries(members)) (merged[modelId] ??= []).push(...ids);

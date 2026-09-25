@@ -407,6 +407,46 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
    categoría; la tabla incluye la diferencia B − A. Un clic en una barra
    selecciona en el visor los objetos de ese lado.
 
+10. **Guardar vista e historial**: en la cabecera del panel "Datos en común"
+    (fijo arriba), **💾 Guardar vista** guarda con un nombre los modelos
+    marcados, los tres gráficos (tipo, categorías, valor, comparativo) y los
+    segmentadores. **🕘 Vistas guardadas** muestra el historial (las más
+    recientes primero, hasta 30), con fecha, cantidad de gráficos y modelos;
+    **Abrir** lo restaura todo con un clic y ✕ lo borra. Los modelos se
+    reconocen por archivo, no por versión, así que una vista sigue abriendo
+    después de subir una versión nueva del modelo. Si la vista usa un modelo
+    que no está cargado en el visor, lo avisa con un botón para cargarlo, y
+    se marca solo al terminar de cargar.
+    Las vistas se guardan **en este navegador, por proyecto** (`localStorage`):
+    son personales, no se comparten con el equipo ni con otros equipos. Si el
+    navegador bloquea el almacenamiento dentro del iframe de Trimble, la
+    extensión lo avisa y las vistas duran solo mientras el panel esté abierto.
+11. **🎨 Colorear**: cada gráfico tiene este botón. Pinta cada categoría con
+    su propio color **en el gráfico y en el modelo 3D**, con el mismo color
+    en ambos (`viewer.setObjectState(..., { color })`), y muestra la leyenda.
+    Usa, en orden fijo, los 8 colores de la paleta validada para daltonismo;
+    si hay más categorías, las menores se agrupan en "Otros" (gris), así
+    nunca se repite un color. En el comparativo, A se pinta azul y B
+    naranja. Solo un gráfico colorea el modelo a la vez: activarlo en otro
+    quita los colores del anterior. Si cambian los datos, los filtros o el
+    gráfico, los colores del modelo se actualizan solos. Al desactivarlo se
+    restauran exactamente los objetos pintados (`color: "reset"`); los demás
+    objetos nunca se tocan. Si se cierra el panel con colores activos,
+    quedan en el modelo hasta "Restablecer modelo" en Trimble Connect.
+12. **📄 Exportar PDF**: genera en el navegador (con `jspdf`, que se carga solo
+    al exportar) un informe A4 con:
+    - una portada con el proyecto, la fecha, los modelos con su cantidad de
+      objetos, los filtros aplicados y el índice;
+    - una página por gráfico, con la imagen del gráfico coloreado, una
+      captura del **modelo 3D coloreado según ese gráfico** y la tabla de
+      datos, con el color de cada categoría (en el comparativo: A, B y la
+      diferencia).
+
+    Para las capturas, la extensión pinta el modelo gráfico por gráfico
+    (`viewer.getSnapshot()`, con la cámara que el usuario tenga en ese
+    momento) y al final lo deja como estaba. Las capturas se guardan en JPEG
+    para que el archivo pese poco (unos 200 KB con tres gráficos).
+
 **Fechas**: se reconocen las propiedades de tipo fecha del modelo
 (`DateTime`, marcas de tiempo UNIX) y los textos que son **solo** una fecha
 (`2026-03-15`, `2026-03-15T10:00`, `15/03/2026`, `15.03.2026`; un texto como
@@ -432,6 +472,9 @@ muestran como Sí/No.
 **Lógica de datos** ([`lib/graficos/modelData.ts`](lib/graficos/modelData.ts),
 cubierta por `modelData.test.ts`): aplanado de propiedades, fechas, datos en
 común entre modelos, segmentadores, agregación por categoría y comparativo.
+La asignación de colores (`colors.ts`), las vistas guardadas
+(`savedViews.ts`, que valida lo que lee del almacenamiento) y el informe PDF
+(`pdfReport.ts`) tienen sus pruebas en `features.test.ts`.
 Cada barra guarda los objetos que la forman (por modelo) para poder
 seleccionarlos en el visor. Un dato cuyo tipo difiere entre modelos se
 ofrece como texto.

@@ -8,10 +8,16 @@ type Status = "connecting" | "not-embedded" | "not-viewer" | "error" | "ready";
 
 export type ViewerEventListener = (event: string) => void;
 
+export interface ViewerProject {
+  id: string;
+  name: string;
+}
+
 export interface ViewerContext {
   viewer: ViewerLike;
   /** Subscribes to Workspace API events; returns the unsubscribe function. */
   subscribe: (listener: ViewerEventListener) => () => void;
+  project: ViewerProject;
 }
 
 /**
@@ -24,6 +30,7 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
   const [status, setStatus] = useState<Status>("connecting");
   const [errorMessage, setErrorMessage] = useState("");
   const [viewer, setViewer] = useState<ViewerLike | null>(null);
+  const [project, setProject] = useState<ViewerProject>({ id: "", name: "" });
   const listeners = useRef(new Set<ViewerEventListener>());
 
   const subscribe = useCallback((listener: ViewerEventListener) => {
@@ -57,6 +64,10 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
           setStatus("not-viewer");
           return;
         }
+        // Only used to label the PDF and to keep saved views per project.
+        const current = await api.project.getProject().catch(() => null);
+        if (cancelled) return;
+        setProject({ id: current?.id ?? "", name: current?.name ?? "" });
         setViewer(api.viewer);
         setStatus("ready");
       } catch (err) {
@@ -74,7 +85,7 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
   }, []);
 
   if (status === "ready" && viewer) {
-    return <>{children({ viewer, subscribe })}</>;
+    return <>{children({ viewer, subscribe, project })}</>;
   }
 
   const screens: Record<Exclude<Status, "ready">, { title: string; body: string }> = {

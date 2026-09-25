@@ -1,6 +1,7 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { assignColors, ColorGroup, COMPARE_COLORS, MAX_COLORED_ROWS } from "../../lib/graficos/colors";
 import {
   aggregate,
   bucketCounts,
@@ -11,8 +12,11 @@ import {
   formatNumber,
   GENERAL_GROUP,
   Members,
+  mergeMembers,
   ModelDataset,
 } from "../../lib/graficos/modelData";
+import type { ReportTableRow } from "../../lib/graficos/pdfReport";
+import type { CardSpec, ChartType } from "../../lib/graficos/savedViews";
 import {
   ColumnChart,
   CompareChart,
@@ -25,17 +29,7 @@ import {
   MAX_SLICES,
 } from "./Charts";
 
-export type ChartType = "column" | "horizontal" | "donut" | "compare";
-
-export interface CardSpec {
-  type: ChartType;
-  category: string | null;
-  value: string | null;
-  /** Comparison only: the field that tells side A from side B (a date is compared by month). */
-  compareBy: string | null;
-  periodA: string | null;
-  periodB: string | null;
-}
+export type { CardSpec, ChartType };
 
 export const CHART_TYPES: { type: ChartType; label: string }[] = [
   { type: "column", label: "Barras verticales" },
@@ -58,12 +52,29 @@ export function kindMark(field: CommonField): string {
   return field.kind === "number" ? "#" : field.kind === "date" ? "📅" : "Aa";
 }
 
+function chartTypeLabel(type: ChartType): string {
+  return CHART_TYPES.find((t) => t.type === type)?.label ?? type;
+}
+
 function optionLabel(field: CommonField): string {
   return field.group === GENERAL_GROUP ? fieldLabel(field) : `${fieldLabel(field)} — ${field.group}`;
 }
 
 function acceptsDrag(e: React.DragEvent): boolean {
   return e.dataTransfer.types.includes(FIELD_DRAG_TYPE);
+}
+
+/** What the PDF report needs from a card, read at export time. */
+export interface CardReport {
+  typeLabel: string;
+  title: string;
+  columns: string[];
+  rows: ReportTableRow[];
+  note: string;
+  legend?: { color: string; label: string }[];
+  /** How the model is painted "según el gráfico" (the same groups "Colorear" applies). */
+  colorGroups: ColorGroup[];
+  svg: SVGSVGElement | null;
 }
 
 export default function ChartCard({
@@ -74,6 +85,12 @@ export default function ChartCard({
   selection,
   onSelectObjects,
   onClearSelection,
+  colored,
+  onToggleColors,
+  onApplyColors,
+  colorVersion,
+  exportMode,
+  registerReport,
 }: {
   spec: CardSpec;
   fields: CommonField[];
@@ -85,10 +102,20 @@ export default function ChartCard({
   selection: { key: string; count: number } | null;
   onSelectObjects: (key: string, members: Members) => void;
   onClearSelection: () => void;
+  /** This chart is the one painting the model ("Colorear" on). */
+  colored: boolean;
+  onToggleColors: () => void;
+  onApplyColors: (groups: ColorGroup[]) => void;
+  /** Bumped by the parent to ask the colored chart to paint the model again. */
+  colorVersion: number;
+  /** While a PDF is being generated: chart view, colored, no animation, no highlight. */
+  exportMode: boolean;
+  registerReport: (getReport: (() => CardReport | null) | null) => void;
 }) {
   const [showTable, setShowTable] = useState(false);
   const [dragOver, setDragOver] = useState<DropTarget | null>(null);
   const [notice, setNotice] = useState("");
+  const chartArea = useRef<HTMLDivElement>(null);
 
   const byKey = useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
   const numericFields = fields.filter((f) => f.kind === "number");
@@ -197,18 +224,79 @@ export default function ChartCard({
     };
   }
 
-  const singleRows = single?.rows ?? [];
-  const chartRows =
-    spec.type === "column"
-      ? foldRows(singleRows, MAX_COLUMNS, chronological)
-      : spec.type === "horizontal"
-        ? foldRows(singleRows, MAX_HORIZONTAL_BARS, chronological)
-        : foldRows(singleRows, MAX_SLICES, chronological);
-  const compareRows = foldCompareRows(comparison?.rows ?? [], MAX_COMPARE_GROUPS, chronological);
+  // With colors on, bars fold down to what the palette can color distinctly
+  // (8 hues + gray "Otros"), so every bar and its objects share one color.
+  const showColors = colored || exportMode;
+  const singleRows = useMemo(() => single?.rows ?? [], [single]);
+  const chartRows = useMemo(() => {
+    const max = spec.type === "column" ? MAX_COLUMNS : spec.type === "horizontal" ? MAX_HORIZONTAL_BARS : MAX_SLICES;
+    return foldRows(singleRows, showColors ? Math.min(max, MAX_COLORED_ROWS) : max, chronological);
+  }, [singleRows, spec.type, showColors, chronological]);
+  const compareRows = useMemo(
+    () => foldCompareRows(comparison?.rows ?? [], MAX_COMPARE_GROUPS, chronological),
+    [comparison, chronological]
+  );
+  const rowColors = useMemo(() => assignColors(chartRows.filter((r) => spec.type !== "donut" || r.value > 0)), [chartRows, spec.type]);
   const result = isCompare ? comparison : single;
   const hasRows = isCompare ? compareRows.length > 0 : singleRows.length > 0;
   const folded = isCompare ? compareRows.length < (comparison?.rows.length ?? 0) : chartRows.length < singleRows.length;
-  const activeKey = selection?.key ?? null;
+  const activeKey = exportMode ? null : (selection?.key ?? null);
+  const tableView = showTable && !exportMode;
+
+  // The same colors the chart shows, as groups of objects to paint in the model.
+  const colorGroups = useMemo<ColorGroup[]>(() => {
+    if (isCompare) {
+      if (compareRows.length === 0) return [];
+      return [
+        { color: COMPARE_COLORS.A, label: labelA, members: mergeMembers(compareRows.map((r) => r.membersA)) },
+        { color: COMPARE_COLORS.B, label: labelB, members: mergeMembers(compareRows.map((r) => r.membersB)) },
+      ];
+    }
+    const colorable = spec.type === "donut" ? chartRows.filter((r) => r.value > 0) : chartRows;
+    return colorable.map((row, i) => ({ color: rowColors[i], label: row.label, members: row.members }));
+  }, [isCompare, compareRows, labelA, labelB, spec.type, chartRows, rowColors]);
+
+  useEffect(() => {
+    if (colored) onApplyColors(colorGroups);
+    // colorVersion: repaint on request (e.g. after a PDF export borrowed the model's colors).
+  }, [colored, colorGroups, colorVersion, onApplyColors]);
+
+  // Hand the report builder a getter over this render's data.
+  useEffect(() => {
+    registerReport(() => {
+      if (!category || !result || !hasRows) return null;
+      // The chart's own surface: legend icons are small SVGs with the same class.
+      const svg = chartArea.current?.querySelector(".recharts-wrapper > svg.recharts-surface") as SVGSVGElement | null;
+      const note = `${formatNumber(result.objectsWithData)} de ${formatNumber(result.totalObjects)} objetos tienen estos datos${isCompare ? " en los periodos elegidos" : ""}.`;
+      if (isCompare) {
+        return {
+          typeLabel: chartTypeLabel(spec.type),
+          title,
+          columns: [fieldLabel(category), labelA, labelB, "Diferencia (B - A)"],
+          rows: compareRows.map((r) => ({
+            cells: [r.label, formatNumber(r.a), formatNumber(r.b), `${r.b - r.a > 0 ? "+" : ""}${formatNumber(r.b - r.a)}`],
+          })),
+          note,
+          legend: colorGroups.map((g) => ({ color: g.color, label: g.label })),
+          colorGroups,
+          svg,
+        };
+      }
+      return {
+        typeLabel: chartTypeLabel(spec.type),
+        title,
+        columns: [fieldLabel(category), valueTitle, "Objetos"],
+        rows: colorGroups.map((group, i) => {
+          const row = (spec.type === "donut" ? chartRows.filter((r) => r.value > 0) : chartRows)[i];
+          return { cells: [row.label, formatNumber(row.value), formatNumber(row.objects)], color: group.color };
+        }),
+        note,
+        colorGroups,
+        svg,
+      };
+    });
+  });
+  useEffect(() => () => registerReport(null), [registerReport]);
 
   return (
     <section
@@ -246,9 +334,20 @@ export default function ChartCard({
           </h3>
         </div>
         {result && hasRows && (
-          <button type="button" onClick={() => setShowTable((v) => !v)} style={linkButtonStyle}>
-            {showTable ? "Ver gráfico" : "Ver tabla"}
-          </button>
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-end", gap: 6 }}>
+            <button type="button" onClick={() => setShowTable((v) => !v)} style={linkButtonStyle}>
+              {showTable ? "Ver gráfico" : "Ver tabla"}
+            </button>
+            <button
+              type="button"
+              onClick={onToggleColors}
+              style={colored ? colorButtonActiveStyle : colorButtonStyle}
+              aria-pressed={colored}
+              title="Pinta cada categoría con su color en el gráfico y en el modelo 3D"
+            >
+              {colored ? "✓ Coloreado" : "🎨 Colorear"}
+            </button>
+          </div>
         )}
       </header>
 
@@ -341,7 +440,7 @@ export default function ChartCard({
 
       {notice && <div style={{ fontSize: 12, color: "#8a1c14" }}>{notice}</div>}
 
-      <div style={{ minHeight: 200, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+      <div ref={chartArea} style={{ minHeight: 200, display: "flex", flexDirection: "column", justifyContent: "center" }}>
         {!category ? (
           <Placeholder highlighted={dragOver !== null}>
             {fields.length === 0
@@ -361,7 +460,7 @@ export default function ChartCard({
           </Placeholder>
         ) : !hasRows ? (
           <Placeholder>Ningún objeto de los modelos seleccionados tiene estos datos.</Placeholder>
-        ) : showTable ? (
+        ) : tableView ? (
           isCompare ? (
             <CompareTable rows={comparison!.rows} categoryTitle={fieldLabel(category)} labelA={labelA} labelB={labelB} />
           ) : (
@@ -383,20 +482,45 @@ export default function ChartCard({
             onBarClick={(row, side: CompareSide) =>
               onSelectObjects(`${row.key}|${side}`, side === "A" ? row.membersA : row.membersB)
             }
+            animate={!exportMode}
           />
         ) : spec.type === "column" ? (
-          <ColumnChart rows={chartRows} unitLabel={unitLabel} activeKey={activeKey} onRowClick={(r) => onSelectObjects(r.key, r.members)} />
+          <ColumnChart
+            rows={chartRows}
+            unitLabel={unitLabel}
+            activeKey={activeKey}
+            onRowClick={(r) => onSelectObjects(r.key, r.members)}
+            colors={showColors ? rowColors : null}
+            animate={!exportMode}
+          />
         ) : spec.type === "horizontal" ? (
           <HorizontalBarChart
             rows={chartRows}
             unitLabel={unitLabel}
             activeKey={activeKey}
             onRowClick={(r) => onSelectObjects(r.key, r.members)}
+            colors={showColors ? rowColors : null}
+            animate={!exportMode}
           />
         ) : (
-          <DonutChart rows={chartRows} unitLabel={unitLabel} activeKey={activeKey} onRowClick={(r) => onSelectObjects(r.key, r.members)} />
+          <DonutChart
+            rows={chartRows}
+            unitLabel={unitLabel}
+            activeKey={activeKey}
+            onRowClick={(r) => onSelectObjects(r.key, r.members)}
+            animate={!exportMode}
+          />
         )}
       </div>
+
+      {colored && hasRows && !tableView && (spec.type === "column" || spec.type === "horizontal") && (
+        <ColorLegend groups={colorGroups} />
+      )}
+      {colored && hasRows && (
+        <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
+          🎨 Los objetos del modelo 3D tienen el mismo color que su categoría en este gráfico.
+        </div>
+      )}
 
       {selection && (
         <div style={selectionNoticeStyle}>
@@ -418,6 +542,20 @@ export default function ChartCard({
         </div>
       )}
     </section>
+  );
+}
+
+/** Color key for bar charts: which category each color stands for, here and in the model. */
+function ColorLegend({ groups }: { groups: ColorGroup[] }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
+      {groups.map((g) => (
+        <span key={`${g.color}-${g.label}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--tc-gray-700)" }}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: g.color, flexShrink: 0 }} />
+          {g.label}
+        </span>
+      ))}
+    </div>
   );
 }
 
@@ -623,6 +761,26 @@ const linkButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: 0,
   whiteSpace: "nowrap",
+};
+
+const colorButtonStyle: React.CSSProperties = {
+  border: "1px solid var(--tc-blue-500)",
+  background: "var(--tc-white)",
+  color: "var(--tc-blue-700)",
+  borderRadius: 6,
+  padding: "3px 9px",
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  whiteSpace: "nowrap",
+  fontFamily: "inherit",
+};
+
+const colorButtonActiveStyle: React.CSSProperties = {
+  ...colorButtonStyle,
+  background: "var(--tc-blue-600)",
+  color: "var(--tc-white)",
+  border: "1px solid var(--tc-blue-700)",
 };
 
 const selectionNoticeStyle: React.CSSProperties = {

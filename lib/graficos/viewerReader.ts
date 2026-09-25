@@ -4,7 +4,13 @@ import { Members, objectHasData, RawObject } from "./modelData";
 /** The slice of the 3D Viewer API this extension uses (also lets the UI run against a fake viewer). */
 export type ViewerLike = Pick<
   ViewerAPI,
-  "getModels" | "getObjects" | "getObjectProperties" | "toggleModel" | "setSelection"
+  | "getModels"
+  | "getObjects"
+  | "getObjectProperties"
+  | "toggleModel"
+  | "setSelection"
+  | "setObjectState"
+  | "getSnapshot"
 >;
 
 /**

@@ -13,16 +13,13 @@ import {
   XAxis,
   YAxis,
 } from "recharts";
-import { ChartRow, CompareRow, formatNumber, OTHER_KEY } from "../../lib/graficos/modelData";
+import { assignColors, CATEGORY_COLORS, COMPARE_COLORS } from "../../lib/graficos/colors";
+import { ChartRow, CompareRow, formatNumber } from "../../lib/graficos/modelData";
 
-// Single-series bars share one hue; the donut uses the first six slots of the
-// validated categorical palette, in fixed order, plus a neutral gray for the
-// folded row. The comparison chart's two sides are slots 1 and 2 (a validated
-// adjacent pair). MAX_SLICES keeps the donut at six colored slices at most.
-const SERIES_COLOR = "#2a78d6";
-const PIE_COLORS = ["#2a78d6", "#eb6834", "#1baf7a", "#eda100", "#e87ba4", "#008300"];
-const OTHER_COLOR = "#a3a8ae";
-export const COMPARE_COLORS = { A: "#2a78d6", B: "#eb6834" } as const;
+// Single-series bars share one hue unless "Colorear" is on, when each bar
+// takes its category's color (the same one painted on the model). The donut
+// always colors by category; MAX_SLICES keeps it within the palette.
+const SERIES_COLOR = CATEGORY_COLORS[0];
 const GRID_COLOR = "#e6e9ee";
 const TICK = { fontSize: 11, fill: "#6b7684" };
 // Marks outside the clicked category recede so the selection reads at a glance.
@@ -86,9 +83,13 @@ interface SingleSeriesProps {
   unitLabel: string;
   activeKey: string | null;
   onRowClick: (row: ChartRow) => void;
+  /** One color per row when "Colorear" is on; otherwise every bar uses the series color. */
+  colors?: string[] | null;
+  /** Off while exporting, so the captured SVG is the final drawing, not a frame of the animation. */
+  animate?: boolean;
 }
 
-export function ColumnChart({ rows, unitLabel, activeKey, onRowClick }: SingleSeriesProps) {
+export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
   return (
     <ResponsiveContainer width="100%" height={280}>
       <BarChart
@@ -114,9 +115,9 @@ export function ColumnChart({ rows, unitLabel, activeKey, onRowClick }: SingleSe
         />
         <YAxis tick={TICK} tickFormatter={(v: number) => formatNumber(v)} width={56} tickLine={false} axisLine={false} />
         <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
-        <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36}>
-          {rows.map((row) => (
-            <Cell key={row.key} fill={SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+        <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
+          {rows.map((row, i) => (
+            <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
           ))}
         </Bar>
       </BarChart>
@@ -124,7 +125,7 @@ export function ColumnChart({ rows, unitLabel, activeKey, onRowClick }: SingleSe
   );
 }
 
-export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick }: SingleSeriesProps) {
+export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
   const height = Math.max(120, rows.length * 26 + 40);
   return (
     <ResponsiveContainer width="100%" height={height}>
@@ -151,9 +152,9 @@ export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick }: S
           axisLine={{ stroke: GRID_COLOR }}
         />
         <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
-        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18}>
-          {rows.map((row) => (
-            <Cell key={row.key} fill={SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={animate}>
+          {rows.map((row, i) => (
+            <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
           ))}
         </Bar>
       </BarChart>
@@ -161,11 +162,11 @@ export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick }: S
   );
 }
 
-export function DonutChart({ rows, unitLabel, activeKey, onRowClick }: SingleSeriesProps) {
-  // A slice can only show a positive share of the whole.
+export function DonutChart({ rows, unitLabel, activeKey, onRowClick, animate = true }: SingleSeriesProps) {
+  // A slice can only show a positive share of the whole. Colors follow the
+  // same assignment as "Colorear", so the model matches the slices.
   const slices = rows.filter((r) => r.value > 0);
-  let colorIndex = 0;
-  const colors = slices.map((r) => (r.key === OTHER_KEY ? OTHER_COLOR : PIE_COLORS[colorIndex++]));
+  const colors = assignColors(slices);
 
   return (
     <ResponsiveContainer width="100%" height={300}>
@@ -182,13 +183,14 @@ export function DonutChart({ rows, unitLabel, activeKey, onRowClick }: SingleSer
             if (row) onRowClick(row);
           }}
           cursor="pointer"
+          isAnimationActive={animate}
         >
           {slices.map((row, i) => (
             <Cell
               key={row.key}
               fill={colors[i]}
               fillOpacity={opacity(activeKey, row.key)}
-              stroke="var(--tc-white)"
+              stroke="#ffffff"
               strokeWidth={2}
             />
           ))}
@@ -246,6 +248,7 @@ export function CompareChart({
   labelB,
   activeKey,
   onBarClick,
+  animate = true,
 }: {
   rows: CompareRow[];
   unitLabel: string;
@@ -254,6 +257,7 @@ export function CompareChart({
   /** "<row key>|A" or "<row key>|B" */
   activeKey: string | null;
   onBarClick: (row: CompareRow, side: CompareSide) => void;
+  animate?: boolean;
 }) {
   return (
     <ResponsiveContainer width="100%" height={310}>
@@ -289,6 +293,7 @@ export function CompareChart({
             radius={[4, 4, 0, 0]}
             maxBarSize={28}
             cursor="pointer"
+            isAnimationActive={animate}
             onClick={(_, index) => {
               const row = rows[index];
               if (row) onBarClick(row, side);
