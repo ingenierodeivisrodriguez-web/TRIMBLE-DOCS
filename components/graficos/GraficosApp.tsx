@@ -3,23 +3,28 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelSpec } from "trimble-connect-workspace-api";
 import {
+  applySlicers,
   buildDataset,
-  ChartSpec,
   CommonField,
   commonFields,
   formatNumber,
   GENERAL_GROUP,
+  memberCount,
+  Members,
   ModelDataset,
+  SlicerSpec,
 } from "../../lib/graficos/modelData";
 import {
   listModelObjects,
   ModelObjectList,
   modelHasData,
   readAllProperties,
+  selectorFor,
   ViewerLike,
 } from "../../lib/graficos/viewerReader";
 import { normalizeForSearch } from "../../lib/folderTree";
-import ChartCard, { ChartKind, FIELD_DRAG_TYPE, fieldLabel } from "./ChartCard";
+import ChartCard, { CardSpec, ChartType, FIELD_DRAG_TYPE, fieldLabel, kindMark } from "./ChartCard";
+import Slicers from "./Slicers";
 import type { ViewerEventListener } from "./ViewerShell";
 
 type ModelStatus = "checking" | "data" | "empty" | "error";
@@ -38,13 +43,25 @@ interface ReadingState {
   total: number;
 }
 
-const CHARTS: { title: string; kind: ChartKind }[] = [
-  { title: "Barras verticales", kind: "column" },
-  { title: "Barras horizontales", kind: "horizontal" },
-  { title: "Circular", kind: "donut" },
-];
+const INITIAL_TYPES: ChartType[] = ["column", "horizontal", "donut"];
 
-const EMPTY_SPEC: ChartSpec = { category: null, value: null };
+function emptySpec(type: ChartType): CardSpec {
+  return { type, category: null, value: null, compareBy: null, periodA: null, periodB: null };
+}
+
+/**
+ * The bar / slice whose objects are selected in the viewer. It only stays
+ * highlighted while the chart it came from is unchanged: `source` and `spec`
+ * are the exact data and spec it was computed from.
+ */
+interface ViewerSelection {
+  chart: number;
+  key: string;
+  members: Members;
+  count: number;
+  source: ModelDataset[];
+  spec: CardSpec;
+}
 
 // A model can be reloaded in the viewer as another version; the data only
 // stays valid for the exact version it was read from.
@@ -66,8 +83,12 @@ export default function GraficosApp({
   const [datasets, setDatasets] = useState<Record<string, ModelDataset>>({});
   const [reading, setReading] = useState<ReadingState | null>(null);
   const [readError, setReadError] = useState("");
-  const [charts, setCharts] = useState<ChartSpec[]>(() => CHARTS.map(() => EMPTY_SPEC));
+  const [charts, setCharts] = useState<CardSpec[]>(() => INITIAL_TYPES.map(emptySpec));
+  const [slicers, setSlicers] = useState<SlicerSpec[]>([]);
+  const [viewerSelection, setViewerSelection] = useState<ViewerSelection | null>(null);
+  const [selectionError, setSelectionError] = useState("");
   const [search, setSearch] = useState("");
+  const [fieldsCollapsed, setFieldsCollapsed] = useState(false);
 
   const unmounted = useRef(false);
   // Probe results survive a model being unloaded and loaded again (same version).
@@ -210,6 +231,57 @@ export default function GraficosApp({
   );
   const fields = useMemo(() => (activeDatasets ? commonFields(activeDatasets) : []), [activeDatasets]);
 
+  // Slicers on fields the selected models don't share are kept (they come
+  // back if the models are selected again) but don't filter anything.
+  const effectiveSlicers = useMemo(() => {
+    const byKey = new Map(fields.map((f) => [f.key, f]));
+    return slicers.filter((s) => byKey.has(s.field)).map((s) => ({ ...s, kind: byKey.get(s.field)!.kind }));
+  }, [slicers, fields]);
+  const filteredDatasets = useMemo(
+    () => (activeDatasets ? applySlicers(activeDatasets, effectiveSlicers) : null),
+    [activeDatasets, effectiveSlicers]
+  );
+  const countObjects = (list: ModelDataset[] | null) => (list ?? []).reduce((sum, d) => sum + d.records.length, 0);
+
+  const viewerModelIds = useMemo(
+    () => Object.fromEntries((models ?? []).filter((e) => e.list).map((e) => [e.key, e.list!.queryModelId])),
+    [models]
+  );
+  const liveSelection =
+    viewerSelection &&
+    viewerSelection.source === filteredDatasets &&
+    viewerSelection.spec === charts[viewerSelection.chart]
+      ? viewerSelection
+      : null;
+
+  async function selectInViewer(chart: number, key: string, members: Members) {
+    setSelectionError("");
+    const selector = selectorFor(members, viewerModelIds);
+    try {
+      if (liveSelection && liveSelection.chart === chart && liveSelection.key === key) {
+        // Clicking the highlighted bar again deselects exactly what it selected.
+        await viewer.setSelection(selector, "remove");
+        setViewerSelection(null);
+        return;
+      }
+      await viewer.setSelection(selector, "set");
+      if (!filteredDatasets) return;
+      setViewerSelection({ chart, key, members, count: memberCount(members), source: filteredDatasets, spec: charts[chart] });
+    } catch (err) {
+      setSelectionError(err instanceof Error ? err.message : "No se pudo seleccionar en el visor.");
+    }
+  }
+
+  async function clearViewerSelection() {
+    if (!liveSelection) return;
+    try {
+      await viewer.setSelection(selectorFor(liveSelection.members, viewerModelIds), "remove");
+    } catch {
+      // The user may already have changed the selection in the viewer; nothing to undo.
+    }
+    setViewerSelection(null);
+  }
+
   const visibleFields = useMemo(() => {
     const q = normalizeForSearch(search.trim());
     if (!q) return fields;
@@ -276,7 +348,16 @@ export default function GraficosApp({
       </Panel>
 
       <div style={{ position: "sticky", top: 0, zIndex: 5 }}>
-        <Panel title="2. Datos en común">
+        <Panel
+          title="2. Datos en común"
+          action={
+            fields.length > 1 ? (
+              <button type="button" onClick={() => setFieldsCollapsed((v) => !v)} style={smallButtonStyle}>
+                {fieldsCollapsed ? "Mostrar datos" : "Ocultar"}
+              </button>
+            ) : undefined
+          }
+        >
           {readError && <div style={{ fontSize: 12.5, color: "#8a1c14", marginBottom: 8 }}>{readError}</div>}
           {selectedWithData.length === 0 ? (
             <Muted>Selecciona uno o varios modelos con datos para ver los datos que tienen en común.</Muted>
@@ -284,6 +365,8 @@ export default function GraficosApp({
             <ReadingProgress reading={reading} />
           ) : fields.length <= 1 ? (
             <Muted>Los modelos seleccionados no comparten ningún dato. Prueba con otra combinación.</Muted>
+          ) : fieldsCollapsed ? (
+            <Muted>{fields.length} datos disponibles. Pulsa “Mostrar datos” para arrastrarlos.</Muted>
           ) : (
             <>
               <input
@@ -294,10 +377,10 @@ export default function GraficosApp({
                 style={searchStyle}
               />
               <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)", margin: "6px 0" }}>
-                Arrastra un dato a un gráfico: los de texto (<b>Aa</b>) forman las categorías y los numéricos (<b>#</b>)
-                se suman.
+                Arrastra un dato a un gráfico o a los segmentadores: texto (<b>Aa</b>) y fechas (<b>📅</b>, por mes)
+                forman categorías; los numéricos (<b>#</b>) se suman.
               </div>
-              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 150, overflowY: "auto", paddingBottom: 2 }}>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6, maxHeight: 104, overflowY: "auto", paddingBottom: 2 }}>
                 {visibleFields.map((field) => (
                   <FieldChip key={field.key} field={field} />
                 ))}
@@ -308,16 +391,32 @@ export default function GraficosApp({
         </Panel>
       </div>
 
+      {activeDatasets && fields.length > 1 && (
+        <Slicers
+          fields={fields}
+          datasets={activeDatasets}
+          slicers={effectiveSlicers}
+          onChange={setSlicers}
+          shownObjects={countObjects(filteredDatasets)}
+          totalObjects={countObjects(activeDatasets)}
+        />
+      )}
+
+      {selectionError && (
+        <div style={{ fontSize: 12.5, color: "#8a1c14" }}>No se pudo seleccionar en el visor: {selectionError}</div>
+      )}
+
       <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 14 }}>
-        {CHARTS.map((chart, i) => (
+        {charts.map((spec, i) => (
           <ChartCard
-            key={chart.kind}
-            title={chart.title}
-            kind={chart.kind}
-            spec={charts[i]}
+            key={i}
+            spec={spec}
             fields={fields}
-            datasets={activeDatasets}
+            datasets={filteredDatasets}
             onChange={(update) => setCharts((prev) => prev.map((s, j) => (j === i ? update(s) : s)))}
+            selection={liveSelection?.chart === i ? { key: liveSelection.key, count: liveSelection.count } : null}
+            onSelectObjects={(key, members) => selectInViewer(i, key, members)}
+            onClearSelection={clearViewerSelection}
           />
         ))}
       </div>
@@ -409,7 +508,7 @@ function FieldChip({ field }: { field: CommonField }) {
       }}
     >
       <span style={{ fontSize: 10.5, fontWeight: 700, color: numeric ? "var(--tc-blue-700)" : "var(--tc-gray-500)" }}>
-        {numeric ? "#" : "Aa"}
+        {kindMark(field)}
       </span>
       <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{fieldLabel(field)}</span>
     </span>

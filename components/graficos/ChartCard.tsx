@@ -3,27 +3,63 @@
 import { useMemo, useState } from "react";
 import {
   aggregate,
-  ChartSpec,
+  bucketCounts,
   CommonField,
+  compare,
+  foldCompareRows,
   foldRows,
   formatNumber,
+  GENERAL_GROUP,
+  Members,
   ModelDataset,
 } from "../../lib/graficos/modelData";
-import { ColumnChart, DonutChart, HorizontalBarChart, MAX_COLUMNS, MAX_HORIZONTAL_BARS, MAX_SLICES } from "./Charts";
+import {
+  ColumnChart,
+  CompareChart,
+  CompareSide,
+  DonutChart,
+  HorizontalBarChart,
+  MAX_COLUMNS,
+  MAX_COMPARE_GROUPS,
+  MAX_HORIZONTAL_BARS,
+  MAX_SLICES,
+} from "./Charts";
 
-export type ChartKind = "column" | "horizontal" | "donut";
+export type ChartType = "column" | "horizontal" | "donut" | "compare";
+
+export interface CardSpec {
+  type: ChartType;
+  category: string | null;
+  value: string | null;
+  /** Comparison only: the field that tells side A from side B (a date is compared by month). */
+  compareBy: string | null;
+  periodA: string | null;
+  periodB: string | null;
+}
+
+export const CHART_TYPES: { type: ChartType; label: string }[] = [
+  { type: "column", label: "Barras verticales" },
+  { type: "horizontal", label: "Barras horizontales" },
+  { type: "donut", label: "Circular" },
+  { type: "compare", label: "Comparativo A vs B" },
+];
 
 export const FIELD_DRAG_TYPE = "application/x-graficos-field";
 
 const TABLE_ROW_LIMIT = 200;
 
+type DropTarget = "card" | "category" | "value" | "compare";
+
 export function fieldLabel(field: CommonField): string {
   return field.unit ? `${field.label} (${field.unit})` : field.label;
 }
 
-/** Reads the dragged field key, if the drag came from one of our chips. */
-function draggedKey(e: React.DragEvent): string | null {
-  return e.dataTransfer.getData(FIELD_DRAG_TYPE) || null;
+export function kindMark(field: CommonField): string {
+  return field.kind === "number" ? "#" : field.kind === "date" ? "📅" : "Aa";
+}
+
+function optionLabel(field: CommonField): string {
+  return field.group === GENERAL_GROUP ? fieldLabel(field) : `${fieldLabel(field)} — ${field.group}`;
 }
 
 function acceptsDrag(e: React.DragEvent): boolean {
@@ -31,60 +67,114 @@ function acceptsDrag(e: React.DragEvent): boolean {
 }
 
 export default function ChartCard({
-  title,
-  kind,
   spec,
   fields,
   datasets,
   onChange,
+  selection,
+  onSelectObjects,
+  onClearSelection,
 }: {
-  title: string;
-  kind: ChartKind;
-  spec: ChartSpec;
+  spec: CardSpec;
   fields: CommonField[];
-  /** null while the selected models are still being read. */
+  /** Already filtered by the slicers; null while the selected models are still being read. */
   datasets: ModelDataset[] | null;
   /** Receives an updater of the latest spec, so quick successive drops never overwrite each other. */
-  onChange: (update: (prev: ChartSpec) => ChartSpec) => void;
+  onChange: (update: (prev: CardSpec) => CardSpec) => void;
+  /** The bar / slice of this chart whose objects are selected in the viewer, if any. */
+  selection: { key: string; count: number } | null;
+  onSelectObjects: (key: string, members: Members) => void;
+  onClearSelection: () => void;
 }) {
   const [showTable, setShowTable] = useState(false);
-  const [dragOver, setDragOver] = useState<"card" | "category" | "value" | null>(null);
+  const [dragOver, setDragOver] = useState<DropTarget | null>(null);
   const [notice, setNotice] = useState("");
 
   const byKey = useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
   const numericFields = fields.filter((f) => f.kind === "number");
+  const compareFields = [...fields.filter((f) => f.kind === "date"), ...fields.filter((f) => f.kind === "text")];
+
+  const isCompare = spec.type === "compare";
   const category = spec.category ? byKey.get(spec.category) : undefined;
   const value = spec.value ? byKey.get(spec.value) : undefined;
+  const compareField = spec.compareBy ? byKey.get(spec.compareBy) : undefined;
 
-  const result = useMemo(
-    () => (datasets && category ? aggregate(datasets, { category: category.key, value: value?.key ?? null }) : null),
-    [datasets, category, value]
+  const periods = useMemo(
+    () => (isCompare && datasets && compareField ? bucketCounts(datasets, compareField.key, compareField.kind) : []),
+    [isCompare, datasets, compareField]
+  );
+  const periodKeys = periods.map((p) => p.key);
+  // Default to the two latest months (or the two most common values).
+  const defaultA = compareField?.kind === "date" ? periodKeys[periodKeys.length - 2] : periodKeys[0];
+  const defaultB = compareField?.kind === "date" ? periodKeys[periodKeys.length - 1] : periodKeys[1];
+  const periodA = spec.periodA && periodKeys.includes(spec.periodA) ? spec.periodA : (defaultA ?? periodKeys[0]);
+  const periodB = spec.periodB && periodKeys.includes(spec.periodB) ? spec.periodB : (defaultB ?? periodKeys[0]);
+  const periodLabel = (key: string | undefined) => periods.find((p) => p.key === key)?.label ?? "";
+  const labelA = `A: ${periodLabel(periodA)}`;
+  const labelB = `B: ${periodLabel(periodB)}`;
+
+  const single = useMemo(
+    () =>
+      !isCompare && datasets && category
+        ? aggregate(datasets, { category: category.key, categoryKind: category.kind, value: value?.key ?? null })
+        : null,
+    [isCompare, datasets, category, value]
+  );
+  const comparison = useMemo(
+    () =>
+      isCompare && datasets && category && compareField && periodA && periodB
+        ? compare(datasets, {
+            category: category.key,
+            categoryKind: category.kind,
+            value: value?.key ?? null,
+            compareBy: compareField.key,
+            compareKind: compareField.kind,
+            periodA,
+            periodB,
+          })
+        : null,
+    [isCompare, datasets, category, value, compareField, periodA, periodB]
   );
 
+  const chronological = category?.kind === "date";
   const unitLabel = value ? (value.unit ?? "") : "objetos";
   const valueTitle = value ? fieldLabel(value) : "Cantidad de objetos";
+  const title = !category
+    ? "Sin datos asignados"
+    : isCompare && compareField && periodA && periodB
+      ? `${valueTitle} por ${fieldLabel(category)}: ${periodLabel(periodA)} vs ${periodLabel(periodB)}`
+      : `${valueTitle} por ${fieldLabel(category)}`;
 
-  function place(key: string, target: "card" | "category" | "value") {
+  function place(key: string, target: DropTarget) {
     const field = byKey.get(key);
     if (!field) return;
     setNotice("");
-    if (target === "category" || (target === "card" && field.kind === "text")) {
+    if (target === "compare") {
+      if (field.kind === "number") {
+        setNotice(`Para comparar se usa un dato de fecha (se compara por mes) o de texto (p. ej. una fase), no uno numérico.`);
+        return;
+      }
+      onChange((prev) => ({ ...prev, compareBy: key, periodA: null, periodB: null }));
+      return;
+    }
+    if (target === "category" || (target === "card" && field.kind !== "number")) {
       onChange((prev) => ({ ...prev, category: key }));
       return;
     }
     if (field.kind !== "number") {
-      setNotice(`"${field.label}" es un dato de texto: solo se pueden sumar datos numéricos (longitud, área, volumen...).`);
+      setNotice(`"${field.label}" no es numérico: solo se pueden sumar datos numéricos (longitud, área, volumen...).`);
       return;
     }
     // A number still needs categories to split by; "Modelo" always exists,
     // and the user can swap it for any other field.
     onChange((prev) => ({
+      ...prev,
       value: key,
       category: prev.category && byKey.has(prev.category) ? prev.category : "@model",
     }));
   }
 
-  function dropHandlers(target: "card" | "category" | "value") {
+  function dropHandlers(target: DropTarget) {
     return {
       onDragOver: (e: React.DragEvent) => {
         if (!acceptsDrag(e)) return;
@@ -101,19 +191,24 @@ export default function ChartCard({
         e.preventDefault();
         e.stopPropagation();
         setDragOver(null);
-        const key = draggedKey(e);
+        const key = e.dataTransfer.getData(FIELD_DRAG_TYPE);
         if (key) place(key, target);
       },
     };
   }
 
-  const rows = result?.rows ?? [];
+  const singleRows = single?.rows ?? [];
   const chartRows =
-    kind === "column"
-      ? foldRows(rows, MAX_COLUMNS)
-      : kind === "horizontal"
-        ? foldRows(rows, MAX_HORIZONTAL_BARS)
-        : foldRows(rows, MAX_SLICES);
+    spec.type === "column"
+      ? foldRows(singleRows, MAX_COLUMNS, chronological)
+      : spec.type === "horizontal"
+        ? foldRows(singleRows, MAX_HORIZONTAL_BARS, chronological)
+        : foldRows(singleRows, MAX_SLICES, chronological);
+  const compareRows = foldCompareRows(comparison?.rows ?? [], MAX_COMPARE_GROUPS, chronological);
+  const result = isCompare ? comparison : single;
+  const hasRows = isCompare ? compareRows.length > 0 : singleRows.length > 0;
+  const folded = isCompare ? compareRows.length < (comparison?.rows.length ?? 0) : chartRows.length < singleRows.length;
+  const activeKey = selection?.key ?? null;
 
   return (
     <section
@@ -129,16 +224,28 @@ export default function ChartCard({
         minWidth: 0,
       }}
     >
-      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8 }}>
-        <div style={{ minWidth: 0 }}>
-          <div style={{ fontSize: 11, fontWeight: 700, letterSpacing: 0.4, color: "var(--tc-gray-500)" }}>
-            {title.toUpperCase()}
-          </div>
-          <h3 style={{ margin: "2px 0 0", fontSize: 14.5, color: "var(--tc-blue-800)", wordBreak: "break-word" }}>
-            {category ? `${valueTitle} por ${fieldLabel(category)}` : "Sin datos asignados"}
+      <header style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 8 }}>
+        <div style={{ minWidth: 0, flex: 1 }}>
+          <select
+            value={spec.type}
+            onChange={(e) => {
+              const type = e.target.value as ChartType;
+              onChange((prev) => ({ ...prev, type }));
+            }}
+            style={typeSelectStyle}
+            aria-label="Tipo de gráfico"
+          >
+            {CHART_TYPES.map((t) => (
+              <option key={t.type} value={t.type}>
+                {t.label}
+              </option>
+            ))}
+          </select>
+          <h3 style={{ margin: "4px 0 0", fontSize: 14.5, color: "var(--tc-blue-800)", wordBreak: "break-word" }}>
+            {title}
           </h3>
         </div>
-        {result && rows.length > 0 && (
+        {result && hasRows && (
           <button type="button" onClick={() => setShowTable((v) => !v)} style={linkButtonStyle}>
             {showTable ? "Ver gráfico" : "Ver tabla"}
           </button>
@@ -156,7 +263,7 @@ export default function ChartCard({
               onChange((prev) => ({ ...prev, category: next }));
             }}
             style={selectStyle}
-            aria-label={`Categorías del gráfico ${title}`}
+            aria-label="Categorías"
           >
             <option value="">Arrastra o elige un dato...</option>
             {fields.map((f) => (
@@ -176,7 +283,7 @@ export default function ChartCard({
               onChange((prev) => ({ ...prev, value: next }));
             }}
             style={selectStyle}
-            aria-label={`Valor del gráfico ${title}`}
+            aria-label="Valor"
           >
             <option value="">Cantidad de objetos</option>
             {numericFields.map((f) => (
@@ -186,6 +293,50 @@ export default function ChartCard({
             ))}
           </select>
         </Slot>
+
+        {isCompare && (
+          <>
+            <SlotLabel>Comparar por</SlotLabel>
+            <Slot highlighted={dragOver === "compare"} {...dropHandlers("compare")}>
+              <select
+                value={compareField?.key ?? ""}
+                disabled={fields.length === 0}
+                onChange={(e) => {
+                  const next = e.target.value || null;
+                  onChange((prev) => ({ ...prev, compareBy: next, periodA: null, periodB: null }));
+                }}
+                style={selectStyle}
+                aria-label="Comparar por"
+              >
+                <option value="">Arrastra o elige una fecha o una fase...</option>
+                {compareFields.map((f) => (
+                  <option key={f.key} value={f.key}>
+                    {f.kind === "date" ? "📅 " : ""}
+                    {optionLabel(f)}
+                  </option>
+                ))}
+              </select>
+            </Slot>
+            {compareField && periods.length > 0 && (
+              <>
+                <SlotLabel>Periodo A</SlotLabel>
+                <PeriodSelect
+                  side="A"
+                  value={periodA}
+                  periods={periods}
+                  onChange={(key) => onChange((prev) => ({ ...prev, periodA: key }))}
+                />
+                <SlotLabel>Periodo B</SlotLabel>
+                <PeriodSelect
+                  side="B"
+                  value={periodB}
+                  periods={periods}
+                  onChange={(key) => onChange((prev) => ({ ...prev, periodB: key }))}
+                />
+              </>
+            )}
+          </>
+        )}
       </div>
 
       {notice && <div style={{ fontSize: 12, color: "#8a1c14" }}>{notice}</div>}
@@ -199,32 +350,102 @@ export default function ChartCard({
           </Placeholder>
         ) : !datasets ? (
           <Placeholder>Leyendo los datos de los modelos...</Placeholder>
-        ) : rows.length === 0 ? (
+        ) : isCompare && !compareField ? (
+          <Placeholder highlighted={dragOver !== null}>
+            Elige en “Comparar por” una fecha (se compara mes contra mes) o un dato de texto como la fase o el nivel.
+          </Placeholder>
+        ) : isCompare && periods.length < 2 ? (
+          <Placeholder>
+            “{compareField ? fieldLabel(compareField) : ""}” tiene un solo valor en los objetos filtrados: no hay dos
+            periodos que comparar.
+          </Placeholder>
+        ) : !hasRows ? (
           <Placeholder>Ningún objeto de los modelos seleccionados tiene estos datos.</Placeholder>
         ) : showTable ? (
-          <DataTable rows={rows} categoryTitle={fieldLabel(category)} valueTitle={valueTitle} />
-        ) : kind === "column" ? (
-          <ColumnChart rows={chartRows} unitLabel={unitLabel} />
-        ) : kind === "horizontal" ? (
-          <HorizontalBarChart rows={chartRows} unitLabel={unitLabel} />
+          isCompare ? (
+            <CompareTable rows={comparison!.rows} categoryTitle={fieldLabel(category)} labelA={labelA} labelB={labelB} />
+          ) : (
+            <DataTable
+              rows={singleRows}
+              categoryTitle={fieldLabel(category)}
+              valueTitle={valueTitle}
+              activeKey={activeKey}
+              onRowClick={(row) => onSelectObjects(row.key, row.members)}
+            />
+          )
+        ) : isCompare ? (
+          <CompareChart
+            rows={compareRows}
+            unitLabel={unitLabel}
+            labelA={labelA}
+            labelB={labelB}
+            activeKey={activeKey}
+            onBarClick={(row, side: CompareSide) =>
+              onSelectObjects(`${row.key}|${side}`, side === "A" ? row.membersA : row.membersB)
+            }
+          />
+        ) : spec.type === "column" ? (
+          <ColumnChart rows={chartRows} unitLabel={unitLabel} activeKey={activeKey} onRowClick={(r) => onSelectObjects(r.key, r.members)} />
+        ) : spec.type === "horizontal" ? (
+          <HorizontalBarChart
+            rows={chartRows}
+            unitLabel={unitLabel}
+            activeKey={activeKey}
+            onRowClick={(r) => onSelectObjects(r.key, r.members)}
+          />
         ) : (
-          <DonutChart rows={chartRows} unitLabel={unitLabel} />
+          <DonutChart rows={chartRows} unitLabel={unitLabel} activeKey={activeKey} onRowClick={(r) => onSelectObjects(r.key, r.members)} />
         )}
       </div>
 
-      {result && rows.length > 0 && (
+      {selection && (
+        <div style={selectionNoticeStyle}>
+          <span>
+            ✓ {formatNumber(selection.count)} objetos seleccionados en el visor
+          </span>
+          <button type="button" onClick={onClearSelection} style={linkButtonStyle}>
+            Quitar
+          </button>
+        </div>
+      )}
+
+      {result && hasRows && (
         <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
-          {formatNumber(result.objectsWithData)} de {formatNumber(result.totalObjects)} objetos tienen estos datos ·{" "}
-          {formatNumber(rows.length)} categorías
-          {chartRows.length < rows.length && !showTable ? " (las menores se agrupan en “Otros”)" : ""}
+          {formatNumber(result.objectsWithData)} de {formatNumber(result.totalObjects)} objetos tienen estos datos
+          {isCompare ? " en los periodos elegidos" : ` · ${formatNumber(singleRows.length)} categorías`}
+          {folded && !showTable ? (chronological ? " (los meses más antiguos se agrupan)" : " (las menores se agrupan en “Otros”)") : ""}
+          {!showTable ? " · Clic en una barra para seleccionar sus objetos en el modelo." : ""}
         </div>
       )}
     </section>
   );
 }
 
-function optionLabel(field: CommonField): string {
-  return field.group === "General" ? fieldLabel(field) : `${fieldLabel(field)} — ${field.group}`;
+function PeriodSelect({
+  side,
+  value,
+  periods,
+  onChange,
+}: {
+  side: CompareSide;
+  value: string | undefined;
+  periods: { key: string; label: string; objects: number }[];
+  onChange: (key: string) => void;
+}) {
+  return (
+    <select
+      value={value ?? ""}
+      onChange={(e) => onChange(e.target.value)}
+      style={{ ...selectStyle, borderLeft: `4px solid ${side === "A" ? "#2a78d6" : "#eb6834"}` }}
+      aria-label={`Periodo ${side}`}
+    >
+      {periods.map((p) => (
+        <option key={p.key} value={p.key}>
+          {p.label} ({formatNumber(p.objects)} objetos)
+        </option>
+      ))}
+    </select>
+  );
 }
 
 function SlotLabel({ children }: { children: React.ReactNode }) {
@@ -280,10 +501,14 @@ function DataTable({
   rows,
   categoryTitle,
   valueTitle,
+  activeKey,
+  onRowClick,
 }: {
-  rows: { label: string; value: number; objects: number }[];
+  rows: { key: string; label: string; value: number; objects: number; members: Members }[];
   categoryTitle: string;
   valueTitle: string;
+  activeKey: string | null;
+  onRowClick: (row: { key: string; members: Members }) => void;
 }) {
   const shown = rows.slice(0, TABLE_ROW_LIMIT);
   return (
@@ -298,14 +523,15 @@ function DataTable({
         </thead>
         <tbody>
           {shown.map((row) => (
-            <tr key={row.label}>
+            <tr
+              key={row.key}
+              onClick={() => onRowClick(row)}
+              style={{ cursor: "pointer", background: activeKey === row.key ? "var(--tc-blue-100)" : undefined }}
+              title="Clic para seleccionar estos objetos en el modelo"
+            >
               <td style={{ ...tdStyle, wordBreak: "break-word" }}>{row.label}</td>
-              <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {formatNumber(row.value)}
-              </td>
-              <td style={{ ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" }}>
-                {formatNumber(row.objects)}
-              </td>
+              <td style={numericTd}>{formatNumber(row.value)}</td>
+              <td style={numericTd}>{formatNumber(row.objects)}</td>
             </tr>
           ))}
         </tbody>
@@ -319,14 +545,72 @@ function DataTable({
   );
 }
 
+function CompareTable({
+  rows,
+  categoryTitle,
+  labelA,
+  labelB,
+}: {
+  rows: { key: string; label: string; a: number; b: number }[];
+  categoryTitle: string;
+  labelA: string;
+  labelB: string;
+}) {
+  const shown = rows.slice(0, TABLE_ROW_LIMIT);
+  return (
+    <div style={{ maxHeight: 300, overflowY: "auto" }}>
+      <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 12.5 }}>
+        <thead>
+          <tr style={{ position: "sticky", top: 0, background: "var(--tc-white)" }}>
+            <th style={thStyle}>{categoryTitle}</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>{labelA}</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>{labelB}</th>
+            <th style={{ ...thStyle, textAlign: "right" }}>Diferencia (B − A)</th>
+          </tr>
+        </thead>
+        <tbody>
+          {shown.map((row) => {
+            const diff = row.b - row.a;
+            return (
+              <tr key={row.key}>
+                <td style={{ ...tdStyle, wordBreak: "break-word" }}>{row.label}</td>
+                <td style={numericTd}>{formatNumber(row.a)}</td>
+                <td style={numericTd}>{formatNumber(row.b)}</td>
+                <td style={numericTd}>
+                  {diff > 0 ? "+" : ""}
+                  {formatNumber(diff)}
+                </td>
+              </tr>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
 const selectStyle: React.CSSProperties = {
   width: "100%",
+  minWidth: 0,
   border: "1px solid var(--tc-gray-300)",
   borderRadius: 6,
   padding: "6px 8px",
   fontSize: 12.5,
   color: "var(--tc-gray-700)",
   background: "var(--tc-white)",
+  fontFamily: "inherit",
+};
+
+const typeSelectStyle: React.CSSProperties = {
+  border: "none",
+  background: "transparent",
+  padding: 0,
+  fontSize: 11,
+  fontWeight: 700,
+  letterSpacing: 0.4,
+  textTransform: "uppercase",
+  color: "var(--tc-blue-700)",
+  cursor: "pointer",
   fontFamily: "inherit",
 };
 
@@ -339,6 +623,18 @@ const linkButtonStyle: React.CSSProperties = {
   cursor: "pointer",
   padding: 0,
   whiteSpace: "nowrap",
+};
+
+const selectionNoticeStyle: React.CSSProperties = {
+  display: "flex",
+  justifyContent: "space-between",
+  alignItems: "center",
+  gap: 8,
+  fontSize: 12.5,
+  color: "var(--tc-blue-900)",
+  background: "var(--tc-blue-100)",
+  borderRadius: 6,
+  padding: "6px 10px",
 };
 
 const thStyle: React.CSSProperties = {
@@ -354,3 +650,5 @@ const tdStyle: React.CSSProperties = {
   borderBottom: "1px solid var(--tc-gray-100)",
   color: "var(--tc-gray-700)",
 };
+
+const numericTd: React.CSSProperties = { ...tdStyle, textAlign: "right", fontVariantNumeric: "tabular-nums" };

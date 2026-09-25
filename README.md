@@ -361,8 +361,9 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
    **todos** comparten: los generales (Modelo, Clase, Nombre, Tipo) y cada
    propiedad, identificada como `Grupo · Propiedad` para que no se confundan
    dos propiedades con el mismo nombre en grupos distintos. Los de texto
-   llevan `Aa` y los numéricos `#`, con su unidad. Hay un buscador, y el
-   panel queda fijo arriba al hacer scroll.
+   llevan `Aa`, los numéricos `#` (con su unidad) y las fechas 📅. Hay un
+   buscador, y el panel queda fijo arriba al hacer scroll (con un botón
+   **Ocultar** para que no tape los gráficos).
 5. **Arrastrar y soltar**: cada gráfico tiene dos casillas:
    - **Categorías**: el dato cuyos valores forman las barras o porciones
      (tipo, material, estado...).
@@ -379,6 +380,42 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
    el circular 6; el resto se agrupa en "Otros". Cada gráfico tiene **Ver
    tabla** con todas las categorías, y un pie con cuántos objetos tienen
    esos datos.
+7. **Segmentadores (filtros)**: arrastra un dato de texto o de fecha al
+   panel "Segmentadores" (o elígelo en "+ Agregar segmentador"). Aparece la
+   lista de sus valores con casillas y cuántos objetos tiene cada uno, con
+   **Todos** / **Ninguno** y buscador. Los tres gráficos muestran solo los
+   objetos que pasan **todos** los segmentadores (se combinan con Y), y el
+   panel indica "Los gráficos muestran X de Y objetos". Las fechas se
+   filtran por mes. Un segmentador sobre un dato que los modelos marcados no
+   comparten se conserva, pero no filtra mientras tanto.
+8. **Clic en el gráfico → selección en el modelo 3D**: al hacer clic en una
+   barra, porción o fila de la tabla se seleccionan en el visor los objetos
+   de esa categoría (respetando los segmentadores). La barra queda
+   resaltada y las demás atenuadas, y la tarjeta muestra "N objetos
+   seleccionados en el visor · Quitar". Un segundo clic en la misma barra,
+   o "Quitar", deselecciona exactamente esos objetos (`setSelection` con
+   `"remove"`). En las barras verticales y horizontales vale toda la franja
+   de la categoría, no solo la barra, para que las barras pequeñas también
+   se puedan pulsar. "Otros" selecciona todos los objetos agrupados en él.
+9. **Tipo de gráfico y comparativo A vs B**: el título de cada tarjeta es un
+   selector de tipo: barras verticales, barras horizontales, circular o
+   **Comparativo A vs B**. El comparativo agrega la casilla **Comparar por**
+   (una fecha, que se compara **mes contra mes**, o un dato de texto como la
+   fase o el nivel) y los selectores **Periodo A** y **Periodo B** con cada
+   mes o valor y su cantidad de objetos. Por defecto propone los dos meses
+   más recientes. Muestra barras agrupadas A (azul) y B (naranja) por
+   categoría; la tabla incluye la diferencia B − A. Un clic en una barra
+   selecciona en el visor los objetos de ese lado.
+
+**Fechas**: se reconocen las propiedades de tipo fecha del modelo
+(`DateTime`, marcas de tiempo UNIX) y los textos que son **solo** una fecha
+(`2026-03-15`, `2026-03-15T10:00`, `15/03/2026`, `15.03.2026`; un texto como
+`12/05/2024 - Rev B` sigue siendo texto). Se agrupan por mes (`mar 2026`),
+en orden cronológico; si hay más meses de los que caben, los más antiguos se
+agrupan en "Anteriores". Si en un modelo un dato mezcla fechas y texto, se
+trata como texto. El comparativo mes a mes necesita que el modelo tenga
+alguna fecha (p. ej. fecha de montaje o de planificación); si no la tiene,
+se pueden comparar dos valores de un dato de texto.
 
 **Cómo lee los datos** ([`lib/graficos/viewerReader.ts`](lib/graficos/viewerReader.ts)):
 usa el Workspace API del visor: `viewer.getModels("loaded")`,
@@ -393,15 +430,18 @@ orden que usa una extensión pública del visor ya validada en proyectos reales.
 muestran como Sí/No.
 
 **Lógica de datos** ([`lib/graficos/modelData.ts`](lib/graficos/modelData.ts),
-cubierta por `modelData.test.ts`): aplanado de propiedades, datos en común
-entre modelos y agregación por categoría. Un dato que es numérico en un
-modelo y de texto en otro se ofrece como texto.
+cubierta por `modelData.test.ts`): aplanado de propiedades, fechas, datos en
+común entre modelos, segmentadores, agregación por categoría y comparativo.
+Cada barra guarda los objetos que la forman (por modelo) para poder
+seleccionarlos en el visor. Un dato cuyo tipo difiere entre modelos se
+ofrece como texto.
 
 **Colores**: las barras usan un solo color (son una sola serie). El circular
 usa, en orden fijo, 6 colores de una paleta validada para daltonismo, más
-gris para "Otros". Como tres de esos colores tienen poco contraste sobre
-blanco, el circular lleva leyenda con nombres y cada gráfico tiene su vista
-de tabla.
+gris para "Otros". El comparativo usa los dos primeros colores de esa
+paleta, validados juntos. Como algunos colores tienen poco contraste sobre
+blanco, los gráficos de varias series llevan leyenda con nombres y cada
+gráfico tiene su vista de tabla.
 
 ---
 

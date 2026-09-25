@@ -1,8 +1,24 @@
 import type { ModelSpec, ObjectSelector, ViewerAPI } from "trimble-connect-workspace-api";
-import { objectHasData, RawObject } from "./modelData";
+import { Members, objectHasData, RawObject } from "./modelData";
 
 /** The slice of the 3D Viewer API this extension uses (also lets the UI run against a fake viewer). */
-export type ViewerLike = Pick<ViewerAPI, "getModels" | "getObjects" | "getObjectProperties" | "toggleModel">;
+export type ViewerLike = Pick<
+  ViewerAPI,
+  "getModels" | "getObjects" | "getObjectProperties" | "toggleModel" | "setSelection"
+>;
+
+/**
+ * Turns the objects behind a bar / slice into a viewer selector. `viewerModelIds`
+ * maps each dataset key to the model id the viewer answered with when the
+ * objects were listed (see listModelObjects) - the id selections must use.
+ */
+export function selectorFor(members: Members, viewerModelIds: Record<string, string>): ObjectSelector {
+  return {
+    modelObjectIds: Object.entries(members)
+      .filter(([datasetKey, ids]) => ids.length > 0 && viewerModelIds[datasetKey])
+      .map(([datasetKey, ids]) => ({ modelId: viewerModelIds[datasetKey], objectRuntimeIds: ids })),
+  };
+}
 
 // Objects per getObjectProperties call: large enough to keep the number of
 // postMessage round-trips down, small enough to keep each reply responsive.
