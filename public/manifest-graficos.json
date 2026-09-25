@@ -1,0 +1,10 @@
+{
+  "url": "https://trimble-docs.vercel.app/graficos",
+  "title": "Gráficos de Modelos",
+  "description": "Gráficos de barras y circular con los datos de los modelos 3D cargados en el visor: elige los modelos y arrastra sus datos en común (longitud, área, volumen, tipo...) a cada gráfico.",
+  "icon": "https://trimble-docs.vercel.app/icon-graficos.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "panel",
+  "enabled": true
+}

@@ -1,23 +1,26 @@
 # Extensiones para Trimble Connect
 
 Este repositorio es una sola app Next.js (desplegada en Vercel) que contiene
-**dos extensiones de proyecto** para Trimble Connect:
+**dos extensiones de proyecto y una extensión del visor 3D** para Trimble Connect:
 
-| Extensión | Página que se embebe | Manifiesto |
-|---|---|---|
-| **Resumen Archivos** — estadísticas de los documentos del proyecto | `/extension` | `/manifest.json` |
-| **Validación** — valida la nomenclatura de los archivos contra reglas configurables | `/validacion` | `/manifest-validacion.json` |
+| Extensión | Dónde aparece | Página que se embebe | Manifiesto |
+|---|---|---|---|
+| **Resumen Archivos** — estadísticas de los documentos del proyecto | Menú lateral del proyecto | `/extension` | `/manifest.json` |
+| **Validación** — valida la nomenclatura de los archivos contra reglas configurables | Menú lateral del proyecto | `/validacion` | `/manifest-validacion.json` |
+| **Gráficos de Modelos** — gráficos con los datos de los modelos 3D cargados | Panel de extensiones del visor 3D | `/graficos` | `/manifest-graficos.json` |
 
-Las dos comparten la conexión con Trimble Connect
+Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
 la API REST ([`lib/trimbleApi.ts`](lib/trimbleApi.ts)) y el recorrido
 recursivo de carpetas ([`lib/walkProjectTree.ts`](lib/walkProjectTree.ts) +
-[`lib/cache.ts`](lib/cache.ts)).
+[`lib/cache.ts`](lib/cache.ts)). "Gráficos de Modelos" es independiente: no usa
+la API REST ni el backend, lee directamente del visor 3D.
 
 - [Resumen Archivos](#resumen-archivos)
   - [Estructura de Carpetas (pestaña)](#estructura-de-carpetas-pestaña)
   - [Auditoría de Permisos (pestaña)](#auditoría-de-permisos-pestaña)
 - [Validación](#validación)
+- [Gráficos de Modelos (visor 3D)](#gráficos-de-modelos-visor-3d)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -336,6 +339,72 @@ recorrer el proyecto dos veces).
 
 ---
 
+## Gráficos de Modelos (visor 3D)
+
+Extensión **del visor 3D** (no del proyecto): aparece en el panel de
+extensiones del visor, no en el menú lateral. Construye gráficos con los
+datos (propiedades) de los objetos de los modelos cargados en el visor.
+
+1. **Modelos en el visor**: lista los modelos cargados y revisa una muestra
+   de ~40 objetos de cada uno para marcarlo **"Con datos · N objetos"** o
+   **"Sin datos"** (p. ej. nubes de puntos). Solo los que tienen datos se
+   pueden marcar. Debajo aparecen los modelos del proyecto que no están
+   cargados, con un botón **Cargar** que los abre en el visor. La lista se
+   actualiza sola cuando se carga o descarga un modelo en el visor.
+2. **Selección de uno o varios modelos**: al marcar un modelo se leen las
+   propiedades de todos sus objetos (con barra de progreso). Se guardan en
+   memoria mientras el panel está abierto, así que desmarcarlo y volver a
+   marcarlo es instantáneo.
+3. **Tres gráficos en blanco**: barras verticales, barras horizontales y
+   circular.
+4. **Datos en común**: con los modelos marcados aparecen los datos que
+   **todos** comparten: los generales (Modelo, Clase, Nombre, Tipo) y cada
+   propiedad, identificada como `Grupo · Propiedad` para que no se confundan
+   dos propiedades con el mismo nombre en grupos distintos. Los de texto
+   llevan `Aa` y los numéricos `#`, con su unidad. Hay un buscador, y el
+   panel queda fijo arriba al hacer scroll.
+5. **Arrastrar y soltar**: cada gráfico tiene dos casillas:
+   - **Categorías**: el dato cuyos valores forman las barras o porciones
+     (tipo, material, estado...).
+   - **Valor**: "Cantidad de objetos" (por defecto) o la **suma** de un dato
+     numérico (longitud, área, volumen, peso...).
+
+   Si sueltas un dato sobre el gráfico (no sobre una casilla), el de texto
+   va a Categorías y el numérico a Valor. Si todavía no hay categorías, se
+   usa "Modelo", útil para comparar varios modelos. Cada casilla tiene
+   también un selector para quien no pueda arrastrar (pantalla táctil o
+   teclado).
+6. **Gráficos con los datos**: se construyen al instante. Las barras
+   verticales muestran las 12 categorías mayores, las horizontales las 15 y
+   el circular 6; el resto se agrupa en "Otros". Cada gráfico tiene **Ver
+   tabla** con todas las categorías, y un pie con cuántos objetos tienen
+   esos datos.
+
+**Cómo lee los datos** ([`lib/graficos/viewerReader.ts`](lib/graficos/viewerReader.ts)):
+usa el Workspace API del visor: `viewer.getModels("loaded")`,
+`viewer.getObjects()` para listar los objetos y
+`viewer.getObjectProperties()` en lotes de 250. No necesita access token ni
+backend. El visor a veces identifica los objetos por el id del modelo y a
+veces por el `versionId` de su archivo, así que se prueban ambos, en el mismo
+orden que usa una extensión pública del visor ya validada en proyectos reales.
+
+**Unidades**: el visor entrega las longitudes en mm (aquí se convierten a
+**m**), áreas en m², volúmenes en m³ y masas en kg. Los datos booleanos se
+muestran como Sí/No.
+
+**Lógica de datos** ([`lib/graficos/modelData.ts`](lib/graficos/modelData.ts),
+cubierta por `modelData.test.ts`): aplanado de propiedades, datos en común
+entre modelos y agregación por categoría. Un dato que es numérico en un
+modelo y de texto en otro se ofrece como texto.
+
+**Colores**: las barras usan un solo color (son una sola serie). El circular
+usa, en orden fijo, 6 colores de una paleta validada para daltonismo, más
+gris para "Otros". Como tres de esos colores tienen poco contraste sobre
+blanco, el circular lleva leyenda con nombres y cada gráfico tiene su vista
+de tabla.
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -418,6 +487,7 @@ app/
   page.tsx                    Pagina informativa (no es una extension)
   extension/                  Resumen Archivos (pagina embebida)
   validacion/                 Validacion (pagina embebida)
+  graficos/                   Graficos de Modelos (pagina embebida en el visor 3D)
   api/summary, api/files      API de Resumen Archivos
   api/tree                    Arbol de carpetas (pestaña "Estructura de Carpetas")
   api/folder-permissions      Permisos (directos/heredados) de una carpeta
@@ -434,6 +504,7 @@ components/
   folderTree/                 Estructura de Carpetas: arbol, fila, panel de permisos
   permissionAudit/            Auditoria de Permisos: tarjetas, lista, hook de estado
   validacion/                 Validacion: configuracion, probador, resultados, duplicados
+  graficos/                   Graficos de Modelos: conexion con el visor, modelos, datos, graficos
 lib/
   trimbleApi.ts, walkProjectTree.ts, cache.ts   API REST y recorrido (compartidos)
   folderTree.ts                Construye el arbol anidado + colores por nivel (server)
@@ -443,9 +514,11 @@ lib/
   access.ts                   Comprueba que el token sea de un miembro del proyecto
   validacion/                 Analizador, configuracion, filtros, exportacion,
                               duplicados, almacenamiento (Supabase o Upstash Redis) y pruebas
+  graficos/                   Lectura del visor 3D, datos en comun y agregacion (con pruebas)
 public/
   manifest.json, icon.svg                       Resumen Archivos
   manifest-validacion.json, icon-validacion.svg Validacion
+  manifest-graficos.json, icon-graficos.svg     Graficos de Modelos
 ```
 
 ## Configurar y desplegar en Vercel
@@ -518,15 +591,21 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    |---|---|
    | Resumen Archivos | `https://trimble-docs.vercel.app/manifest.json` |
    | Validación | `https://trimble-docs.vercel.app/manifest-validacion.json` |
+   | Gráficos de Modelos | `https://trimble-docs.vercel.app/manifest-graficos.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
    Validación con un documento con marca de verificación). Si no aparece,
    recarga la pestaña de Trimble Connect.
-6. Al abrirla por primera vez, Trimble Connect pedira tu consentimiento para
-   que la extension pueda leer el access token del usuario actual (esto es lo
-   que permite leer los documentos del proyecto). Acepta el mensaje para que
-   el panel cargue los datos.
+   **Gráficos de Modelos** no aparece en el menú lateral: aparece con
+   categoría *3D Viewer*. Abre un modelo en el visor 3D y elígela en el
+   panel de extensiones del visor.
+6. Al abrir Resumen Archivos o Validación por primera vez, Trimble Connect
+   pedira tu consentimiento para que la extension pueda leer el access token
+   del usuario actual (esto es lo que permite leer los documentos del
+   proyecto). Acepta el mensaje para que el panel cargue los datos. Gráficos
+   de Modelos no pide este consentimiento: solo lee lo que ya está cargado en
+   el visor.
 
 Si en algun momento quieres revocar el permiso, puedes hacerlo desde la
 configuracion de la extension dentro del proyecto.
@@ -539,7 +618,8 @@ npm run dev     # http://localhost:3000
 npm test        # pruebas del analizador de nomenclatura (35+ casos)
 ```
 
-Las paginas `/extension` y `/validacion` solo funcionan correctamente
+Las paginas `/extension`, `/validacion` y `/graficos` (esta, dentro del
+visor 3D) solo funcionan correctamente
 **embebidas dentro de un iframe de Trimble Connect** (usan `window.parent`
 para comunicarse via `postMessage`). Abrirlas directamente en el navegador
 mostrara un mensaje indicando que deben abrirse desde dentro de Trimble
@@ -564,6 +644,16 @@ variables de Supabase (o de Upstash).
   proyecto ven todos los archivos salvo restriccion explicita de carpeta.
 - La extension siempre opera sobre el proyecto abierto en ese momento; no
   hay selector de proyectos.
+- "Gráficos de Modelos" solo puede leer los modelos **cargados** en el visor
+  (así funciona el Workspace API). Un modelo grande (decenas de miles de
+  objetos) tarda en leerse la primera vez, porque las propiedades se piden al
+  visor en lotes de 250.
+- En modelos exportados desde Revit/Navisworks (NWC/NWD), el visor también
+  entrega como "objetos" los nodos de la jerarquía (archivo, nivel,
+  categoría, familia...). Si esos nodos tienen el dato elegido como
+  categoría (p. ej. un "Name"), también se cuentan. Los datos de cantidades
+  (longitud, área, volumen) normalmente solo los tienen los elementos
+  reales, así que las sumas no se ven afectadas.
 - "Validación" no restringe la pantalla de configuración por rol (cualquier
   miembro del proyecto puede guardarla); la última en guardar gana.
 - Las exportaciones se descargan como archivo desde el navegador; si Trimble
