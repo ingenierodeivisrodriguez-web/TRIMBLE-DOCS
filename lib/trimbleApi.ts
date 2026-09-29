@@ -36,11 +36,35 @@ async function trimbleFetch(url: string, accessToken: string, extraHeaders?: Hea
   return res.json();
 }
 
-interface RegionInfo {
+export interface RegionInfo {
   location: string;
   "tc-api": string;
   /** Property Set Service (libraries of custom properties) for the region. */
   "pset-api"?: string;
+  isMaster?: boolean;
+  region?: string;
+  serviceRegion?: string;
+  trnRegion?: string;
+  awsRegion?: string;
+}
+
+/**
+ * The region a project lives in. The project's `location` is compared, case
+ * insensitively, with every name a region goes by ("northAmerica", "na",
+ * "us", "us-east-1"...). When it matches none - or the project listing
+ * omits it - the master region is used, which is where projects are hosted
+ * unless created in another region.
+ */
+export function pickRegion(regions: RegionInfo[], location: string | undefined): RegionInfo | undefined {
+  const wanted = (location ?? "").trim().toLowerCase();
+  const byName = wanted
+    ? regions.find((r) =>
+        [r.location, r.region, r.serviceRegion, r.trnRegion, r.awsRegion].some(
+          (name) => typeof name === "string" && name.toLowerCase() === wanted
+        )
+      )
+    : undefined;
+  return byName ?? regions.find((r) => r.isMaster) ?? regions[0];
 }
 
 let regionsCache: { data: RegionInfo[]; expiresAt: number } | null = null;
@@ -82,7 +106,7 @@ async function resolveProjectRegion(accessToken: string, projectId: string): Pro
       404
     );
   }
-  return regions.find((r) => r.location === project.location);
+  return pickRegion(regions, project.location);
 }
 
 export async function resolveProjectBaseUrl(
