@@ -146,6 +146,10 @@ function convert(type: number, value: unknown): { kind: FieldKind; value: FieldV
   }
   const text = String(value).trim();
   if (!text) return null;
+  // Yes/no stored as text ("True", "FALSO"...) groups with real booleans.
+  const word = text.toLowerCase();
+  if (word === "true" || word === "verdadero") return { kind: "text", value: "Sí" };
+  if (word === "false" || word === "falso") return { kind: "text", value: "No" };
   const iso = parseDateText(text);
   return iso ? { kind: "date", value: iso } : { kind: "text", value: text };
 }

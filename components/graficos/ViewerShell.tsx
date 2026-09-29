@@ -20,13 +20,27 @@ export interface ViewerContext {
   /** Subscribes to Workspace API events; returns the unsubscribe function. */
   subscribe: (listener: ViewerEventListener) => () => void;
   project: ViewerProject;
+  /**
+   * The user's Trimble Connect access token, asked for only when a feature
+   * needs it (property-set libraries). The first time, Trimble Connect shows
+   * its consent prompt. `fresh` drops the cached token (after a 401).
+   */
+  getAccessToken: (fresh?: boolean) => Promise<string>;
+}
+
+function tokenFrom(data: unknown): string {
+  if (typeof data === "string") return data;
+  const d = data as { data?: unknown; accessToken?: unknown } | null;
+  if (typeof d?.data === "string") return d.data;
+  if (typeof d?.accessToken === "string") return d.accessToken;
+  return "";
 }
 
 /**
  * Connects a Trimble Connect *3D Viewer* extension to its host. Unlike
- * ExtensionShell (project extensions) it needs no access token and no
- * left-menu entry: everything it reads comes from the models loaded in the
- * viewer, through the Workspace API's viewer namespace.
+ * ExtensionShell (project extensions) it needs no left-menu entry and no
+ * token up front: the charts come from the models loaded in the viewer, and
+ * a token is only requested when property-set libraries are used.
  */
 export default function ViewerShell({ children }: { children: (context: ViewerContext) => React.ReactNode }) {
   const [status, setStatus] = useState<Status>("connecting");
@@ -34,12 +48,30 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
   const [viewer, setViewer] = useState<ViewerLike | null>(null);
   const [project, setProject] = useState<ViewerProject>({ id: "", name: "", userName: "" });
   const listeners = useRef(new Set<ViewerEventListener>());
+  const apiRef = useRef<WorkspaceAPI.WorkspaceAPI | null>(null);
+  const token = useRef("");
 
   const subscribe = useCallback((listener: ViewerEventListener) => {
     listeners.current.add(listener);
     return () => {
       listeners.current.delete(listener);
     };
+  }, []);
+
+  const getAccessToken = useCallback(async (fresh = false) => {
+    if (fresh) token.current = "";
+    if (token.current) return token.current;
+    const api = apiRef.current;
+    if (!api) throw new Error("La extensión todavía no está conectada con Trimble Connect.");
+    const result = await api.extension.requestPermission("accesstoken");
+    if (result === "pending") {
+      throw new Error("Acepta el permiso que muestra Trimble Connect para leer las bibliotecas de propiedades y vuelve a intentar.");
+    }
+    if (result === "denied") {
+      throw new Error("Se denegó el permiso para leer las bibliotecas. Puedes restablecerlo en la configuración de la extensión.");
+    }
+    token.current = result;
+    return result;
   }, []);
 
   useEffect(() => {
@@ -53,12 +85,18 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
       try {
         const api = await WorkspaceAPI.connect(
           window.parent,
-          (event: string) => {
+          (event: string, data: unknown) => {
+            // Trimble Connect pushes a renewed token here once access was granted.
+            if (event === "extension.accessToken") {
+              const renewed = tokenFrom(data);
+              if (renewed) token.current = renewed;
+            }
             for (const listener of listeners.current) listener(event);
           },
           30000
         );
         if (cancelled) return;
+        apiRef.current = api;
 
         const host = await api.extension.getHost().catch(() => null);
         if (cancelled) return;
@@ -91,7 +129,7 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
   }, []);
 
   if (status === "ready" && viewer) {
-    return <>{children({ viewer, subscribe, project })}</>;
+    return <>{children({ viewer, subscribe, project, getAccessToken })}</>;
   }
 
   const screens: Record<Exclude<Status, "ready">, { title: string; body: string }> = {

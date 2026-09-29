@@ -18,6 +18,13 @@ import {
   SlicerSpec,
 } from "../../lib/graficos/modelData";
 import { buildReportPdf, downloadBlob, ReportChart, snapshotToJpeg, svgToPng } from "../../lib/graficos/pdfReport";
+import { entityLink, LibrariesPayload, librarySummary, mergePsets } from "../../lib/graficos/psets";
+import {
+  fetchLibraries,
+  loadKnownLibraries,
+  psetsOnObjects,
+  storeKnownLibraries,
+} from "../../lib/graficos/psetClient";
 import {
   defaultReportSettings,
   loadReportSettings,
@@ -30,6 +37,7 @@ import {
   ModelObjectList,
   modelHasData,
   readAllProperties,
+  readObjectGuids,
   selectorFor,
   ViewerLike,
 } from "../../lib/graficos/viewerReader";
@@ -109,14 +117,19 @@ function defaultViewName(): string {
   return `Vista ${new Date().toLocaleString("es", { dateStyle: "short", timeStyle: "short" })}`;
 }
 
+// Objects checked when looking for property-set libraries (the service's per-request limit is 60).
+const DISCOVERY_LINKS = 60;
+
 export default function GraficosApp({
   viewer,
   subscribe,
   project,
+  getAccessToken,
 }: {
   viewer: ViewerLike;
   subscribe: (listener: ViewerEventListener) => () => void;
   project: ViewerProject;
+  getAccessToken: (fresh?: boolean) => Promise<string>;
 }) {
   const [models, setModels] = useState<ModelEntry[] | null>(null);
   const [unloaded, setUnloaded] = useState<ModelSpec[]>([]);
@@ -131,6 +144,14 @@ export default function GraficosApp({
   const [selectionError, setSelectionError] = useState("");
   const [search, setSearch] = useState("");
   const [fieldsCollapsed, setFieldsCollapsed] = useState(false);
+
+  // Trimble Connect property-set libraries ("Bibliotecas de conjuntos de propiedades").
+  const [psetLibIds, setPsetLibIds] = useState<string[]>([]);
+  const [psetData, setPsetData] = useState<LibrariesPayload | null>(null);
+  const [guidMaps, setGuidMaps] = useState<Record<string, Map<number, string>>>({});
+  const [psetBusy, setPsetBusy] = useState("");
+  const [psetError, setPsetError] = useState("");
+  const [psetNotice, setPsetNotice] = useState("");
 
   // "Colorear": the chart painting the model, and a nudge to make it repaint.
   const [coloring, setColoring] = useState<number | null>(null);
@@ -289,10 +310,149 @@ export default function GraficosApp({
     [selected, models]
   );
   const allRead = selectedWithData.every((key) => datasets[key]);
-  const activeDatasets = useMemo(
+  const modelDatasets = useMemo(
     () => (allRead ? selectedWithData.map((key) => datasets[key]) : null),
     [allRead, selectedWithData, datasets]
   );
+  const viewerModelIds = useMemo(
+    () => Object.fromEntries((models ?? []).filter((e) => e.list).map((e) => [e.key, e.list!.queryModelId])),
+    [models]
+  );
+
+  // ------------------------------------------------------------ bibliotecas de propiedades
+
+  useEffect(() => {
+    setPsetLibIds(loadKnownLibraries(project.id));
+    setPsetData(null);
+  }, [project.id]);
+
+  // Library values attach to objects by GUID, so each model's GUIDs are read once.
+  useEffect(() => {
+    if (!psetData || !modelDatasets) return;
+    const missing = modelDatasets.filter((d) => !guidMaps[d.modelId] && viewerModelIds[d.modelId]);
+    if (missing.length === 0) return;
+    let cancelled = false;
+    (async () => {
+      for (const dataset of missing) {
+        if (cancelled) return;
+        try {
+          const map = await readObjectGuids(viewer, viewerModelIds[dataset.modelId], dataset.records.map((r) => r.runtimeId));
+          if (cancelled) return;
+          setGuidMaps((prev) => ({ ...prev, [dataset.modelId]: map }));
+        } catch (err) {
+          if (!cancelled) setPsetError(`No se pudieron leer los identificadores de "${dataset.modelName}": ${err instanceof Error ? err.message : "error desconocido"}.`);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [psetData, modelDatasets, guidMaps, viewerModelIds, viewer]);
+
+  const loadLibraryData = useCallback(
+    async (libIds: string[]) => {
+      setPsetBusy("Cargando las propiedades de las bibliotecas...");
+      setPsetError("");
+      try {
+        setPsetData(await fetchLibraries(project.id, libIds, getAccessToken));
+      } catch (err) {
+        setPsetError(err instanceof Error ? err.message : "No se pudieron cargar las bibliotecas.");
+      } finally {
+        setPsetBusy("");
+      }
+    },
+    [project.id, getAccessToken]
+  );
+
+  // Libraries found before in this project load on their own once models are read.
+  const autoLoaded = useRef("");
+  useEffect(() => {
+    const signature = psetLibIds.join(",");
+    if (!signature || psetData || !modelDatasets?.length || autoLoaded.current === signature) return;
+    autoLoaded.current = signature;
+    loadLibraryData(psetLibIds);
+  }, [psetLibIds, psetData, modelDatasets, loadLibraryData]);
+
+  /** Links of the objects selected in the viewer, or else of a spread sample of the marked models. */
+  async function discoveryLinks(): Promise<{ links: string[]; fromSelection: boolean }> {
+    const selection = (await viewer.getSelection().catch(() => [])) ?? [];
+    const picked = selection.filter((s) => (s.objectRuntimeIds ?? []).length > 0);
+    const links: string[] = [];
+    if (picked.length > 0) {
+      for (const s of picked) {
+        const ids = await viewer.convertToObjectIds(s.modelId, s.objectRuntimeIds!.slice(0, DISCOVERY_LINKS - links.length));
+        links.push(...(ids ?? []).filter(Boolean).map(entityLink));
+        if (links.length >= DISCOVERY_LINKS) break;
+      }
+      return { links, fromSelection: true };
+    }
+    const sets = modelDatasets ?? [];
+    const perModel = Math.max(1, Math.floor(DISCOVERY_LINKS / Math.max(1, sets.length)));
+    for (const dataset of sets) {
+      const queryId = viewerModelIds[dataset.modelId];
+      if (!queryId || dataset.records.length === 0) continue;
+      const step = Math.max(1, Math.floor(dataset.records.length / perModel));
+      const sample = dataset.records.filter((_, i) => i % step === 0).slice(0, perModel).map((r) => r.runtimeId);
+      const ids = await viewer.convertToObjectIds(queryId, sample);
+      links.push(...(ids ?? []).filter(Boolean).map(entityLink));
+    }
+    return { links, fromSelection: false };
+  }
+
+  async function discoverLibraries() {
+    setPsetError("");
+    setPsetNotice("");
+    setPsetBusy("Buscando propiedades de biblioteca en los objetos...");
+    try {
+      const { links, fromSelection } = await discoveryLinks();
+      if (links.length === 0) throw new Error("Marca un modelo con datos o selecciona elementos en el visor.");
+      const psets = await psetsOnObjects(project.id, links, getAccessToken);
+      const found = [...new Set(psets.map((p) => p.libId))];
+      if (found.length === 0) {
+        const checked =
+          links.length === 1
+            ? `el objeto ${fromSelection ? "seleccionado" : "revisado"}`
+            : `los ${links.length} objetos ${fromSelection ? "seleccionados" : "revisados (una muestra del modelo)"}`;
+        setPsetNotice(
+          `No hay propiedades de biblioteca en ${checked}. ` +
+            "Selecciona en el visor un elemento que tenga una propiedad de biblioteca (se ve en su panel Propiedades, p. ej. “control construccion”) y pulsa Buscar de nuevo."
+        );
+        setPsetBusy("");
+        return;
+      }
+      const ids = [...new Set([...psetLibIds, ...found])];
+      setPsetLibIds(ids);
+      storeKnownLibraries(project.id, ids);
+      autoLoaded.current = ids.join(",");
+      await loadLibraryData(ids);
+    } catch (err) {
+      setPsetError(err instanceof Error ? err.message : "No se pudieron buscar las bibliotecas.");
+      setPsetBusy("");
+    }
+  }
+
+  function forgetLibraries() {
+    setPsetLibIds([]);
+    storeKnownLibraries(project.id, []);
+    setPsetData(null);
+    setPsetNotice("");
+    setPsetError("");
+    autoLoaded.current = "";
+  }
+
+  // The charts' data: the models' own properties plus library values.
+  const activeDatasets = useMemo(
+    () => (modelDatasets && psetData ? mergePsets(modelDatasets, guidMaps, psetData) : modelDatasets),
+    [modelDatasets, psetData, guidMaps]
+  );
+  const psetMatches = useMemo(() => {
+    if (!psetData || !activeDatasets) return 0;
+    let count = 0;
+    for (const d of activeDatasets) for (const r of d.records) if (Object.keys(r.values).some((k) => k.startsWith("pset:"))) count++;
+    return count;
+  }, [psetData, activeDatasets]);
+  const guidsReady = !!modelDatasets && modelDatasets.every((d) => guidMaps[d.modelId]);
+
   const fields = useMemo(() => (activeDatasets ? commonFields(activeDatasets) : []), [activeDatasets]);
 
   // Slicers on fields the selected models don't share are kept (they come
@@ -306,11 +466,6 @@ export default function GraficosApp({
     [activeDatasets, effectiveSlicers]
   );
   const countObjects = (list: ModelDataset[] | null) => (list ?? []).reduce((sum, d) => sum + d.records.length, 0);
-
-  const viewerModelIds = useMemo(
-    () => Object.fromEntries((models ?? []).filter((e) => e.list).map((e) => [e.key, e.list!.queryModelId])),
-    [models]
-  );
   const liveSelection =
     viewerSelection &&
     viewerSelection.source === filteredDatasets &&
@@ -644,6 +799,26 @@ export default function GraficosApp({
             </ul>
           </details>
         )}
+        <LibrariesBox
+          data={psetData}
+          knownLibraries={psetLibIds.length}
+          matches={psetMatches}
+          guidsReady={guidsReady}
+          busy={psetBusy}
+          notice={psetNotice}
+          error={psetError}
+          canSearch={!!modelDatasets?.length}
+          sampleModelLink={(() => {
+            const first = modelDatasets?.map((d) => guidMaps[d.modelId]).find(Boolean);
+            const guid = first ? first.values().next().value : undefined;
+            return guid ? entityLink(guid) : "";
+          })()}
+          onSearch={discoverLibraries}
+          onRefresh={() => loadLibraryData(psetLibIds)}
+          onForget={forgetLibraries}
+          onDismissNotice={() => setPsetNotice("")}
+          onDismissError={() => setPsetError("")}
+        />
       </Panel>
 
       <div style={{ position: "sticky", top: 0, zIndex: 5 }}>
@@ -806,6 +981,99 @@ export default function GraficosApp({
           />
         ))}
       </div>
+    </div>
+  );
+}
+
+/** Status and actions for Trimble Connect property-set libraries (custom properties such as "está construido"). */
+function LibrariesBox({
+  data,
+  knownLibraries,
+  matches,
+  guidsReady,
+  busy,
+  notice,
+  error,
+  canSearch,
+  sampleModelLink,
+  onSearch,
+  onRefresh,
+  onForget,
+  onDismissNotice,
+  onDismissError,
+}: {
+  data: LibrariesPayload | null;
+  knownLibraries: number;
+  matches: number;
+  guidsReady: boolean;
+  busy: string;
+  notice: string;
+  error: string;
+  canSearch: boolean;
+  sampleModelLink: string;
+  onSearch: () => void;
+  onRefresh: () => void;
+  onForget: () => void;
+  onDismissNotice: () => void;
+  onDismissError: () => void;
+}) {
+  const libs = data ? librarySummary(data) : [];
+  const status = data
+    ? `${libs.map((l) => l.name).join(", ")} · ${
+        guidsReady ? `${formatNumber(matches)} objetos de los modelos marcados tienen valores` : "relacionando valores con los objetos..."
+      }`
+    : knownLibraries > 0
+      ? "Se cargan al marcar un modelo."
+      : "Para usar propiedades asignadas en Trimble Connect (p. ej. “está construido”), selecciona en el visor un elemento que las tenga y pulsa Buscar.";
+  const mismatch = data && guidsReady && matches === 0 && data.psets.length > 0;
+
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid var(--tc-gray-100)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--tc-blue-800)" }}>Bibliotecas de conjuntos de propiedades</div>
+          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>{status}</div>
+        </div>
+        <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+          <button
+            type="button"
+            onClick={onSearch}
+            disabled={!!busy || !canSearch}
+            style={{ ...smallButtonStyle, opacity: busy || !canSearch ? 0.5 : 1 }}
+            title="Busca bibliotecas en los elementos seleccionados en el visor (o en una muestra del modelo)"
+          >
+            {data ? "Buscar más" : "Buscar"}
+          </button>
+          {knownLibraries > 0 && (
+            <button type="button" onClick={onRefresh} disabled={!!busy} style={{ ...smallButtonStyle, opacity: busy ? 0.5 : 1 }} title="Vuelve a leer los valores">
+              Actualizar
+            </button>
+          )}
+          {knownLibraries > 0 && (
+            <button type="button" onClick={onForget} disabled={!!busy} style={{ ...smallButtonStyle, opacity: busy ? 0.5 : 1 }}>
+              Quitar
+            </button>
+          )}
+        </div>
+      </div>
+      {busy && <Muted>{busy}</Muted>}
+      {notice && <Notice onClose={onDismissNotice}>{notice}</Notice>}
+      {error && (
+        <Notice tone="error" onClose={onDismissError}>
+          {error}
+        </Notice>
+      )}
+      {mismatch && (
+        <Notice tone="error">
+          Las bibliotecas tienen {formatNumber(data!.psets.length)} registros, pero ninguno coincide con los objetos de los modelos
+          marcados. Ejemplo de la biblioteca: <code style={{ wordBreak: "break-all" }}>{data!.psets[0].link}</code>
+          {sampleModelLink && (
+            <>
+              {" "}· ejemplo del modelo: <code style={{ wordBreak: "break-all" }}>{sampleModelLink}</code>
+            </>
+          )}
+        </Notice>
+      )}
     </div>
   );
 }

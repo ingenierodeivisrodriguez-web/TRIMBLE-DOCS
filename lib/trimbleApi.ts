@@ -39,6 +39,8 @@ async function trimbleFetch(url: string, accessToken: string, extraHeaders?: Hea
 interface RegionInfo {
   location: string;
   "tc-api": string;
+  /** Property Set Service (libraries of custom properties) for the region. */
+  "pset-api"?: string;
 }
 
 let regionsCache: { data: RegionInfo[]; expiresAt: number } | null = null;
@@ -65,10 +67,7 @@ interface ProjectMinimal {
  * by cross-referencing /projects/me (which lists the project's `location`)
  * against /regions (which maps `location` -> the region's API host).
  */
-export async function resolveProjectBaseUrl(
-  accessToken: string,
-  projectId: string
-): Promise<string> {
+async function resolveProjectRegion(accessToken: string, projectId: string): Promise<RegionInfo | undefined> {
   const [regions, projects] = await Promise.all([
     getRegions(accessToken),
     trimbleFetch(`${MASTER_BASE_URL}/projects/me?fullyLoaded=false`, accessToken) as Promise<
@@ -83,10 +82,28 @@ export async function resolveProjectBaseUrl(
       404
     );
   }
+  return regions.find((r) => r.location === project.location);
+}
 
-  const region = regions.find((r) => r.location === project.location);
+export async function resolveProjectBaseUrl(
+  accessToken: string,
+  projectId: string
+): Promise<string> {
+  const region = await resolveProjectRegion(accessToken, projectId);
   const baseUrl = region?.["tc-api"] ?? MASTER_BASE_URL;
   return baseUrl.replace(/\/$/, "");
+}
+
+/** Base URL of the Property Set Service in the project's region (see /regions). */
+export async function resolvePsetApiBaseUrl(accessToken: string, projectId: string): Promise<string> {
+  const region = await resolveProjectRegion(accessToken, projectId);
+  const baseUrl = region?.["pset-api"];
+  if (!baseUrl) {
+    throw new TrimbleApiError("La región del proyecto no publica el servicio de propiedades (pset-api).", 502);
+  }
+  const trimmed = baseUrl.replace(/\/$/, "");
+  // The service's paths live under /v1 (see its OpenAPI servers list).
+  return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
 }
 
 export interface ProjectDetails {

@@ -86,6 +86,18 @@ describe("buildDataset", () => {
     assert.equal(d.records[0].values["P · Externo"], "Sí");
   });
 
+  it("groups yes/no written as text with the booleans", () => {
+    const d = buildDataset("m", "M", [
+      { id: 1, properties: [{ name: "P", properties: [{ name: "Construido", value: "True", type: 5 }] }] },
+      { id: 2, properties: [{ name: "P", properties: [{ name: "Construido", value: "FALSO", type: 5 }] }] },
+      { id: 3, properties: [{ name: "P", properties: [{ name: "Construido", value: "verdadero", type: 5 }] }] },
+    ]);
+    assert.deepEqual(
+      d.records.map((r) => r.values["P · Construido"]),
+      ["Sí", "No", "Sí"]
+    );
+  });
+
   it("recognises dates in text properties and DateTime timestamps", () => {
     const d = buildDataset("m", "M", [
       {

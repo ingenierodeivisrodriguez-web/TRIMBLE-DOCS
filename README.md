@@ -473,6 +473,42 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
     para que el archivo pese poco (unos 350 KB con tres gráficos y logo).
     Las cifras usan separador de miles siempre (9.470), para que las tablas
     se lean alineadas.
+13. **Propiedades de las bibliotecas de Trimble Connect**: los valores que
+    se asignan desde las **Bibliotecas de conjuntos de propiedades** (por
+    ejemplo, "control construccion · está construido" = Verdadero/Falso,
+    editados con el lápiz en el panel Propiedades del visor) no vienen en el
+    archivo del modelo, así que el visor no los entrega con
+    `getObjectProperties`. Viven en el servicio **Property Set** de Trimble
+    Connect. En el panel "1. Modelos" está el recuadro **Bibliotecas de
+    conjuntos de propiedades**:
+    - **Buscar**: revisa los elementos **seleccionados en el visor** (o, si
+      no hay selección, una muestra de 60 objetos de los modelos marcados)
+      para descubrir qué bibliotecas usa el proyecto. El servicio no ofrece
+      una forma pública de listar las bibliotecas de un proyecto, por eso se
+      descubren a partir de un objeto que tenga valores. Lo más seguro es
+      seleccionar un elemento que ya tenga la propiedad.
+    - Luego carga **todos** los valores de esas bibliotecas y los une a los
+      objetos por su IFC GUID (`viewer.convertToObjectIds`; enlace
+      `frn:entity:<GUID>`, el mismo que usa el panel Propiedades de Trimble).
+      Cada propiedad aparece como un dato más ("está construido — control
+      construccion"), con su nombre traducido de la biblioteca, y sirve en
+      gráficos, segmentadores, comparativo, Colorear, vistas guardadas y PDF.
+      Verdadero/Falso se muestra como **Sí/No**.
+    - Las bibliotecas encontradas **se recuerdan por proyecto** y se cargan
+      solas la próxima vez. **Actualizar** relee los valores (si alguien los
+      editó) y **Quitar** las olvida.
+    - Para leer el servicio, la extensión pide el token del usuario (la
+      primera vez Trimble Connect muestra su aviso de autorización) solo
+      cuando se usan las bibliotecas. Las consultas pasan por la ruta
+      [`/api/graficos/psets`](app/api/graficos/psets/route.ts), que resuelve
+      la región del proyecto (`pset-api` en `/regions`) y solo permite las
+      dos lecturas necesarias ([`lib/psetApi.ts`](lib/psetApi.ts)).
+    - Si las bibliotecas tienen valores pero ninguno coincide con los objetos
+      marcados, el recuadro muestra un ejemplo de enlace de cada lado para
+      diagnosticar el formato.
+
+    Además, una propiedad **del propio modelo** con Verdadero/Falso escrito
+    como texto ("True", "FALSO"...) también se agrupa como Sí/No.
 
 **Fechas**: se reconocen las propiedades de tipo fecha del modelo
 (`DateTime`, marcas de tiempo UNIX) y los textos que son **solo** una fecha
@@ -602,6 +638,7 @@ app/
   api/tree                    Arbol de carpetas (pestaña "Estructura de Carpetas")
   api/folder-permissions      Permisos (directos/heredados) de una carpeta
   api/permissions-audit       Auditoria de permisos de todo el proyecto (pestaña)
+  api/graficos/psets          Lectura de bibliotecas de propiedades (Graficos de Modelos)
   api/validacion/config       GET/PUT de la configuracion por proyecto
   api/validacion/analyze      Ejecuta el analisis (boton "Analizar")
   api/validacion/results      Pagina de resultados (con filtros)
@@ -624,7 +661,9 @@ lib/
   access.ts                   Comprueba que el token sea de un miembro del proyecto
   validacion/                 Analizador, configuracion, filtros, exportacion,
                               duplicados, almacenamiento (Supabase o Upstash Redis) y pruebas
-  graficos/                   Lectura del visor 3D, datos en comun y agregacion (con pruebas)
+  graficos/                   Lectura del visor 3D, datos en comun, agregacion, bibliotecas
+                              de propiedades, informe PDF (con pruebas)
+  psetApi.ts                  Cliente del servicio Property Set de Trimble Connect (servidor)
 public/
   manifest.json, icon.svg                       Resumen Archivos
   manifest-validacion.json, icon-validacion.svg Validacion
@@ -714,8 +753,9 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    pedira tu consentimiento para que la extension pueda leer el access token
    del usuario actual (esto es lo que permite leer los documentos del
    proyecto). Acepta el mensaje para que el panel cargue los datos. Gráficos
-   de Modelos no pide este consentimiento: solo lee lo que ya está cargado en
-   el visor.
+   de Modelos solo pide este consentimiento cuando se usan las bibliotecas de
+   conjuntos de propiedades; para lo demás lee lo que ya está cargado en el
+   visor.
 
 Si en algun momento quieres revocar el permiso, puedes hacerlo desde la
 configuracion de la extension dentro del proyecto.

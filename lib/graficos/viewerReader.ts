@@ -11,7 +11,31 @@ export type ViewerLike = Pick<
   | "setSelection"
   | "setObjectState"
   | "getSnapshot"
+  | "getSelection"
+  | "convertToObjectIds"
 >;
+
+const GUID_CHUNK = 2000;
+
+/**
+ * The stable id (IFC GUID) of each object, which is what Trimble Connect's
+ * property-set libraries attach their values to. Returned by runtime id.
+ */
+export async function readObjectGuids(
+  viewer: ViewerLike,
+  queryModelId: string,
+  runtimeIds: number[]
+): Promise<Map<number, string>> {
+  const guids = new Map<number, string>();
+  for (let i = 0; i < runtimeIds.length; i += GUID_CHUNK) {
+    const chunk = runtimeIds.slice(i, i + GUID_CHUNK);
+    const ids = (await viewer.convertToObjectIds(queryModelId, chunk)) ?? [];
+    chunk.forEach((runtimeId, j) => {
+      if (ids[j]) guids.set(runtimeId, ids[j]);
+    });
+  }
+  return guids;
+}
 
 /**
  * Turns the objects behind a bar / slice into a viewer selector. `viewerModelIds`
