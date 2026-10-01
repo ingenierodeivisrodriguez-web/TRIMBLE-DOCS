@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ModelSpec } from "trimble-connect-workspace-api";
-import type { ColorGroup } from "../../lib/graficos/colors";
+import { ColorGroup, groupsByColor } from "../../lib/graficos/colors";
 import {
   applySlicers,
   bucketOf,
@@ -532,7 +532,8 @@ export default function GraficosApp({
   const paint = useCallback(
     async (groups: ColorGroup[]) => {
       await resetPainted();
-      for (const group of groups) {
+      // One viewer call per color, however many categories share it.
+      for (const group of groupsByColor(groups)) {
         if (memberCount(group.members) === 0) continue;
         await viewer.setObjectState(selectorFor(group.members, viewerModelIdsRef.current), { color: group.color });
       }

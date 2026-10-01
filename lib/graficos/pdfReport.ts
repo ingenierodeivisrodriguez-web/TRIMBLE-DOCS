@@ -143,7 +143,7 @@ const RULE = "#d7dee6";
 const ZEBRA = "#f5f8fb";
 const WHITE = "#ffffff";
 
-const MAX_TABLE_ROWS = 40;
+const MAX_TABLE_ROWS = 100; // as many as the horizontal bar chart shows
 const LINE = 0.44; // line height in mm per font point
 
 function fit(img: RasterImage, maxW: number, maxH: number): { w: number; h: number } {
@@ -514,7 +514,7 @@ export async function buildReportPdf(input: ReportInput): Promise<Blob> {
     `Fuente: propiedades de los objetos de los modelos cargados en el visor 3D de Trimble Connect, leídas el ${issuedOn}.`,
     "Unidades: longitudes en metros (el visor las entrega en milímetros), áreas en m², volúmenes en m³ y masas en kg.",
     "Las fechas se agrupan por mes. Solo se cuentan los objetos que tienen el dato usado en cada gráfico.",
-    "Para que cada color identifique una sola categoría, se usan como máximo 8 colores; las categorías menores se agrupan en \"Otros\".",
+    "Se usan 8 colores; cuando hay más categorías los colores se repiten en orden, y la tabla de datos indica el color de cada una. Solo si hay más categorías de las que el gráfico muestra, las menores se agrupan en \"Otros\" (gris).",
     "Las capturas muestran el modelo pintado según cada gráfico, con la vista de cámara que había al generar el informe.",
     input.filters.length
       ? `Filtros aplicados a todos los gráficos: ${input.filters.join("; ")}.`

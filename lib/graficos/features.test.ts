@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { assignColors, CATEGORY_COLORS, OTHER_COLOR } from "./colors";
+import { assignColors, CATEGORY_COLORS, groupsByColor, OTHER_COLOR } from "./colors";
 import { OTHER_KEY } from "./modelData";
 import { pdfSafe } from "./pdfReport";
 import { DEFAULT_REPORT_TITLE, parseReportSettings } from "./reportSettings";
@@ -8,15 +8,48 @@ import { addView, MAX_SAVED_VIEWS, parseViews, SavedView } from "./savedViews";
 
 describe("assignColors", () => {
   it("gives categories the palette in order and 'Otros' gray", () => {
-    const colors = assignColors([{ key: "a" }, { key: "b" }, { key: OTHER_KEY }]);
+    const colors = assignColors([
+      { key: "a", label: "a" },
+      { key: "b", label: "b" },
+      { key: OTHER_KEY, label: "Otros" },
+    ]);
     assert.deepEqual(colors, [CATEGORY_COLORS[0], CATEGORY_COLORS[1], OTHER_COLOR]);
   });
 
-  it("never repeats a hue: rows past the palette are gray", () => {
-    const rows = Array.from({ length: CATEGORY_COLORS.length + 2 }, (_, i) => ({ key: `r${i}` }));
+  it("repeats the palette when there are more categories than colors: none is left gray", () => {
+    const rows = Array.from({ length: CATEGORY_COLORS.length * 2 + 3 }, (_, i) => ({ key: `r${i}`, label: `r${i}` }));
     const colors = assignColors(rows);
-    assert.equal(new Set(colors.slice(0, CATEGORY_COLORS.length)).size, CATEGORY_COLORS.length);
-    assert.deepEqual(colors.slice(CATEGORY_COLORS.length), [OTHER_COLOR, OTHER_COLOR]);
+    assert.ok(!colors.includes(OTHER_COLOR));
+    colors.forEach((color, i) => assert.equal(color, CATEGORY_COLORS[i % CATEGORY_COLORS.length]));
+  });
+
+  it("by label, consecutive levels get different colors even when sorted by value", () => {
+    // Bars sorted by value: the levels come out of order.
+    const levels = [7, 1, 12, 3, 10, 2, 9, 4, 11, 5, 8, 6].map((n) => ({ key: `L${n}`, label: `Nivel ${n}` }));
+    const colors = assignColors(levels, "labels");
+    const colorOf = new Map(levels.map((l, i) => [l.label, colors[i]]));
+    assert.equal(colorOf.get("Nivel 1"), CATEGORY_COLORS[0]);
+    assert.equal(colorOf.get("Nivel 2"), CATEGORY_COLORS[1]);
+    assert.equal(colorOf.get("Nivel 9"), CATEGORY_COLORS[0]);
+    for (let n = 1; n < 12; n++) assert.notEqual(colorOf.get(`Nivel ${n}`), colorOf.get(`Nivel ${n + 1}`));
+  });
+});
+
+describe("groupsByColor", () => {
+  it("merges the categories that share a color, objects included", () => {
+    const merged = groupsByColor([
+      { color: "#111111", label: "Nivel 1", members: { m1: [1, 2] } },
+      { color: "#222222", label: "Nivel 2", members: { m1: [3] } },
+      { color: "#111111", label: "Nivel 9", members: { m1: [4], m2: [5] } },
+    ]);
+    assert.deepEqual(
+      merged.map((g) => [g.color, g.labels]),
+      [
+        ["#111111", ["Nivel 1", "Nivel 9"]],
+        ["#222222", ["Nivel 2"]],
+      ]
+    );
+    assert.deepEqual(merged[0].members, { m1: [1, 2, 4], m2: [5] });
   });
 });
 

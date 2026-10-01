@@ -375,11 +375,13 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
    usa "Modelo", útil para comparar varios modelos. Cada casilla tiene
    también un selector para quien no pueda arrastrar (pantalla táctil o
    teclado).
-6. **Gráficos con los datos**: se construyen al instante. Las barras
-   verticales muestran las 12 categorías mayores, las horizontales las 15 y
-   el circular 6; el resto se agrupa en "Otros". Cada gráfico tiene **Ver
-   tabla** con todas las categorías, y un pie con cuántos objetos tienen
-   esos datos.
+6. **Gráficos con los datos**: se construyen al instante y muestran todas
+   las categorías: hasta 50 en barras verticales (con desplazamiento lateral
+   si no caben) y hasta 100 en barras horizontales (con desplazamiento
+   vertical). Solo pasado ese límite las menores se agrupan en "Otros". El
+   circular muestra las 12 mayores, porque más porciones no se leen. Cada
+   gráfico tiene **Ver tabla** con todas las categorías, y un pie con
+   cuántos objetos tienen esos datos.
 7. **Segmentadores (filtros)**: arrastra un dato de texto o de fecha al
    panel "Segmentadores" (o elígelo en "+ Agregar segmentador"). Aparece la
    lista de sus valores con casillas y cuántos objetos tiene cada uno, con
@@ -424,9 +426,15 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
 11. **🎨 Colorear**: cada gráfico tiene este botón. Pinta cada categoría con
     su propio color **en el gráfico y en el modelo 3D**, con el mismo color
     en ambos (`viewer.setObjectState(..., { color })`), y muestra la leyenda.
-    Usa, en orden fijo, los 8 colores de la paleta validada para daltonismo;
-    si hay más categorías, las menores se agrupan en "Otros" (gris), así
-    nunca se repite un color. En el comparativo, A se pinta azul y B
+    Usa, en orden fijo, los 8 colores de la paleta validada para daltonismo.
+    Con más categorías los colores **se repiten en ciclo**, así todas las
+    categorías y todos sus objetos quedan coloreados (p. ej. muros por nivel
+    con 19 niveles: los 19 niveles con color, ninguno en gris). En barras los
+    colores se asignan en orden natural de nombre ("Nivel 2" antes que
+    "Nivel 10"), de modo que dos niveles consecutivos nunca comparten color;
+    la leyenda lista juntas las categorías de cada color ("Nivel 1, Nivel 9,
+    Nivel 17"). Las categorías que comparten color se pintan en una sola
+    llamada al visor (máximo 8). En el comparativo, A se pinta azul y B
     naranja. Solo un gráfico colorea el modelo a la vez: activarlo en otro
     quita los colores del anterior. Si cambian los datos, los filtros o el
     gráfico, los colores del modelo se actualizan solos. Al desactivarlo se
@@ -542,9 +550,9 @@ Cada barra guarda los objetos que la forman (por modelo) para poder
 seleccionarlos en el visor. Un dato cuyo tipo difiere entre modelos se
 ofrece como texto.
 
-**Colores**: las barras usan un solo color (son una sola serie). El circular
-usa, en orden fijo, 6 colores de una paleta validada para daltonismo, más
-gris para "Otros". El comparativo usa los dos primeros colores de esa
+**Colores**: las barras usan un solo color (son una sola serie) salvo con
+**Colorear**. El circular usa, en orden fijo, los colores de una paleta
+validada para daltonismo (se repiten pasado el 8.º), más gris para "Otros". El comparativo usa los dos primeros colores de esa
 paleta, validados juntos. Como algunos colores tienen poco contraste sobre
 blanco, los gráficos de varias series llevan leyenda con nombres y cada
 gráfico tiene su vista de tabla.

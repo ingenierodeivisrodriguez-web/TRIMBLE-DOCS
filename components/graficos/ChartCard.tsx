@@ -1,7 +1,14 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { assignColors, ColorGroup, COMPARE_COLORS, MAX_COLORED_ROWS } from "../../lib/graficos/colors";
+import {
+  assignColors,
+  CATEGORY_COLORS,
+  ColorGroup,
+  compareLabels,
+  COMPARE_COLORS,
+  groupsByColor,
+} from "../../lib/graficos/colors";
 import {
   aggregate,
   bucketCounts,
@@ -14,6 +21,7 @@ import {
   Members,
   mergeMembers,
   ModelDataset,
+  OTHER_KEY,
 } from "../../lib/graficos/modelData";
 import type { ChartReportData } from "../../lib/graficos/insights";
 import type { CardSpec, ChartType } from "../../lib/graficos/savedViews";
@@ -41,6 +49,8 @@ export const CHART_TYPES: { type: ChartType; label: string }[] = [
 export const FIELD_DRAG_TYPE = "application/x-graficos-field";
 
 const TABLE_ROW_LIMIT = 200;
+// Categories named per color in the color key before it summarizes the rest.
+const LEGEND_LABELS = 6;
 
 type DropTarget = "card" | "category" | "value" | "compare";
 
@@ -219,19 +229,28 @@ export default function ChartCard({
     };
   }
 
-  // With colors on, bars fold down to what the palette can color distinctly
-  // (8 hues + gray "Otros"), so every bar and its objects share one color.
+  // The same rows with or without colors: every category keeps its own bar,
+  // and with more categories than palette colors the colors repeat.
   const showColors = colored || exportMode;
   const singleRows = useMemo(() => single?.rows ?? [], [single]);
   const chartRows = useMemo(() => {
     const max = spec.type === "column" ? MAX_COLUMNS : spec.type === "horizontal" ? MAX_HORIZONTAL_BARS : MAX_SLICES;
-    return foldRows(singleRows, showColors ? Math.min(max, MAX_COLORED_ROWS) : max, chronological);
-  }, [singleRows, spec.type, showColors, chronological]);
+    return foldRows(singleRows, max, chronological);
+  }, [singleRows, spec.type, chronological]);
   const compareRows = useMemo(
     () => foldCompareRows(comparison?.rows ?? [], MAX_COMPARE_GROUPS, chronological),
     [comparison, chronological]
   );
-  const rowColors = useMemo(() => assignColors(chartRows.filter((r) => spec.type !== "donut" || r.value > 0)), [chartRows, spec.type]);
+  // Bars take colors in label order, so consecutive levels differ in the model;
+  // slices (and months) in their own order, so neighbours differ in the chart.
+  const rowColors = useMemo(
+    () =>
+      spec.type === "donut"
+        ? assignColors(chartRows.filter((r) => r.value > 0))
+        : assignColors(chartRows, chronological ? "rows" : "labels"),
+    [chartRows, spec.type, chronological]
+  );
+  const colorsRepeat = !isCompare && chartRows.filter((r) => r.key !== OTHER_KEY).length > CATEGORY_COLORS.length;
   const result = isCompare ? comparison : single;
   const hasRows = isCompare ? compareRows.length > 0 : singleRows.length > 0;
   const folded = isCompare ? compareRows.length < (comparison?.rows.length ?? 0) : chartRows.length < singleRows.length;
@@ -518,11 +537,15 @@ export default function ChartCard({
       </div>
 
       {colored && hasRows && !tableView && (spec.type === "column" || spec.type === "horizontal") && (
-        <ColorLegend groups={colorGroups} />
+        <ColorLegend
+          groups={chronological ? colorGroups : [...colorGroups].sort((a, b) => compareLabels(a.label, b.label))}
+        />
       )}
       {colored && hasRows && (
         <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
           🎨 Los objetos del modelo 3D tienen el mismo color que su categoría en este gráfico.
+          {colorsRepeat &&
+            ` Hay más categorías que colores (${CATEGORY_COLORS.length}), así que los colores se repiten: la leyenda indica qué categorías comparten cada uno.`}
         </div>
       )}
 
@@ -541,7 +564,13 @@ export default function ChartCard({
         <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
           {formatNumber(result.objectsWithData)} de {formatNumber(result.totalObjects)} objetos tienen estos datos
           {isCompare ? " en los periodos elegidos" : ` · ${formatNumber(singleRows.length)} categorías`}
-          {folded && !showTable ? (chronological ? " (los meses más antiguos se agrupan)" : " (las menores se agrupan en “Otros”)") : ""}
+          {folded && !showTable
+            ? chronological
+              ? " (los meses más antiguos se agrupan)"
+              : spec.type === "donut"
+                ? " (las menores se agrupan en “Otros”; en barras se ven todas)"
+                : " (las menores se agrupan en “Otros”)"
+            : ""}
           {!showTable ? " · Clic en una barra para seleccionar sus objetos en el modelo." : ""}
         </div>
       )}
@@ -549,14 +578,23 @@ export default function ChartCard({
   );
 }
 
-/** Color key for bar charts: which category each color stands for, here and in the model. */
+/**
+ * Color key for bar charts: which categories each color stands for, here and
+ * in the model. When colors repeat, the categories sharing one are listed together.
+ */
 function ColorLegend({ groups }: { groups: ColorGroup[] }) {
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
-      {groups.map((g) => (
-        <span key={`${g.color}-${g.label}`} style={{ display: "inline-flex", alignItems: "center", gap: 5, fontSize: 11.5, color: "var(--tc-gray-700)" }}>
-          <span style={{ width: 10, height: 10, borderRadius: 3, background: g.color, flexShrink: 0 }} />
-          {g.label}
+      {groupsByColor(groups).map((g) => (
+        <span
+          key={g.color}
+          title={g.label}
+          style={{ display: "inline-flex", alignItems: "flex-start", gap: 5, fontSize: 11.5, color: "var(--tc-gray-700)" }}
+        >
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: g.color, flexShrink: 0, marginTop: 2 }} />
+          {g.labels.length > LEGEND_LABELS
+            ? `${g.labels.slice(0, LEGEND_LABELS).join(", ")} y ${g.labels.length - LEGEND_LABELS} más`
+            : g.label}
         </span>
       ))}
     </div>

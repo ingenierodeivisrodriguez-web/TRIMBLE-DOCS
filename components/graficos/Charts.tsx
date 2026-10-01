@@ -18,16 +18,22 @@ import { ChartRow, CompareRow, formatNumber } from "../../lib/graficos/modelData
 
 // Single-series bars share one hue unless "Colorear" is on, when each bar
 // takes its category's color (the same one painted on the model). The donut
-// always colors by category; MAX_SLICES keeps it within the palette.
+// always colors by category. Past 8 categories the palette repeats.
 const SERIES_COLOR = CATEGORY_COLORS[0];
 const GRID_COLOR = "#e6e9ee";
 const TICK = { fontSize: 11, fill: "#6b7684" };
 // Marks outside the clicked category recede so the selection reads at a glance.
 const DIMMED = 0.3;
 
-export const MAX_COLUMNS = 12;
-export const MAX_HORIZONTAL_BARS = 15;
-export const MAX_SLICES = 6;
+// Bar charts show every category up to these limits (scrolling when they
+// don't fit the card); only past them do the smallest fold into "Otros".
+export const MAX_COLUMNS = 50;
+export const MAX_HORIZONTAL_BARS = 100;
+export const MAX_SLICES = 12;
+// Room per column before the chart scrolls sideways, and the tallest the
+// horizontal chart grows before it scrolls down.
+const COLUMN_WIDTH = 36;
+const HORIZONTAL_MAX_HEIGHT = 620;
 export const MAX_COMPARE_GROUPS = 10;
 
 export type CompareSide = "A" | "B";
@@ -91,74 +97,80 @@ interface SingleSeriesProps {
 
 export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
   return (
-    <ResponsiveContainer width="100%" height={280}>
-      <BarChart
-        data={rows}
-        margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
-        onClick={(state) => {
-          const row = rowAt(rows, state);
-          if (row) onRowClick(row);
-        }}
-        style={{ cursor: "pointer" }}
-      >
-        <CartesianGrid vertical={false} stroke={GRID_COLOR} />
-        <XAxis
-          dataKey="label"
-          tick={TICK}
-          tickFormatter={(v: string) => short(v, 12)}
-          interval={0}
-          angle={-30}
-          textAnchor="end"
-          height={64}
-          tickLine={false}
-          axisLine={{ stroke: GRID_COLOR }}
-        />
-        <YAxis tick={TICK} tickFormatter={(v: number) => formatNumber(v)} width={56} tickLine={false} axisLine={false} />
-        <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
-        <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
-          {rows.map((row, i) => (
-            <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <div style={{ overflowX: "auto", overflowY: "hidden" }}>
+      <div style={{ minWidth: rows.length * COLUMN_WIDTH + 64 }}>
+        <ResponsiveContainer width="100%" height={280}>
+          <BarChart
+            data={rows}
+            margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
+            onClick={(state) => {
+              const row = rowAt(rows, state);
+              if (row) onRowClick(row);
+            }}
+            style={{ cursor: "pointer" }}
+          >
+            <CartesianGrid vertical={false} stroke={GRID_COLOR} />
+            <XAxis
+              dataKey="label"
+              tick={TICK}
+              tickFormatter={(v: string) => short(v, 12)}
+              interval={0}
+              angle={-30}
+              textAnchor="end"
+              height={64}
+              tickLine={false}
+              axisLine={{ stroke: GRID_COLOR }}
+            />
+            <YAxis tick={TICK} tickFormatter={(v: number) => formatNumber(v)} width={56} tickLine={false} axisLine={false} />
+            <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
+            <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
+              {rows.map((row, i) => (
+                <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+              ))}
+            </Bar>
+          </BarChart>
+        </ResponsiveContainer>
+      </div>
+    </div>
   );
 }
 
 export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
   const height = Math.max(120, rows.length * 26 + 40);
   return (
-    <ResponsiveContainer width="100%" height={height}>
-      <BarChart
-        data={rows}
-        layout="vertical"
-        margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
-        onClick={(state) => {
-          const row = rowAt(rows, state);
-          if (row) onRowClick(row);
-        }}
-        style={{ cursor: "pointer" }}
-      >
-        <CartesianGrid horizontal={false} stroke={GRID_COLOR} />
-        <XAxis type="number" tick={TICK} tickFormatter={(v: number) => formatNumber(v)} tickLine={false} axisLine={false} />
-        <YAxis
-          type="category"
-          dataKey="label"
-          tick={TICK}
-          tickFormatter={(v: string) => short(v, 18)}
-          width={120}
-          interval={0}
-          tickLine={false}
-          axisLine={{ stroke: GRID_COLOR }}
-        />
-        <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
-        <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={animate}>
-          {rows.map((row, i) => (
-            <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
-          ))}
-        </Bar>
-      </BarChart>
-    </ResponsiveContainer>
+    <div style={{ maxHeight: HORIZONTAL_MAX_HEIGHT, overflowY: "auto", overflowX: "hidden" }}>
+      <ResponsiveContainer width="100%" height={height}>
+        <BarChart
+          data={rows}
+          layout="vertical"
+          margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
+          onClick={(state) => {
+            const row = rowAt(rows, state);
+            if (row) onRowClick(row);
+          }}
+          style={{ cursor: "pointer" }}
+        >
+          <CartesianGrid horizontal={false} stroke={GRID_COLOR} />
+          <XAxis type="number" tick={TICK} tickFormatter={(v: number) => formatNumber(v)} tickLine={false} axisLine={false} />
+          <YAxis
+            type="category"
+            dataKey="label"
+            tick={TICK}
+            tickFormatter={(v: string) => short(v, 18)}
+            width={120}
+            interval={0}
+            tickLine={false}
+            axisLine={{ stroke: GRID_COLOR }}
+          />
+          <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
+          <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={animate}>
+            {rows.map((row, i) => (
+              <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+            ))}
+          </Bar>
+        </BarChart>
+      </ResponsiveContainer>
+    </div>
   );
 }
 
