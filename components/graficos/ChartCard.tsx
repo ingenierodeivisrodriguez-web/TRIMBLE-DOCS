@@ -241,13 +241,16 @@ export default function ChartCard({
     () => foldCompareRows(comparison?.rows ?? [], MAX_COMPARE_GROUPS, chronological),
     [comparison, chronological]
   );
-  // Bars take colors in label order, so consecutive levels differ in the model;
-  // slices (and months) in their own order, so neighbours differ in the chart.
+  // Every chart type colors the same way: neighbouring bars or slices never
+  // share a color, nor do consecutive levels (by name) painted in the model.
   const rowColors = useMemo(
     () =>
       spec.type === "donut"
-        ? assignColors(chartRows.filter((r) => r.value > 0))
-        : assignColors(chartRows, chronological ? "rows" : "labels"),
+        ? assignColors(
+            chartRows.filter((r) => r.value > 0),
+            { byLabel: !chronological, ring: true }
+          )
+        : assignColors(chartRows, { byLabel: !chronological }),
     [chartRows, spec.type, chronological]
   );
   const colorsRepeat = !isCompare && chartRows.filter((r) => r.key !== OTHER_KEY).length > CATEGORY_COLORS.length;
@@ -531,6 +534,7 @@ export default function ChartCard({
             unitLabel={unitLabel}
             activeKey={activeKey}
             onRowClick={(r) => onSelectObjects(r.key, r.members)}
+            colors={rowColors}
             animate={!exportMode}
           />
         )}
@@ -543,9 +547,11 @@ export default function ChartCard({
       )}
       {colored && hasRows && (
         <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
-          🎨 Los objetos del modelo 3D tienen el mismo color que su categoría en este gráfico.
+          {isCompare
+            ? "🎨 En el modelo 3D, los objetos del periodo A van en azul y los del B en naranja, como en el gráfico; los demás conservan su color."
+            : "🎨 Los objetos del modelo 3D tienen el mismo color que su categoría en este gráfico."}
           {colorsRepeat &&
-            ` Hay más categorías que colores (${CATEGORY_COLORS.length}), así que los colores se repiten: la leyenda indica qué categorías comparten cada uno.`}
+            ` Hay más categorías que colores (${CATEGORY_COLORS.length}), así que los colores se repiten, nunca en dos categorías vecinas: la leyenda indica el color de cada una.`}
         </div>
       )}
 

@@ -23,15 +23,40 @@ describe("assignColors", () => {
     colors.forEach((color, i) => assert.equal(color, CATEGORY_COLORS[i % CATEGORY_COLORS.length]));
   });
 
-  it("by label, consecutive levels get different colors even when sorted by value", () => {
-    // Bars sorted by value: the levels come out of order.
-    const levels = [7, 1, 12, 3, 10, 2, 9, 4, 11, 5, 8, 6].map((n) => ({ key: `L${n}`, label: `Nivel ${n}` }));
-    const colors = assignColors(levels, "labels");
-    const colorOf = new Map(levels.map((l, i) => [l.label, colors[i]]));
-    assert.equal(colorOf.get("Nivel 1"), CATEGORY_COLORS[0]);
-    assert.equal(colorOf.get("Nivel 2"), CATEGORY_COLORS[1]);
-    assert.equal(colorOf.get("Nivel 9"), CATEGORY_COLORS[0]);
-    for (let n = 1; n < 12; n++) assert.notEqual(colorOf.get(`Nivel ${n}`), colorOf.get(`Nivel ${n + 1}`));
+  it("up to 8 categories, each one has its own color, also by label", () => {
+    const rows = ["Nivel 3", "Nivel 1", "Nivel 8", "Nivel 2", "Nivel 5"].map((label) => ({ key: label, label }));
+    assert.equal(new Set(assignColors(rows, { byLabel: true, ring: true })).size, rows.length);
+  });
+
+  // 19 levels in a few value orders, as bars or as donut slices.
+  const orders = [
+    [7, 1, 12, 3, 10, 2, 9, 4, 11, 5, 8, 6, 19, 13, 18, 14, 17, 15, 16],
+    [17, 9, 3, 16, 10, 4, 1, 8, 5, 15, 11, 18, 14, 13, 19, 2, 12, 6, 7],
+    Array.from({ length: 19 }, (_, i) => 19 - i),
+    Array.from({ length: 19 }, (_, i) => ((i * 8) % 19) + 1),
+  ];
+  for (const [i, order] of orders.entries()) {
+    it(`by label, neither consecutive levels nor neighbouring bars/slices share a color (order ${i + 1})`, () => {
+      const rows = order.map((n) => ({ key: `L${n}`, label: `Nivel ${n}` }));
+      for (const ring of [false, true]) {
+        const colors = assignColors(rows, { byLabel: true, ring });
+        assert.ok(!colors.includes(OTHER_COLOR));
+        const colorOf = new Map(rows.map((r, j) => [r.label, colors[j]]));
+        for (let n = 1; n < 19; n++) assert.notEqual(colorOf.get(`Nivel ${n}`), colorOf.get(`Nivel ${n + 1}`));
+        for (let j = 1; j < rows.length; j++) assert.notEqual(colors[j - 1], colors[j]);
+        if (ring) assert.notEqual(colors[0], colors[colors.length - 1]);
+        // The palette is spread evenly: no color covers more than 3 of 19 levels.
+        const uses = new Map<string, number>();
+        for (const c of colors) uses.set(c, (uses.get(c) ?? 0) + 1);
+        assert.ok(Math.max(...uses.values()) <= 3, JSON.stringify([...uses]));
+      }
+    });
+  }
+
+  it("a donut's last slice never takes the first slice's color", () => {
+    const rows = Array.from({ length: CATEGORY_COLORS.length + 1 }, (_, i) => ({ key: `r${i}`, label: `r${i}` }));
+    const colors = assignColors(rows, { ring: true });
+    assert.notEqual(colors[colors.length - 1], colors[0]);
   });
 });
 

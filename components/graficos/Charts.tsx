@@ -5,7 +5,6 @@ import {
   BarChart,
   CartesianGrid,
   Cell,
-  Legend,
   Pie,
   PieChart,
   ResponsiveContainer,
@@ -18,23 +17,25 @@ import { ChartRow, CompareRow, formatNumber } from "../../lib/graficos/modelData
 
 // Single-series bars share one hue unless "Colorear" is on, when each bar
 // takes its category's color (the same one painted on the model). The donut
-// always colors by category. Past 8 categories the palette repeats.
+// always colors by category. Past 8 categories the palette repeats (see assignColors).
 const SERIES_COLOR = CATEGORY_COLORS[0];
 const GRID_COLOR = "#e6e9ee";
 const TICK = { fontSize: 11, fill: "#6b7684" };
 // Marks outside the clicked category recede so the selection reads at a glance.
 const DIMMED = 0.3;
 
-// Bar charts show every category up to these limits (scrolling when they
-// don't fit the card); only past them do the smallest fold into "Otros".
+// Charts show every category up to these limits (scrolling when they don't
+// fit the card); only past them do the smallest fold into "Otros".
 export const MAX_COLUMNS = 50;
 export const MAX_HORIZONTAL_BARS = 100;
-export const MAX_SLICES = 12;
-// Room per column before the chart scrolls sideways, and the tallest the
-// horizontal chart grows before it scrolls down.
+export const MAX_SLICES = 50;
+export const MAX_COMPARE_GROUPS = 50;
+// Room per column (and per A/B pair) before a chart scrolls sideways, and the
+// tallest the horizontal chart and the donut's key grow before they scroll down.
 const COLUMN_WIDTH = 36;
+const COMPARE_GROUP_WIDTH = 56;
 const HORIZONTAL_MAX_HEIGHT = 620;
-export const MAX_COMPARE_GROUPS = 10;
+const DONUT_KEY_MAX_HEIGHT = 150;
 
 export type CompareSide = "A" | "B";
 
@@ -174,49 +175,84 @@ export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, col
   );
 }
 
-export function DonutChart({ rows, unitLabel, activeKey, onRowClick, animate = true }: SingleSeriesProps) {
-  // A slice can only show a positive share of the whole. Colors follow the
-  // same assignment as "Colorear", so the model matches the slices.
+export function DonutChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
+  // A slice can only show a positive share of the whole. Colors come from the
+  // card - the same ones "Colorear" paints on the model.
   const slices = rows.filter((r) => r.value > 0);
-  const colors = assignColors(slices);
+  const sliceColors = colors ?? assignColors(slices, { ring: true });
+  const total = slices.reduce((sum, r) => sum + r.value, 0);
+  // Many thin slices: no gaps, thinner borders, so none disappears.
+  const crowded = slices.length > 20;
 
   return (
-    <ResponsiveContainer width="100%" height={300}>
-      <PieChart>
-        <Pie
-          data={slices}
-          dataKey="value"
-          nameKey="label"
-          innerRadius={55}
-          outerRadius={95}
-          paddingAngle={1}
-          onClick={(_, index) => {
-            const row = slices[index];
-            if (row) onRowClick(row);
-          }}
-          cursor="pointer"
-          isAnimationActive={animate}
-        >
-          {slices.map((row, i) => (
-            <Cell
-              key={row.key}
-              fill={colors[i]}
-              fillOpacity={opacity(activeKey, row.key)}
-              stroke="#ffffff"
-              strokeWidth={2}
-            />
-          ))}
-        </Pie>
-        <Tooltip content={<RowTooltip unitLabel={unitLabel} />} />
-        <Legend
-          formatter={(value: string) => (
-            <span style={{ color: "var(--tc-gray-700)", fontSize: 12 }}>{short(value, 24)}</span>
-          )}
-          iconType="circle"
-          iconSize={9}
-        />
-      </PieChart>
-    </ResponsiveContainer>
+    <div>
+      <ResponsiveContainer width="100%" height={240}>
+        <PieChart>
+          <Pie
+            data={slices}
+            dataKey="value"
+            nameKey="label"
+            innerRadius={55}
+            outerRadius={95}
+            paddingAngle={crowded ? 0 : 1}
+            onClick={(_, index) => {
+              const row = slices[index];
+              if (row) onRowClick(row);
+            }}
+            cursor="pointer"
+            isAnimationActive={animate}
+          >
+            {slices.map((row, i) => (
+              <Cell
+                key={row.key}
+                fill={sliceColors[i]}
+                fillOpacity={opacity(activeKey, row.key)}
+                stroke="#ffffff"
+                strokeWidth={crowded ? 1 : 2}
+              />
+            ))}
+          </Pie>
+          <Tooltip content={<RowTooltip unitLabel={unitLabel} />} />
+        </PieChart>
+      </ResponsiveContainer>
+      {/* Key in slice order (clockwise from the top); a click selects like the slice does. */}
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          justifyContent: "center",
+          gap: "2px 10px",
+          maxHeight: DONUT_KEY_MAX_HEIGHT,
+          overflowY: "auto",
+        }}
+      >
+        {slices.map((row, i) => (
+          <button
+            key={row.key}
+            type="button"
+            onClick={() => onRowClick(row)}
+            title={`${row.label}: ${formatNumber(row.value)} ${unitLabel}`}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 5,
+              border: "none",
+              background: "transparent",
+              padding: "1px 0",
+              cursor: "pointer",
+              fontSize: 12,
+              fontFamily: "inherit",
+              color: "var(--tc-gray-700)",
+              opacity: opacity(activeKey, row.key),
+            }}
+          >
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: sliceColors[i], flexShrink: 0 }} />
+            {short(row.label, 24)}
+            <span style={{ color: "var(--tc-gray-500)" }}>{formatNumber(total ? (row.value / total) * 100 : 0)} %</span>
+          </button>
+        ))}
+      </div>
+    </div>
   );
 }
 
@@ -272,55 +308,64 @@ export function CompareChart({
   animate?: boolean;
 }) {
   return (
-    <ResponsiveContainer width="100%" height={310}>
-      <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }} barGap={2} barCategoryGap="22%">
-        <CartesianGrid vertical={false} stroke={GRID_COLOR} />
-        <XAxis
-          dataKey="label"
-          tick={TICK}
-          tickFormatter={(v: string) => short(v, 12)}
-          interval={0}
-          angle={-30}
-          textAnchor="end"
-          height={64}
-          tickLine={false}
-          axisLine={{ stroke: GRID_COLOR }}
-        />
-        <YAxis tick={TICK} tickFormatter={(v: number) => formatNumber(v)} width={56} tickLine={false} axisLine={false} />
-        <Tooltip
-          content={<CompareTooltip unitLabel={unitLabel} labelA={labelA} labelB={labelB} />}
-          cursor={{ fill: "var(--tc-blue-50)" }}
-        />
-        <Legend
-          formatter={(value: string) => <span style={{ color: "var(--tc-gray-700)", fontSize: 12 }}>{value}</span>}
-          iconType="circle"
-          iconSize={9}
-        />
-        {(["A", "B"] as const).map((side) => (
-          <Bar
-            key={side}
-            dataKey={side === "A" ? "a" : "b"}
-            name={side === "A" ? labelA : labelB}
-            fill={COMPARE_COLORS[side]}
-            radius={[4, 4, 0, 0]}
-            maxBarSize={28}
-            cursor="pointer"
-            isAnimationActive={animate}
-            onClick={(_, index) => {
-              const row = rows[index];
-              if (row) onBarClick(row, side);
-            }}
-          >
-            {rows.map((row) => (
-              <Cell
-                key={row.key}
-                fill={COMPARE_COLORS[side]}
-                fillOpacity={opacity(activeKey, `${row.key}|${side}`)}
+    <div>
+      <div style={{ overflowX: "auto", overflowY: "hidden" }}>
+        <div style={{ minWidth: rows.length * COMPARE_GROUP_WIDTH + 64 }}>
+          <ResponsiveContainer width="100%" height={290}>
+            <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }} barGap={2} barCategoryGap="22%">
+              <CartesianGrid vertical={false} stroke={GRID_COLOR} />
+              <XAxis
+                dataKey="label"
+                tick={TICK}
+                tickFormatter={(v: string) => short(v, 12)}
+                interval={0}
+                angle={-30}
+                textAnchor="end"
+                height={64}
+                tickLine={false}
+                axisLine={{ stroke: GRID_COLOR }}
               />
-            ))}
-          </Bar>
+              <YAxis tick={TICK} tickFormatter={(v: number) => formatNumber(v)} width={56} tickLine={false} axisLine={false} />
+              <Tooltip
+                content={<CompareTooltip unitLabel={unitLabel} labelA={labelA} labelB={labelB} />}
+                cursor={{ fill: "var(--tc-blue-50)" }}
+              />
+              {(["A", "B"] as const).map((side) => (
+                <Bar
+                  key={side}
+                  dataKey={side === "A" ? "a" : "b"}
+                  name={side === "A" ? labelA : labelB}
+                  fill={COMPARE_COLORS[side]}
+                  radius={[4, 4, 0, 0]}
+                  maxBarSize={28}
+                  cursor="pointer"
+                  isAnimationActive={animate}
+                  onClick={(_, index) => {
+                    const row = rows[index];
+                    if (row) onBarClick(row, side);
+                  }}
+                >
+                  {rows.map((row) => (
+                    <Cell
+                      key={row.key}
+                      fill={COMPARE_COLORS[side]}
+                      fillOpacity={opacity(activeKey, `${row.key}|${side}`)}
+                    />
+                  ))}
+                </Bar>
+              ))}
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </div>
+      <div style={{ display: "flex", justifyContent: "center", gap: 16, fontSize: 12, color: "var(--tc-gray-700)" }}>
+        {(["A", "B"] as const).map((side) => (
+          <span key={side} style={{ display: "inline-flex", alignItems: "center", gap: 5 }}>
+            <span style={{ width: 9, height: 9, borderRadius: "50%", background: COMPARE_COLORS[side] }} />
+            {side === "A" ? labelA : labelB}
+          </span>
         ))}
-      </BarChart>
-    </ResponsiveContainer>
+      </div>
+    </div>
   );
 }

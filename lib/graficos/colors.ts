@@ -32,21 +32,53 @@ const labelCollator = new Intl.Collator("es", { numeric: true, sensitivity: "bas
 export const compareLabels = (a: string, b: string) => labelCollator.compare(a, b);
 
 /**
- * One palette color per row, cycling when there are more rows than colors;
- * the folded "Otros"/"Anteriores" row is gray and doesn't use up a color.
+ * One palette color per row, repeating the palette when there are more rows
+ * than colors; the folded "Otros"/"Anteriores" row is gray and doesn't use up
+ * a color. Up to 8 categories, each gets its own color.
  *
- * `order: "rows"` hands colors out in row order - what a donut needs, so
- * neighbouring slices differ. `order: "labels"` hands them out in natural
- * label order ("Nivel 2" before "Nivel 10"), so consecutive levels, phases or
- * axes get different colors in the model even when the bars are sorted by value.
+ * Past that, colors repeat, but never between categories that would be read
+ * side by side: rows next to each other in the chart (and the last and first
+ * slice of a donut, with `ring`), and - with `byLabel` - categories next to
+ * each other in natural label order ("Nivel 2" before "Nivel 10"), so
+ * consecutive levels, phases or axes differ in the model even though the chart
+ * sorts them by value. Each category has at most 4 such neighbours and the
+ * palette has 8 colors, so one is always free.
  */
-export function assignColors(rows: { key: string; label: string }[], order: "rows" | "labels" = "rows"): string[] {
+export function assignColors(
+  rows: { key: string; label: string }[],
+  options: { byLabel?: boolean; ring?: boolean } = {}
+): string[] {
   const categories = rows.filter((row) => row.key !== OTHER_KEY);
-  if (order === "labels") categories.sort((a, b) => compareLabels(a.label, b.label));
-  const position = new Map(categories.map((row, i) => [row.key, i]));
+  const neighbours = new Map(categories.map((row) => [row.key, new Set<string>()]));
+  const link = (a: string, b: string) => {
+    if (a === b) return;
+    neighbours.get(a)!.add(b);
+    neighbours.get(b)!.add(a);
+  };
+  for (let i = 1; i < categories.length; i++) link(categories[i - 1].key, categories[i].key);
+  if (options.ring && categories.length > 2) link(categories[categories.length - 1].key, categories[0].key);
+
+  const order = options.byLabel ? [...categories].sort((a, b) => compareLabels(a.label, b.label)) : categories;
+  if (options.byLabel) for (let i = 1; i < order.length; i++) link(order[i - 1].key, order[i].key);
+
+  // In that order, each takes the next palette color; when a neighbour has it,
+  // the least used free color (the nearest one on ties), so the palette stays evenly spread.
+  const size = CATEGORY_COLORS.length;
+  const uses = new Array<number>(size).fill(0);
+  const colorOf = new Map<string, number>();
+  order.forEach((row, position) => {
+    const taken = new Set([...neighbours.get(row.key)!].map((key) => colorOf.get(key)));
+    let best = -1;
+    for (let step = 0; step < size; step++) {
+      const color = (position + step) % size;
+      if (!taken.has(color) && (best === -1 || uses[color] < uses[best])) best = color;
+    }
+    colorOf.set(row.key, best);
+    uses[best]++;
+  });
   return rows.map((row) => {
-    const i = position.get(row.key);
-    return i === undefined ? OTHER_COLOR : CATEGORY_COLORS[i % CATEGORY_COLORS.length];
+    const color = colorOf.get(row.key);
+    return color === undefined ? OTHER_COLOR : CATEGORY_COLORS[color];
   });
 }
 
