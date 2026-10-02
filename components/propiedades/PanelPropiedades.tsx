@@ -10,6 +10,7 @@ import {
   summarizeValues,
   summaryOf,
 } from "../../lib/propiedades/form";
+import { describeResponsables } from "../../lib/propiedades/responsables";
 import { readSelection, SelectedElement, SelectionRead, PropiedadesViewer } from "../../lib/propiedades/selection";
 import {
   AttributeDefinition,
@@ -216,6 +217,9 @@ export default function PanelPropiedades({
 
   const definitions = catalog?.definitions ?? [];
   const groups = useMemo(() => groupDefinitions(definitions.filter((d) => d.active)), [definitions]);
+  /** Attributes this user can assign: all for administrators, else those they are responsable for. */
+  const editable = useMemo(() => new Set(catalog?.editableIds ?? []), [catalog]);
+  const anyEditable = groups.some((g) => g.attributes.some((d) => editable.has(d.id)));
   const inactiveWithValues = definitions.filter((d) => !d.active && summaries.has(d.id));
 
   const editMap = useMemo(() => {
@@ -399,7 +403,14 @@ export default function PanelPropiedades({
               </p>
             </div>
           ) : (
-            groups.map((group) => (
+            <>
+            {!anyEditable && (
+              <div style={{ ...noticeBase, ...noticeStyles.info }}>
+                Puedes consultar estos atributos, pero no asignarlos: solo pueden hacerlo sus responsables y los
+                administradores del proyecto.
+              </div>
+            )}
+            {groups.map((group) => (
               <details key={group.name} open style={cardStyle}>
                 <summary style={groupSummaryStyle}>
                   {group.name} <span style={{ fontWeight: 600, color: "var(--tc-gray-500)", fontSize: 12 }}>{group.attributes.length}</span>
@@ -413,13 +424,21 @@ export default function PanelPropiedades({
                       edit={edits[def.id]}
                       elementCount={targets.length}
                       single={single}
+                      readOnly={
+                        editable.has(def.id)
+                          ? null
+                          : def.responsables.length
+                            ? `lo asignan ${describeResponsables(def.responsables)} o un administrador`
+                            : "lo asignan los administradores del proyecto"
+                      }
                       onEdit={(edit) => setField(def, edit)}
                       onRevert={() => revert(def.id)}
                     />
                   ))}
                 </div>
               </details>
-            ))
+            ))}
+            </>
           )}
 
           {inactiveWithValues.length > 0 && (
@@ -600,6 +619,7 @@ function AttributeField({
   edit,
   elementCount,
   single,
+  readOnly,
   onEdit,
   onRevert,
 }: {
@@ -608,6 +628,8 @@ function AttributeField({
   edit: FieldEdit | undefined;
   elementCount: number;
   single: boolean;
+  /** Who can assign it, when this user can't (the field is then only shown). */
+  readOnly: string | null;
   onEdit: (edit: FieldEdit) => void;
   onRevert: () => void;
 }) {
@@ -617,7 +639,17 @@ function AttributeField({
   const raw = edit ? edit.raw : initialRaw(def, summary);
 
   let control: React.ReactNode;
-  if (def.dataType === "boolean") {
+  if (readOnly !== null) {
+    control = (
+      <div id={id} role="textbox" aria-readonly="true" aria-labelledby={`${id}-label`} style={readOnlyBoxStyle}>
+        {summary.kind === "same" ? (
+          formatValue(def.dataType, summary.value)
+        ) : (
+          <span style={{ color: "var(--tc-gray-500)", fontStyle: "italic" }}>{summary.kind === "mixed" ? "Valores mixtos" : "Sin valor"}</span>
+        )}
+      </div>
+    );
+  } else if (def.dataType === "boolean") {
     const current = edit ? edit.value : summary.kind === "same" ? summary.value : summary.kind === "empty" ? null : undefined;
     const option = (label: string, value: boolean | null) => {
       const active = current === value;
@@ -678,7 +710,7 @@ function AttributeField({
     status = (
       <span>
         Valores mixtos: {summary.withValue} de {elementCount} elementos tienen valor
-        {summary.distinct > 1 ? ` (${summary.distinct} distintos)` : ""}. No se cambian si no editas el campo.
+        {summary.distinct > 1 ? ` (${summary.distinct} distintos)` : ""}.{readOnly === null ? " No se cambian si no editas el campo." : ""}
       </span>
     );
   else if (summary.kind === "same" && !edit)
@@ -699,6 +731,15 @@ function AttributeField({
       </label>
       {control}
       {status && <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>{status}</div>}
+      {readOnly !== null && (
+        <div style={readOnlyNoteStyle}>
+          <svg width="11" height="11" viewBox="0 0 16 16" aria-hidden="true" style={{ flexShrink: 0, marginTop: 2 }}>
+            <rect x="3" y="7" width="10" height="8" rx="1.5" fill="currentColor" />
+            <path d="M5 7V5a3 3 0 0 1 6 0v2" fill="none" stroke="currentColor" strokeWidth="1.8" />
+          </svg>
+          <span>Solo lectura: {readOnly}.</span>
+        </div>
+      )}
     </div>
   );
 }
@@ -752,6 +793,22 @@ const mixedBadgeStyle: React.CSSProperties = {
   border: "1px solid #f0c36d",
   borderRadius: 999,
   padding: "0 7px",
+};
+const readOnlyBoxStyle: React.CSSProperties = {
+  border: "1px dashed var(--tc-gray-300)",
+  borderRadius: 6,
+  padding: "6px 8px",
+  fontSize: 13,
+  color: "var(--tc-gray-700)",
+  background: "var(--tc-gray-100)",
+  minHeight: 32,
+  overflowWrap: "anywhere",
+};
+const readOnlyNoteStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 5,
+  fontSize: 11.5,
+  color: "var(--tc-gray-500)",
 };
 const inputStyle: React.CSSProperties = {
   border: "1px solid var(--tc-gray-300)",

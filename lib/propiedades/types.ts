@@ -14,6 +14,15 @@ export const DATA_TYPE_LABELS: Record<DataType, string> = {
 /** A value as it travels and is stored: dates as ISO "YYYY-MM-DD", shown as DD-MM-AAAA. */
 export type AttributeValue = string | number | boolean;
 
+/** A project contact (person or group of Trimble Connect) who can assign an attribute's values. */
+export interface Responsable {
+  type: "user" | "group";
+  /** Trimble Connect user or group id. */
+  id: string;
+  /** Name when it was assigned, shown if the contact list isn't at hand. */
+  name: string;
+}
+
 export interface AttributeDefinition {
   id: string;
   projectId: string;
@@ -24,6 +33,8 @@ export interface AttributeDefinition {
   active: boolean;
   /** How many element values use it: one with values can't be deleted, only deactivated. */
   valueCount: number;
+  /** Who can assign its values besides project administrators (none: administrators only). */
+  responsables: Responsable[];
   updatedAt: string;
   updatedBy: string | null;
 }
@@ -54,17 +65,27 @@ export interface DefinitionInput {
   dataType: DataType;
   group: string;
   sortOrder: number;
+  responsables?: Responsable[];
 }
 
 export interface CatalogResponse {
   definitions: AttributeDefinition[];
   /** Whether the caller is a project administrator (only they can edit the catalog). */
   canEdit: boolean;
+  /** Attributes whose values the caller can assign: all for administrators, else those they are responsable for. */
+  editableIds: string[];
+}
+
+/** The project's people and groups (Trimble Connect's team), to pick responsables from. */
+export interface ProjectContacts {
+  users: { id: string; name: string; email: string; pending: boolean }[];
+  groups: { id: string; name: string; usersCount: number | null }[];
 }
 
 export const DEFAULT_GROUP = "General";
 export const MAX_TEXT_LENGTH = 2000;
 export const MAX_TITLE_LENGTH = 120;
 export const MAX_GROUP_LENGTH = 80;
+export const MAX_RESPONSABLES = 50;
 /** Elements per query or save; a larger selection is handled in batches by the panel. */
 export const MAX_ELEMENTS_PER_REQUEST = 2000;

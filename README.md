@@ -587,7 +587,7 @@ archivos IFC no se modifican.
 | Dónde | Qué hace | Quién edita |
 |---|---|---|
 | **Menú lateral del proyecto → Propiedades** | Catálogo de atributos: crear, editar, desactivar, reactivar y eliminar definiciones (título, tipo, grupo, orden) | Administradores del proyecto. Los demás lo ven en solo lectura |
-| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos | Cualquier miembro del proyecto |
+| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
 
 Las dos superficies son la misma página (`/propiedades`) registrada con **un
 solo manifiesto**, [`public/manifest-propiedades.json`](public/manifest-propiedades.json),
@@ -684,6 +684,44 @@ Limitaciones:
 - **Metadatos.** Cada valor guarda quién lo modificó y cuándo; el panel lo
   muestra como "Modificado por … el DD-MM-AAAA".
 
+### Responsables: quién asigna cada atributo
+
+Cada atributo puede tener **responsables**: personas o grupos del equipo del
+proyecto en Trimble Connect (el mismo listado de usuarios y grupos de la
+sección de equipo/contactos del proyecto). Por ejemplo, a David Pérez o al
+grupo "Calidad" para los atributos de calidad.
+
+- **Quién puede asignar valores en el visor:** los administradores del
+  proyecto y los responsables del atributo. Un responsable puede estar
+  nombrado directamente o pertenecer a un grupo responsable.
+- **Sin responsables**, el atributo lo asignan solo los administradores.
+- **Los demás miembros** ven los valores pero no los cambian. En el panel,
+  cada campo que no pueden editar aparece como solo lectura, con un candado y
+  el texto "lo asignan …". Si no pueden editar ninguno, el panel lo avisa
+  arriba.
+- **Validación en el servidor.** La regla se aplica también al guardar: si un
+  cambio incluye un atributo que el usuario no puede asignar, se rechaza todo
+  (403 `not-responsable`) y no se guarda nada.
+- **Pertenencia a grupos.** Se consulta en Trimble Connect con
+  `GET /projects/{id}/users?groupId=…`, solo para los grupos que aparecen como
+  responsables, y se guarda en caché 2 minutos. Por eso un cambio en los
+  grupos de Trimble puede tardar hasta 2 minutos en notarse.
+
+**Dónde se asignan (solo administradores), en el catálogo:**
+
+- **Al crear o editar un atributo**, en el campo "Responsables". Es un
+  buscador de personas y grupos del proyecto que ignora tildes; se agregan
+  con clic o Enter y se quitan con la ×.
+- **Con "Responsables del grupo"**, en la cabecera de cada grupo. Lo que se
+  agrega o quita ahí se aplica a todos los atributos del grupo. Los
+  responsables asignados a un solo atributo no cambian.
+- **Al crear un atributo en un grupo existente**, se proponen los
+  responsables que comparten todos los atributos de ese grupo.
+
+Para mostrar los responsables se usa el nombre actual que tiene la persona o
+el grupo en Trimble Connect. Además se guarda el nombre que tenía al
+asignarse, que se muestra si la lista de contactos no está disponible.
+
 ### Catálogo (menú del proyecto)
 
 - **Edición solo para administradores.** Lo decide el rol del usuario en el
@@ -710,7 +748,7 @@ que usa "Validación":
 
 | Tabla | Columnas principales |
 |---|---|
-| `propiedades_definiciones` | `id` (uuid), `project_id`, `title`, `data_type` (`text` / `number` / `boolean` / `date`), `group_name`, `sort_order`, `active`, `created_at/by`, `updated_at/by` |
+| `propiedades_definiciones` | `id` (uuid), `project_id`, `title`, `data_type` (`text` / `number` / `boolean` / `date`), `group_name`, `sort_order`, `active`, `responsables` (jsonb: lista de `{ type: "user" \| "group", id, name }`), `created_at/by`, `updated_at/by` |
 | `propiedades_valores` | `id`, `project_id`, `model_id` (informativo), `ifc_guid` (22 caracteres, validado), `attribute_id` → definición (`on delete restrict`), una columna tipada por tipo (`value_text`, `value_number`, `value_boolean`, `value_date`; exactamente una con valor), `updated_at`, `updated_by` |
 
 - **Clave del valor.** Cada valor es único por **(proyecto, IFCGUID,
@@ -730,17 +768,19 @@ que usa "Validación":
 
 Todas las rutas requieren `?projectId=` y el token del usuario
 (`Authorization: Bearer`, el mismo de `extension.requestPermission("accesstoken")`).
-El servidor comprueba que el usuario sea miembro del proyecto y, para el
-catálogo, que sea administrador.
+El servidor comprueba que el usuario sea miembro del proyecto. Además, para
+cambiar el catálogo comprueba que sea administrador, y para guardar valores,
+que sea administrador o responsable de cada atributo.
 
 | Método y ruta | Uso |
 |---|---|
-| `GET /api/propiedades/definiciones` | Catálogo completo (activas e inactivas, con su número de valores) y si el usuario puede editarlo |
-| `POST /api/propiedades/definiciones` | Crear: `{ title, dataType, group?, sortOrder? }` (solo administradores) |
-| `PATCH /api/propiedades/definiciones/{id}` | Editar o desactivar/reactivar: `{ title?, dataType?, group?, sortOrder?, active? }` (solo administradores) |
+| `GET /api/propiedades/definiciones` | Catálogo completo (activas e inactivas, con su número de valores y responsables), si el usuario puede editarlo (`canEdit`) y qué atributos puede asignar (`editableIds`) |
+| `POST /api/propiedades/definiciones` | Crear: `{ title, dataType, group?, sortOrder?, responsables? }` (solo administradores) |
+| `PATCH /api/propiedades/definiciones/{id}` | Editar o desactivar/reactivar: `{ title?, dataType?, group?, sortOrder?, active?, responsables? }` (solo administradores) |
 | `DELETE /api/propiedades/definiciones/{id}` | Eliminar; 409 si ya tiene valores (solo administradores) |
 | `POST /api/propiedades/valores/consulta` | Valores de uno o varios elementos: `{ ifcGuids: [...] }` |
-| `PUT /api/propiedades/valores` | Upsert en varios elementos a la vez: `{ elements: [{ ifcGuid, modelId }], changes: [{ attributeId, value }] }`. `value: null` borra. Fechas en ISO (`AAAA-MM-DD`) |
+| `PUT /api/propiedades/valores` | Upsert en varios elementos a la vez: `{ elements: [{ ifcGuid, modelId }], changes: [{ attributeId, value }] }`. `value: null` borra. Fechas en ISO (`AAAA-MM-DD`). 403 `not-responsable` si incluye un atributo que el usuario no puede asignar |
+| `GET /api/propiedades/contactos` | Personas y grupos del proyecto para elegir responsables: `{ users: [{ id, name, email, pending }], groups: [{ id, name, usersCount }] }` (solo administradores) |
 
 Cada solicitud admite hasta 2.000 elementos y es atómica (todo o nada). Para
 selecciones más grandes (el panel lee hasta 5.000 objetos), el panel envía
@@ -753,6 +793,10 @@ No hay variables nuevas: usa las mismas `SUPABASE_URL` /
 `SUPABASE_SERVICE_ROLE_KEY` de "Validación". Solo hay que ejecutar una vez
 [`supabase/propiedades.sql`](supabase/propiedades.sql) en el **SQL Editor** de
 Supabase. Hasta entonces, la API responde con un mensaje que indica ese paso.
+**Al actualizar**, por ejemplo cuando se agregaron los responsables, vuelve a
+ejecutar el mismo archivo: es seguro repetirlo y no borra datos. Si falta
+hacerlo, el catálogo sigue funcionando, pero guardar responsables muestra un
+mensaje que pide ese paso.
 En `npm run dev` sin variables de Supabase, los datos se guardan en memoria.
 
 ---

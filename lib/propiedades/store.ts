@@ -4,6 +4,7 @@ import type {
   AttributeValue,
   DataType,
   DefinitionInput,
+  Responsable,
   StoredValue,
   TargetElement,
   ValueChange,
@@ -56,6 +57,8 @@ interface DefinitionRow {
   sort_order: number;
   active: boolean;
   value_count?: number | string;
+  /** Missing until supabase/propiedades.sql is run again after the upgrade. */
+  responsables?: Responsable[] | null;
   updated_at: string;
   updated_by: string | null;
 }
@@ -82,6 +85,7 @@ function toDefinition(row: DefinitionRow): AttributeDefinition {
     sortOrder: row.sort_order,
     active: row.active,
     valueCount: Number(row.value_count ?? 0),
+    responsables: Array.isArray(row.responsables) ? row.responsables : [],
     updatedAt: row.updated_at,
     updatedBy: row.updated_by,
   };
@@ -102,6 +106,9 @@ function toValue(row: ValueRow): StoredValue {
 
 const SETUP_HINT =
   "Falta crear las tablas de Propiedades en Supabase: abre Supabase → SQL Editor y ejecuta una vez el archivo supabase/propiedades.sql del repositorio.";
+
+const UPGRADE_HINT =
+  "Falta actualizar las tablas de Propiedades para guardar responsables: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/propiedades.sql del repositorio (es seguro repetirlo; no borra datos).";
 
 function supabaseStore(): PropertiesStore | null {
   const rawUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -129,6 +136,7 @@ function supabaseStore(): PropertiesStore | null {
     } catch {
       // not JSON
     }
+    if (/responsables/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) {
       throw new StoreError(SETUP_HINT);
     }
@@ -170,6 +178,8 @@ function supabaseStore(): PropertiesStore | null {
           data_type: input.dataType,
           group_name: input.group,
           sort_order: input.sortOrder,
+          // Only sent when set, so the catalog keeps working before the upgrade.
+          ...(input.responsables?.length ? { responsables: input.responsables } : {}),
           created_by: user,
           updated_by: user,
         }),
@@ -185,6 +195,7 @@ function supabaseStore(): PropertiesStore | null {
       if (patch.group !== undefined) body.group_name = patch.group;
       if (patch.sortOrder !== undefined) body.sort_order = patch.sortOrder;
       if (patch.active !== undefined) body.active = patch.active;
+      if (patch.responsables !== undefined) body.responsables = patch.responsables;
       const res = await call(`/propiedades_definiciones?project_id=${eq(projectId)}&id=${eq(id)}`, {
         method: "PATCH",
         headers: { Prefer: "return=minimal" },
@@ -260,6 +271,7 @@ export function memoryStore(): PropertiesStore {
         id: randomUUID(),
         projectId,
         ...input,
+        responsables: input.responsables ?? [],
         active: true,
         valueCount: 0,
         updatedAt: now,

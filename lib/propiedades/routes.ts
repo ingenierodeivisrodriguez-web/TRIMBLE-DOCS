@@ -9,6 +9,8 @@ export interface RouteContext {
   projectId: string;
   caller: Caller;
   store: PropertiesStore;
+  /** The caller's Trimble Connect token, for routes that read Trimble data (contacts). */
+  accessToken: string;
 }
 
 /**
@@ -30,7 +32,7 @@ export async function handle(
   }
   try {
     const caller = await resolveCaller(accessToken, projectId);
-    return await run({ projectId, caller, store: propertiesStore() });
+    return await run({ projectId, caller, store: propertiesStore(), accessToken });
   } catch (err) {
     if (err instanceof ServiceError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });

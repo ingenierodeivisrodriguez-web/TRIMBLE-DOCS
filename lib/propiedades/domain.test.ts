@@ -150,6 +150,7 @@ function def(id: string, title: string, group: string, sortOrder: number, extra:
     sortOrder,
     active: true,
     valueCount: 0,
+    responsables: [],
     updatedAt: "",
     updatedBy: null,
     ...extra,

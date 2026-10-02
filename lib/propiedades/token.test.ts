@@ -47,6 +47,7 @@ describe("token del usuario", () => {
 });
 
 describe("cliente HTTP: renovación del token", () => {
+  const live = jwt({ sub: "u1", exp: Date.now() / 1000 + 3600 });
   const realFetch = globalThis.fetch;
   afterEach(() => {
     globalThis.fetch = realFetch;
@@ -68,9 +69,9 @@ describe("cliente HTTP: renovación del token", () => {
       { status: 200, body: { definitions: [], canEdit: true } },
     ]);
     const fresh = jwt({ exp: Date.now() / 1000 + 3600, n: 2 });
-    const api = httpApi("proj1", { get: () => valid, refresh: async () => fresh });
+    const api = httpApi("proj1", { get: () => live, refresh: async () => fresh });
     assert.deepEqual(await api.getCatalog(), { definitions: [], canEdit: true });
-    assert.deepEqual(sent, [`Bearer ${valid}`, `Bearer ${fresh}`]);
+    assert.deepEqual(sent, [`Bearer ${live}`, `Bearer ${fresh}`]);
   });
 
   it("renueva antes de enviar un token vencido", async () => {
@@ -87,8 +88,8 @@ describe("cliente HTTP: renovación del token", () => {
       { status: 401, body: { error: "Trimble Connect no aceptó tu sesión.", code: "trimble-session" } },
     ]);
     const api = httpApi("proj1", {
-      get: () => valid,
-      refresh: async () => valid,
+      get: () => live,
+      refresh: async () => live,
       describe: () => "token JWT de 900 caracteres",
     });
     await assert.rejects(api.getCatalog(), (err: unknown) => {
@@ -102,7 +103,7 @@ describe("cliente HTTP: renovación del token", () => {
 
   it("no reintenta otros errores", async () => {
     const sent = mockFetch([{ status: 409, body: { error: "Tiene valores.", code: "has-values" } }]);
-    const api = httpApi("proj1", { get: () => valid, refresh: async () => "otro-token-largo-xxxxxxxx" });
+    const api = httpApi("proj1", { get: () => live, refresh: async () => "otro-token-largo-xxxxxxxx" });
     await assert.rejects(api.deleteDefinition("a1"), /Tiene valores/);
     assert.equal(sent.length, 1);
   });

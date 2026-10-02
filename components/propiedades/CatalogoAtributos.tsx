@@ -4,28 +4,41 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { ApiError, PropiedadesApi } from "../../lib/propiedades/client";
 import { existingGroups, groupDefinitions } from "../../lib/propiedades/form";
 import {
+  applyGroupResponsables,
+  commonResponsables,
+  responsableKey,
+  withCurrentNames,
+} from "../../lib/propiedades/responsables";
+import {
   AttributeDefinition,
   CatalogResponse,
   DATA_TYPE_LABELS,
   DATA_TYPES,
   DataType,
   DEFAULT_GROUP,
+  ProjectContacts,
+  Responsable,
 } from "../../lib/propiedades/types";
 import { isoToDisplay } from "../../lib/propiedades/values";
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
+import ResponsablesPicker, { ResponsableChip } from "./ResponsablesPicker";
 
 interface Draft {
   title: string;
   dataType: DataType;
   group: string;
   sortOrder: string;
+  responsables: Responsable[];
 }
 
-const EMPTY_DRAFT: Draft = { title: "", dataType: "text", group: "", sortOrder: "" };
+const EMPTY_DRAFT: Draft = { title: "", dataType: "text", group: "", sortOrder: "", responsables: [] };
 
 function draftOf(def: AttributeDefinition): Draft {
-  return { title: def.title, dataType: def.dataType, group: def.group, sortOrder: String(def.sortOrder) };
+  return { title: def.title, dataType: def.dataType, group: def.group, sortOrder: String(def.sortOrder), responsables: def.responsables };
 }
+
+const RESPONSABLES_HINT =
+  "Además de los administradores, solo ellos podrán asignar los valores en el visor 3D. Sin responsables, solo los administradores.";
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : "Ocurrió un error.";
@@ -54,6 +67,11 @@ export default function CatalogoAtributos({
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<{ tone: "info" | "error"; text: string } | null>(null);
+  const [contacts, setContacts] = useState<ProjectContacts | null>(null);
+  const [contactsError, setContactsError] = useState("");
+  /** Whether the new attribute's responsables were picked by hand (else they follow its group). */
+  const [newTouched, setNewTouched] = useState(false);
+  const [groupEdit, setGroupEdit] = useState<{ name: string; before: Responsable[]; value: Responsable[] } | null>(null);
 
   const load = useCallback(async () => {
     try {
@@ -74,6 +92,20 @@ export default function CatalogoAtributos({
   const groups = useMemo(() => existingGroups(definitions), [definitions]);
   const canEdit = catalog?.canEdit ?? false;
 
+  const loadContacts = useCallback(async () => {
+    setContactsError("");
+    try {
+      setContacts(await api.getContacts());
+    } catch (err) {
+      setContactsError(message(err));
+    }
+  }, [api]);
+
+  // Only administrators pick responsables, so only they need the project's team.
+  useEffect(() => {
+    if (canEdit && !contacts && !contactsError) loadContacts();
+  }, [canEdit, contacts, contactsError, loadContacts]);
+
   async function run(action: () => Promise<unknown>, success: string) {
     setBusy(true);
     setNotice(null);
@@ -92,6 +124,34 @@ export default function CatalogoAtributos({
     }
   }
 
+  /** What every active attribute of a group shares, suggested for a new attribute in that group. */
+  function groupCommon(name: string): Responsable[] {
+    return commonResponsables(definitions.filter((d) => d.active && d.group === name.trim()));
+  }
+
+  async function saveGroupResponsables(attributes: AttributeDefinition[]) {
+    if (!groupEdit) return;
+    const changes = applyGroupResponsables(attributes, groupEdit.before, groupEdit.value);
+    if (changes.length === 0) return setGroupEdit(null);
+    const ok = await run(async () => {
+      for (const change of changes) await api.updateDefinition(change.id, { responsables: change.responsables });
+    }, `Responsables de "${groupEdit.name}" actualizados en ${changes.length === 1 ? "1 atributo" : `${changes.length} atributos`}.`);
+    if (ok) setGroupEdit(null);
+  }
+
+  function picker(id: string, value: Responsable[], onChange: (value: Responsable[]) => void) {
+    return (
+      <ResponsablesPicker
+        id={id}
+        value={withCurrentNames(value, contacts)}
+        onChange={onChange}
+        contacts={contacts}
+        contactsError={contactsError}
+        onRetry={loadContacts}
+      />
+    );
+  }
+
   function parseOrder(text: string): number | undefined | null {
     if (!text.trim()) return undefined;
     const n = Number(text);
@@ -103,10 +163,17 @@ export default function CatalogoAtributos({
     const order = parseOrder(draft.sortOrder);
     if (order === null) return setNotice({ tone: "error", text: "El orden debe ser un número entero." });
     const ok = await run(
-      () => api.createDefinition({ title: draft.title, dataType: draft.dataType, group: draft.group || DEFAULT_GROUP, sortOrder: order }),
+      () =>
+        api.createDefinition({
+          title: draft.title,
+          dataType: draft.dataType,
+          group: draft.group || DEFAULT_GROUP,
+          sortOrder: order,
+          responsables: draft.responsables,
+        }),
       `Atributo "${draft.title.trim()}" creado.`
     );
-    if (ok) setDraft({ ...EMPTY_DRAFT, group: draft.group, dataType: draft.dataType });
+    if (ok) setDraft({ ...EMPTY_DRAFT, group: draft.group, dataType: draft.dataType, responsables: draft.responsables });
   }
 
   async function saveEdit(def: AttributeDefinition) {
@@ -119,6 +186,7 @@ export default function CatalogoAtributos({
           dataType: editDraft.dataType,
           group: editDraft.group || DEFAULT_GROUP,
           sortOrder: order ?? def.sortOrder,
+          responsables: editDraft.responsables,
         }),
       `Atributo "${editDraft.title.trim()}" actualizado.`
     );
@@ -141,7 +209,7 @@ export default function CatalogoAtributos({
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       {!canEdit && (
         <div style={{ ...noticeBase, ...noticeStyles.info }}>
-          Solo los administradores del proyecto pueden modificar el catálogo. Aquí ves los atributos disponibles.
+          Solo los administradores del proyecto pueden modificar el catálogo y sus responsables. Aquí ves los atributos disponibles y quién puede asignar cada uno.
         </div>
       )}
       {notice && (
@@ -169,7 +237,12 @@ export default function CatalogoAtributos({
               <TypeSelect id="new-type" value={draft.dataType} onChange={(dataType) => setDraft({ ...draft, dataType })} />
             </Field>
             <Field label="Grupo" htmlFor="new-group">
-              <GroupInput id="new-group" value={draft.group} groups={groups} onChange={(group) => setDraft({ ...draft, group })} />
+              <GroupInput
+                id="new-group"
+                value={draft.group}
+                groups={groups}
+                onChange={(group) => setDraft({ ...draft, group, responsables: newTouched ? draft.responsables : groupCommon(group) })}
+              />
             </Field>
             <Field label="Orden (opcional)" htmlFor="new-order">
               <input
@@ -181,6 +254,15 @@ export default function CatalogoAtributos({
                 style={inputStyle}
               />
             </Field>
+            <div style={{ gridColumn: "1 / -1" }}>
+              <Field label="Responsables (opcional)" htmlFor="new-responsables">
+                {picker("new-responsables", draft.responsables, (responsables) => {
+                  setNewTouched(true);
+                  setDraft({ ...draft, responsables });
+                })}
+                <span style={hintStyle}>{RESPONSABLES_HINT}</span>
+              </Field>
+            </div>
           </div>
           <div>
             <button type="submit" disabled={busy || !draft.title.trim()} style={{ ...primaryButtonStyle, opacity: busy || !draft.title.trim() ? 0.55 : 1 }}>
@@ -201,9 +283,43 @@ export default function CatalogoAtributos({
       ) : (
         activeGroups.map((group) => (
           <section key={group.name} style={cardStyle} aria-label={`Grupo ${group.name}`}>
-            <h3 style={cardTitleStyle}>
-              {group.name} <span style={countStyle}>{group.attributes.length}</span>
-            </h3>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, flexWrap: "wrap" }}>
+              <h3 style={cardTitleStyle}>
+                {group.name} <span style={countStyle}>{group.attributes.length}</span>
+              </h3>
+              {canEdit && groupEdit?.name !== group.name && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={() => {
+                    const common = commonResponsables(group.attributes);
+                    setGroupEdit({ name: group.name, before: common, value: common });
+                  }}
+                  style={smallButtonStyle}
+                >
+                  Responsables del grupo
+                </button>
+              )}
+            </div>
+            {groupEdit?.name === group.name && (
+              <div style={groupPanelStyle}>
+                <Field label={`Responsables de todo el grupo "${group.name}"`} htmlFor={`group-resp-${group.name}`}>
+                  {picker(`group-resp-${group.name}`, groupEdit.value, (value) => setGroupEdit({ ...groupEdit, value }))}
+                </Field>
+                <span style={hintStyle}>
+                  Lo que agregues o quites aquí se aplica a {group.attributes.length === 1 ? "su atributo" : `sus ${group.attributes.length} atributos`}.
+                  Los responsables asignados a un solo atributo no cambian.
+                </span>
+                <div style={{ display: "flex", gap: 6 }}>
+                  <button type="button" onClick={() => saveGroupResponsables(group.attributes)} disabled={busy} style={primaryButtonStyle}>
+                    Guardar
+                  </button>
+                  <button type="button" onClick={() => setGroupEdit(null)} style={secondaryButtonStyle}>
+                    Cancelar
+                  </button>
+                </div>
+              </div>
+            )}
             <ul style={listStyle}>
               {group.attributes.map((def) =>
                 editingId === def.id ? (
@@ -243,6 +359,12 @@ export default function CatalogoAtributos({
                           style={inputStyle}
                         />
                       </Field>
+                      <div style={{ gridColumn: "1 / -1" }}>
+                        <Field label="Responsables" htmlFor={`edit-resp-${def.id}`}>
+                          {picker(`edit-resp-${def.id}`, editDraft.responsables, (responsables) => setEditDraft({ ...editDraft, responsables }))}
+                          <span style={hintStyle}>{RESPONSABLES_HINT}</span>
+                        </Field>
+                      </div>
                     </div>
                     {def.valueCount > 0 && (
                       <span style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
@@ -266,6 +388,14 @@ export default function CatalogoAtributos({
                         <Badge>{DATA_TYPE_LABELS[def.dataType]}</Badge>
                         <Badge muted>orden {def.sortOrder}</Badge>
                         <Badge muted>{def.valueCount === 1 ? "1 valor" : `${def.valueCount} valores`}</Badge>
+                      </div>
+                      <div style={{ display: "flex", gap: 5, flexWrap: "wrap", alignItems: "center", marginTop: 6 }}>
+                        <span style={assignLabelStyle}>Asignan:</span>
+                        {def.responsables.length ? (
+                          withCurrentNames(def.responsables, contacts).map((r) => <ResponsableChip key={responsableKey(r)} r={r} />)
+                        ) : (
+                          <span style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>solo administradores</span>
+                        )}
                       </div>
                     </div>
                     {canEdit && (
@@ -500,6 +630,17 @@ const rowStyle: React.CSSProperties = {
   flexWrap: "wrap",
 };
 const mutedStyle: React.CSSProperties = { fontSize: 13, color: "var(--tc-gray-500)" };
+const hintStyle: React.CSSProperties = { fontSize: 11.5, color: "var(--tc-gray-500)", lineHeight: 1.4 };
+const assignLabelStyle: React.CSSProperties = { fontSize: 11.5, fontWeight: 600, color: "var(--tc-gray-500)" };
+const groupPanelStyle: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+  gap: 8,
+  padding: 10,
+  borderRadius: 8,
+  background: "var(--tc-blue-50)",
+  border: "1px solid var(--tc-blue-100)",
+};
 const inputStyle: React.CSSProperties = {
   border: "1px solid var(--tc-gray-300)",
   borderRadius: 6,

@@ -4,7 +4,9 @@ import {
   Caller,
   createDefinition,
   deleteDefinition,
+  editableAttributeIds,
   getCatalog,
+  listContacts,
   queryValues,
   saveValues,
   ServiceError,
@@ -13,7 +15,17 @@ import {
 import { memoryStore } from "./store";
 
 const admin: Caller = { id: "u1", name: "Ana Pérez (ana@obra.com)", isAdmin: true };
-const user: Caller = { id: "u2", name: "Luis Gómez", isAdmin: false };
+// Responsable of the "Obra" attributes in person and of "Calidad" through the group g-cal.
+const user: Caller = {
+  id: "u2",
+  name: "Luis Gómez",
+  isAdmin: false,
+  memberOfGroups: async (ids) => new Set(ids.filter((id) => id === "g-cal")),
+};
+// A project member who isn't responsable of anything.
+const outsider: Caller = { id: "u3", name: "Marta Ruiz", isAdmin: false, memberOfGroups: async () => new Set() };
+const LUIS = { type: "user", id: "u2", name: "Luis Gómez" } as const;
+const CALIDAD = { type: "group", id: "g-cal", name: "Calidad" } as const;
 const P = "proj1";
 const G1 = "3CqVfw$t15ihB2vPgB1wri";
 const G2 = "0000000000000000000000";
@@ -29,9 +41,9 @@ async function rejects(promise: Promise<unknown>, status: number, code?: string)
 
 async function setup() {
   const store = memoryStore();
-  const fecha = await createDefinition(store, admin, P, { title: "Fecha de instalación", dataType: "date", group: "Obra" });
-  const avance = await createDefinition(store, admin, P, { title: "Avance (%)", dataType: "number", group: "Obra" });
-  const listo = await createDefinition(store, admin, P, { title: "Inspeccionado", dataType: "boolean", group: "Calidad" });
+  const fecha = await createDefinition(store, admin, P, { title: "Fecha de instalación", dataType: "date", group: "Obra", responsables: [LUIS] });
+  const avance = await createDefinition(store, admin, P, { title: "Avance (%)", dataType: "number", group: "Obra", responsables: [LUIS] });
+  const listo = await createDefinition(store, admin, P, { title: "Inspeccionado", dataType: "boolean", group: "Calidad", responsables: [CALIDAD] });
   return { store, fecha, avance, listo };
 }
 
@@ -145,5 +157,77 @@ describe("values", () => {
       saveValues(store, user, "otroProyecto", { elements: [{ ifcGuid: G1, modelId: "m1" }], changes: [{ attributeId: avance.id, value: 1 }] }),
       400
     );
+  });
+});
+
+describe("responsables", () => {
+  const one = (attributeId: string, value: unknown) => ({
+    elements: [{ ifcGuid: G1, modelId: "m1" }],
+    changes: [{ attributeId, value }],
+  });
+
+  it("lets responsables (in person or through a group) and administrators assign values", async () => {
+    const { store, fecha, listo } = await setup();
+    await saveValues(store, user, P, one(fecha.id, "2026-05-20")); // in person
+    await saveValues(store, user, P, one(listo.id, true)); // through the group
+    await saveValues(store, admin, P, one(listo.id, false)); // administrators always
+    assert.equal((await queryValues(store, P, { ifcGuids: [G1] })).length, 2);
+  });
+
+  it("refuses everyone else, without writing anything", async () => {
+    const { store, fecha, avance } = await setup();
+    await rejects(saveValues(store, outsider, P, one(fecha.id, "2026-05-20")), 403, "not-responsable");
+    // one forbidden attribute stops the whole save
+    const sinResponsables = await createDefinition(store, admin, P, { title: "Nota", dataType: "text" });
+    await rejects(
+      saveValues(store, user, P, {
+        elements: [{ ifcGuid: G1, modelId: "m1" }],
+        changes: [
+          { attributeId: avance.id, value: 10 },
+          { attributeId: sinResponsables.id, value: "hola" },
+        ],
+      }),
+      403,
+      "not-responsable"
+    );
+    assert.deepEqual(await queryValues(store, P, { ifcGuids: [G1] }), []);
+  });
+
+  it("tells each caller which attributes they can assign", async () => {
+    const { store, fecha, avance, listo } = await setup();
+    const nota = await createDefinition(store, admin, P, { title: "Nota", dataType: "text" });
+    const ids = async (c: Caller) => new Set((await getCatalog(store, c, P)).editableIds);
+    assert.deepEqual(await ids(admin), new Set([fecha.id, avance.id, listo.id, nota.id]));
+    assert.deepEqual(await ids(user), new Set([fecha.id, avance.id, listo.id]));
+    assert.deepEqual(await ids(outsider), new Set());
+  });
+
+  it("asks for group membership only when it matters", async () => {
+    const { store, fecha, listo } = await setup();
+    const asked: string[][] = [];
+    const spy: Caller = { ...user, memberOfGroups: async (g) => (asked.push(g), new Set(g)) };
+    const defs = (await getCatalog(store, admin, P)).definitions;
+    await editableAttributeIds(spy, defs.filter((d) => d.id === fecha.id));
+    assert.deepEqual(asked, []);
+    await editableAttributeIds(spy, defs.filter((d) => d.id === listo.id));
+    assert.deepEqual(asked, [["g-cal"]]);
+  });
+
+  it("validates and de-duplicates the list, and only administrators set it", async () => {
+    const { store, fecha } = await setup();
+    const updated = await updateDefinition(store, admin, P, fecha.id, { responsables: [LUIS, LUIS, CALIDAD] });
+    assert.deepEqual(updated.responsables, [LUIS, CALIDAD]);
+    await rejects(updateDefinition(store, admin, P, fecha.id, { responsables: [{ type: "empresa", id: "x", name: "X" }] }), 400);
+    await rejects(updateDefinition(store, admin, P, fecha.id, { responsables: [{ type: "user", id: "../x", name: "X" }] }), 400);
+    await rejects(updateDefinition(store, admin, P, fecha.id, { responsables: "Luis" }), 400);
+    await rejects(updateDefinition(store, user, P, fecha.id, { responsables: [] }), 403, "not-admin");
+    const cleared = await updateDefinition(store, admin, P, fecha.id, { responsables: [] });
+    assert.deepEqual(cleared.responsables, []);
+  });
+
+  it("shows the contact list only to administrators", async () => {
+    const contacts = { users: [], groups: [{ id: "g-cal", name: "Calidad", usersCount: 3 }] };
+    assert.deepEqual(await listContacts(admin, async () => contacts), contacts);
+    await rejects(listContacts(user, async () => contacts), 403, "not-admin");
   });
 });

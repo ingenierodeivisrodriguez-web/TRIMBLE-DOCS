@@ -242,6 +242,8 @@ export interface ProjectUser {
   email: string;
   /** The user's role in this project (ListProjectUsersResponse.role). */
   role?: "ADMIN" | "USER" | string;
+  /** ACTIVE, PENDING (invited, not joined yet) or REMOVED. */
+  status?: string;
 }
 
 export interface CurrentUser {
@@ -257,17 +259,22 @@ export async function getCurrentUser(baseUrl: string, accessToken: string): Prom
   return { id: data.id, firstName: data.firstName, lastName: data.lastName, email: data.email };
 }
 
-/** GET /projects/{projectId}/users, paginated the same way as folder items. */
+/**
+ * GET /projects/{projectId}/users, paginated the same way as folder items.
+ * With `groupId`, only the members of that group (a documented filter).
+ */
 export async function listProjectUsers(
   baseUrl: string,
   accessToken: string,
-  projectId: string
+  projectId: string,
+  options: { groupId?: string } = {}
 ): Promise<ProjectUser[]> {
   const all: ProjectUser[] = [];
   let start = 0;
+  const query = options.groupId ? `?groupId=${encodeURIComponent(options.groupId)}` : "";
   for (;;) {
     const end = start + FOLDER_PAGE_SIZE - 1;
-    const url = `${baseUrl}/projects/${encodeURIComponent(projectId)}/users`;
+    const url = `${baseUrl}/projects/${encodeURIComponent(projectId)}/users${query}`;
     const batch = (await trimbleFetch(url, accessToken, {
       Range: `items=${start}-${end}`,
     })) as ProjectUser[];
@@ -281,6 +288,7 @@ export async function listProjectUsers(
 export interface ProjectGroup {
   id: string;
   name: string;
+  usersCount?: number;
 }
 
 /** GET /groups?projectId={projectId} - the project's user groups. */

@@ -1,6 +1,7 @@
 -- Servicio de datos de la herramienta "Propiedades": catálogo de atributos por
 -- proyecto y valores asignados a elementos del modelo por su IFCGUID.
--- Ejecútalo una sola vez en Supabase → SQL Editor. Es seguro volver a ejecutarlo.
+-- Ejecútalo en Supabase → SQL Editor. Es seguro volver a ejecutarlo: no borra
+-- datos, y así se aplican también las actualizaciones (p. ej. los responsables).
 -- No usa los Property Sets/UDA de Trimble Connect: estos datos viven solo aquí.
 
 -- Definiciones de atributos (el catálogo que configura el administrador).
@@ -19,6 +20,20 @@ create table if not exists public.propiedades_definiciones (
 );
 create index if not exists propiedades_definiciones_project_idx
   on public.propiedades_definiciones (project_id);
+
+-- Responsables: personas o grupos de Trimble Connect que pueden asignar los
+-- valores del atributo, además de los administradores del proyecto. Lista de
+-- {"type": "user" | "group", "id": "...", "name": "..."}; vacía = solo administradores.
+alter table public.propiedades_definiciones
+  add column if not exists responsables jsonb not null default '[]'::jsonb;
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'propiedades_definiciones_responsables_lista') then
+    alter table public.propiedades_definiciones
+      add constraint propiedades_definiciones_responsables_lista check (jsonb_typeof(responsables) = 'array');
+  end if;
+end;
+$$;
 
 -- Valores asignados. Un valor por (proyecto, IFCGUID, atributo): el valor sigue
 -- al elemento aunque cambie la versión del modelo. Cada fila guarda el valor en
@@ -43,11 +58,14 @@ create index if not exists propiedades_valores_attribute_idx
   on public.propiedades_valores (attribute_id);
 
 -- Catálogo con la cantidad de valores de cada atributo (para saber si se puede
--- borrar o solo desactivar).
+-- borrar o solo desactivar). Las columnas van en orden fijo y las nuevas al
+-- final, para que "create or replace" funcione sobre la versión anterior.
 create or replace view public.propiedades_definiciones_uso
 with (security_invoker = true) as
-select d.*,
-       (select count(*) from public.propiedades_valores v where v.attribute_id = d.id) as value_count
+select d.id, d.project_id, d.title, d.data_type, d.group_name, d.sort_order, d.active,
+       d.created_at, d.created_by, d.updated_at, d.updated_by,
+       (select count(*) from public.propiedades_valores v where v.attribute_id = d.id) as value_count,
+       d.responsables
 from public.propiedades_definiciones d;
 
 -- Guarda varios atributos en varios elementos en una sola transacción.

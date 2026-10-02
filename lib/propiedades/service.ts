@@ -9,7 +9,10 @@ import {
   DefinitionInput,
   MAX_ELEMENTS_PER_REQUEST,
   MAX_GROUP_LENGTH,
+  MAX_RESPONSABLES,
   MAX_TITLE_LENGTH,
+  ProjectContacts,
+  Responsable,
   StoredValue,
   TargetElement,
   ValueChange,
@@ -22,6 +25,8 @@ export interface Caller {
   name: string;
   /** Project administrators are the only ones who can change the catalog. */
   isAdmin: boolean;
+  /** Which of these Trimble Connect groups the caller belongs to (asked only when needed). */
+  memberOfGroups?: (groupIds: string[]) => Promise<Set<string>>;
 }
 
 export class ServiceError extends Error {
@@ -53,6 +58,24 @@ function cleanText(value: unknown, field: string, max: number): string {
   return text;
 }
 
+const CONTACT_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+/** People or groups of the project; repeated ones are dropped. */
+function readResponsables(value: unknown): Responsable[] {
+  if (!Array.isArray(value)) throw new ServiceError("Los responsables deben ser una lista.", 400);
+  if (value.length > MAX_RESPONSABLES) throw new ServiceError(`Se pueden asignar hasta ${MAX_RESPONSABLES} responsables.`, 400);
+  const out = new Map<string, Responsable>();
+  for (const raw of value) {
+    const r = (raw ?? {}) as Record<string, unknown>;
+    if ((r.type !== "user" && r.type !== "group") || typeof r.id !== "string" || !CONTACT_ID_RE.test(r.id)) {
+      throw new ServiceError("Uno de los responsables no es una persona o grupo válido del proyecto.", 400);
+    }
+    const name = typeof r.name === "string" && r.name.trim() ? r.name.trim().slice(0, 160) : r.id;
+    out.set(`${r.type}:${r.id}`, { type: r.type, id: r.id, name });
+  }
+  return [...out.values()];
+}
+
 function readDefinitionInput(body: unknown, partial: boolean): Partial<DefinitionInput> & { active?: boolean } {
   const b = (body ?? {}) as Record<string, unknown>;
   const out: Partial<DefinitionInput> & { active?: boolean } = {};
@@ -72,6 +95,7 @@ function readDefinitionInput(body: unknown, partial: boolean): Partial<Definitio
     }
     out.sortOrder = b.sortOrder;
   }
+  if (b.responsables !== undefined) out.responsables = readResponsables(b.responsables);
   if (partial && b.active !== undefined) {
     if (typeof b.active !== "boolean") throw new ServiceError("El estado activo debe ser sí o no.", 400);
     out.active = b.active;
@@ -94,8 +118,40 @@ function assertUniqueTitle(definitions: AttributeDefinition[], title: string, ex
 
 // ---------------------------------------------------------------- catalog
 
+/**
+ * The attributes whose values the caller can assign: every one for project
+ * administrators; otherwise those that name them, or a group they belong to,
+ * as responsables. An attribute without responsables is for administrators only.
+ */
+export async function editableAttributeIds(caller: Caller, definitions: AttributeDefinition[]): Promise<Set<string>> {
+  if (caller.isAdmin) return new Set(definitions.map((d) => d.id));
+  const editable = new Set(
+    definitions.filter((d) => d.responsables.some((r) => r.type === "user" && r.id === caller.id)).map((d) => d.id)
+  );
+  const groupIds = [
+    ...new Set(
+      definitions
+        .filter((d) => !editable.has(d.id))
+        .flatMap((d) => d.responsables.filter((r) => r.type === "group").map((r) => r.id))
+    ),
+  ];
+  if (groupIds.length && caller.memberOfGroups) {
+    const mine = await caller.memberOfGroups(groupIds);
+    for (const d of definitions) if (d.responsables.some((r) => r.type === "group" && mine.has(r.id))) editable.add(d.id);
+  }
+  return editable;
+}
+
 export async function getCatalog(store: PropertiesStore, caller: Caller, projectId: string): Promise<CatalogResponse> {
-  return { definitions: await store.listDefinitions(projectId), canEdit: caller.isAdmin };
+  const definitions = await store.listDefinitions(projectId);
+  const editable = await editableAttributeIds(caller, definitions.filter((d) => d.active));
+  return { definitions, canEdit: caller.isAdmin, editableIds: [...editable] };
+}
+
+/** The project's people and groups, to choose responsables from (administrators only). */
+export async function listContacts(caller: Caller, load: () => Promise<ProjectContacts>): Promise<ProjectContacts> {
+  requireAdmin(caller);
+  return load();
 }
 
 export async function createDefinition(
@@ -206,7 +262,8 @@ export async function saveValues(
   }
 
   if (!Array.isArray(b.changes) || b.changes.length === 0) throw new ServiceError("No hay cambios para guardar.", 400);
-  const definitions = new Map((await store.listDefinitions(projectId)).map((d) => [d.id, d]));
+  const catalog = await store.listDefinitions(projectId);
+  const definitions = new Map(catalog.map((d) => [d.id, d]));
   const changes: ValueChange[] = [];
   const seen = new Set<string>();
   for (const raw of b.changes as unknown[]) {
@@ -225,6 +282,19 @@ export async function saveValues(
     const check = validateValue(def.dataType, c.value);
     if (!check.ok) throw new ServiceError(`"${def.title}": ${check.error}.`, 400);
     changes.push({ attributeId: def.id, value: check.value });
+  }
+
+  const editable = await editableAttributeIds(
+    caller,
+    changes.map((c) => definitions.get(c.attributeId)!)
+  );
+  const notAllowed = changes.filter((c) => !editable.has(c.attributeId)).map((c) => `"${definitions.get(c.attributeId)!.title}"`);
+  if (notAllowed.length) {
+    throw new ServiceError(
+      `No puedes asignar ${notAllowed.join(", ")}: solo sus responsables o un administrador del proyecto. No se guardó nada.`,
+      403,
+      "not-responsable"
+    );
   }
 
   await store.saveValues(projectId, [...byGuid.values()], changes, caller.name);

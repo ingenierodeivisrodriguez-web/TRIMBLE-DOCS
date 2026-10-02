@@ -3,6 +3,7 @@ import {
   CatalogResponse,
   DefinitionInput,
   MAX_ELEMENTS_PER_REQUEST,
+  ProjectContacts,
   StoredValue,
   TargetElement,
   ValueChange,
@@ -17,6 +18,8 @@ export interface PropiedadesApi {
   deleteDefinition(id: string): Promise<void>;
   queryValues(ifcGuids: string[]): Promise<StoredValue[]>;
   saveValues(elements: TargetElement[], changes: ValueChange[]): Promise<void>;
+  /** The project's people and groups, to pick responsables from (administrators only). */
+  getContacts(): Promise<ProjectContacts>;
 }
 
 export class ApiError extends Error {
@@ -71,6 +74,7 @@ export function httpApi(projectId: string, auth: TokenSource): PropiedadesApi {
 
   return {
     getCatalog: () => request<CatalogResponse>("/definiciones"),
+    getContacts: () => request<ProjectContacts>("/contactos"),
     createDefinition: (input) => request("/definiciones", { method: "POST", body: JSON.stringify(input) }),
     updateDefinition: (id, patch) =>
       request(`/definiciones/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),
