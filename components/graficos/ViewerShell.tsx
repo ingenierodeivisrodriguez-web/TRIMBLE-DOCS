@@ -65,10 +65,14 @@ export default function ViewerShell({ children }: { children: (context: ViewerCo
     if (!api) throw new Error("La extensión todavía no está conectada con Trimble Connect.");
     const result = await api.extension.requestPermission("accesstoken");
     if (result === "pending") {
-      throw new Error("Acepta el permiso que muestra Trimble Connect para leer las bibliotecas de propiedades y vuelve a intentar.");
+      throw new Error(
+        "Acepta el permiso que muestra Trimble Connect (para leer las bibliotecas y los atributos de Propiedades del proyecto) y pulsa Actualizar."
+      );
     }
     if (result === "denied") {
-      throw new Error("Se denegó el permiso para leer las bibliotecas. Puedes restablecerlo en la configuración de la extensión.");
+      throw new Error(
+        "Se denegó el permiso de acceso: sin él no se leen las bibliotecas ni los atributos de Propiedades. Puedes restablecerlo en la configuración de la extensión."
+      );
     }
     token.current = result;
     return result;
