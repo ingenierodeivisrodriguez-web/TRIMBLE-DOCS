@@ -96,9 +96,11 @@ interface SingleSeriesProps {
   colors?: string[] | null;
   /** Off while exporting, so the captured SVG is the final drawing, not a frame of the animation. */
   animate?: boolean;
+  /** Fixed top of the value axis (bars): lets a chart fill up toward a known total, e.g. in the Simulador. */
+  maxValue?: number;
 }
 
-export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
+export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true, maxValue }: SingleSeriesProps) {
   return (
     <div style={{ overflowX: "auto", overflowY: "hidden" }}>
       <div style={{ minWidth: rows.length * COLUMN_WIDTH + 64, overflow: "hidden" }}>
@@ -124,7 +126,14 @@ export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, an
               tickLine={false}
               axisLine={{ stroke: GRID_COLOR }}
             />
-            <YAxis tick={TICK} tickFormatter={(v: number) => formatNumber(v)} width={56} tickLine={false} axisLine={false} />
+            <YAxis
+              tick={TICK}
+              tickFormatter={(v: number) => formatNumber(v)}
+              width={56}
+              tickLine={false}
+              axisLine={false}
+              domain={maxValue ? [0, maxValue] : undefined}
+            />
             <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
             <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
               {rows.map((row, i) => (
@@ -138,7 +147,7 @@ export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, an
   );
 }
 
-export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
+export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true, maxValue }: SingleSeriesProps) {
   const height = Math.max(120, rows.length * 26 + 40);
   return (
     <div style={{ maxHeight: HORIZONTAL_MAX_HEIGHT, overflowY: "auto", overflowX: "hidden" }}>
@@ -154,7 +163,14 @@ export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, col
           style={{ cursor: "pointer" }}
         >
           <CartesianGrid horizontal={false} stroke={GRID_COLOR} />
-          <XAxis type="number" tick={TICK} tickFormatter={(v: number) => formatNumber(v)} tickLine={false} axisLine={false} />
+          <XAxis
+            type="number"
+            tick={TICK}
+            tickFormatter={(v: number) => formatNumber(v)}
+            tickLine={false}
+            axisLine={false}
+            domain={maxValue ? [0, maxValue] : undefined}
+          />
           <YAxis
             type="category"
             dataKey="label"

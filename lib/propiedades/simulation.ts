@@ -2,7 +2,7 @@
 // (native or an attribute of this app). Elements appear in the 3D viewer as
 // the timeline reaches their date; the progress is the share of the dated
 // elements already shown.
-import type { Members, ModelDataset } from "../graficos/modelData";
+import { aggregate, ChartResult, ChartRow, FieldKind, foldRows, mergeMembers, Members, ModelDataset, OTHER_KEY } from "../graficos/modelData";
 
 const DAY_MS = 86_400_000;
 
@@ -113,4 +113,94 @@ export function progressCurve(items: TimelineItem[], start: number, end: number,
 /** Members of several models merged into one (no element appears twice in a timeline). */
 export function memberCount(members: Members): number {
   return Object.values(members).reduce((sum, ids) => sum + ids.length, 0);
+}
+
+// ---------------------------------------------------------------- charts of the progress
+
+/** The datasets reduced to the elements with the date, each sorted by it (with the day of each record). */
+export interface DatedDataset {
+  dataset: ModelDataset;
+  /** Day of each record of `dataset.records`, ascending. */
+  days: number[];
+}
+
+export function datedDatasets(datasets: ModelDataset[], fieldKey: string): DatedDataset[] {
+  return datasets.map((dataset) => {
+    const dated = dataset.records
+      .map((record) => ({ record, day: dayNumber(record.values[fieldKey]) }))
+      .filter((r): r is { record: (typeof dataset.records)[number]; day: number } => r.day !== null)
+      .sort((a, b) => a.day - b.day);
+    return { dataset: { ...dataset, records: dated.map((r) => r.record) }, days: dated.map((r) => r.day) };
+  });
+}
+
+/** How many of the ascending `days` are on or before `day`. */
+function upTo(days: number[], day: number): number {
+  let lo = 0;
+  let hi = days.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (days[mid] <= day) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
+/** The elements already shown on `day`: each dataset cut at that date (null: none yet). */
+export function shownDatasets(dated: DatedDataset[], day: number | null): ModelDataset[] {
+  return dated.map(({ dataset, days }) => ({
+    ...dataset,
+    records: dataset.records.slice(0, day === null ? 0 : upTo(days, day)),
+  }));
+}
+
+export interface ProgressChart {
+  /** The final categories (fixed order) with the values of the elements shown so far. */
+  rows: ChartRow[];
+  /** The same categories with their final values. */
+  finalRows: ChartRow[];
+  /** Top of the scale: the largest final value. */
+  maxValue: number;
+  /** Elements with the chart's data: shown so far / in the whole timeline. */
+  shownWithData: number;
+  totalWithData: number;
+}
+
+/**
+ * A chart at a moment of the simulation: categories and scale come from the
+ * whole timeline (`final`: the chart of every dated element, computed once),
+ * so bars grow toward their final size instead of the axis rescaling and the
+ * bars reordering; the values come from the elements shown so far.
+ */
+export function progressChart(
+  final: ChartResult,
+  shown: ModelDataset[],
+  spec: { category: string; categoryKind: FieldKind; value: string | null },
+  maxRows: number
+): ProgressChart {
+  const chronological = spec.categoryKind === "date";
+  const finalRows = foldRows(final.rows, maxRows, chronological);
+  const current = aggregate(shown, spec);
+  const byKey = new Map(current.rows.map((r) => [r.key, r]));
+  const kept = new Set(finalRows.filter((r) => r.key !== OTHER_KEY).map((r) => r.key));
+  const rows = finalRows.map((row) => {
+    if (row.key === OTHER_KEY) {
+      const rest = current.rows.filter((r) => !kept.has(r.key));
+      return {
+        ...row,
+        value: rest.reduce((sum, r) => sum + r.value, 0),
+        objects: rest.reduce((sum, r) => sum + r.objects, 0),
+        members: mergeMembers(rest.map((r) => r.members)),
+      };
+    }
+    const now = byKey.get(row.key);
+    return now ? { ...row, value: now.value, objects: now.objects, members: now.members } : { ...row, value: 0, objects: 0, members: {} };
+  });
+  return {
+    rows,
+    finalRows,
+    maxValue: finalRows.reduce((max, r) => Math.max(max, r.value), 0),
+    shownWithData: current.objectsWithData,
+    totalWithData: final.objectsWithData,
+  };
 }

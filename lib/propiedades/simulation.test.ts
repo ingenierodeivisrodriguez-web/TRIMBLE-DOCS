@@ -1,15 +1,18 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { Field, ModelDataset } from "../graficos/modelData";
+import { aggregate, Field, ModelDataset } from "../graficos/modelData";
 import {
   buildTimeline,
   countUpTo,
+  datedDatasets,
   dayNumber,
   isoFromDay,
   memberCount,
   membersOf,
+  progressChart,
   progressCurve,
   progressPercent,
+  shownDatasets,
 } from "./simulation";
 
 const FECHA: Field = { key: "prop:a2", label: "semana de instalacion", group: "programacion", kind: "date" };
@@ -85,5 +88,52 @@ describe("línea de tiempo", () => {
     const empty = buildTimeline([dataset("x", [[1, undefined]])], FECHA.key);
     assert.equal(empty.start, null);
     assert.deepEqual(progressCurve(empty.items, 0, 0), []);
+  });
+});
+
+describe("gráficos del avance", () => {
+  const TIPO: Field = { key: "@objectType", label: "Tipo", group: "General", kind: "text" };
+  const AREA: Field = { key: "Dimensions · Area", label: "Area", group: "Dimensions", kind: "number" };
+  const ds: ModelDataset = {
+    modelId: "est",
+    modelName: "est",
+    fields: new Map([FECHA, TIPO, AREA].map((f) => [f.key, f])),
+    coverage: new Map(),
+    records: [
+      { runtimeId: 1, values: { [FECHA.key]: "2026-01-10", [TIPO.key]: "Columna", [AREA.key]: 2 } },
+      { runtimeId: 2, values: { [FECHA.key]: "2026-01-20", [TIPO.key]: "Columna", [AREA.key]: 3 } },
+      { runtimeId: 3, values: { [FECHA.key]: "2026-01-15", [TIPO.key]: "Muro", [AREA.key]: 10 } },
+      { runtimeId: 4, values: { [TIPO.key]: "Losa", [AREA.key]: 50 } }, // sin fecha: nunca aparece
+    ],
+  };
+  const dated = datedDatasets([ds], FECHA.key);
+  const full = dated.map((d) => d.dataset);
+
+  it("deja solo los elementos con fecha, ordenados por ella", () => {
+    assert.deepEqual(full[0].records.map((r) => r.runtimeId), [1, 3, 2]);
+    assert.deepEqual(shownDatasets(dated, null)[0].records, []);
+    assert.deepEqual(shownDatasets(dated, dayNumber("2026-01-15"))[0].records.map((r) => r.runtimeId), [1, 3]);
+  });
+
+  it("muestra lo que ya apareció, con las categorías y la escala del final", () => {
+    const spec = { category: TIPO.key, categoryKind: "text" as const, value: null };
+    const day10 = progressChart(aggregate(full, spec), shownDatasets(dated, dayNumber("2026-01-10")), spec, 50);
+    // Columna (2 al final) va primero y Muro (1) después, aunque Muro aún no aparezca
+    assert.deepEqual(day10.rows.map((r) => [r.label, r.value]), [["Columna", 1], ["Muro", 0]]);
+    assert.equal(day10.maxValue, 2);
+    assert.equal(day10.shownWithData, 1);
+    assert.equal(day10.totalWithData, 3);
+    const end = progressChart(aggregate(full, spec), shownDatasets(dated, dayNumber("2026-12-31")), spec, 50);
+    assert.deepEqual(end.rows.map((r) => [r.label, r.value]), [["Columna", 2], ["Muro", 1]]);
+    assert.deepEqual(end.rows[0].members, { est: [1, 2] });
+  });
+
+  it("suma un valor numérico y agrupa el resto en Otros", () => {
+    const spec = { category: TIPO.key, categoryKind: "text" as const, value: AREA.key };
+    const day15 = progressChart(aggregate(full, spec), shownDatasets(dated, dayNumber("2026-01-15")), spec, 50);
+    assert.deepEqual(day15.rows.map((r) => [r.label, r.value]), [["Muro", 10], ["Columna", 2]]);
+    assert.equal(day15.maxValue, 10);
+    const folded = progressChart(aggregate(full, spec), shownDatasets(dated, dayNumber("2026-01-15")), spec, 1);
+    assert.deepEqual(folded.rows.map((r) => [r.label, r.value]), [["Otros", 12]]);
   });
 });

@@ -865,8 +865,28 @@ elementos en el tiempo, según una fecha.
 - **Cola de cambios:** los cambios al visor van en cola, uno a la vez. Si la
   reproducción va más rápido que el visor, se juntan en un solo cambio.
 
-La lógica (orden por fecha, conteo hasta una fecha, curva de avance) está
-en [`lib/propiedades/simulation.ts`](lib/propiedades/simulation.ts), con
+**Gráficos del avance.** Debajo de la línea de tiempo hay tres gráficos,
+iguales a los de Gráficos de Modelos: barras verticales, barras horizontales y
+circular. El tipo se puede cambiar en cada uno. Cada gráfico se configura con
+**Categorías** (cualquier dato de los modelos o atributo del proyecto) y
+**Valor** (cantidad de objetos o la suma de un dato numérico).
+
+- **Qué cuentan:** solo los elementos que **ya aparecieron** en la fecha
+  actual. Si ese día se ven 5 columnas, los gráficos muestran esas 5.
+- **Se llenan sin saltar:** las categorías, su orden y la escala del eje son
+  los del final de la línea de tiempo. Así las barras crecen hacia su tamaño
+  final en lugar de reordenarse o cambiar de escala, y en el circular cada
+  categoría conserva su color.
+- **Selección:** al hacer clic en una barra o sector se seleccionan en el
+  modelo esos elementos.
+- **Configuración:** se recuerda en la pestaña del navegador.
+- **Piezas reutilizadas:** usan las mismas piezas de gráfico de Gráficos de
+  Modelos ([`components/graficos/Charts.tsx`](components/graficos/Charts.tsx),
+  que admite una escala fija con `maxValue`) y su misma agregación.
+
+La lógica (orden por fecha, conteo hasta una fecha, curva de avance y
+gráficos del avance) está en
+[`lib/propiedades/simulation.ts`](lib/propiedades/simulation.ts), con
 pruebas.
 
 ### Catálogo (menú del proyecto)

@@ -8,15 +8,18 @@ import type { PropiedadesViewer } from "../../lib/propiedades/selection";
 import {
   buildTimeline,
   countUpTo,
+  datedDatasets,
   isoFromDay,
   membersOf,
   progressCurve,
   progressPercent,
+  shownDatasets,
   today,
 } from "../../lib/propiedades/simulation";
 import { isoToDisplay } from "../../lib/propiedades/values";
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
 import ModelosCard from "./ModelosCard";
+import SimChartCard, { SimChartSpec } from "./SimChartCard";
 import type { ModelData } from "./useModelData";
 
 /** Viewer updates per second while playing. */
@@ -33,6 +36,22 @@ const HIGHLIGHT = "#eb6834";
 const GHOST = "#d7dee6";
 
 type UndatedMode = "gris" | "ocultar" | "igual";
+
+const DEFAULT_CHARTS: SimChartSpec[] = [
+  { type: "column", category: null, value: null },
+  { type: "horizontal", category: null, value: null },
+  { type: "donut", category: null, value: null },
+];
+
+function readCharts(key: string): SimChartSpec[] {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(key) ?? "null");
+    if (Array.isArray(stored) && stored.length === DEFAULT_CHARTS.length) return stored as SimChartSpec[];
+  } catch {
+    // storage unavailable or not ours
+  }
+  return DEFAULT_CHARTS;
+}
 
 function message(err: unknown): string {
   return err instanceof Error ? err.message : "Ocurrió un error.";
@@ -82,6 +101,9 @@ export default function Simulador({
   const [playing, setPlaying] = useState(false);
   const [prepared, setPrepared] = useState(false);
   const [error, setError] = useState("");
+  const chartsKey = `propiedades.simulador.graficos.${projectId}`;
+  const [charts, setCharts] = useState<SimChartSpec[]>(() => readCharts(chartsKey));
+  const [chartNote, setChartNote] = useState("");
 
   // ------------------------------------------------------------ timeline
 
@@ -117,6 +139,28 @@ export default function Simulador({
   const percent = progressPercent(shown, items.length);
   const curve = useMemo(() => (start !== null && end !== null ? progressCurve(items, start, end, 80) : []), [items, start, end]);
   const todayOffset = start !== null && end !== null && today() >= start && today() <= end ? today() - start : null;
+
+  // ------------------------------------------------------------ charts
+
+  // The charts use the elements with the date; at each moment, only those already shown.
+  const allFields = useMemo(() => availableFields(merged), [merged]);
+  const dated = useMemo(() => (field ? datedDatasets(merged, field.key) : []), [merged, field]);
+  const fullDated = useMemo(() => dated.map((d) => d.dataset), [dated]);
+  const cutoff = shown > 0 ? items[shown - 1].day : null;
+  const shownData = useMemo(() => shownDatasets(dated, cutoff), [dated, cutoff]);
+  const chartsUseApp = charts.some((c) => [c.category, c.value].some((k) => k?.startsWith("prop:")));
+
+  useEffect(() => {
+    if (chartsUseApp) wantAppValues();
+  }, [chartsUseApp, wantAppValues]);
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(chartsKey, JSON.stringify(charts));
+    } catch {
+      // storage unavailable
+    }
+  }, [chartsKey, charts]);
 
   // ------------------------------------------------------------ viewer
 
@@ -244,6 +288,15 @@ export default function Simulador({
     if (!prepared && !(await prepare())) return;
     if (position >= span) setPosition(0);
     setPlaying(true);
+  }
+
+  async function selectFromChart(members: Members, label: string, objects: number) {
+    try {
+      await viewer.setSelection(selectorFor(members, data.viewerModelIds), "set");
+      setChartNote(`${objects.toLocaleString("es")} ${objects === 1 ? "elemento seleccionado" : "elementos seleccionados"} en el modelo: ${label}.`);
+    } catch (err) {
+      setChartNote(`No se pudo seleccionar en el visor: ${message(err)}`);
+    }
   }
 
   async function jump(to: number) {
@@ -378,6 +431,34 @@ export default function Simulador({
         </section>
       )}
 
+      {field && timeline && items.length > 0 && (
+        <section style={{ display: "flex", flexDirection: "column", gap: 8 }} aria-label="Gráficos del avance">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
+            <h3 style={sectionTitleStyle}>Gráficos del avance</h3>
+            <span style={hintStyle}>Muestran solo los elementos que ya aparecieron.</span>
+          </div>
+          {chartNote && (
+            <div style={{ ...noticeBase, ...noticeStyles.info }} role="status">
+              {chartNote}
+            </div>
+          )}
+          <div style={chartsGridStyle}>
+            {charts.map((spec, i) => (
+              <SimChartCard
+                key={i}
+                spec={spec}
+                onChange={(next) => setCharts((prev) => prev.map((c, j) => (j === i ? next : c)))}
+                fields={allFields}
+                full={fullDated}
+                shown={shownData}
+                animate={!playing}
+                onSelect={selectFromChart}
+              />
+            ))}
+          </div>
+        </section>
+      )}
+
       {field && timeline && (
         <section style={cardStyle}>
           <h3 style={sectionTitleStyle}>Opciones</h3>
@@ -445,4 +526,5 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
 };
 const controlStyle: React.CSSProperties = { ...secondaryButtonStyle, padding: "6px 10px", fontSize: 14, lineHeight: 1 };
+const chartsGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 };
 const radioStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tc-gray-700)", cursor: "pointer" };
