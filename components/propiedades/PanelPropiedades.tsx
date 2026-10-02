@@ -33,6 +33,8 @@ import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } fr
 import CatalogoAtributos from "./CatalogoAtributos";
 import DateField from "./DateField";
 import SeleccionPorGrupos from "./SeleccionPorGrupos";
+import Simulador from "./Simulador";
+import { useModelData } from "./useModelData";
 import type { ViewerEventListener } from "./PropiedadesShell";
 
 type ViewerSelection = { modelId: string; objectRuntimeIds?: number[] }[];
@@ -115,10 +117,12 @@ export default function PanelPropiedades({
   getAccessToken: (fresh?: boolean) => Promise<string>;
 }) {
   const [view, setView] = useState<"form" | "catalog">("form");
-  /** "Propiedades" (the form) or "Seleccionar por agrupación", as tabs of the panel. */
-  const [tab, setTab] = useState<"form" | "grupos">("form");
-  /** Bumped when values or the catalog change, so the grouping tab reads them again. */
+  /** The panel's tabs: the form, "Seleccionar por agrupación" and "Simulador". */
+  const [tab, setTab] = useState<"form" | "grupos" | "simulador">("form");
+  /** Bumped when values or the catalog change, so the other tabs read them again. */
   const [dataVersion, setDataVersion] = useState(0);
+  // The loaded models, read once for the grouping and simulator tabs.
+  const modelData = useModelData({ active: tab !== "form", viewer, subscribe, projectId, getAccessToken, dataVersion });
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState("");
 
@@ -533,6 +537,7 @@ export default function PanelPropiedades({
           [
             ["form", "Propiedades"],
             ["grupos", "Seleccionar por agrupación"],
+            ["simulador", "Simulador"],
           ] as const
         ).map(([key, label]) => (
           <button
@@ -560,13 +565,14 @@ export default function PanelPropiedades({
         <SeleccionPorGrupos
           active={tab === "grupos"}
           viewer={viewer}
-          subscribe={subscribe}
+          data={modelData}
           projectId={projectId}
-          getAccessToken={getAccessToken}
           api={api}
-          dataVersion={dataVersion}
           onShowForm={() => setTab("form")}
         />
+      </div>
+      <div role="tabpanel" id="panel-simulador" aria-labelledby="tab-simulador" style={{ ...scrollStyle, display: tab === "simulador" ? "block" : "none" }}>
+        <Simulador active={tab === "simulador"} viewer={viewer} data={modelData} projectId={projectId} />
       </div>
     </div>
   );
@@ -820,6 +826,8 @@ const tabsStyle: React.CSSProperties = {
   display: "flex",
   gap: 4,
   padding: "0 10px",
+  overflowX: "auto",
+  whiteSpace: "nowrap",
   borderBottom: "1px solid var(--tc-gray-300)",
   background: "var(--tc-white)",
   flexShrink: 0,

@@ -1,18 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ModelSpec } from "trimble-connect-workspace-api";
-import { buildDataset, mergeMembers, Members, ModelDataset } from "../../lib/graficos/modelData";
-import { mergePropiedades, PropiedadesData } from "../../lib/graficos/propiedades";
-import { fetchPropiedades, PropiedadesUnavailableError } from "../../lib/graficos/propiedadesClient";
-import {
-  listModelObjects,
-  ModelObjectList,
-  readAllProperties,
-  readObjectGuids,
-  selectorFor,
-  ViewerLike,
-} from "../../lib/graficos/viewerReader";
+import { mergeMembers, Members } from "../../lib/graficos/modelData";
+import { selectorFor } from "../../lib/graficos/viewerReader";
 import type { PropiedadesApi } from "../../lib/propiedades/client";
 import {
   availableFields,
@@ -28,17 +18,11 @@ import {
 import type { PropiedadesViewer } from "../../lib/propiedades/selection";
 import type { SavedGrouping, SavedGroupingField } from "../../lib/propiedades/types";
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
-import type { ViewerEventListener } from "./PropiedadesShell";
+import ModelosCard from "./ModelosCard";
+import type { ModelData } from "./useModelData";
 
 const MAX_ROWS_SHOWN = 300;
 const MAX_FIELDS_SHOWN = 200;
-
-interface ModelEntry {
-  key: string;
-  spec: ModelSpec;
-  status: "listing" | "ready" | "empty" | "error";
-  list?: ModelObjectList;
-}
 
 /** `selection`: it reports a selection made in the viewer (offers to show its properties). */
 type Notice = { tone: "info" | "warning" | "error"; text: string; selection?: boolean } | null;
@@ -68,37 +52,22 @@ function stamp(iso: string): string {
 export default function SeleccionPorGrupos({
   active,
   viewer,
-  subscribe,
+  data,
   projectId,
-  getAccessToken,
   api,
-  dataVersion,
   onShowForm,
 }: {
-  /** Whether the tab is visible: models are only read then. */
+  /** Whether the tab is visible. */
   active: boolean;
   viewer: PropiedadesViewer;
-  subscribe: (listener: ViewerEventListener) => () => void;
+  /** The loaded models' data, shared with the panel's other tools. */
+  data: ModelData;
   projectId: string;
-  getAccessToken: (fresh?: boolean) => Promise<string>;
   api: PropiedadesApi;
-  /** Changes when attribute values or the catalog change, to read them again. */
-  dataVersion: number;
   /** Switches to the Propiedades tab, where the selected elements are shown. */
   onShowForm?: () => void;
 }) {
-  // The Gráficos readers only use getObjects, getObjectProperties and convertToObjectIds.
-  const reader = viewer as unknown as ViewerLike;
-
-  const [models, setModels] = useState<ModelEntry[] | null>(null);
-  const [checked, setChecked] = useState<string[]>([]);
-  const [datasets, setDatasets] = useState<Record<string, ModelDataset>>({});
-  const [reading, setReading] = useState<{ name: string; done: number; total: number } | null>(null);
-  const [readError, setReadError] = useState("");
-  const [propData, setPropData] = useState<PropiedadesData | null>(null);
-  const [propNote, setPropNote] = useState("");
-  const [guidMaps, setGuidMaps] = useState<Record<string, Map<number, string>>>({});
-  const [guidBusy, setGuidBusy] = useState("");
+  const { models, checked, setChecked, merged, allRead, reading, viewerModelIds } = data;
 
   const [chosen, setChosen] = useState<string[]>([]);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -117,193 +86,47 @@ export default function SeleccionPorGrupos({
 
   /** What was being grouped, kept for this browser tab in case Trimble Connect reloads the panel. */
   const storageKey = `propiedades.agrupacion.${projectId}`;
-  const restored = useRef<{ fields: SavedGroupingField[]; models: string[] } | null>(null);
-  const unmounted = useRef(false);
-  const readingKey = useRef<string | null>(null);
-  const listing = useRef(new Set<string>());
-  /** Models already offered once: new ones start checked, ones the user unchecked stay so. */
-  const seen = useRef(new Set<string>());
   const started = useRef(false);
-
-  useEffect(() => {
-    unmounted.current = false;
-    return () => {
-      unmounted.current = true;
-    };
-  }, []);
 
   // Restore once: the fields are matched when the models are read (like a saved configuration).
   useEffect(() => {
     try {
       const raw = sessionStorage.getItem(storageKey);
-      const data = raw ? JSON.parse(raw) : null;
-      if (data && Array.isArray(data.fields) && Array.isArray(data.models)) {
-        restored.current = data;
-        if (data.fields.length) {
-          setPending({
-            id: "",
-            name: "",
-            fields: data.fields,
-            modelNames: [],
-            createdBy: null,
-            createdById: null,
-            createdAt: "",
-            canDelete: false,
-          });
-        }
+      const stored = raw ? JSON.parse(raw) : null;
+      if (stored && Array.isArray(stored.fields) && stored.fields.length) {
+        setPending({
+          id: "",
+          name: "",
+          fields: stored.fields as SavedGroupingField[],
+          modelNames: [],
+          createdBy: null,
+          createdById: null,
+          createdAt: "",
+          canDelete: false,
+        });
       }
     } catch {
       // storage unavailable: start empty
     }
   }, [storageKey]);
 
-  // ------------------------------------------------------------ models
-
-  const refreshModels = useCallback(async () => {
-    const loaded = ((await viewer.getModels("loaded").catch(() => [])) ?? []) as ModelSpec[];
-    if (unmounted.current) return;
-    setModels((prev) => {
-      const previous = new Map((prev ?? []).map((e) => [e.key, e]));
-      return loaded.map((spec) => previous.get(spec.id) ?? { key: spec.id, spec, status: "listing" });
-    });
-    // New models are included by default; models no longer loaded drop out.
-    const keys = new Set(loaded.map((m) => m.id));
-    const fresh = loaded
-      .filter((m) => !seen.current.has(m.id))
-      // After a reload, only the models that were checked before.
-      .filter((m) => !restored.current || restored.current.models.length === 0 || restored.current.models.includes(m.name))
-      .map((m) => m.id);
-    for (const m of loaded) seen.current.add(m.id);
-    setChecked((prev) => [...prev.filter((k) => keys.has(k)), ...fresh.filter((k) => !prev.includes(k))]);
-
-    for (const spec of loaded) {
-      if (listing.current.has(spec.id)) continue;
-      listing.current.add(spec.id);
-      try {
-        const list = await listModelObjects(reader, spec);
-        if (unmounted.current) return;
-        setModels((prev) =>
-          prev?.map((e) =>
-            e.key === spec.id ? { ...e, list, status: list.runtimeIds.length ? "ready" : "empty" } : e
-          ) ?? prev
-        );
-      } catch {
-        listing.current.delete(spec.id); // a later refresh retries it
-        setModels((prev) => prev?.map((e) => (e.key === spec.id ? { ...e, status: "error" } : e)) ?? prev);
-      }
-    }
-  }, [viewer, reader]);
-
-  useEffect(() => {
-    if (!active) return;
-    refreshModels();
-    return subscribe((event) => {
-      if (event === "viewer.onModelStateChanged" || event === "viewer.onModelReset") refreshModels();
-    });
-  }, [active, refreshModels, subscribe]);
-
-  // Read the checked models' properties, one model at a time, keeping each.
-  useEffect(() => {
-    if (!active || readingKey.current || !models) return;
-    const next = models.find((e) => checked.includes(e.key) && e.status === "ready" && e.list && !datasets[e.key]);
-    if (!next || !next.list) return;
-    readingKey.current = next.key;
-    setReadError("");
-    setReading({ name: next.spec.name, done: 0, total: next.list.runtimeIds.length });
-    readAllProperties(
-      reader,
-      next.list,
-      (done, total) => !unmounted.current && setReading({ name: next.spec.name, done, total }),
-      () => unmounted.current
-    )
-      .then((raw) => {
-        if (raw && !unmounted.current) setDatasets((prev) => ({ ...prev, [next.key]: buildDataset(next.key, next.spec.name, raw) }));
-      })
-      .catch((err: unknown) => {
-        if (unmounted.current) return;
-        setReadError(`No se pudieron leer las propiedades de "${next.spec.name}": ${message(err)}. Márcalo de nuevo para reintentar.`);
-        setChecked((prev) => prev.filter((k) => k !== next.key));
-      })
-      .finally(() => {
-        readingKey.current = null;
-        if (!unmounted.current) setReading(null);
-      });
-  }, [active, models, checked, datasets, reader, reading]);
-
-  // ------------------------------------------------------------ attributes of the app
-
-  useEffect(() => {
-    if (!active) return;
-    let cancelled = false;
-    fetchPropiedades(projectId, getAccessToken)
-      .then((data) => {
-        if (cancelled) return;
-        setPropData(data);
-        setPropNote("");
-      })
-      .catch((err: unknown) => {
-        if (cancelled) return;
-        setPropNote(
-          err instanceof PropiedadesUnavailableError
-            ? "Los atributos del proyecto no están disponibles para agrupar; las propiedades del modelo sí."
-            : `No se pudieron leer los atributos del proyecto: ${message(err)}`
-        );
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [active, projectId, getAccessToken, dataVersion]);
-
   // ------------------------------------------------------------ derived
 
-  const ready = useMemo(() => checked.map((k) => datasets[k]).filter((d): d is ModelDataset => !!d), [checked, datasets]);
-  const merged = useMemo(() => (propData ? mergePropiedades(ready, guidMaps, propData) : ready), [ready, propData, guidMaps]);
   const fields = useMemo(() => availableFields(merged), [merged]);
   const fieldByKey = useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
   const chosenFields = useMemo(
     () => chosen.map((k) => fieldByKey.get(k)).filter((f): f is GroupField => !!f),
     [chosen, fieldByKey]
   );
-  const allRead =
-    !!models && checked.length > 0 && checked.every((k) => datasets[k] || models.find((e) => e.key === k)?.status === "empty");
   const rows = useMemo(() => groupObjects(merged, chosenFields), [merged, chosenFields]);
   const shownRows = useMemo(() => filterGroups(rows, rowQuery), [rows, rowQuery]);
-  const viewerModelIds = useMemo(
-    () => Object.fromEntries((models ?? []).filter((e) => e.list).map((e) => [e.key, e.list!.queryModelId])),
-    [models]
-  );
 
-  // Attribute values attach by IFCGUID: objects without a GUID property of
-  // their own (IFC models; Revit has "IfcGUID") need the viewer's ids, read
-  // only once an attribute of the project is chosen for grouping.
-  const needGuids = useMemo(() => {
-    if (!propData?.values.length || !chosenFields.some((f) => f.fromApp)) return [];
-    return ready.filter((d) => !guidMaps[d.modelId] && viewerModelIds[d.modelId] && d.records.some((r) => !r.ifcGuid));
-  }, [propData, chosenFields, ready, guidMaps, viewerModelIds]);
-
+  // The project's attributes attach by IFCGUID; the shared data reads the viewer's ids when needed.
+  const usesAppFields = chosenFields.some((f) => f.fromApp);
+  const { wantAppValues } = data;
   useEffect(() => {
-    if (!active || needGuids.length === 0) return;
-    let cancelled = false;
-    (async () => {
-      for (const dataset of needGuids) {
-        if (cancelled) return;
-        setGuidBusy(`Leyendo los identificadores IFC de "${dataset.modelName}"...`);
-        try {
-          const map = await readObjectGuids(reader, viewerModelIds[dataset.modelId], dataset.records.map((r) => r.runtimeId));
-          if (!cancelled) setGuidMaps((prev) => ({ ...prev, [dataset.modelId]: map }));
-        } catch (err) {
-          if (!cancelled) {
-            setGuidMaps((prev) => ({ ...prev, [dataset.modelId]: new Map() }));
-            setNotice({ tone: "warning", text: `No se pudieron leer los identificadores de "${dataset.modelName}": ${message(err)}` });
-          }
-        }
-      }
-      if (!cancelled) setGuidBusy("");
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [active, needGuids, reader, viewerModelIds]);
+    if (usesAppFields) wantAppValues();
+  }, [usesAppFields, wantAppValues]);
 
   useEffect(() => {
     // While a configuration is still being applied, keep what was stored.
@@ -313,13 +136,12 @@ export default function SeleccionPorGrupos({
         storageKey,
         JSON.stringify({
           fields: chosenFields.map((f) => ({ key: f.key, label: f.label, group: f.group })),
-          models: models.filter((e) => checked.includes(e.key)).map((e) => e.spec.name),
         })
       );
     } catch {
       // storage unavailable: nothing to remember
     }
-  }, [storageKey, chosenFields, checked, models, pending]);
+  }, [storageKey, chosenFields, models, pending]);
 
   // A new grouping starts with nothing marked.
   useEffect(() => {
@@ -349,7 +171,7 @@ export default function SeleccionPorGrupos({
     setNotice(null);
     const names = new Set(config.modelNames);
     const matching = (models ?? []).filter((e) => names.has(e.spec.name)).map((e) => e.key);
-    if (matching.length) setChecked(matching);
+    if (matching.length) setChecked(() => matching);
     else if (config.modelNames.length) {
       setNotice({ tone: "warning", text: `Los modelos con que se guardó (${config.modelNames.join(", ")}) no están cargados; se usan los marcados.` });
     }
@@ -429,7 +251,6 @@ export default function SeleccionPorGrupos({
 
   if (!active && !models) return null;
 
-  const loadedModels = models ?? [];
   const pickerFields = filterFields(
     fields.filter((f) => !chosen.includes(f.key)),
     fieldQuery
@@ -458,54 +279,7 @@ export default function SeleccionPorGrupos({
         </div>
       )}
 
-      {/* Models */}
-      <details open style={cardStyle}>
-        <summary style={sectionTitleStyle}>
-          Modelos ({checked.length}/{loadedModels.length})
-        </summary>
-        {models === null ? (
-          <span style={mutedStyle}>Buscando los modelos cargados...</span>
-        ) : loadedModels.length === 0 ? (
-          <span style={mutedStyle}>Carga un modelo en el visor para agrupar sus elementos.</span>
-        ) : (
-          <ul style={listStyle}>
-            {loadedModels.map((e) => {
-              const isChecked = checked.includes(e.key);
-              const ds = datasets[e.key];
-              const status =
-                e.status === "listing"
-                  ? "buscando objetos..."
-                  : e.status === "empty"
-                    ? "sin objetos"
-                    : e.status === "error"
-                      ? "no se pudo leer"
-                      : reading && reading.name === e.spec.name && isChecked
-                        ? `leyendo ${reading.done.toLocaleString("es")} de ${reading.total.toLocaleString("es")}`
-                        : ds
-                          ? count(ds.records.length, "elemento", "elementos")
-                          : isChecked
-                            ? "en espera"
-                            : count(e.list?.runtimeIds.length ?? 0, "objeto", "objetos");
-              return (
-                <li key={e.key}>
-                  <label style={checkRowStyle}>
-                    <input
-                      type="checkbox"
-                      checked={isChecked}
-                      onChange={() =>
-                        setChecked((prev) => (prev.includes(e.key) ? prev.filter((k) => k !== e.key) : [...prev, e.key]))
-                      }
-                    />
-                    <span style={{ flex: 1, minWidth: 0, overflowWrap: "anywhere" }}>{e.spec.name}</span>
-                    <span style={metaStyle}>{status}</span>
-                  </label>
-                </li>
-              );
-            })}
-          </ul>
-        )}
-        {readError && <div style={{ ...noticeBase, ...noticeStyles.error }}>{readError}</div>}
-      </details>
+      <ModelosCard data={data} emptyText="Carga un modelo en el visor para agrupar sus elementos." />
 
       {/* Group by */}
       <section style={cardStyle}>
@@ -605,7 +379,7 @@ export default function SeleccionPorGrupos({
             </div>
           </div>
         )}
-        {propNote && <span style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>{propNote}</span>}
+        {data.propNote && <span style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>{data.propNote}</span>}
       </section>
 
       {/* Results */}
@@ -617,8 +391,8 @@ export default function SeleccionPorGrupos({
               {count(rows.length, "grupo", "grupos")} · {count(countObjects(rows), "elemento", "elementos")}
             </span>
           </div>
-          {(reading || guidBusy) && (
-            <span style={mutedStyle}>{guidBusy || "Leyendo modelos: los resultados se completan al terminar."}</span>
+          {(reading || data.guidBusy) && (
+            <span style={mutedStyle}>{data.guidBusy || "Leyendo modelos: los resultados se completan al terminar."}</span>
           )}
           {rows.length > 8 && (
             <input

@@ -622,7 +622,7 @@ archivos IFC no se modifican.
 | Dónde | Qué hace | Quién edita |
 |---|---|---|
 | **Menú lateral del proyecto → Propiedades** | Catálogo de atributos: crear, editar, desactivar, reactivar y eliminar definiciones (título, tipo, grupo, orden) | Administradores del proyecto. Los demás lo ven en solo lectura |
-| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos. Una segunda pestaña, **Seleccionar por agrupación**, selecciona elementos por sus valores | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
+| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos. Más pestañas: **Seleccionar por agrupación** (selecciona elementos por sus valores) y **Simulador** (los muestra en el tiempo según una fecha) | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
 
 Las dos superficies son la misma página (`/propiedades`) registrada con **un
 solo manifiesto**, [`public/manifest-propiedades.json`](public/manifest-propiedades.json),
@@ -821,6 +821,53 @@ formulario. Para los modelos sin propiedad `IfcGUID` propia (los IFC), los
 identificadores del visor solo se leen cuando se agrupa por un atributo del
 proyecto. Después de guardar valores en el formulario, o de cambiar el
 catálogo, la pestaña vuelve a leer los atributos.
+
+### Simulador (pestaña del panel del visor)
+
+Es la tercera pestaña del panel Propiedades: **Propiedades** | **Seleccionar
+por agrupación** | **Simulador**. Reproduce en el visor 3D la aparición de los
+elementos en el tiempo, según una fecha.
+
+1. **Modelos.** Son los mismos de la pestaña de agrupación. Las dos pestañas
+   comparten la lectura de los modelos
+   ([`components/propiedades/useModelData.ts`](components/propiedades/useModelData.ts)),
+   así que cada modelo se lee una sola vez.
+2. **Fecha a simular.** Se ofrecen todas las propiedades de fecha de los
+   modelos marcados: las nativas (de tipo fecha, o un texto que es una fecha)
+   y los **atributos de tipo Fecha del proyecto**. Primero van los del
+   proyecto, y cada una indica cuántos elementos la tienen.
+3. **Línea de tiempo.** Va desde la fecha más antigua hasta la más reciente
+   de esa propiedad. Muestra:
+   - la fecha actual (`DD-MM-AAAA`);
+   - la **curva de avance acumulado** (curva S), con la posición actual
+     marcada;
+   - un control deslizante para moverse por días;
+   - los botones ⏮ (inicio), **▶ Reproducir / ⏸ Pausar**, ⏭ (final) y
+     **Hoy** (si hoy cae dentro del rango);
+   - la duración de la reproducción completa: 15 s, 30 s, 1 min o 2 min.
+4. **Avance.** Es el porcentaje de los elementos que tienen esa fecha y que
+   ya aparecieron: los que tienen una fecha igual o anterior a la actual,
+   divididos por el total de elementos con la fecha. Se muestra con la
+   cuenta, por ejemplo "6 de 16 elementos".
+
+**Qué pasa en el visor:**
+
+- **Al empezar**, se ocultan todos los elementos con esa fecha
+  (`viewer.setObjectState`, `visible: false`). A medida que avanza la línea
+  de tiempo van apareciendo, y retroceder los oculta de nuevo.
+- **Lo que aparece en cada paso** se resalta en naranja; se puede apagar.
+- **Elementos sin esa fecha:** se pueden mostrar en gris como contexto (es la
+  opción por defecto), ocultar o dejar como están.
+- **"Restablecer modelo"** devuelve la visibilidad y los colores que la
+  simulación cambió. También se restablece al cambiar de fecha, de modelos o
+  de opción, y al cerrar el panel.
+- **Pausa automática:** la reproducción se pausa al salir de la pestaña.
+- **Cola de cambios:** los cambios al visor van en cola, uno a la vez. Si la
+  reproducción va más rápido que el visor, se juntan en un solo cambio.
+
+La lógica (orden por fecha, conteo hasta una fecha, curva de avance) está
+en [`lib/propiedades/simulation.ts`](lib/propiedades/simulation.ts), con
+pruebas.
 
 ### Catálogo (menú del proyecto)
 
