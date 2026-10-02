@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as WorkspaceAPI from "trimble-connect-workspace-api";
 import { httpApi, PropiedadesApi } from "../../lib/propiedades/client";
 import type { PropiedadesViewer } from "../../lib/propiedades/selection";
-import { describeToken, isTokenLike, tokenFrom } from "../../lib/propiedades/token";
+import { describeToken, expiresSoon, isTokenLike, tokenFrom } from "../../lib/propiedades/token";
 
 type Status = "connecting" | "pending-consent" | "denied" | "not-embedded" | "error" | "ready";
 export type Host = "project" | "3dviewer";
@@ -19,6 +19,8 @@ export interface PropiedadesContext {
   /** Only in the 3D viewer. */
   viewer: PropiedadesViewer | null;
   subscribe: (listener: ViewerEventListener) => () => void;
+  /** The user's Trimble token for this app's other endpoints; `fresh` asks Trimble Connect for it again. */
+  getAccessToken: (fresh?: boolean) => Promise<string>;
 }
 
 /**
@@ -136,6 +138,18 @@ export default function PropiedadesShell({
     return accept(result ?? "", "solicitud de permiso (renovada)") ? token.current.value : "";
   }, []);
 
+  const getAccessToken = useCallback(
+    async (fresh = false): Promise<string> => {
+      const current = token.current.value;
+      if (!fresh && current && !expiresSoon(current)) return current;
+      const renewed = await requestToken();
+      if (renewed) return renewed;
+      if (current) return current;
+      throw new Error("Trimble Connect no ha entregado la autorización de esta app; recarga la página.");
+    },
+    [requestToken]
+  );
+
   const [checking, setChecking] = useState(false);
   async function continueAfterConsent() {
     setChecking(true);
@@ -157,7 +171,7 @@ export default function PropiedadesShell({
   );
 
   if (status === "ready") {
-    return <>{children({ host, projectId: project.id, projectName: project.name, api, viewer, subscribe })}</>;
+    return <>{children({ host, projectId: project.id, projectName: project.name, api, viewer, subscribe, getAccessToken })}</>;
   }
 
   const screens: Record<Exclude<Status, "ready">, { title: string; body: string }> = {

@@ -3,6 +3,9 @@ import { describe, it } from "node:test";
 import {
   Caller,
   createDefinition,
+  createSavedGrouping,
+  deleteSavedGrouping,
+  listSavedGroupings,
   deleteDefinition,
   editableAttributeIds,
   getCatalog,
@@ -229,5 +232,45 @@ describe("responsables", () => {
     const contacts = { users: [], groups: [{ id: "g-cal", name: "Calidad", usersCount: 3 }] };
     assert.deepEqual(await listContacts(admin, async () => contacts), contacts);
     await rejects(listContacts(user, async () => contacts), 403, "not-admin");
+  });
+});
+
+describe("configuraciones de agrupación guardadas", () => {
+  const config = (name: string) => ({
+    name,
+    fields: [{ key: "Constraints · Level", label: "Level", group: "Constraints" }],
+    modelNames: ["EST.rvt"],
+  });
+
+  it("cualquier miembro guarda; el nombre es único sin importar mayúsculas ni tildes", async () => {
+    const store = memoryStore();
+    const saved = await createSavedGrouping(store, outsider, P, config("Muros por nivel"));
+    assert.equal(saved.canDelete, true);
+    assert.equal(saved.createdBy, "Marta Ruiz");
+    await rejects(createSavedGrouping(store, user, P, config("muros por NIVEL")), 409, "duplicate-name");
+    await createSavedGrouping(store, user, "otroProyecto", config("Muros por nivel"));
+    assert.equal((await listSavedGroupings(store, admin, P)).length, 1);
+  });
+
+  it("solo quien la guardó o un administrador la elimina", async () => {
+    const store = memoryStore();
+    const saved = await createSavedGrouping(store, outsider, P, config("Calidad"));
+    const asUser = await listSavedGroupings(store, user, P);
+    assert.equal(asUser[0].canDelete, false);
+    assert.equal((await listSavedGroupings(store, admin, P))[0].canDelete, true);
+    await rejects(deleteSavedGrouping(store, user, P, saved.id), 403, "not-owner");
+    await deleteSavedGrouping(store, outsider, P, saved.id);
+    assert.deepEqual(await listSavedGroupings(store, admin, P), []);
+    await rejects(deleteSavedGrouping(store, admin, P, saved.id), 404);
+  });
+
+  it("valida nombre, campos y modelos", async () => {
+    const store = memoryStore();
+    await rejects(createSavedGrouping(store, user, P, { ...config("x"), name: "  " }), 400);
+    await rejects(createSavedGrouping(store, user, P, { ...config("x"), fields: [] }), 400);
+    const four = Array.from({ length: 4 }, (_, i) => ({ key: `k${i}`, label: `L${i}`, group: "" }));
+    await rejects(createSavedGrouping(store, user, P, { ...config("x"), fields: four }), 400);
+    await rejects(createSavedGrouping(store, user, P, { ...config("x"), modelNames: "EST" }), 400);
+    await rejects(deleteSavedGrouping(store, admin, P, "no-es-uuid"), 400);
   });
 });

@@ -9,10 +9,15 @@ import {
   DefinitionInput,
   MAX_ELEMENTS_PER_REQUEST,
   MAX_GROUP_LENGTH,
+  MAX_GROUPING_FIELDS,
+  MAX_GROUPING_NAME_LENGTH,
+  MAX_SAVED_GROUPINGS,
   MAX_RESPONSABLES,
   MAX_TITLE_LENGTH,
   ProjectContacts,
   Responsable,
+  SavedGrouping,
+  SavedGroupingField,
   StoredValue,
   TargetElement,
   ValueChange,
@@ -299,4 +304,73 @@ export async function saveValues(
 
   await store.saveValues(projectId, [...byGuid.values()], changes, caller.name);
   return { elements: byGuid.size, attributes: changes.length };
+}
+
+// ---------------------------------------------------------------- saved groupings
+
+function readGroupingFields(value: unknown): SavedGroupingField[] {
+  if (!Array.isArray(value) || value.length === 0) throw new ServiceError("Elige al menos una propiedad para agrupar.", 400);
+  if (value.length > MAX_GROUPING_FIELDS) {
+    throw new ServiceError(`Se puede agrupar por hasta ${MAX_GROUPING_FIELDS} propiedades.`, 400);
+  }
+  return value.map((raw) => {
+    const f = (raw ?? {}) as Record<string, unknown>;
+    if (typeof f.key !== "string" || !f.key.trim() || f.key.length > 300) {
+      throw new ServiceError("Una de las propiedades de la agrupación no es válida.", 400);
+    }
+    const label = typeof f.label === "string" && f.label.trim() ? f.label.trim().slice(0, 200) : f.key.slice(0, 200);
+    const group = typeof f.group === "string" ? f.group.trim().slice(0, 200) : "";
+    return { key: f.key, label, group };
+  });
+}
+
+function readModelNames(value: unknown): string[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value) || value.length > 50 || value.some((v) => typeof v !== "string" || v.length > 300)) {
+    throw new ServiceError("La lista de modelos no es válida.", 400);
+  }
+  return [...new Set(value as string[])];
+}
+
+/** The project's saved groupings; each says whether this user can delete it. */
+export async function listSavedGroupings(store: PropertiesStore, caller: Caller, projectId: string): Promise<SavedGrouping[]> {
+  return (await store.listGroupings(projectId)).map((g) => ({
+    ...g,
+    canDelete: caller.isAdmin || (!!g.createdById && g.createdById === caller.id),
+  }));
+}
+
+/** Any member of the project can save a grouping; names are unique in the project. */
+export async function createSavedGrouping(
+  store: PropertiesStore,
+  caller: Caller,
+  projectId: string,
+  body: unknown
+): Promise<SavedGrouping> {
+  const b = (body ?? {}) as Record<string, unknown>;
+  const name = cleanText(b.name, "el nombre de la configuración", MAX_GROUPING_NAME_LENGTH);
+  const fields = readGroupingFields(b.fields);
+  const modelNames = readModelNames(b.modelNames);
+  const existing = await store.listGroupings(projectId);
+  if (existing.length >= MAX_SAVED_GROUPINGS) {
+    throw new ServiceError(`El proyecto ya tiene ${MAX_SAVED_GROUPINGS} configuraciones guardadas: elimina alguna antes de guardar otra.`, 409);
+  }
+  const clash = existing.find((g) => g.name.localeCompare(name, "es", { sensitivity: "base" }) === 0);
+  const duplicate = () =>
+    new ServiceError(`Ya existe una configuración llamada "${clash?.name ?? name}". Usa otro nombre.`, 409, "duplicate-name");
+  if (clash) throw duplicate();
+  const saved = await store.insertGrouping(projectId, { name, fields, modelNames }, caller.name, caller.id);
+  if (saved === "duplicate-name") throw duplicate();
+  return { ...saved, canDelete: true };
+}
+
+/** Only the one who saved it, or a project administrator, deletes a grouping. */
+export async function deleteSavedGrouping(store: PropertiesStore, caller: Caller, projectId: string, id: string): Promise<void> {
+  if (!UUID_RE.test(id)) throw new ServiceError("El identificador de la configuración no es válido.", 400);
+  const grouping = (await store.listGroupings(projectId)).find((g) => g.id === id);
+  if (!grouping) throw new ServiceError("La configuración no existe en este proyecto.", 404);
+  if (!caller.isAdmin && grouping.createdById !== caller.id) {
+    throw new ServiceError("Solo quien guardó esta configuración o un administrador del proyecto puede eliminarla.", 403, "not-owner");
+  }
+  await store.deleteGrouping(projectId, id);
 }

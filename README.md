@@ -622,7 +622,7 @@ archivos IFC no se modifican.
 | Dónde | Qué hace | Quién edita |
 |---|---|---|
 | **Menú lateral del proyecto → Propiedades** | Catálogo de atributos: crear, editar, desactivar, reactivar y eliminar definiciones (título, tipo, grupo, orden) | Administradores del proyecto. Los demás lo ven en solo lectura |
-| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
+| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos. Al lado, la columna **Seleccionar por agrupación** | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
 
 Las dos superficies son la misma página (`/propiedades`) registrada con **un
 solo manifiesto**, [`public/manifest-propiedades.json`](public/manifest-propiedades.json),
@@ -757,6 +757,59 @@ Para mostrar los responsables se usa el nombre actual que tiene la persona o
 el grupo en Trimble Connect. Además se guarda el nombre que tenía al
 asignarse, que se muestra si la lista de contactos no está disponible.
 
+### Seleccionar por agrupación (visor 3D)
+
+Es una segunda columna del panel, a la derecha del formulario. Si el panel es
+angosto (menos de 760 px), el formulario y esta columna aparecen como dos
+pestañas: "Propiedades" y "Seleccionar por agrupación". Sirve para
+seleccionar en el modelo todos los elementos que comparten un valor, por
+ejemplo:
+
+- todos los muros del "Piso 1": agrupar por *Clase* y *Level*;
+- todo lo que "cumple calidad?" = Sí: agrupar por ese atributo del proyecto.
+
+**Cómo se usa:**
+
+1. **Modelos.** Se ofrecen todos los modelos cargados en el visor, marcados
+   por defecto. La columna lee sus propiedades una vez, con barra de
+   progreso, y las mantiene mientras el panel siga abierto.
+2. **Agrupar por.** Se eligen hasta 3 propiedades con un buscador que
+   ignora tildes. Pueden ser:
+   - **atributos del proyecto**, los de esta app;
+   - **generales**: Clase, Nombre, Tipo y Modelo;
+   - **cualquier propiedad nativa de los modelos**, por conjunto (p. ej.
+     *Constraints · Level*, *Identity Data · Name*).
+
+   Se ofrecen todas las propiedades, no solo las comunes a todos los modelos.
+   Un elemento sin la propiedad cae en el grupo "(Sin valor)".
+3. **Resultados.** Cada combinación de valores es un grupo con su número de
+   elementos, en orden natural ("Piso 2" antes de "Piso 10") y con
+   "(Sin valor)" al final.
+   - Al hacer **clic en un grupo** se seleccionan sus elementos en el modelo
+     3D (`viewer.setSelection`).
+   - Con las casillas se pueden marcar varios grupos y seleccionarlos juntos
+     con **"Seleccionar marcados"**.
+   - Esa selección carga los elementos en el formulario de la izquierda, así
+     que se les pueden asignar atributos de una sola vez.
+   - Las fechas se muestran en `DD-MM-AAAA`.
+4. **Configuraciones guardadas.**
+   - **Qué se guarda:** con un nombre, por qué propiedades se agrupa y con
+     qué modelos.
+   - **Quién las ve y las borra:** se comparten con todo el proyecto.
+     Cualquier miembro puede guardar una, y solo quien la guardó o un
+     administrador puede eliminarla.
+   - **Al aplicarlas:** se marcan de nuevo esos modelos, si están cargados,
+     y se avisa si alguna propiedad ya no existe en ellos.
+
+**De dónde salen los datos.** Las propiedades nativas se leen del visor
+igual que en "Gráficos de Modelos" (`lib/graficos/viewerReader.ts` y
+`modelData.ts`). Los valores de los atributos del proyecto vienen de
+`/api/graficos/propiedades` y se cruzan por IFCGUID con la misma regla del
+formulario. Para los modelos sin propiedad `IfcGUID` propia (los IFC), los
+identificadores del visor solo se leen cuando se agrupa por un atributo del
+proyecto. Después de guardar valores en el formulario, o de cambiar el
+catálogo, la columna vuelve a leer los atributos.
+
 ### Catálogo (menú del proyecto)
 
 - **Edición solo para administradores.** Lo decide el rol del usuario en el
@@ -784,6 +837,7 @@ que usa "Validación":
 | Tabla | Columnas principales |
 |---|---|
 | `propiedades_definiciones` | `id` (uuid), `project_id`, `title`, `data_type` (`text` / `number` / `boolean` / `date`), `group_name`, `sort_order`, `active`, `responsables` (jsonb: lista de `{ type: "user" \| "group", id, name }`), `created_at/by`, `updated_at/by` |
+| `propiedades_agrupaciones` | `id` (uuid), `project_id`, `name` (único por proyecto sin distinguir mayúsculas), `config` (jsonb: `{ fields: [{ key, label, group }], modelNames: [...] }`), `created_at`, `created_by`, `created_by_id` |
 | `propiedades_valores` | `id`, `project_id`, `model_id` (informativo), `ifc_guid` (22 caracteres, validado), `attribute_id` → definición (`on delete restrict`), una columna tipada por tipo (`value_text`, `value_number`, `value_boolean`, `value_date`; exactamente una con valor), `updated_at`, `updated_by` |
 
 - **Clave del valor.** Cada valor es único por **(proyecto, IFCGUID,
@@ -815,6 +869,9 @@ que sea administrador o responsable de cada atributo.
 | `DELETE /api/propiedades/definiciones/{id}` | Eliminar; 409 si ya tiene valores (solo administradores) |
 | `POST /api/propiedades/valores/consulta` | Valores de uno o varios elementos: `{ ifcGuids: [...] }` |
 | `PUT /api/propiedades/valores` | Upsert en varios elementos a la vez: `{ elements: [{ ifcGuid, modelId }], changes: [{ attributeId, value }] }`. `value: null` borra. Fechas en ISO (`AAAA-MM-DD`). 403 `not-responsable` si incluye un atributo que el usuario no puede asignar |
+| `GET /api/propiedades/agrupaciones` | Configuraciones de "Seleccionar por agrupación" guardadas en el proyecto; cada una dice si el usuario puede eliminarla (`canDelete`) |
+| `POST /api/propiedades/agrupaciones` | Guardar una: `{ name, fields: [{ key, label, group }], modelNames }` (cualquier miembro; hasta 3 propiedades; 409 `duplicate-name` si el nombre ya existe) |
+| `DELETE /api/propiedades/agrupaciones/{id}` | Eliminarla (quien la guardó o un administrador; 403 `not-owner` para los demás) |
 | `GET /api/propiedades/contactos` | Personas y grupos del proyecto para elegir responsables: `{ users: [{ id, name, email, pending }], groups: [{ id, name, usersCount }] }` (solo administradores) |
 
 Cada solicitud admite hasta 2.000 elementos y es atómica (todo o nada). Para
@@ -828,10 +885,11 @@ No hay variables nuevas: usa las mismas `SUPABASE_URL` /
 `SUPABASE_SERVICE_ROLE_KEY` de "Validación". Solo hay que ejecutar una vez
 [`supabase/propiedades.sql`](supabase/propiedades.sql) en el **SQL Editor** de
 Supabase. Hasta entonces, la API responde con un mensaje que indica ese paso.
-**Al actualizar**, por ejemplo cuando se agregaron los responsables, vuelve a
-ejecutar el mismo archivo: es seguro repetirlo y no borra datos. Si falta
-hacerlo, el catálogo sigue funcionando, pero guardar responsables muestra un
-mensaje que pide ese paso.
+**Al actualizar**, por ejemplo cuando se agregaron los responsables o las
+configuraciones guardadas, vuelve a ejecutar el mismo archivo: es seguro
+repetirlo y no borra datos. Si falta hacerlo, lo demás sigue funcionando,
+pero guardar responsables o configuraciones muestra un mensaje que pide ese
+paso.
 En `npm run dev` sin variables de Supabase, los datos se guardan en memoria.
 
 ---

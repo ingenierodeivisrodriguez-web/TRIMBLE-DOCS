@@ -7,9 +7,15 @@ import PropiedadesShell, { Host } from "../../components/propiedades/Propiedades
 export default function PropiedadesPage({ forceHost }: { forceHost?: Host }) {
   return (
     <PropiedadesShell forceHost={forceHost}>
-      {({ host, projectName, api, viewer, subscribe }) =>
+      {({ host, projectId, projectName, api, viewer, subscribe, getAccessToken }) =>
         host === "3dviewer" && viewer ? (
-          <PanelPropiedades api={api} viewer={viewer} subscribe={subscribe} />
+          <PanelPropiedades
+            api={api}
+            viewer={viewer}
+            subscribe={subscribe}
+            projectId={projectId}
+            getAccessToken={getAccessToken}
+          />
         ) : (
           <main style={{ padding: "20px 24px 40px", maxWidth: 980, margin: "0 auto" }}>
             <header style={{ marginBottom: 16 }}>

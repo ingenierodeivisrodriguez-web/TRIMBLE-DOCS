@@ -4,6 +4,8 @@ import {
   DefinitionInput,
   MAX_ELEMENTS_PER_REQUEST,
   ProjectContacts,
+  SavedGrouping,
+  SavedGroupingInput,
   StoredValue,
   TargetElement,
   ValueChange,
@@ -20,6 +22,9 @@ export interface PropiedadesApi {
   saveValues(elements: TargetElement[], changes: ValueChange[]): Promise<void>;
   /** The project's people and groups, to pick responsables from (administrators only). */
   getContacts(): Promise<ProjectContacts>;
+  listGroupings(): Promise<SavedGrouping[]>;
+  saveGrouping(input: SavedGroupingInput): Promise<SavedGrouping>;
+  deleteGrouping(id: string): Promise<void>;
 }
 
 export class ApiError extends Error {
@@ -75,6 +80,11 @@ export function httpApi(projectId: string, auth: TokenSource): PropiedadesApi {
   return {
     getCatalog: () => request<CatalogResponse>("/definiciones"),
     getContacts: () => request<ProjectContacts>("/contactos"),
+    listGroupings: () => request<{ groupings: SavedGrouping[] }>("/agrupaciones").then((r) => r.groupings),
+    saveGrouping: (input) => request<SavedGrouping>("/agrupaciones", { method: "POST", body: JSON.stringify(input) }),
+    async deleteGrouping(id) {
+      await request(`/agrupaciones/${encodeURIComponent(id)}`, { method: "DELETE" });
+    },
     createDefinition: (input) => request("/definiciones", { method: "POST", body: JSON.stringify(input) }),
     updateDefinition: (id, patch) =>
       request(`/definiciones/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(patch) }),

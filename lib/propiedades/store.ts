@@ -5,6 +5,7 @@ import type {
   DataType,
   DefinitionInput,
   Responsable,
+  SavedGroupingInput,
   StoredValue,
   TargetElement,
   ValueChange,
@@ -32,6 +33,18 @@ export interface PropertiesStore {
   getValues(projectId: string, guids: string[]): Promise<StoredValue[]>;
   /** Applies every change to every element, all or nothing. */
   saveValues(projectId: string, elements: TargetElement[], changes: ValueChange[], user: string): Promise<void>;
+  listGroupings(projectId: string): Promise<StoredGrouping[]>;
+  /** "duplicate-name" when another one of the project already has that name. */
+  insertGrouping(projectId: string, input: SavedGroupingInput, user: string, userId: string): Promise<StoredGrouping | "duplicate-name">;
+  deleteGrouping(projectId: string, id: string): Promise<boolean>;
+}
+
+/** A saved grouping as stored (who may delete it is decided by the service). */
+export interface StoredGrouping extends SavedGroupingInput {
+  id: string;
+  createdBy: string | null;
+  createdById: string | null;
+  createdAt: string;
 }
 
 export class StoreError extends Error {
@@ -91,6 +104,31 @@ function toDefinition(row: DefinitionRow): AttributeDefinition {
   };
 }
 
+interface GroupingRow {
+  id: string;
+  name: string;
+  config: { fields?: SavedGroupingInput["fields"]; modelNames?: string[] } | null;
+  created_by: string | null;
+  created_by_id: string | null;
+  created_at: string;
+}
+
+function toGrouping(row: GroupingRow): StoredGrouping {
+  return {
+    id: row.id,
+    name: row.name,
+    fields: Array.isArray(row.config?.fields) ? row.config!.fields! : [],
+    modelNames: Array.isArray(row.config?.modelNames) ? row.config!.modelNames! : [],
+    createdBy: row.created_by,
+    createdById: row.created_by_id,
+    createdAt: row.created_at,
+  };
+}
+
+function sameName(a: string, b: string): boolean {
+  return a.trim().localeCompare(b.trim(), "es", { sensitivity: "base" }) === 0;
+}
+
 function toValue(row: ValueRow): StoredValue {
   const value: AttributeValue =
     row.value_text ?? row.value_number ?? row.value_boolean ?? (row.value_date as string);
@@ -108,7 +146,7 @@ const SETUP_HINT =
   "Falta crear las tablas de Propiedades en Supabase: abre Supabase → SQL Editor y ejecuta una vez el archivo supabase/propiedades.sql del repositorio.";
 
 const UPGRADE_HINT =
-  "Falta actualizar las tablas de Propiedades para guardar responsables: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/propiedades.sql del repositorio (es seguro repetirlo; no borra datos).";
+  "Falta actualizar las tablas de Propiedades: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/propiedades.sql del repositorio (es seguro repetirlo; no borra datos).";
 
 function supabaseStore(): PropertiesStore | null {
   const rawUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
@@ -137,6 +175,9 @@ function supabaseStore(): PropertiesStore | null {
       // not JSON
     }
     if (/responsables/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
+    if (/propiedades_agrupaciones/i.test(body)) throw new StoreError(UPGRADE_HINT);
+    // Unique name per project (also checked before inserting).
+    if (detail.code === "23505") throw new StoreError("duplicate-name", 409);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) {
       throw new StoreError(SETUP_HINT);
     }
@@ -240,6 +281,42 @@ function supabaseStore(): PropertiesStore | null {
       });
       await res.text();
     },
+
+    async listGroupings(projectId) {
+      const res = await call(
+        `/propiedades_agrupaciones?project_id=${eq(projectId)}&select=id,name,config,created_by,created_by_id,created_at&order=name.asc`
+      );
+      return ((await res.json()) as GroupingRow[]).map(toGrouping);
+    },
+
+    async insertGrouping(projectId, input, user, userId) {
+      try {
+        const res = await call("/propiedades_agrupaciones", {
+          method: "POST",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({
+            project_id: projectId,
+            name: input.name,
+            config: { fields: input.fields, modelNames: input.modelNames },
+            created_by: user,
+            created_by_id: userId,
+          }),
+        });
+        const [row] = (await res.json()) as GroupingRow[];
+        return toGrouping(row);
+      } catch (err) {
+        if (err instanceof StoreError && err.message === "duplicate-name") return "duplicate-name";
+        throw err;
+      }
+    },
+
+    async deleteGrouping(projectId, id) {
+      const res = await call(`/propiedades_agrupaciones?project_id=${eq(projectId)}&id=${eq(id)}`, {
+        method: "DELETE",
+        headers: { Prefer: "return=representation" },
+      });
+      return ((await res.json()) as unknown[]).length > 0;
+    },
   };
 }
 
@@ -249,6 +326,7 @@ function supabaseStore(): PropertiesStore | null {
 export function memoryStore(): PropertiesStore {
   const definitions = new Map<string, AttributeDefinition>();
   const values = new Map<string, StoredValue & { projectId: string }>(); // key: project|guid|attribute
+  const groupings = new Map<string, StoredGrouping & { projectId: string }>();
 
   const valueKey = (projectId: string, guid: string, attributeId: string) => `${projectId}|${guid}|${attributeId}`;
   const countFor = (id: string) => [...values.values()].filter((v) => v.attributeId === id).length;
@@ -324,6 +402,30 @@ export function memoryStore(): PropertiesStore {
             });
         }
       }
+    },
+    async listGroupings(projectId) {
+      return [...groupings.values()]
+        .filter((g) => g.projectId === projectId)
+        .map(({ projectId: _p, ...g }) => g)
+        .sort((a, b) => a.name.localeCompare(b.name, "es"));
+    },
+    async insertGrouping(projectId, input, user, userId) {
+      if ([...groupings.values()].some((g) => g.projectId === projectId && sameName(g.name, input.name))) return "duplicate-name";
+      const grouping: StoredGrouping = {
+        id: randomUUID(),
+        ...input,
+        createdBy: user,
+        createdById: userId,
+        createdAt: new Date().toISOString(),
+      };
+      groupings.set(grouping.id, { ...grouping, projectId });
+      return grouping;
+    },
+    async deleteGrouping(projectId, id) {
+      const g = groupings.get(id);
+      if (!g || g.projectId !== projectId) return false;
+      groupings.delete(id);
+      return true;
     },
   };
 }

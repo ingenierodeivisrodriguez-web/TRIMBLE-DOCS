@@ -2,7 +2,10 @@ import type { ModelSpec, ViewerAPI } from "trimble-connect-workspace-api";
 import { GuidResolution, PropertySetLike, resolveIfcGuid } from "./ifcGuid";
 
 /** The slice of the 3D Viewer API the panel uses (also lets it run against a fake viewer). */
-export type PropiedadesViewer = Pick<ViewerAPI, "getSelection" | "getModels" | "getObjectProperties" | "convertToObjectIds">;
+export type PropiedadesViewer = Pick<
+  ViewerAPI,
+  "getSelection" | "getModels" | "getObjectProperties" | "convertToObjectIds" | "getObjects" | "setSelection"
+>;
 
 export interface SelectedElement {
   key: string;

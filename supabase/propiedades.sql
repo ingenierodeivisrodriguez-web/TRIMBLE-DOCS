@@ -136,11 +136,27 @@ begin
 end;
 $$;
 
+-- Configuraciones guardadas de "Seleccionar por agrupación" (panel del visor):
+-- por qué propiedades agrupar y con qué modelos. Se comparten con todo el
+-- proyecto; las borra quien las guardó o un administrador.
+create table if not exists public.propiedades_agrupaciones (
+  id             uuid        primary key default gen_random_uuid(),
+  project_id     text        not null,
+  name           text        not null check (char_length(btrim(name)) between 1 and 80),
+  config         jsonb       not null check (jsonb_typeof(config) = 'object'),
+  created_at     timestamptz not null default now(),
+  created_by     text,
+  created_by_id  text
+);
+create unique index if not exists propiedades_agrupaciones_nombre_unico
+  on public.propiedades_agrupaciones (project_id, lower(btrim(name)));
+
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. La función se ejecuta con los permisos de quien la llama, así que
 -- tampoco abre acceso a la clave pública.
 alter table public.propiedades_definiciones enable row level security;
 alter table public.propiedades_valores enable row level security;
+alter table public.propiedades_agrupaciones enable row level security;
 revoke all on function public.propiedades_guardar_valores(text, jsonb, jsonb, text) from public;
 do $$
 begin

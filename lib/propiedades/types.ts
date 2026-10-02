@@ -82,10 +82,40 @@ export interface ProjectContacts {
   groups: { id: string; name: string; usersCount: number | null }[];
 }
 
+/** A field of a saved grouping, by the key the grouping tool gives it (see lib/propiedades/grouping.ts). */
+export interface SavedGroupingField {
+  key: string;
+  label: string;
+  group: string;
+}
+
+/** A saved "Seleccionar por agrupación" configuration, shared with the whole project. */
+export interface SavedGrouping {
+  id: string;
+  name: string;
+  fields: SavedGroupingField[];
+  /** Models it was saved with; used again when they are loaded. */
+  modelNames: string[];
+  createdBy: string | null;
+  createdById: string | null;
+  createdAt: string;
+  /** Its creator and project administrators can delete it. */
+  canDelete: boolean;
+}
+
+export interface SavedGroupingInput {
+  name: string;
+  fields: SavedGroupingField[];
+  modelNames: string[];
+}
+
 export const DEFAULT_GROUP = "General";
 export const MAX_TEXT_LENGTH = 2000;
 export const MAX_TITLE_LENGTH = 120;
 export const MAX_GROUP_LENGTH = 80;
 export const MAX_RESPONSABLES = 50;
+export const MAX_GROUPING_NAME_LENGTH = 80;
+export const MAX_GROUPING_FIELDS = 3;
+export const MAX_SAVED_GROUPINGS = 200;
 /** Elements per query or save; a larger selection is handled in batches by the panel. */
 export const MAX_ELEMENTS_PER_REQUEST = 2000;
