@@ -10,6 +10,7 @@ ambos lugares** para Trimble Connect:
 | **Validación** — valida la nomenclatura de los archivos contra reglas configurables | Menú lateral del proyecto | `/validacion` | `/manifest-validacion.json` |
 | **Gráficos de Modelos** — gráficos con los datos de los modelos 3D cargados | Panel de extensiones del visor 3D | `/graficos` | `/manifest-graficos.json` |
 | **Propiedades** — atributos propios asignados por IFCGUID a los elementos de los modelos | Menú lateral del proyecto (catálogo) **y** panel del visor 3D (asignación) | `/propiedades` | `/manifest-propiedades.json` |
+| **Seleccionar por agrupación** — agrupa los elementos por propiedades o atributos y los selecciona en el modelo | Panel derecho del visor 3D (tipo `properties`) | `/propiedades/agrupacion` | `/manifest-agrupacion.json` |
 
 Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
@@ -622,7 +623,7 @@ archivos IFC no se modifican.
 | Dónde | Qué hace | Quién edita |
 |---|---|---|
 | **Menú lateral del proyecto → Propiedades** | Catálogo de atributos: crear, editar, desactivar, reactivar y eliminar definiciones (título, tipo, grupo, orden) | Administradores del proyecto. Los demás lo ven en solo lectura |
-| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos. Al lado, la columna **Seleccionar por agrupación** | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
+| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos | Los administradores y los **responsables** de cada atributo. Los demás miembros solo consultan |
 
 Las dos superficies son la misma página (`/propiedades`) registrada con **un
 solo manifiesto**, [`public/manifest-propiedades.json`](public/manifest-propiedades.json),
@@ -757,13 +758,36 @@ Para mostrar los responsables se usa el nombre actual que tiene la persona o
 el grupo en Trimble Connect. Además se guarda el nombre que tenía al
 asignarse, que se muestra si la lista de contactos no está disponible.
 
-### Seleccionar por agrupación (visor 3D)
+### Seleccionar por agrupación (visor 3D, panel derecho)
 
-Es una segunda columna del panel, a la derecha del formulario. Si el panel es
-angosto (menos de 760 px), el formulario y esta columna aparecen como dos
-pestañas: "Propiedades" y "Seleccionar por agrupación". Sirve para
-seleccionar en el modelo todos los elementos que comparten un valor, por
-ejemplo:
+Es una **extensión aparte del visor**, con su propio manifiesto,
+[`public/manifest-agrupacion.json`](public/manifest-agrupacion.json)
+(`/propiedades/agrupacion`).
+
+**Dónde aparece.** El manifiesto usa `"type": "properties"`, que en las
+definiciones del Workspace API es el tipo de extensión del visor que va en el
+panel de la derecha (el de propiedades), con la altura de `"height"`
+(`700px`). Así queda a la derecha del modelo, mientras el panel Propiedades
+sigue a la izquierda. Ni la documentación ni las pruebas de esta app
+confirman cómo se comporta ese panel, por ejemplo si siempre está visible o
+solo con algo seleccionado; hay que comprobarlo en Trimble Connect.
+
+**Si Trimble recarga el panel**, la extensión recuerda, en la pestaña del
+navegador (`sessionStorage`), por qué propiedades se agrupaba y con qué
+modelos, y lo vuelve a aplicar.
+
+**Cómo se comunican las dos extensiones:**
+
+- **De la derecha a la izquierda:** al seleccionar un grupo, cambia la
+  selección del visor, y el panel Propiedades la carga.
+- **De la izquierda a la derecha:** al guardar valores, o al cambiar el
+  catálogo, Propiedades avisa con `extension.broadcast` (mensaje
+  `propiedades:valores-cambiados`, ver
+  [`lib/propiedades/messages.ts`](lib/propiedades/messages.ts)), y esta
+  extensión vuelve a leer los atributos.
+
+**Para qué sirve:** para seleccionar en el modelo todos los elementos que
+comparten un valor, por ejemplo:
 
 - todos los muros del "Piso 1": agrupar por *Clase* y *Level*;
 - todo lo que "cumple calidad?" = Sí: agrupar por ese atributo del proyecto.
@@ -771,7 +795,7 @@ ejemplo:
 **Cómo se usa:**
 
 1. **Modelos.** Se ofrecen todos los modelos cargados en el visor, marcados
-   por defecto. La columna lee sus propiedades una vez, con barra de
+   por defecto. La extensión lee sus propiedades una vez, con barra de
    progreso, y las mantiene mientras el panel siga abierto.
 2. **Agrupar por.** Se eligen hasta 3 propiedades con un buscador que
    ignora tildes. Pueden ser:
@@ -790,7 +814,8 @@ ejemplo:
    - Con las casillas se pueden marcar varios grupos y seleccionarlos juntos
      con **"Seleccionar marcados"**.
    - Esa selección carga los elementos en el formulario de la izquierda, así
-     que se les pueden asignar atributos de una sola vez.
+     que se les pueden asignar atributos de una sola vez desde el panel
+   Propiedades.
    - Las fechas se muestran en `DD-MM-AAAA`.
 4. **Configuraciones guardadas.**
    - **Qué se guarda:** con un nombre, por qué propiedades se agrupa y con
@@ -1019,6 +1044,7 @@ public/
   manifest-graficos.json, icon-graficos.svg     Graficos de Modelos
   manifest-propiedades.json, icon-propiedades.svg  Propiedades (proyecto + visor 3D)
   manifest-propiedades-visor.json                  Propiedades, respaldo solo para el visor 3D
+  manifest-agrupacion.json, icon-agrupacion.svg    Seleccionar por agrupación (panel derecho del visor 3D)
 supabase/
   validacion_config.sql       Tabla de Validacion
   propiedades.sql             Tablas, vista y funcion de Propiedades
@@ -1100,6 +1126,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Validación | `https://trimble-docs.vercel.app/manifest-validacion.json` |
    | Gráficos de Modelos | `https://trimble-docs.vercel.app/manifest-graficos.json` |
    | Propiedades | `https://trimble-docs.vercel.app/manifest-propiedades.json` |
+   | Seleccionar por agrupación | `https://trimble-docs.vercel.app/manifest-agrupacion.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
@@ -1113,6 +1140,8 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    del visor 3D. Si no aparece en el visor, instala además
    `https://trimble-docs.vercel.app/manifest-propiedades-visor.json` desde
    la configuración de extensiones del visor.
+   **Seleccionar por agrupación** es otra extensión del visor 3D, que se
+   agrega con su propio manifiesto y se muestra en el panel derecho.
 6. Al abrir Resumen Archivos o Validación por primera vez, Trimble Connect
    pedira tu consentimiento para que la extension pueda leer el access token
    del usuario actual (esto es lo que permite leer los documentos del

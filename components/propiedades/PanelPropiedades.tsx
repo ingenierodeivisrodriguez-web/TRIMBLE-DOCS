@@ -32,7 +32,6 @@ import {
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
 import CatalogoAtributos from "./CatalogoAtributos";
 import DateField from "./DateField";
-import SeleccionPorGrupos from "./SeleccionPorGrupos";
 import type { ViewerEventListener } from "./PropiedadesShell";
 
 type ViewerSelection = { modelId: string; objectRuntimeIds?: number[] }[];
@@ -105,32 +104,15 @@ export default function PanelPropiedades({
   api,
   viewer,
   subscribe,
-  projectId,
-  getAccessToken,
+  onDataChanged,
 }: {
   api: PropiedadesApi;
   viewer: PropiedadesViewer;
   subscribe: (listener: ViewerEventListener) => () => void;
-  projectId: string;
-  getAccessToken: (fresh?: boolean) => Promise<string>;
+  /** Called after values are saved or the catalog changes (tells the grouping extension). */
+  onDataChanged?: () => void;
 }) {
   const [view, setView] = useState<"form" | "catalog">("form");
-  // Two columns (form | selection by grouping) when the panel is wide enough, tabs otherwise.
-  const layoutRef = useRef<HTMLDivElement>(null);
-  const [wide, setWide] = useState(false);
-  const [tab, setTab] = useState<"form" | "grupos">("form");
-  /** Bumped when values or the catalog change, so the grouping column reads them again. */
-  const [dataVersion, setDataVersion] = useState(0);
-
-  useEffect(() => {
-    const el = layoutRef.current;
-    if (!el) return;
-    const update = () => setWide(el.clientWidth >= WIDE_LAYOUT_MIN);
-    update();
-    const observer = new ResizeObserver(update);
-    observer.observe(el);
-    return () => observer.disconnect();
-  }, [view]);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState("");
 
@@ -307,7 +289,7 @@ export default function PanelPropiedades({
       setEdits({});
       dirty.current = false;
       setConfirming(false);
-      setDataVersion((v) => v + 1);
+      onDataChanged?.();
       setResult({
         tone: "info",
         text: `Guardado: ${changes.length === 1 ? "1 atributo" : `${changes.length} atributos`} en ${
@@ -333,7 +315,7 @@ export default function PanelPropiedades({
 
   // ---------------------------------------------------------------- render
 
-  // The catalog (gear button) takes the form's place; the grouping column stays as it is.
+  // The catalog (gear button) takes the form's place.
   const catalogColumn = view === "catalog" && (
     <div style={pageStyle}>
       <header style={headerStyle}>
@@ -347,7 +329,7 @@ export default function PanelPropiedades({
         compact
         onChanged={() => {
           loadCatalog();
-          setDataVersion((v) => v + 1);
+          onDataChanged?.();
         }}
       />
     </div>
@@ -536,57 +518,8 @@ export default function PanelPropiedades({
     </div>
   );
 
-  const showForm = wide || tab === "form";
-  const showGroups = wide || tab === "grupos";
-  return (
-    <div ref={layoutRef} style={layoutStyle}>
-      {!wide && (
-        <nav style={tabsStyle} aria-label="Secciones del panel">
-          {(
-            [
-              ["form", "Propiedades"],
-              ["grupos", "Seleccionar por agrupación"],
-            ] as const
-          ).map(([key, label]) => (
-            <button
-              key={key}
-              type="button"
-              onClick={() => setTab(key)}
-              aria-pressed={tab === key}
-              style={{
-                ...tabStyle,
-                color: tab === key ? "var(--tc-blue-800)" : "var(--tc-gray-500)",
-                borderBottomColor: tab === key ? "var(--tc-blue-600)" : "transparent",
-              }}
-            >
-              {label}
-            </button>
-          ))}
-        </nav>
-      )}
-      <div style={{ ...columnsStyle, display: wide ? "grid" : "block" }}>
-        <div style={{ ...columnStyle, display: showForm ? "block" : "none" }}>{catalogColumn || formColumn}</div>
-        <div
-          style={{
-            ...columnStyle,
-            display: showGroups ? "block" : "none",
-            borderLeft: wide ? "1px solid var(--tc-gray-300)" : undefined,
-          }}
-        >
-          <SeleccionPorGrupos
-            active={showGroups}
-            viewer={viewer}
-            subscribe={subscribe}
-            projectId={projectId}
-            getAccessToken={getAccessToken}
-            api={api}
-            dataVersion={dataVersion}
-            onShowForm={wide ? undefined : () => setTab("form")}
-          />
-        </div>
-      </div>
-    </div>
-  );
+  // One scrolling column, so the save bar can stick to its bottom.
+  return <div style={scrollStyle}>{catalogColumn || formColumn}</div>;
 }
 
 function SelectionSummary({
@@ -830,30 +763,8 @@ function ReadOnlyValue({ def, summary }: { def: AttributeDefinition; summary: Fi
   return <em>sin valor</em>;
 }
 
-/** Panel width from which the form and the grouping tool sit side by side. */
-const WIDE_LAYOUT_MIN = 760;
 const pageStyle: React.CSSProperties = { padding: 14, display: "flex", flexDirection: "column", gap: 12, maxWidth: 720, margin: "0 auto" };
-const layoutStyle: React.CSSProperties = { height: "100vh", display: "flex", flexDirection: "column" };
-const columnsStyle: React.CSSProperties = { flex: 1, minHeight: 0, gridTemplateColumns: "minmax(0, 1fr) minmax(0, 1fr)" };
-const columnStyle: React.CSSProperties = { height: "100%", overflowY: "auto", minWidth: 0 };
-const tabsStyle: React.CSSProperties = {
-  display: "flex",
-  gap: 4,
-  padding: "0 10px",
-  borderBottom: "1px solid var(--tc-gray-300)",
-  background: "var(--tc-white)",
-  flexShrink: 0,
-};
-const tabStyle: React.CSSProperties = {
-  border: "none",
-  borderBottom: "2px solid transparent",
-  background: "transparent",
-  padding: "10px 8px 8px",
-  fontSize: 13,
-  fontWeight: 700,
-  cursor: "pointer",
-  fontFamily: "inherit",
-};
+const scrollStyle: React.CSSProperties = { height: "100vh", overflowY: "auto" };
 const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 };
 const titleStyle: React.CSSProperties = { margin: 0, fontSize: 19, color: "var(--tc-blue-900)" };
 const subtitleStyle: React.CSSProperties = { margin: "2px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" };

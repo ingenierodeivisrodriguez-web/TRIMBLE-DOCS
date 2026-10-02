@@ -26,7 +26,7 @@ import {
   resolveSavedFields,
 } from "../../lib/propiedades/grouping";
 import type { PropiedadesViewer } from "../../lib/propiedades/selection";
-import type { SavedGrouping } from "../../lib/propiedades/types";
+import type { SavedGrouping, SavedGroupingField } from "../../lib/propiedades/types";
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
 import type { ViewerEventListener } from "./PropiedadesShell";
 
@@ -73,7 +73,6 @@ export default function SeleccionPorGrupos({
   getAccessToken,
   api,
   dataVersion,
-  onShowForm,
 }: {
   /** Whether the column is visible: models are only read then. */
   active: boolean;
@@ -84,8 +83,6 @@ export default function SeleccionPorGrupos({
   api: PropiedadesApi;
   /** Changes when attribute values or the catalog change, to read them again. */
   dataVersion: number;
-  /** In the narrow layout, switches to the Propiedades form. */
-  onShowForm?: () => void;
 }) {
   // The Gráficos readers only use getObjects, getObjectProperties and convertToObjectIds.
   const reader = viewer as unknown as ViewerLike;
@@ -115,6 +112,9 @@ export default function SeleccionPorGrupos({
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   const [pending, setPending] = useState<SavedGrouping | null>(null);
 
+  /** What was being grouped, kept for this browser tab in case Trimble Connect reloads the panel. */
+  const storageKey = `propiedades.agrupacion.${projectId}`;
+  const restored = useRef<{ fields: SavedGroupingField[]; models: string[] } | null>(null);
   const unmounted = useRef(false);
   const readingKey = useRef<string | null>(null);
   const listing = useRef(new Set<string>());
@@ -129,6 +129,31 @@ export default function SeleccionPorGrupos({
     };
   }, []);
 
+  // Restore once: the fields are matched when the models are read (like a saved configuration).
+  useEffect(() => {
+    try {
+      const raw = sessionStorage.getItem(storageKey);
+      const data = raw ? JSON.parse(raw) : null;
+      if (data && Array.isArray(data.fields) && Array.isArray(data.models)) {
+        restored.current = data;
+        if (data.fields.length) {
+          setPending({
+            id: "",
+            name: "",
+            fields: data.fields,
+            modelNames: [],
+            createdBy: null,
+            createdById: null,
+            createdAt: "",
+            canDelete: false,
+          });
+        }
+      }
+    } catch {
+      // storage unavailable: start empty
+    }
+  }, [storageKey]);
+
   // ------------------------------------------------------------ models
 
   const refreshModels = useCallback(async () => {
@@ -140,8 +165,12 @@ export default function SeleccionPorGrupos({
     });
     // New models are included by default; models no longer loaded drop out.
     const keys = new Set(loaded.map((m) => m.id));
-    const fresh = loaded.map((m) => m.id).filter((k) => !seen.current.has(k));
-    for (const k of fresh) seen.current.add(k);
+    const fresh = loaded
+      .filter((m) => !seen.current.has(m.id))
+      // After a reload, only the models that were checked before.
+      .filter((m) => !restored.current || restored.current.models.length === 0 || restored.current.models.includes(m.name))
+      .map((m) => m.id);
+    for (const m of loaded) seen.current.add(m.id);
     setChecked((prev) => [...prev.filter((k) => keys.has(k)), ...fresh.filter((k) => !prev.includes(k))]);
 
     for (const spec of loaded) {
@@ -273,6 +302,22 @@ export default function SeleccionPorGrupos({
     };
   }, [active, needGuids, reader, viewerModelIds]);
 
+  useEffect(() => {
+    // While a configuration is still being applied, keep what was stored.
+    if (!models || pending) return;
+    try {
+      sessionStorage.setItem(
+        storageKey,
+        JSON.stringify({
+          fields: chosenFields.map((f) => ({ key: f.key, label: f.label, group: f.group })),
+          models: models.filter((e) => checked.includes(e.key)).map((e) => e.spec.name),
+        })
+      );
+    } catch {
+      // storage unavailable: nothing to remember
+    }
+  }, [storageKey, chosenFields, checked, models, pending]);
+
   // A new grouping starts with nothing marked.
   useEffect(() => {
     setMarked(new Set());
@@ -315,6 +360,7 @@ export default function SeleccionPorGrupos({
     const { found, missing } = resolveSavedFields(pending.fields, fields);
     setChosen(found.map((f) => f.key));
     setPending(null);
+    if (!pending.name) return; // restored after a reload: nothing to announce
     if (missing.length) {
       setNotice({ tone: "warning", text: `"${pending.name}": no se encontró ${missing.join(", ")} en los modelos marcados.` });
     } else {
@@ -398,14 +444,7 @@ export default function SeleccionPorGrupos({
       {notice && (
         <div style={{ ...noticeBase, ...noticeStyles[notice.tone] }} role="status">
           {notice.text}
-          {onShowForm && notice.selection && (
-            <>
-              {" "}
-              <button type="button" onClick={onShowForm} style={linkStyle}>
-                Ver sus propiedades
-              </button>
-            </>
-          )}
+          {notice.selection && " Sus atributos se muestran en el panel Propiedades."}
         </div>
       )}
 

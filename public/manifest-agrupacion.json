@@ -1,0 +1,11 @@
+{
+  "url": "https://trimble-docs.vercel.app/propiedades/agrupacion",
+  "title": "Seleccionar por agrupación",
+  "description": "Agrupa los elementos de los modelos por sus propiedades (p. ej. Level) o por los atributos de la app Propiedades (p. ej. cumple calidad?) y selecciona cada grupo en el visor 3D. Las configuraciones se pueden guardar para todo el proyecto.",
+  "icon": "https://trimble-docs.vercel.app/icon-agrupacion.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "properties",
+  "height": "700px",
+  "enabled": true
+}
