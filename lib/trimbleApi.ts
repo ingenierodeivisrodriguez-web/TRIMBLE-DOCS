@@ -240,6 +240,21 @@ export interface ProjectUser {
   firstName: string;
   lastName: string;
   email: string;
+  /** The user's role in this project (ListProjectUsersResponse.role). */
+  role?: "ADMIN" | "USER" | string;
+}
+
+export interface CurrentUser {
+  id: string;
+  firstName?: string;
+  lastName?: string;
+  email?: string;
+}
+
+/** GET /users/me - the user the access token belongs to (`me` is a documented alias of /users/{userId}). */
+export async function getCurrentUser(baseUrl: string, accessToken: string): Promise<CurrentUser> {
+  const data = await trimbleFetch(`${baseUrl}/users/me`, accessToken);
+  return { id: data.id, firstName: data.firstName, lastName: data.lastName, email: data.email };
 }
 
 /** GET /projects/{projectId}/users, paginated the same way as folder items. */

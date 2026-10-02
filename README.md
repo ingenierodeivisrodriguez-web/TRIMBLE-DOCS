@@ -1,26 +1,30 @@
 # Extensiones para Trimble Connect
 
 Este repositorio es una sola app Next.js (desplegada en Vercel) que contiene
-**dos extensiones de proyecto y una extensión del visor 3D** para Trimble Connect:
+**dos extensiones de proyecto, una extensión del visor 3D y una que funciona en
+ambos lugares** para Trimble Connect:
 
 | Extensión | Dónde aparece | Página que se embebe | Manifiesto |
 |---|---|---|---|
 | **Resumen Archivos** — estadísticas de los documentos del proyecto | Menú lateral del proyecto | `/extension` | `/manifest.json` |
 | **Validación** — valida la nomenclatura de los archivos contra reglas configurables | Menú lateral del proyecto | `/validacion` | `/manifest-validacion.json` |
 | **Gráficos de Modelos** — gráficos con los datos de los modelos 3D cargados | Panel de extensiones del visor 3D | `/graficos` | `/manifest-graficos.json` |
+| **Propiedades** — atributos propios asignados por IFCGUID a los elementos de los modelos | Menú lateral del proyecto (catálogo) **y** panel del visor 3D (asignación) | `/propiedades` | `/manifest-propiedades.json` |
 
 Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
 la API REST ([`lib/trimbleApi.ts`](lib/trimbleApi.ts)) y el recorrido
 recursivo de carpetas ([`lib/walkProjectTree.ts`](lib/walkProjectTree.ts) +
 [`lib/cache.ts`](lib/cache.ts)). "Gráficos de Modelos" es independiente: no usa
-la API REST ni el backend, lee directamente del visor 3D.
+la API REST ni el backend, lee directamente del visor 3D. "Propiedades" usa
+el visor para la selección y su propia base de datos (Supabase) para los valores.
 
 - [Resumen Archivos](#resumen-archivos)
   - [Estructura de Carpetas (pestaña)](#estructura-de-carpetas-pestaña)
   - [Auditoría de Permisos (pestaña)](#auditoría-de-permisos-pestaña)
 - [Validación](#validación)
 - [Gráficos de Modelos (visor 3D)](#gráficos-de-modelos-visor-3d)
+- [Propiedades (proyecto + visor 3D)](#propiedades-proyecto--visor-3d)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -569,6 +573,190 @@ gráfico tiene su vista de tabla.
 
 ---
 
+## Propiedades (proyecto + visor 3D)
+
+Atributos propios del proyecto (por ejemplo "Estado", "Avance (%)", "Fecha
+de instalación", "Inspeccionado") que el equipo asigna a los elementos de los
+modelos. Los valores se guardan **en la base de datos de esta app (Supabase)**,
+identificados por el **IFCGUID** de cada elemento. No se usan los conjuntos de
+propiedades (Property Sets) ni los UDA nativos de Trimble Connect, y los
+archivos IFC no se modifican.
+
+### Dos superficies, un manifiesto
+
+| Dónde | Qué hace | Quién edita |
+|---|---|---|
+| **Menú lateral del proyecto → Propiedades** | Catálogo de atributos: crear, editar, desactivar, reactivar y eliminar definiciones (título, tipo, grupo, orden) | Administradores del proyecto. Los demás lo ven en solo lectura |
+| **Visor 3D → panel de extensiones → Propiedades** | Formulario con los atributos activos para los elementos seleccionados en el modelo; "Guardar" asigna los valores a todos | Cualquier miembro del proyecto |
+
+Las dos superficies son la misma página (`/propiedades`) registrada con **un
+solo manifiesto**, [`public/manifest-propiedades.json`](public/manifest-propiedades.json),
+con `"extensionType": ["project", "3dviewer"]`. Las definiciones de tipos del
+paquete `trimble-connect-workspace-api` documentan esta combinación: *"Extension
+with ["project", "3dviewer"] can use the extension.getHost to identify the
+extension host type"*. Al cargar, la página llama a `extension.getHost()`:
+en el proyecto registra la entrada del menú (`ui.setMenu`) y muestra el
+catálogo, y en el visor muestra el formulario.
+
+Por si el visor no ofreciera la extensión instalada con ese manifiesto
+combinado, hay un respaldo solo para el visor:
+[`public/manifest-propiedades-visor.json`](public/manifest-propiedades-visor.json)
+(`/propiedades/visor`, `"extensionType": ["3dviewer"]`, `"type": "panel"`),
+que siempre abre el formulario. Usa la misma base de datos y el mismo catálogo.
+
+El botón ⚙ del panel abre el catálogo **dentro del mismo panel** (con
+"← Volver a Propiedades"). No puede saltar a la página del menú lateral,
+porque `extension.goTo` solo acepta las rutas `settings-extensions`,
+`settings-details` y `3dviewer`.
+
+### Cómo se obtiene el IFCGUID
+
+La selección del visor (`viewer.getSelection()` y el evento
+`viewer.onSelectionChanged`) entrega **ids de tiempo de ejecución**
+(`objectRuntimeIds`). Esos ids cambian entre sesiones, así que no sirven para
+guardar valores. Para cada elemento seleccionado, el panel
+([`lib/propiedades/selection.ts`](lib/propiedades/selection.ts) +
+[`lib/propiedades/ifcGuid.ts`](lib/propiedades/ifcGuid.ts)) hace lo siguiente:
+
+1. **Lee sus propiedades** con `viewer.getObjectProperties`. Si alguna se
+   llama `IfcGUID`, `IfcGlobalId`, `GlobalId` o `GUID`, su valor es el
+   IFCGUID. Las comparaciones ignoran mayúsculas, espacios, `_`, `.` y `-`, y
+   las propiedades se prueban en ese orden de prioridad. Revit exporta
+   `IfcGUID`. `Tipo IfcGUID` / `Type IfcGUID` (el GUID del *tipo*, no del
+   elemento) no coincide a propósito.
+2. **Pide su id externo** con `viewer.convertToObjectIds`. Las definiciones
+   del Workspace API documentan que, para modelos IFC, el id externo es el
+   **GUID sin comprimir** (formato de 36 caracteres, p. ej.
+   `0b3a6d2e-1f4c-…`). Se convierte al IFCGUID de 22 caracteres con el
+   algoritmo estándar de IFC (el mismo de IfcOpenShell).
+3. **Normaliza y valida.** Todo se guarda en la forma de 22 caracteres
+   (`^[0-3][0-9A-Za-z_$]{21}$`). Si hay propiedad y también id externo y no
+   coinciden, gana la propiedad, y el panel avisa de la diferencia.
+
+Limitaciones:
+
+- **Geometría no IFC.** Algunos objetos no tienen IFCGUID: DWG, mallas,
+  nubes de puntos, o modelos sin GlobalId ni id externo. Para ellos el panel
+  muestra un aviso con sus nombres y no les asigna valores. El resto de la
+  selección se sigue editando normalmente.
+  `convertToObjectIds` falla si *cualquier* objeto del lote no tiene id
+  externo; en ese caso se pregunta objeto por objeto.
+- **El IFCGUID depende de quien exporta el IFC.** Revit conserva el IfcGUID
+  entre exportaciones (está guardado en el elemento). Otras herramientas
+  pueden regenerarlo, y en ese caso los valores quedan asociados al GUID
+  anterior.
+- **Pendiente de confirmar con un modelo real.** Esta resolución se basa en la
+  documentación del SDK, no en una prueba con un modelo real. En el panel,
+  **"Origen del IFCGUID"** muestra para cada elemento:
+  - el IFCGUID resuelto;
+  - de dónde salió;
+  - el id externo crudo;
+  - cualquier diferencia entre las fuentes.
+
+  Compáralo con el `GlobalId` que muestra el panel de propiedades del visor
+  la primera vez que se use en un modelo.
+
+### Comportamiento del formulario (visor)
+
+- **Agrupación y controles.** Los atributos se agrupan por categoría, en
+  secciones plegables ordenadas por el campo "orden". Cada tipo tiene su
+  control:
+  - **Texto:** campo de texto.
+  - **Número:** campo numérico; acepta coma o punto decimal.
+  - **Sí / No:** botones Sí, No y Sin valor.
+  - **Fecha:** se escribe `DD-MM-AAAA` y tiene calendario propio. El selector
+    nativo depende del idioma del navegador y no se puede abrir dentro del
+    iframe de Trimble Connect.
+- **Valores mixtos.** Cuando los elementos seleccionados tienen valores
+  distintos (incluido "unos tienen valor y otros no"), el campo muestra
+  **"Valores mixtos"**.
+  - Si no lo tocas, **no se guarda**: cada elemento conserva su valor.
+  - Si lo editas, antes de guardar aparece una confirmación explícita que
+    dice qué se va a reemplazar en cuántos elementos.
+  - Lo mismo ocurre al borrar un valor existente.
+- **Solo se envían los campos editados.** Un cambio que deja el campo igual
+  no cuenta.
+- **Cambio de selección con cambios pendientes.** La nueva selección queda en
+  espera con un aviso y dos opciones: "Guardar en la selección anterior" o
+  "Descartar cambios". Nunca se pierden ni se aplican cambios en silencio.
+- **Elementos repetidos.** Si dos objetos seleccionados tienen el mismo
+  IFCGUID (p. ej. el mismo elemento en dos modelos), se guarda una sola vez.
+- **Metadatos.** Cada valor guarda quién lo modificó y cuándo; el panel lo
+  muestra como "Modificado por … el DD-MM-AAAA".
+
+### Catálogo (menú del proyecto)
+
+- **Edición solo para administradores.** Lo decide el rol del usuario en el
+  proyecto (`role: "ADMIN"` en `GET /projects/{id}/users` de la API REST de
+  Trimble Connect). La comprobación se hace en el servidor; la interfaz solo
+  oculta los botones.
+- **Grupos.** Se elige uno existente (lista desplegable) o se escribe uno
+  nuevo.
+- **Desactivar.** Un atributo desactivado no aparece en el formulario ni
+  admite valores nuevos, pero **sus valores se conservan** y el panel los
+  muestra en "Atributos inactivos con valores". Se puede reactivar.
+- **Eliminar.** Solo es posible si el atributo **no tiene ningún valor**. Si
+  tiene valores, la base de datos lo impide además de la interfaz
+  (`on delete restrict`, error 409 en la API).
+- **El tipo de dato no se puede cambiar** una vez que el atributo tiene
+  valores.
+- **Títulos únicos.** No puede haber dos atributos con el mismo título en el
+  proyecto, sin distinguir mayúsculas ni tildes.
+
+### Esquema de la base de datos
+
+[`supabase/propiedades.sql`](supabase/propiedades.sql), en la misma Supabase
+que usa "Validación":
+
+| Tabla | Columnas principales |
+|---|---|
+| `propiedades_definiciones` | `id` (uuid), `project_id`, `title`, `data_type` (`text` / `number` / `boolean` / `date`), `group_name`, `sort_order`, `active`, `created_at/by`, `updated_at/by` |
+| `propiedades_valores` | `id`, `project_id`, `model_id` (informativo), `ifc_guid` (22 caracteres, validado), `attribute_id` → definición (`on delete restrict`), una columna tipada por tipo (`value_text`, `value_number`, `value_boolean`, `value_date`; exactamente una con valor), `updated_at`, `updated_by` |
+
+- **Clave del valor.** Cada valor es único por **(proyecto, IFCGUID,
+  atributo)**. El `model_id` es solo informativo: el mismo elemento en una
+  versión nueva del modelo conserva sus valores.
+- **Fechas.** Se guardan como `date` (ISO). Al usuario siempre se le muestran
+  como `DD-MM-AAAA`.
+- **Vista de conteo.** `propiedades_definiciones_uso` cuenta los valores de
+  cada definición.
+- **Guardado atómico.** La función `propiedades_guardar_valores` guarda un
+  lote de forma atómica (todo o nada). Antes de escribir comprueba que cada
+  atributo sea del proyecto y esté activo, y un valor `null` borra.
+- **Acceso.** RLS está activado y sin políticas: solo el servidor, con la
+  clave de servicio, lee y escribe.
+
+### API
+
+Todas las rutas requieren `?projectId=` y el token del usuario
+(`Authorization: Bearer`, el mismo de `extension.requestPermission("accesstoken")`).
+El servidor comprueba que el usuario sea miembro del proyecto y, para el
+catálogo, que sea administrador.
+
+| Método y ruta | Uso |
+|---|---|
+| `GET /api/propiedades/definiciones` | Catálogo completo (activas e inactivas, con su número de valores) y si el usuario puede editarlo |
+| `POST /api/propiedades/definiciones` | Crear: `{ title, dataType, group?, sortOrder? }` (solo administradores) |
+| `PATCH /api/propiedades/definiciones/{id}` | Editar o desactivar/reactivar: `{ title?, dataType?, group?, sortOrder?, active? }` (solo administradores) |
+| `DELETE /api/propiedades/definiciones/{id}` | Eliminar; 409 si ya tiene valores (solo administradores) |
+| `POST /api/propiedades/valores/consulta` | Valores de uno o varios elementos: `{ ifcGuids: [...] }` |
+| `PUT /api/propiedades/valores` | Upsert en varios elementos a la vez: `{ elements: [{ ifcGuid, modelId }], changes: [{ attributeId, value }] }`. `value: null` borra. Fechas en ISO (`AAAA-MM-DD`) |
+
+Cada solicitud admite hasta 2.000 elementos y es atómica (todo o nada). Para
+selecciones más grandes (el panel lee hasta 5.000 objetos), el panel envía
+varios lotes. Si uno de ellos fallara, los anteriores ya quedarían guardados;
+el panel lo dice y conserva los cambios para volver a guardar.
+
+### Configuración
+
+No hay variables nuevas: usa las mismas `SUPABASE_URL` /
+`SUPABASE_SERVICE_ROLE_KEY` de "Validación". Solo hay que ejecutar una vez
+[`supabase/propiedades.sql`](supabase/propiedades.sql) en el **SQL Editor** de
+Supabase. Hasta entonces, la API responde con un mensaje que indica ese paso.
+En `npm run dev` sin variables de Supabase, los datos se guardan en memoria.
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -652,11 +840,13 @@ app/
   extension/                  Resumen Archivos (pagina embebida)
   validacion/                 Validacion (pagina embebida)
   graficos/                   Graficos de Modelos (pagina embebida en el visor 3D)
+  propiedades/                Propiedades: catalogo (proyecto) y formulario (visor 3D); visor/ = respaldo solo visor
   api/summary, api/files      API de Resumen Archivos
   api/tree                    Arbol de carpetas (pestaña "Estructura de Carpetas")
   api/folder-permissions      Permisos (directos/heredados) de una carpeta
   api/permissions-audit       Auditoria de permisos de todo el proyecto (pestaña)
   api/graficos/psets          Lectura de bibliotecas de propiedades (Graficos de Modelos)
+  api/propiedades/            Definiciones (CRUD), consulta y upsert de valores por IFCGUID
   api/validacion/config       GET/PUT de la configuracion por proyecto
   api/validacion/analyze      Ejecuta el analisis (boton "Analizar")
   api/validacion/results      Pagina de resultados (con filtros)
@@ -670,6 +860,7 @@ components/
   permissionAudit/            Auditoria de Permisos: tarjetas, lista, hook de estado
   validacion/                 Validacion: configuracion, probador, resultados, duplicados
   graficos/                   Graficos de Modelos: conexion con el visor, modelos, datos, graficos
+  propiedades/                Propiedades: conexion (proyecto/visor), catalogo, formulario, fecha DD-MM-AAAA
 lib/
   trimbleApi.ts, walkProjectTree.ts, cache.ts   API REST y recorrido (compartidos)
   folderTree.ts                Construye el arbol anidado + colores por nivel (server)
@@ -681,11 +872,18 @@ lib/
                               duplicados, almacenamiento (Supabase o Upstash Redis) y pruebas
   graficos/                   Lectura del visor 3D, datos en comun, agregacion, bibliotecas
                               de propiedades, informe PDF (con pruebas)
+  propiedades/                IFCGUID, valores y fechas, formulario (mixtos), servicio, almacenamiento
+                              (Supabase o memoria), cliente HTTP y lectura de la seleccion (con pruebas)
   psetApi.ts                  Cliente del servicio Property Set de Trimble Connect (servidor)
 public/
   manifest.json, icon.svg                       Resumen Archivos
   manifest-validacion.json, icon-validacion.svg Validacion
   manifest-graficos.json, icon-graficos.svg     Graficos de Modelos
+  manifest-propiedades.json, icon-propiedades.svg  Propiedades (proyecto + visor 3D)
+  manifest-propiedades-visor.json                  Propiedades, respaldo solo para el visor 3D
+supabase/
+  validacion_config.sql       Tabla de Validacion
+  propiedades.sql             Tablas, vista y funcion de Propiedades
 ```
 
 ## Configurar y desplegar en Vercel
@@ -709,6 +907,10 @@ public/
    - **Vuelve a desplegar** (Deployments → ⋯ → Redeploy) para que el código lea
      las variables. Sin esto, «Validación» muestra "La base de datos de
      configuración no está conectada" (Resumen Archivos no la necesita).
+   - **Para "Propiedades"**, ejecuta también, una sola vez,
+     [`supabase/propiedades.sql`](supabase/propiedades.sql) en el mismo SQL
+     Editor. Usa las mismas variables, así que no hay nada más que configurar.
+     "Propiedades" requiere Supabase: no funciona con Upstash Redis.
    - *Alternativa:* Upstash Redis (Marketplace → **Upstash → Redis**). Agrega
      `KV_REST_API_URL` y `KV_REST_API_TOKEN` (o `UPSTASH_REDIS_REST_URL` /
      `UPSTASH_REDIS_REST_TOKEN`) y no necesita crear tablas. Si hay ambas, se usa
@@ -759,6 +961,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Resumen Archivos | `https://trimble-docs.vercel.app/manifest.json` |
    | Validación | `https://trimble-docs.vercel.app/manifest-validacion.json` |
    | Gráficos de Modelos | `https://trimble-docs.vercel.app/manifest-graficos.json` |
+   | Propiedades | `https://trimble-docs.vercel.app/manifest-propiedades.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
@@ -767,6 +970,11 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    **Gráficos de Modelos** no aparece en el menú lateral: aparece con
    categoría *3D Viewer*. Abre un modelo en el visor 3D y elígela en el
    panel de extensiones del visor.
+   **Propiedades** aparece en los dos lugares con un solo manifiesto: el
+   catálogo en el menú lateral y el formulario en el panel de extensiones
+   del visor 3D. Si no aparece en el visor, instala además
+   `https://trimble-docs.vercel.app/manifest-propiedades-visor.json` desde
+   la configuración de extensiones del visor.
 6. Al abrir Resumen Archivos o Validación por primera vez, Trimble Connect
    pedira tu consentimiento para que la extension pueda leer el access token
    del usuario actual (esto es lo que permite leer los documentos del
@@ -786,8 +994,8 @@ npm run dev     # http://localhost:3000
 npm test        # pruebas del analizador de nomenclatura (35+ casos)
 ```
 
-Las paginas `/extension`, `/validacion` y `/graficos` (esta, dentro del
-visor 3D) solo funcionan correctamente
+Las paginas `/extension`, `/validacion`, `/graficos` y `/propiedades` (estas dos
+también dentro del visor 3D) solo funcionan correctamente
 **embebidas dentro de un iframe de Trimble Connect** (usan `window.parent`
 para comunicarse via `postMessage`). Abrirlas directamente en el navegador
 mostrara un mensaje indicando que deben abrirse desde dentro de Trimble

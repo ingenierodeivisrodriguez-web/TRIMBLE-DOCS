@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/propiedades",
+  "title": "Propiedades",
+  "description": "Atributos propios del proyecto (texto, número, sí/no, fecha) asignados por IFCGUID a los elementos de los modelos: el catálogo se configura desde el menú del proyecto y los valores se asignan desde el visor 3D.",
+  "icon": "https://trimble-docs.vercel.app/icon-propiedades.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project", "3dviewer"],
+  "enabled": true
+}
