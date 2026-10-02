@@ -879,6 +879,18 @@ circular. El tipo se puede cambiar en cada uno. Cada gráfico se configura con
   categoría conserva su color.
 - **Selección:** al hacer clic en una barra o sector se seleccionan en el
   modelo esos elementos.
+- **Segmentadores por gráfico:** cada gráfico tiene los suyos, como en
+  Gráficos de Modelos. Se elige un dato de texto o fecha y se marcan los
+  valores que se quieren ver (Todos / Ninguno / buscar). Filtran solo ese
+  gráfico y lo que colorea en el modelo.
+- **"🎨 Colorear" por gráfico:** las barras toman un color por categoría,
+  fijo durante toda la línea de tiempo, con su leyenda. En el modelo, cada
+  elemento **aparece con el color de su categoría** a medida que avanza la
+  simulación. Solo un gráfico colorea a la vez, y mientras tanto se apaga el
+  resaltado naranja. Los elementos que no pasan los segmentadores conservan
+  su color. Al apagarlo, los elementos ya mostrados recuperan su color; si la
+  simulación no estaba corriendo, activarlo la inicia en la fecha actual.
+  "Restablecer modelo" también lo apaga.
 - **Configuración:** se recuerda en la pestaña del navegador.
 - **Piezas reutilizadas:** usan las mismas piezas de gráfico de Gráficos de
   Modelos ([`components/graficos/Charts.tsx`](components/graficos/Charts.tsx),

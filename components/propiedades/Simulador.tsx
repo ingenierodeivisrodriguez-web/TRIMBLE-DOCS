@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import type { ColorGroup } from "../../lib/graficos/colors";
 import type { Members } from "../../lib/graficos/modelData";
 import { selectorFor } from "../../lib/graficos/viewerReader";
 import { availableFields, GroupField } from "../../lib/propiedades/grouping";
@@ -104,6 +105,9 @@ export default function Simulador({
   const chartsKey = `propiedades.simulador.graficos.${projectId}`;
   const [charts, setCharts] = useState<SimChartSpec[]>(() => readCharts(chartsKey));
   const [chartNote, setChartNote] = useState("");
+  /** The chart painting the model ("Colorear"), and its colors. */
+  const [coloredChart, setColoredChart] = useState<number | null>(null);
+  const [colorGroups, setColorGroups] = useState<ColorGroup[] | null>(null);
 
   // ------------------------------------------------------------ timeline
 
@@ -176,6 +180,10 @@ export default function Simulador({
     highlighted: null as Members | null,
     /** What was changed in the viewer, to restore it. */
     touched: [] as Members[],
+    /** "Colorear": element -> color of its category in the colored chart (null: off). */
+    colorMap: null as Map<string, Map<number, string>> | null,
+    /** The colors changed: paint the elements already shown again. */
+    repaint: false,
   });
   state.current.items = items;
   state.current.viewerModelIds = data.viewerModelIds;
@@ -183,20 +191,55 @@ export default function Simulador({
 
   const sel = useCallback((members: Members) => selectorFor(members, state.current.viewerModelIds), []);
 
+  /**
+   * Paints elements [from, to) of the timeline with their category's color
+   * ("Colorear"); with `resetOthers`, the ones without a color go back to theirs.
+   */
+  const paint = useCallback(
+    async (from: number, to: number, resetOthers: boolean) => {
+      const s = state.current;
+      const byColor = new Map<string | null, Members>();
+      for (let i = from; i < to; i++) {
+        const item = s.items[i];
+        const color = s.colorMap?.get(item.model)?.get(item.runtimeId) ?? null;
+        if (color === null && !resetOthers) continue;
+        const members = byColor.get(color) ?? {};
+        (members[item.model] ??= []).push(item.runtimeId);
+        byColor.set(color, members);
+      }
+      for (const [color, members] of byColor) await viewer.setObjectState(sel(members), { color: color ?? "reset" });
+    },
+    [viewer, sel]
+  );
+
   /** Brings the viewer to `target` elements shown, a step at a time, never two updates at once. */
   const pump = useCallback(async () => {
     const s = state.current;
     if (s.running) return;
     s.running = true;
     try {
-      while (s.applied !== null && s.applied !== s.target) {
+      while (s.applied !== null && (s.applied !== s.target || s.repaint)) {
+        if (s.repaint) {
+          // The colors changed (Colorear on, off or another chart): repaint what is shown.
+          s.repaint = false;
+          s.highlighted = null;
+          await paint(0, s.applied, true);
+          continue;
+        }
         const from = s.applied;
         const to = s.target;
         if (to > from) {
           const batch = membersOf(s.items, from, to);
-          if (s.highlighted) await viewer.setObjectState(sel(s.highlighted), { color: "reset" });
-          await viewer.setObjectState(sel(batch), s.highlight ? { visible: true, color: HIGHLIGHT } : { visible: true });
-          s.highlighted = s.highlight ? batch : null;
+          if (s.colorMap) {
+            // Each element appears in its category's color.
+            await viewer.setObjectState(sel(batch), { visible: true });
+            await paint(from, to, false);
+            s.highlighted = null;
+          } else {
+            if (s.highlighted) await viewer.setObjectState(sel(s.highlighted), { color: "reset" });
+            await viewer.setObjectState(sel(batch), s.highlight ? { visible: true, color: HIGHLIGHT } : { visible: true });
+            s.highlighted = s.highlight ? batch : null;
+          }
         } else {
           await viewer.setObjectState(sel(membersOf(s.items, to, from)), { visible: false, color: "reset" });
           s.highlighted = null;
@@ -210,7 +253,7 @@ export default function Simulador({
     } finally {
       s.running = false;
     }
-  }, [viewer, sel]);
+  }, [viewer, sel, paint]);
 
   /** Hides every element with the date and sets how the rest look; then the timeline shows them. */
   const prepare = useCallback(async () => {
@@ -244,7 +287,11 @@ export default function Simulador({
     s.applied = null;
     s.highlighted = null;
     s.touched = [];
+    s.colorMap = null;
+    s.repaint = false;
     setPrepared(false);
+    setColoredChart(null);
+    setColorGroups(null);
     for (const members of touched) {
       await viewer.setObjectState(sel(members), { visible: "reset", color: "reset" }).catch(() => undefined);
     }
@@ -288,6 +335,41 @@ export default function Simulador({
     if (!prepared && !(await prepare())) return;
     if (position >= span) setPosition(0);
     setPlaying(true);
+  }
+
+  // "Colorear": the colored chart's categories become a color per element, and the
+  // model is painted again (entering the simulation if it wasn't running).
+  const prepareRef = useRef(prepare);
+  prepareRef.current = prepare;
+  useEffect(() => {
+    const s = state.current;
+    if (coloredChart === null || !colorGroups) {
+      if (s.colorMap) {
+        s.colorMap = null;
+        s.repaint = true;
+        pump();
+      }
+      return;
+    }
+    const map = new Map<string, Map<number, string>>();
+    for (const group of colorGroups) {
+      for (const [model, ids] of Object.entries(group.members)) {
+        const perModel = map.get(model) ?? new Map<number, string>();
+        for (const id of ids) perModel.set(id, group.color);
+        map.set(model, perModel);
+      }
+    }
+    s.colorMap = map;
+    s.repaint = true;
+    if (s.applied !== null) pump();
+    else prepareRef.current();
+  }, [coloredChart, colorGroups, pump]);
+
+  const receiveColorGroups = useCallback((groups: ColorGroup[]) => setColorGroups(groups), []);
+
+  function toggleColors(index: number) {
+    setColorGroups(null);
+    setColoredChart((current) => (current === index ? null : index));
   }
 
   async function selectFromChart(members: Members, label: string, objects: number) {
@@ -453,6 +535,9 @@ export default function Simulador({
                 shown={shownData}
                 animate={!playing}
                 onSelect={selectFromChart}
+                colored={coloredChart === i}
+                onToggleColors={() => toggleColors(i)}
+                onColorGroups={receiveColorGroups}
               />
             ))}
           </div>
@@ -479,10 +564,18 @@ export default function Simulador({
               </label>
             ))}
           </fieldset>
-          <label style={radioStyle}>
-            <input type="checkbox" checked={highlight} onChange={(e) => setHighlight(e.target.checked)} />
+          <label style={{ ...radioStyle, opacity: coloredChart !== null ? 0.55 : 1 }}>
+            <input
+              type="checkbox"
+              checked={highlight && coloredChart === null}
+              disabled={coloredChart !== null}
+              onChange={(e) => setHighlight(e.target.checked)}
+            />
             Resaltar en naranja lo que aparece en cada paso
           </label>
+          {coloredChart !== null && (
+            <span style={hintStyle}>Mientras un gráfico colorea el modelo, cada elemento aparece con el color de su categoría.</span>
+          )}
           <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
             <button type="button" onClick={restore} disabled={!prepared} style={{ ...secondaryButtonStyle, opacity: prepared ? 1 : 0.55 }}>
               Restablecer modelo
