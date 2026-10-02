@@ -32,6 +32,8 @@ export const MAX_SLICES = 50;
 export const MAX_COMPARE_GROUPS = 50;
 // Room per column (and per A/B pair) before a chart scrolls sideways, and the
 // tallest the horizontal chart and the donut's key grow before they scroll down.
+// The scrolled content clips its overflow: Recharts rounds the drawing's width
+// up, and that fraction of a pixel alone would show a scrollbar.
 const COLUMN_WIDTH = 36;
 const COMPARE_GROUP_WIDTH = 56;
 const HORIZONTAL_MAX_HEIGHT = 620;
@@ -99,7 +101,7 @@ interface SingleSeriesProps {
 export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true }: SingleSeriesProps) {
   return (
     <div style={{ overflowX: "auto", overflowY: "hidden" }}>
-      <div style={{ minWidth: rows.length * COLUMN_WIDTH + 64 }}>
+      <div style={{ minWidth: rows.length * COLUMN_WIDTH + 64, overflow: "hidden" }}>
         <ResponsiveContainer width="100%" height={280}>
           <BarChart
             data={rows}
@@ -310,7 +312,7 @@ export function CompareChart({
   return (
     <div>
       <div style={{ overflowX: "auto", overflowY: "hidden" }}>
-        <div style={{ minWidth: rows.length * COMPARE_GROUP_WIDTH + 64 }}>
+        <div style={{ minWidth: rows.length * COMPARE_GROUP_WIDTH + 64, overflow: "hidden" }}>
           <ResponsiveContainer width="100%" height={290}>
             <BarChart data={rows} margin={{ top: 8, right: 8, left: 0, bottom: 4 }} barGap={2} barCategoryGap="22%">
               <CartesianGrid vertical={false} stroke={GRID_COLOR} />

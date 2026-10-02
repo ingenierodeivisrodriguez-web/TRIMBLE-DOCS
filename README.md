@@ -530,6 +530,41 @@ datos (propiedades) de los objetos de los modelos cargados en el visor.
 
     Además, una propiedad **del propio modelo** con Verdadero/Falso escrito
     como texto ("True", "FALSO"...) también se agrupa como Sí/No.
+14. **Atributos de la app Propiedades**: los atributos del catálogo de
+    [Propiedades](#propiedades-proyecto--visor-3d) (p. ej. "semana de
+    instalacion", "ciclo de instalacion", "cumple calidad?", "costo real",
+    "planificado") y los valores asignados a los elementos desde su panel
+    del visor aparecen como datos más. Se pueden usar en gráficos,
+    segmentadores, comparativo (una fecha como "semana de instalacion" se
+    compara mes contra mes), Colorear, vistas guardadas y PDF. El tipo de
+    cada atributo se respeta: número se suma, fecha se agrupa por mes, Sí/No
+    y texto forman categorías. En el panel "1. Modelos", el recuadro
+    **Atributos de Propiedades** indica cuántos atributos hay y cuántos
+    objetos de los modelos marcados tienen valores:
+    - Se cargan **solos** al marcar un modelo, sin buscar nada. **Actualizar**
+      los relee, y también se releen al volver al panel si pasaron más de
+      30 s, por si se asignaron valores mientras tanto.
+    - Los valores se unen a los objetos por **IFCGUID**, con la misma regla
+      del panel Propiedades: primero la propiedad de GUID del objeto (el
+      "IfcGUID" de los modelos de Revit) y, si no la tiene, el id externo
+      del visor convertido a los 22 caracteres de IFC
+      (`resolveIfcGuid` / `normalizeGuid` de
+      [`lib/propiedades/ifcGuid.ts`](lib/propiedades/ifcGuid.ts)). Los objetos
+      sin id externo se dejan fuera uno a uno: `convertToObjectIds` falla
+      para todo el lote si uno no lo tiene, así que el lote se divide hasta
+      aislarlos.
+    - Se leen **todos los valores del proyecto** (solo existen los de
+      elementos con algo asignado) en páginas de 5.000, por la ruta de solo
+      lectura [`/api/graficos/propiedades`](app/api/graficos/propiedades/route.ts).
+      La ruta comprueba con el token del usuario que es miembro del proyecto
+      (`assertProjectAccess`) y lee directamente las tablas
+      `propiedades_definiciones` y `propiedades_valores` de Supabase
+      ([`lib/graficos/propiedadesServer.ts`](lib/graficos/propiedadesServer.ts)),
+      con la misma clave de servidor que la API de Propiedades. No escribe
+      nada.
+    - Los atributos inactivos solo se ofrecen si algún elemento conserva
+      valores. Si Propiedades no tiene base de datos en ese despliegue, el
+      recuadro lo indica y el resto de la extensión funciona igual.
 
 **Fechas**: se reconocen las propiedades de tipo fecha del modelo
 (`DateTime`, marcas de tiempo UNIX) y los textos que son **solo** una fecha
@@ -890,6 +925,7 @@ app/
   api/folder-permissions      Permisos (directos/heredados) de una carpeta
   api/permissions-audit       Auditoria de permisos de todo el proyecto (pestaña)
   api/graficos/psets          Lectura de bibliotecas de propiedades (Graficos de Modelos)
+  api/graficos/propiedades    Lectura de los atributos de Propiedades para Graficos (solo lectura)
   api/propiedades/            Definiciones (CRUD), consulta y upsert de valores por IFCGUID
   api/validacion/config       GET/PUT de la configuracion por proyecto
   api/validacion/analyze      Ejecuta el analisis (boton "Analizar")
@@ -915,7 +951,7 @@ lib/
   validacion/                 Analizador, configuracion, filtros, exportacion,
                               duplicados, almacenamiento (Supabase o Upstash Redis) y pruebas
   graficos/                   Lectura del visor 3D, datos en comun, agregacion, bibliotecas
-                              de propiedades, informe PDF (con pruebas)
+                              de propiedades, atributos de Propiedades, informe PDF (con pruebas)
   propiedades/                IFCGUID, valores y fechas, formulario (mixtos), servicio, almacenamiento
                               (Supabase o memoria), cliente HTTP y lectura de la seleccion (con pruebas)
   psetApi.ts                  Cliente del servicio Property Set de Trimble Connect (servidor)

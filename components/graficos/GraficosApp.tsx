@@ -18,6 +18,8 @@ import {
   SlicerSpec,
 } from "../../lib/graficos/modelData";
 import { buildReportPdf, downloadBlob, ReportChart, snapshotToJpeg, svgToPng } from "../../lib/graficos/pdfReport";
+import { mergePropiedades, PropiedadesData, propiedadesMatches } from "../../lib/graficos/propiedades";
+import { fetchPropiedades, PropiedadesUnavailableError } from "../../lib/graficos/propiedadesClient";
 import { entityLink, LibrariesPayload, librarySummary, mergePsets } from "../../lib/graficos/psets";
 import {
   fetchLibraries,
@@ -119,6 +121,8 @@ function defaultViewName(): string {
 
 // Objects checked when looking for property-set libraries (the service's per-request limit is 60).
 const DISCOVERY_LINKS = 60;
+// Coming back to the panel reloads the Propiedades attributes if they are older than this.
+const PROPIEDADES_REFRESH_MS = 30_000;
 
 export default function GraficosApp({
   viewer,
@@ -152,6 +156,11 @@ export default function GraficosApp({
   const [psetBusy, setPsetBusy] = useState("");
   const [psetError, setPsetError] = useState("");
   const [psetNotice, setPsetNotice] = useState("");
+  // Attributes of the "Propiedades" app (assigned by IFCGUID, stored in Supabase).
+  const [propData, setPropData] = useState<PropiedadesData | null>(null);
+  const [propBusy, setPropBusy] = useState("");
+  const [propError, setPropError] = useState("");
+  const [propUnavailable, setPropUnavailable] = useState("");
 
   // "Colorear": the chart painting the model, and a nudge to make it repaint.
   const [coloring, setColoring] = useState<number | null>(null);
@@ -326,9 +335,16 @@ export default function GraficosApp({
     setPsetData(null);
   }, [project.id]);
 
-  // Library values attach to objects by GUID, so each model's GUIDs are read once.
+  // Propiedades values need the viewer's GUIDs only for objects without a GUID
+  // property of their own (Revit models carry "IfcGUID"; IFC models don't).
+  const propNeedsGuids = useMemo(
+    () => !!propData?.values.length && !!modelDatasets?.some((d) => d.records.some((r) => !r.ifcGuid)),
+    [propData, modelDatasets]
+  );
+
+  // Library and Propiedades values attach to objects by GUID, so each model's GUIDs are read once.
   useEffect(() => {
-    if (!psetData || !modelDatasets) return;
+    if ((!psetData && !propNeedsGuids) || !modelDatasets) return;
     const missing = modelDatasets.filter((d) => !guidMaps[d.modelId] && viewerModelIds[d.modelId]);
     if (missing.length === 0) return;
     let cancelled = false;
@@ -340,14 +356,65 @@ export default function GraficosApp({
           if (cancelled) return;
           setGuidMaps((prev) => ({ ...prev, [dataset.modelId]: map }));
         } catch (err) {
-          if (!cancelled) setPsetError(`No se pudieron leer los identificadores de "${dataset.modelName}": ${err instanceof Error ? err.message : "error desconocido"}.`);
+          if (cancelled) continue;
+          const message = `No se pudieron leer los identificadores de "${dataset.modelName}": ${err instanceof Error ? err.message : "error desconocido"}.`;
+          if (psetData) setPsetError(message);
+          if (propNeedsGuids) setPropError(message);
         }
       }
     })();
     return () => {
       cancelled = true;
     };
-  }, [psetData, modelDatasets, guidMaps, viewerModelIds, viewer]);
+  }, [psetData, propNeedsGuids, modelDatasets, guidMaps, viewerModelIds, viewer]);
+
+  // ------------------------------------------------------------ atributos de la app Propiedades
+
+  // When the attributes were last loaded: 0 never, -1 first load under way or failed.
+  const propLoadedAt = useRef(0);
+  const loadPropiedades = useCallback(async () => {
+    setPropBusy("Cargando los atributos de Propiedades...");
+    setPropError("");
+    try {
+      const data = await fetchPropiedades(project.id, getAccessToken);
+      if (unmounted.current) return;
+      setPropData(data);
+      setPropUnavailable("");
+      propLoadedAt.current = Date.now();
+    } catch (err) {
+      if (unmounted.current) return;
+      if (err instanceof PropiedadesUnavailableError) setPropUnavailable(err.message);
+      else setPropError(err instanceof Error ? err.message : "No se pudieron leer los atributos de Propiedades.");
+    } finally {
+      if (!unmounted.current) setPropBusy("");
+    }
+  }, [project.id, getAccessToken]);
+
+  useEffect(() => {
+    setPropData(null);
+    setPropUnavailable("");
+    propLoadedAt.current = 0;
+  }, [project.id]);
+
+  // Loaded once the first models are read, then again on "Actualizar" or when
+  // the panel comes back into view (values may have been assigned meanwhile
+  // in the Propiedades panel).
+  const hasModels = !!modelDatasets?.length;
+  useEffect(() => {
+    if (hasModels && propLoadedAt.current === 0 && !propBusy) {
+      propLoadedAt.current = -1;
+      loadPropiedades();
+    }
+  }, [hasModels, propBusy, loadPropiedades]);
+  useEffect(() => {
+    const onVisible = () => {
+      if (document.visibilityState === "visible" && propLoadedAt.current > 0 && Date.now() - propLoadedAt.current > PROPIEDADES_REFRESH_MS) {
+        loadPropiedades();
+      }
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => document.removeEventListener("visibilitychange", onVisible);
+  }, [loadPropiedades]);
 
   const loadLibraryData = useCallback(
     async (libIds: string[]) => {
@@ -440,11 +507,13 @@ export default function GraficosApp({
     autoLoaded.current = "";
   }
 
-  // The charts' data: the models' own properties plus library values.
-  const activeDatasets = useMemo(
-    () => (modelDatasets && psetData ? mergePsets(modelDatasets, guidMaps, psetData) : modelDatasets),
-    [modelDatasets, psetData, guidMaps]
-  );
+  // The charts' data: the models' own properties plus library values and Propiedades attributes.
+  const activeDatasets = useMemo(() => {
+    if (!modelDatasets) return modelDatasets;
+    const withPsets = psetData ? mergePsets(modelDatasets, guidMaps, psetData) : modelDatasets;
+    return propData ? mergePropiedades(withPsets, guidMaps, propData) : withPsets;
+  }, [modelDatasets, psetData, propData, guidMaps]);
+  const propMatches = useMemo(() => (propData && activeDatasets ? propiedadesMatches(activeDatasets) : 0), [propData, activeDatasets]);
   const psetMatches = useMemo(() => {
     if (!psetData || !activeDatasets) return 0;
     let count = 0;
@@ -820,6 +889,17 @@ export default function GraficosApp({
           onDismissNotice={() => setPsetNotice("")}
           onDismissError={() => setPsetError("")}
         />
+        <PropiedadesBox
+          data={propData}
+          matches={propMatches}
+          linking={propNeedsGuids && !guidsReady}
+          busy={propBusy}
+          unavailable={propUnavailable}
+          error={propError}
+          canLoad={!!modelDatasets?.length}
+          onRefresh={loadPropiedades}
+          onDismissError={() => setPropError("")}
+        />
       </Panel>
 
       <div style={{ position: "sticky", top: 0, zIndex: 5 }}>
@@ -1073,6 +1153,78 @@ function LibrariesBox({
               {" "}· ejemplo del modelo: <code style={{ wordBreak: "break-all" }}>{sampleModelLink}</code>
             </>
           )}
+        </Notice>
+      )}
+    </div>
+  );
+}
+
+/** Status of the "Propiedades" app's attributes, which load on their own. */
+function PropiedadesBox({
+  data,
+  matches,
+  linking,
+  busy,
+  unavailable,
+  error,
+  canLoad,
+  onRefresh,
+  onDismissError,
+}: {
+  data: PropiedadesData | null;
+  matches: number;
+  /** Values are loaded but the viewer's GUIDs are still being read. */
+  linking: boolean;
+  busy: string;
+  unavailable: string;
+  error: string;
+  canLoad: boolean;
+  onRefresh: () => void;
+  onDismissError: () => void;
+}) {
+  const withValues = new Set(data?.values.map((v) => v.attributeId));
+  const attributes = data?.definitions.filter((d) => d.active || withValues.has(d.id)) ?? [];
+  const groups = [...new Set(attributes.map((d) => d.group))];
+  let status: string;
+  if (unavailable) status = `No disponibles: ${unavailable}`;
+  else if (!data) status = canLoad ? "" : "Se cargan al marcar un modelo.";
+  else if (attributes.length === 0) status = "El proyecto aún no tiene atributos en Propiedades.";
+  else {
+    const what = `${attributes.length} ${attributes.length === 1 ? "atributo" : "atributos"} (${groups.join(", ")})`;
+    status =
+      data.values.length === 0
+        ? `${what} · aún no hay valores asignados a ningún elemento.`
+        : `${what} · ${linking ? "relacionando valores con los objetos..." : `${formatNumber(matches)} objetos de los modelos marcados tienen valores`}`;
+  }
+  const mismatch = !!data && !linking && matches === 0 && data.values.length > 0;
+
+  return (
+    <div style={{ marginTop: 12, borderTop: "1px solid var(--tc-gray-100)", paddingTop: 10, display: "flex", flexDirection: "column", gap: 6 }}>
+      <div style={{ display: "flex", flexWrap: "wrap", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+        <div style={{ minWidth: 0, flex: "1 1 240px" }}>
+          <div style={{ fontSize: 12.5, fontWeight: 700, color: "var(--tc-blue-800)" }}>Atributos de Propiedades</div>
+          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>{status}</div>
+        </div>
+        <button
+          type="button"
+          onClick={onRefresh}
+          disabled={!!busy || !canLoad}
+          style={{ ...smallButtonStyle, opacity: busy || !canLoad ? 0.5 : 1 }}
+          title="Vuelve a leer los valores asignados en la app Propiedades"
+        >
+          Actualizar
+        </button>
+      </div>
+      {busy && <Muted>{busy}</Muted>}
+      {error && (
+        <Notice tone="error" onClose={onDismissError}>
+          {error}
+        </Notice>
+      )}
+      {mismatch && (
+        <Notice>
+          Propiedades tiene {formatNumber(data!.values.length)} valores en este proyecto, pero ninguno es de los objetos de los
+          modelos marcados (los valores van con el IFCGUID de cada elemento).
         </Notice>
       )}
     </div>

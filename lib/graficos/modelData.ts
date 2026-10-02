@@ -1,3 +1,5 @@
+import { resolveIfcGuid } from "../propiedades/ifcGuid";
+
 // Numeric codes of the Workspace API's PropertyType. The package declares it
 // as a `const enum`, which can't be referenced as a value under Next.js's
 // isolatedModules, so the values are mirrored here.
@@ -60,6 +62,8 @@ export type FieldValue = string | number;
 export interface ObjectRecord {
   runtimeId: number;
   values: Record<string, FieldValue>;
+  /** The IFCGUID from a GUID property of the object (e.g. Revit's "IfcGUID"), when it has one. */
+  ifcGuid?: string;
 }
 
 /** Everything read from one model, ready for charting. */
@@ -209,7 +213,9 @@ export function buildDataset(modelId: string, modelName: string, objects: RawObj
         );
       }
     }
-    records.push({ runtimeId: obj.id, values });
+    // Same rule as the Propiedades panel, whose values are stored by this GUID.
+    const ifcGuid = resolveIfcGuid(null, obj.properties ?? []).guid;
+    records.push(ifcGuid ? { runtimeId: obj.id, values, ifcGuid } : { runtimeId: obj.id, values });
   }
 
   return { modelId, modelName, records, fields, coverage };

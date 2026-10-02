@@ -16,10 +16,18 @@ export type ViewerLike = Pick<
 >;
 
 const GUID_CHUNK = 2000;
+// Objects without an external id given up on before the rest of a failing
+// batch is skipped as well (finding each one takes a few calls).
+const MAX_MISSING_GUIDS = 200;
 
 /**
- * The stable id (IFC GUID) of each object, which is what Trimble Connect's
- * property-set libraries attach their values to. Returned by runtime id.
+ * The stable id (external id: the IFC GUID) of each object, which is what
+ * Trimble Connect's property-set libraries and the Propiedades app attach
+ * their values to. Returned by runtime id.
+ *
+ * convertToObjectIds fails for the whole batch when any object in it has no
+ * external id, so a failing batch is split in halves until those objects are
+ * isolated, and only they are left out.
  */
 export async function readObjectGuids(
   viewer: ViewerLike,
@@ -27,13 +35,29 @@ export async function readObjectGuids(
   runtimeIds: number[]
 ): Promise<Map<number, string>> {
   const guids = new Map<number, string>();
-  for (let i = 0; i < runtimeIds.length; i += GUID_CHUNK) {
-    const chunk = runtimeIds.slice(i, i + GUID_CHUNK);
-    const ids = (await viewer.convertToObjectIds(queryModelId, chunk)) ?? [];
-    chunk.forEach((runtimeId, j) => {
-      if (ids[j]) guids.set(runtimeId, ids[j]);
-    });
+  let missing = 0;
+  let lastError: unknown = null;
+  async function convert(ids: number[]): Promise<void> {
+    if (ids.length === 0 || missing >= MAX_MISSING_GUIDS) return;
+    try {
+      const out = (await viewer.convertToObjectIds(queryModelId, ids)) ?? [];
+      ids.forEach((runtimeId, j) => {
+        if (out[j]) guids.set(runtimeId, out[j]);
+      });
+    } catch (err) {
+      lastError = err;
+      if (ids.length === 1) {
+        missing++;
+        return;
+      }
+      const half = Math.ceil(ids.length / 2);
+      await convert(ids.slice(0, half));
+      await convert(ids.slice(half));
+    }
   }
+  for (let i = 0; i < runtimeIds.length; i += GUID_CHUNK) await convert(runtimeIds.slice(i, i + GUID_CHUNK));
+  // Nothing converted at all: the model has no external ids (or the viewer failed) - say so.
+  if (guids.size === 0 && lastError) throw lastError;
   return guids;
 }
 
