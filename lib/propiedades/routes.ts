@@ -35,6 +35,18 @@ export async function handle(
     if (err instanceof ServiceError) {
       return NextResponse.json({ error: err.message, code: err.code }, { status: err.status });
     }
+    if (err instanceof TrimbleApiError && err.status === 401) {
+      // The raw response stays in the server log; the user gets what to do.
+      console.error("[propiedades] Trimble Connect rechazó el token:", err.message);
+      return NextResponse.json(
+        {
+          error:
+            "Trimble Connect no aceptó tu sesión (token vencido o no válido). Recarga Trimble Connect (F5) y vuelve a abrir Propiedades.",
+          code: "trimble-session",
+        },
+        { status: 401 }
+      );
+    }
     if (err instanceof StoreError || err instanceof TrimbleApiError) {
       return NextResponse.json({ error: err.message }, { status: err.status });
     }

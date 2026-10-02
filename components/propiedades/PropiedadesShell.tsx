@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import * as WorkspaceAPI from "trimble-connect-workspace-api";
 import { httpApi, PropiedadesApi } from "../../lib/propiedades/client";
 import type { PropiedadesViewer } from "../../lib/propiedades/selection";
+import { describeToken, isTokenLike, tokenFrom } from "../../lib/propiedades/token";
 
 type Status = "connecting" | "pending-consent" | "denied" | "not-embedded" | "error" | "ready";
 export type Host = "project" | "3dviewer";
@@ -40,8 +41,16 @@ export default function PropiedadesShell({
   const [host, setHost] = useState<Host>(forceHost ?? "project");
   const [project, setProject] = useState({ id: "", name: "" });
   const [viewer, setViewer] = useState<PropiedadesViewer | null>(null);
-  const token = useRef("");
+  const token = useRef({ value: "", source: "" });
+  const workspace = useRef<WorkspaceAPI.WorkspaceAPI | null>(null);
   const listeners = useRef(new Set<ViewerEventListener>());
+
+  /** Keeps `value` as the token if it looks like one (status words like "pending" never do). */
+  function accept(value: string, source: string): boolean {
+    if (!isTokenLike(value)) return false;
+    token.current = { value, source };
+    return true;
+  }
 
   const subscribe = useCallback((listener: ViewerEventListener) => {
     listeners.current.add(listener);
@@ -62,17 +71,14 @@ export default function PropiedadesShell({
         const api = await WorkspaceAPI.connect(
           window.parent,
           (event: string, data: unknown) => {
-            if (event === "extension.accessToken") {
-              // Typed as { data: token }; older hosts send the string or { accessToken }.
-              const d = data as { data?: unknown; accessToken?: unknown } | string;
-              const fresh = typeof d === "string" ? d : (d?.data ?? d?.accessToken);
-              if (typeof fresh === "string" && fresh) token.current = fresh;
-            }
+            // Sent after the user consents and every time the token is renewed.
+            if (event === "extension.accessToken") accept(tokenFrom(data), "evento de renovación");
             for (const listener of listeners.current) listener(event, data);
           },
           30000
         );
         if (cancelled) return;
+        workspace.current = api;
 
         const detected = forceHost ?? ((await api.extension.getHost().catch(() => null))?.name === "3dviewer" ? "3dviewer" : "project");
         if (cancelled) return;
@@ -98,10 +104,8 @@ export default function PropiedadesShell({
         if (cancelled) return;
         if (permission === "pending") setStatus("pending-consent");
         else if (permission === "denied") setStatus("denied");
-        else {
-          token.current = permission;
-          setStatus("ready");
-        }
+        else if (accept(permission, "solicitud de permiso") || token.current.value) setStatus("ready");
+        else setStatus("pending-consent");
       } catch (err) {
         if (!cancelled) {
           setErrorMessage(err instanceof Error ? err.message : "Error desconocido.");
@@ -120,12 +124,37 @@ export default function PropiedadesShell({
   useEffect(() => {
     if (status !== "pending-consent") return;
     const timer = setInterval(() => {
-      if (token.current) setStatus("ready");
+      if (token.current.value) setStatus("ready");
     }, 500);
     return () => clearInterval(timer);
   }, [status]);
 
-  const api = useMemo(() => httpApi(project.id, () => token.current), [project.id]);
+  /** Asks Trimble Connect for the token again; "" when it isn't available (yet). */
+  const requestToken = useCallback(async (): Promise<string> => {
+    const result = await workspace.current?.extension.requestPermission("accesstoken").catch(() => "");
+    if (result === "denied") setStatus("denied");
+    return accept(result ?? "", "solicitud de permiso (renovada)") ? token.current.value : "";
+  }, []);
+
+  const [checking, setChecking] = useState(false);
+  async function continueAfterConsent() {
+    setChecking(true);
+    try {
+      if (await requestToken()) setStatus("ready");
+    } finally {
+      setChecking(false);
+    }
+  }
+
+  const api = useMemo(
+    () =>
+      httpApi(project.id, {
+        get: () => token.current.value,
+        refresh: requestToken,
+        describe: () => describeToken(token.current.value, token.current.source),
+      }),
+    [project.id, requestToken]
+  );
 
   if (status === "ready") {
     return <>{children({ host, projectId: project.id, projectName: project.name, api, viewer, subscribe })}</>;
@@ -163,6 +192,26 @@ export default function PropiedadesShell({
       >
         <h2 style={{ color: "var(--tc-blue-800)", marginTop: 0, fontSize: 18 }}>{screen.title}</h2>
         <p style={{ color: "var(--tc-gray-500)", fontSize: 14, marginBottom: 0 }}>{screen.body}</p>
+        {status === "pending-consent" && (
+          <button
+            type="button"
+            onClick={continueAfterConsent}
+            disabled={checking}
+            style={{
+              marginTop: 16,
+              border: "none",
+              borderRadius: 8,
+              padding: "8px 16px",
+              background: "var(--tc-blue-600)",
+              color: "var(--tc-white)",
+              fontWeight: 600,
+              cursor: "pointer",
+              fontFamily: "inherit",
+            }}
+          >
+            {checking ? "Comprobando..." : "Ya acepté, continuar"}
+          </button>
+        )}
       </div>
     </div>
   );

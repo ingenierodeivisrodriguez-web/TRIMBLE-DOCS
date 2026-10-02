@@ -7,6 +7,7 @@ import {
   TargetElement,
   ValueChange,
 } from "./types";
+import { expiresSoon } from "./token";
 
 /** What the catalog screen and the viewer panel need from the data service. */
 export interface PropiedadesApi {
@@ -28,19 +29,43 @@ export class ApiError extends Error {
   }
 }
 
+export interface TokenSource {
+  /** The current access token. */
+  get(): string;
+  /** Asks Trimble Connect for the token again; "" when none can be had right now. */
+  refresh?(): Promise<string>;
+  /** A safe description of the current token (never the token), for error messages. */
+  describe?(): string;
+}
+
 /** The HTTP client for /api/propiedades, authenticated with the user's Trimble token. */
-export function httpApi(projectId: string, getToken: () => string): PropiedadesApi {
+export function httpApi(projectId: string, auth: TokenSource): PropiedadesApi {
   async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
     const sep = path.includes("?") ? "&" : "?";
-    const res = await fetch(`/api/propiedades${path}${sep}projectId=${encodeURIComponent(projectId)}`, {
-      ...init,
-      headers: {
-        Authorization: `Bearer ${getToken()}`,
-        ...(init.body ? { "Content-Type": "application/json" } : {}),
-      },
-    });
+    const send = (token: string) =>
+      fetch(`/api/propiedades${path}${sep}projectId=${encodeURIComponent(projectId)}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
+        },
+      });
+
+    let token = auth.get();
+    if (auth.refresh && (!token || expiresSoon(token))) token = (await auth.refresh()) || token;
+    let res = await send(token);
+    // Trimble Connect rejected the token (expired or stale): ask for it again, once.
+    if (res.status === 401 && auth.refresh) {
+      const fresh = await auth.refresh();
+      if (fresh) res = await send(fresh);
+    }
+
     const body = await res.json().catch(() => ({}));
-    if (!res.ok) throw new ApiError(body.error ?? `Error ${res.status}`, res.status, body.code);
+    if (!res.ok) {
+      let text: string = body.error ?? `Error ${res.status}`;
+      if (res.status === 401 && auth.describe) text += ` (Diagnóstico: ${auth.describe()}.)`;
+      throw new ApiError(text, res.status, body.code);
+    }
     return body as T;
   }
 
