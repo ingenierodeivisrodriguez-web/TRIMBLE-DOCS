@@ -73,8 +73,9 @@ export default function SeleccionPorGrupos({
   getAccessToken,
   api,
   dataVersion,
+  onShowForm,
 }: {
-  /** Whether the column is visible: models are only read then. */
+  /** Whether the tab is visible: models are only read then. */
   active: boolean;
   viewer: PropiedadesViewer;
   subscribe: (listener: ViewerEventListener) => () => void;
@@ -83,6 +84,8 @@ export default function SeleccionPorGrupos({
   api: PropiedadesApi;
   /** Changes when attribute values or the catalog change, to read them again. */
   dataVersion: number;
+  /** Switches to the Propiedades tab, where the selected elements are shown. */
+  onShowForm?: () => void;
 }) {
   // The Gráficos readers only use getObjects, getObjectProperties and convertToObjectIds.
   const reader = viewer as unknown as ViewerLike;
@@ -444,7 +447,14 @@ export default function SeleccionPorGrupos({
       {notice && (
         <div style={{ ...noticeBase, ...noticeStyles[notice.tone] }} role="status">
           {notice.text}
-          {notice.selection && " Sus atributos se muestran en el panel Propiedades."}
+          {notice.selection && onShowForm && (
+            <>
+              {" "}
+              <button type="button" onClick={onShowForm} style={linkStyle}>
+                Ver y asignar sus atributos
+              </button>
+            </>
+          )}
         </div>
       )}
 

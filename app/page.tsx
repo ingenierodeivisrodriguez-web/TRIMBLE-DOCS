@@ -22,8 +22,7 @@ export default function Home() {
       <p style={{ color: "var(--tc-gray-700)" }}>
         <code>/manifest.json</code> (Resumen Archivos) · <code>/manifest-validacion.json</code>{" "}
         (Validación) · <code>/manifest-graficos.json</code> (Gráficos de Modelos) ·{" "}
-        <code>/manifest-propiedades.json</code> (Propiedades) · <code>/manifest-agrupacion.json</code> (Seleccionar
-        por agrupación, panel derecho del visor 3D)
+        <code>/manifest-propiedades.json</code> (Propiedades)
       </p>
     </main>
   );

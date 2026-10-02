@@ -32,6 +32,7 @@ import {
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
 import CatalogoAtributos from "./CatalogoAtributos";
 import DateField from "./DateField";
+import SeleccionPorGrupos from "./SeleccionPorGrupos";
 import type { ViewerEventListener } from "./PropiedadesShell";
 
 type ViewerSelection = { modelId: string; objectRuntimeIds?: number[] }[];
@@ -104,15 +105,20 @@ export default function PanelPropiedades({
   api,
   viewer,
   subscribe,
-  onDataChanged,
+  projectId,
+  getAccessToken,
 }: {
   api: PropiedadesApi;
   viewer: PropiedadesViewer;
   subscribe: (listener: ViewerEventListener) => () => void;
-  /** Called after values are saved or the catalog changes (tells the grouping extension). */
-  onDataChanged?: () => void;
+  projectId: string;
+  getAccessToken: (fresh?: boolean) => Promise<string>;
 }) {
   const [view, setView] = useState<"form" | "catalog">("form");
+  /** "Propiedades" (the form) or "Seleccionar por agrupación", as tabs of the panel. */
+  const [tab, setTab] = useState<"form" | "grupos">("form");
+  /** Bumped when values or the catalog change, so the grouping tab reads them again. */
+  const [dataVersion, setDataVersion] = useState(0);
   const [catalog, setCatalog] = useState<CatalogResponse | null>(null);
   const [catalogError, setCatalogError] = useState("");
 
@@ -289,7 +295,7 @@ export default function PanelPropiedades({
       setEdits({});
       dirty.current = false;
       setConfirming(false);
-      onDataChanged?.();
+      setDataVersion((v) => v + 1);
       setResult({
         tone: "info",
         text: `Guardado: ${changes.length === 1 ? "1 atributo" : `${changes.length} atributos`} en ${
@@ -329,7 +335,7 @@ export default function PanelPropiedades({
         compact
         onChanged={() => {
           loadCatalog();
-          onDataChanged?.();
+          setDataVersion((v) => v + 1);
         }}
       />
     </div>
@@ -518,8 +524,52 @@ export default function PanelPropiedades({
     </div>
   );
 
-  // One scrolling column, so the save bar can stick to its bottom.
-  return <div style={scrollStyle}>{catalogColumn || formColumn}</div>;
+  // Both tabs stay mounted (the hidden one keeps what it read); each scrolls on its own,
+  // so the save bar sticks to the bottom of the form.
+  return (
+    <div style={layoutStyle}>
+      <div role="tablist" aria-label="Secciones del panel" style={tabsStyle}>
+        {(
+          [
+            ["form", "Propiedades"],
+            ["grupos", "Seleccionar por agrupación"],
+          ] as const
+        ).map(([key, label]) => (
+          <button
+            key={key}
+            type="button"
+            role="tab"
+            id={`tab-${key}`}
+            aria-selected={tab === key}
+            aria-controls={`panel-${key}`}
+            onClick={() => setTab(key)}
+            style={{
+              ...tabStyle,
+              color: tab === key ? "var(--tc-blue-800)" : "var(--tc-gray-500)",
+              borderBottomColor: tab === key ? "var(--tc-blue-600)" : "transparent",
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <div role="tabpanel" id="panel-form" aria-labelledby="tab-form" style={{ ...scrollStyle, display: tab === "form" ? "block" : "none" }}>
+        {catalogColumn || formColumn}
+      </div>
+      <div role="tabpanel" id="panel-grupos" aria-labelledby="tab-grupos" style={{ ...scrollStyle, display: tab === "grupos" ? "block" : "none" }}>
+        <SeleccionPorGrupos
+          active={tab === "grupos"}
+          viewer={viewer}
+          subscribe={subscribe}
+          projectId={projectId}
+          getAccessToken={getAccessToken}
+          api={api}
+          dataVersion={dataVersion}
+          onShowForm={() => setTab("form")}
+        />
+      </div>
+    </div>
+  );
 }
 
 function SelectionSummary({
@@ -764,7 +814,26 @@ function ReadOnlyValue({ def, summary }: { def: AttributeDefinition; summary: Fi
 }
 
 const pageStyle: React.CSSProperties = { padding: 14, display: "flex", flexDirection: "column", gap: 12, maxWidth: 720, margin: "0 auto" };
-const scrollStyle: React.CSSProperties = { height: "100vh", overflowY: "auto" };
+const layoutStyle: React.CSSProperties = { height: "100vh", display: "flex", flexDirection: "column" };
+const scrollStyle: React.CSSProperties = { flex: 1, minHeight: 0, overflowY: "auto" };
+const tabsStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 4,
+  padding: "0 10px",
+  borderBottom: "1px solid var(--tc-gray-300)",
+  background: "var(--tc-white)",
+  flexShrink: 0,
+};
+const tabStyle: React.CSSProperties = {
+  border: "none",
+  borderBottom: "2px solid transparent",
+  background: "transparent",
+  padding: "10px 8px 8px",
+  fontSize: 13,
+  fontWeight: 700,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
 const headerStyle: React.CSSProperties = { display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 };
 const titleStyle: React.CSSProperties = { margin: 0, fontSize: 19, color: "var(--tc-blue-900)" };
 const subtitleStyle: React.CSSProperties = { margin: "2px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" };

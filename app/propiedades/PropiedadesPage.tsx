@@ -3,18 +3,18 @@
 import CatalogoAtributos from "../../components/propiedades/CatalogoAtributos";
 import PanelPropiedades from "../../components/propiedades/PanelPropiedades";
 import PropiedadesShell, { Host } from "../../components/propiedades/PropiedadesShell";
-import { VALUES_CHANGED } from "../../lib/propiedades/messages";
 
 export default function PropiedadesPage({ forceHost }: { forceHost?: Host }) {
   return (
     <PropiedadesShell forceHost={forceHost}>
-      {({ host, projectName, api, viewer, subscribe, broadcast }) =>
+      {({ host, projectId, projectName, api, viewer, subscribe, getAccessToken }) =>
         host === "3dviewer" && viewer ? (
           <PanelPropiedades
             api={api}
             viewer={viewer}
             subscribe={subscribe}
-            onDataChanged={() => broadcast({ type: VALUES_CHANGED })}
+            projectId={projectId}
+            getAccessToken={getAccessToken}
           />
         ) : (
           <main style={{ padding: "20px 24px 40px", maxWidth: 980, margin: "0 auto" }}>

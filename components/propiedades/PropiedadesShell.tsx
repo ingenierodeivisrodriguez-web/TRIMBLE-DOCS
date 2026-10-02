@@ -21,8 +21,6 @@ export interface PropiedadesContext {
   subscribe: (listener: ViewerEventListener) => () => void;
   /** The user's Trimble token for this app's other endpoints; `fresh` asks Trimble Connect for it again. */
   getAccessToken: (fresh?: boolean) => Promise<string>;
-  /** Sends a message to the other extensions open in Trimble Connect. */
-  broadcast: (message: unknown) => void;
 }
 
 /**
@@ -152,10 +150,6 @@ export default function PropiedadesShell({
     [requestToken]
   );
 
-  const broadcast = useCallback((message: unknown) => {
-    workspace.current?.extension.broadcast(message).catch(() => undefined);
-  }, []);
-
   const [checking, setChecking] = useState(false);
   async function continueAfterConsent() {
     setChecking(true);
@@ -177,7 +171,7 @@ export default function PropiedadesShell({
   );
 
   if (status === "ready") {
-    return <>{children({ host, projectId: project.id, projectName: project.name, api, viewer, subscribe, getAccessToken, broadcast })}</>;
+    return <>{children({ host, projectId: project.id, projectName: project.name, api, viewer, subscribe, getAccessToken })}</>;
   }
 
   const screens: Record<Exclude<Status, "ready">, { title: string; body: string }> = {
