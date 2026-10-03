@@ -841,10 +841,15 @@ elementos en el tiempo, según una fecha.
    solo muros, solo el "Piso 1" o una fase), con Todos / Ninguno / buscar.
    El filtro se aplica a todo: la línea de tiempo, el % de avance, la curva
    y los gráficos del avance (los segmentadores de cada gráfico filtran
-   además sobre esto). Los elementos que quedan fuera se tratan como los que
-   no tienen fecha: en gris como contexto, ocultos o sin cambios, según la
-   opción elegida. Se indica cuántos se simulan, por ejemplo "Se simulan 6 de
-   16 elementos con…".
+   además sobre esto). Se indica cuántos se simulan, por ejemplo "Se simulan
+   6 de 16 elementos con…".
+
+   **Al segmentar, el modelo muestra de inmediato los elementos
+   segmentados.** La línea de tiempo salta al final para mostrarlos todos,
+   con su color, y lo que queda fuera se **oculta**. Con ▶ (que pasa a decir
+   "Repetir") la simulación arranca desde el inicio solo con esos elementos.
+   Lo que queda fuera tiene su propia opción: ocultarlo (por defecto),
+   mostrarlo en gris o dejarlo como está.
 4. **Línea de tiempo.** Va desde la fecha más antigua hasta la más reciente
    de esa propiedad. Muestra:
    - la fecha actual (`DD-MM-AAAA`);
@@ -865,9 +870,13 @@ elementos en el tiempo, según una fecha.
   (`viewer.setObjectState`, `visible: false`). A medida que avanza la línea
   de tiempo van apareciendo, y retroceder los oculta de nuevo.
 - **Lo que aparece en cada paso** se resalta en naranja; se puede apagar.
-- **Elementos que no entran** (sin esa fecha o fuera de los segmentadores
-  del simulador): se pueden mostrar en gris como contexto (es la opción por
-  defecto), ocultar o dejar como están.
+- **Elementos que no entran:** hay dos opciones separadas.
+  - **Fuera de los segmentadores:** por defecto se ocultan.
+  - **Sin esa fecha entre los segmentados:** por defecto quedan en gris como
+    contexto.
+
+  En ambos casos se puede elegir ocultar, gris o dejar como están. Cambiar
+  una opción rehace el modelo en la misma fecha.
 - **"Restablecer modelo"** devuelve la visibilidad y los colores que la
   simulación cambió. También se restablece al cambiar de fecha, de modelos o
   de opción, y al cerrar el panel.

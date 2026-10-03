@@ -109,6 +109,11 @@ export default function Simulador({
   });
   const [durationSec, setDurationSec] = useState(30);
   const [undatedMode, setUndatedMode] = useState<UndatedMode>("gris");
+  /** Elements the simulator's slicers leave out: hidden by default, so only the segmented ones are seen. */
+  const [outsideMode, setOutsideMode] = useState<UndatedMode>("ocultar");
+  /** Set when the user changes the slicers: the model then shows the segmented elements right away. */
+  const segmentEdit = useRef(false);
+  const [autoPrepare, setAutoPrepare] = useState(false);
   const [highlight, setHighlight] = useState(true);
   /** Days since the first date (fractional while playing). */
   const [position, setPosition] = useState(0);
@@ -150,7 +155,7 @@ export default function Simulador({
     if (fromApp) wantAppValues();
   }, [fromApp, wantAppValues]);
 
-  // Only the elements that pass the simulator's slicers take part; the rest are context, like the undated ones.
+  // Only the elements that pass the simulator's slicers take part; the rest are hidden (or as the option says).
   const filtering = simSlicers.some((s) => s.selected !== null);
   const passing = useMemo(() => applySlicers(merged, simSlicers), [merged, simSlicers]);
   const excluded = useMemo(
@@ -158,14 +163,6 @@ export default function Simulador({
     [filtering, merged, passing]
   );
   const timeline = useMemo(() => (field ? buildTimeline(passing, field.key) : null), [passing, field]);
-  /** Elements that don't take part: without the date, or left out by the slicers. */
-  const context = useMemo(
-    () =>
-      timeline
-        ? { members: mergeMembers([timeline.undated, excluded.members]), count: timeline.undatedCount + excluded.count }
-        : { members: {}, count: 0 },
-    [timeline, excluded]
-  );
   const datedTotal = useMemo(
     () =>
       field && filtering
@@ -230,12 +227,15 @@ export default function Simulador({
     colorMap: null as Map<string, Map<number, string>> | null,
     /** The colors changed: paint the elements already shown again. */
     repaint: false,
+    /** The next elements shown are a preview (after segmenting): no orange highlight. */
+    quiet: false,
   });
   state.current.items = items;
   state.current.viewerModelIds = data.viewerModelIds;
   state.current.highlight = highlight;
 
   const sel = useCallback((members: Members) => selectorFor(members, state.current.viewerModelIds), []);
+  const isEmpty = (members: Members) => Object.values(members).every((ids) => ids.length === 0);
 
   /**
    * Paints elements [from, to) of the timeline with their category's color
@@ -282,10 +282,12 @@ export default function Simulador({
             await paint(from, to, false);
             s.highlighted = null;
           } else {
+            const highlight = s.highlight && !s.quiet;
             if (s.highlighted) await viewer.setObjectState(sel(s.highlighted), { color: "reset" });
-            await viewer.setObjectState(sel(batch), s.highlight ? { visible: true, color: HIGHLIGHT } : { visible: true });
-            s.highlighted = s.highlight ? batch : null;
+            await viewer.setObjectState(sel(batch), highlight ? { visible: true, color: HIGHLIGHT } : { visible: true });
+            s.highlighted = highlight ? batch : null;
           }
+          s.quiet = false;
         } else {
           await viewer.setObjectState(sel(membersOf(s.items, to, from)), { visible: false, color: "reset" });
           s.highlighted = null;
@@ -301,21 +303,38 @@ export default function Simulador({
     }
   }, [viewer, sel, paint]);
 
-  /** Hides every element with the date and sets how the rest look; then the timeline shows them. */
-  const prepare = useCallback(async () => {
-    if (!timeline || items.length === 0) return false;
+  /** A restore still sending its changes to the viewer: preparing waits for it. */
+  const restoring = useRef<Promise<void>>(Promise.resolve());
+
+  /**
+   * Hides every element with the date and sets how the rest look; then the
+   * timeline shows them. `quiet`: what appears first isn't highlighted (a preview).
+   */
+  const prepare = useCallback(async (quiet = false) => {
+    await restoring.current;
+    // Nothing simulated is still something to show when the slicers leave elements out.
+    if (!timeline || (items.length === 0 && excluded.count === 0)) return false;
     const s = state.current;
     setError("");
     try {
       const all = membersOf(items, 0, items.length);
-      await viewer.setObjectState(sel(all), { visible: false });
-      s.touched = [all];
-      if (context.count > 0 && undatedMode !== "igual") {
-        await viewer.setObjectState(sel(context.members), undatedMode === "gris" ? { color: GHOST } : { visible: false });
-        s.touched.push(context.members);
+      s.touched = [];
+      if (!isEmpty(all)) {
+        await viewer.setObjectState(sel(all), { visible: false });
+        s.touched.push(all);
+      }
+      const look = (mode: UndatedMode) => (mode === "gris" ? { color: GHOST } : { visible: false });
+      if (timeline.undatedCount > 0 && undatedMode !== "igual") {
+        await viewer.setObjectState(sel(timeline.undated), look(undatedMode));
+        s.touched.push(timeline.undated);
+      }
+      if (excluded.count > 0 && outsideMode !== "igual") {
+        await viewer.setObjectState(sel(excluded.members), look(outsideMode));
+        s.touched.push(excluded.members);
       }
       s.applied = 0;
       s.highlighted = null;
+      s.quiet = quiet;
       setPrepared(true);
       pump();
       return true;
@@ -323,10 +342,10 @@ export default function Simulador({
       setError(`No se pudo preparar la simulación en el visor: ${message(err)}`);
       return false;
     }
-  }, [timeline, items, context, undatedMode, viewer, sel, pump]);
+  }, [timeline, items, excluded, undatedMode, outsideMode, viewer, sel, pump]);
 
   /** Puts back the visibility and colors the simulation changed. */
-  const restore = useCallback(async () => {
+  const restore = useCallback(() => {
     const s = state.current;
     setPlaying(false);
     const touched = s.touched;
@@ -338,9 +357,14 @@ export default function Simulador({
     setPrepared(false);
     setColoredChart(null);
     setColorGroups(null);
-    for (const members of touched) {
-      await viewer.setObjectState(sel(members), { visible: "reset", color: "reset" }).catch(() => undefined);
-    }
+    const done = (async () => {
+      for (const members of touched) {
+        if (isEmpty(members)) continue;
+        await viewer.setObjectState(sel(members), { visible: "reset", color: "reset" }).catch(() => undefined);
+      }
+    })();
+    restoring.current = done;
+    return done;
   }, [viewer, sel]);
 
   // The viewer follows the timeline position.
@@ -349,13 +373,44 @@ export default function Simulador({
     if (prepared) pump();
   }, [shown, prepared, pump]);
 
-  // A different date, models or option makes a different simulation: start it over.
+  // A different date or models make a different simulation: start it over. After the
+  // user changes the slicers, the model shows at once what they segmented: every
+  // segmented element (the end of the timeline), the rest as the option says.
   const restoreRef = useRef(restore);
   restoreRef.current = restore;
+  const prepareRef = useRef(prepare);
+  prepareRef.current = prepare;
+  const spanRef = useRef(span);
+  spanRef.current = span;
   useEffect(() => {
     if (state.current.applied !== null) restoreRef.current();
-    setPosition(0);
-  }, [timeline, undatedMode]);
+    if (segmentEdit.current) {
+      segmentEdit.current = false;
+      setPosition(spanRef.current);
+      setAutoPrepare(true);
+    } else {
+      setPosition(0);
+    }
+  }, [timeline]);
+
+  // Changing how the other elements look redoes the model at the same date.
+  const modesSeen = useRef(false);
+  useEffect(() => {
+    if (!modesSeen.current) {
+      modesSeen.current = true;
+      return;
+    }
+    if (state.current.applied !== null) {
+      restoreRef.current();
+      setAutoPrepare(true);
+    }
+  }, [undatedMode, outsideMode]);
+
+  useEffect(() => {
+    if (!autoPrepare) return;
+    setAutoPrepare(false);
+    prepareRef.current(true);
+  }, [autoPrepare]);
 
   // Leaving the tab pauses; closing the panel restores the model.
   useEffect(() => {
@@ -385,8 +440,6 @@ export default function Simulador({
 
   // "Colorear": the colored chart's categories become a color per element, and the
   // model is painted again (entering the simulation if it wasn't running).
-  const prepareRef = useRef(prepare);
-  prepareRef.current = prepare;
   useEffect(() => {
     const s = state.current;
     if (coloredChart === null || !colorGroups) {
@@ -473,11 +526,15 @@ export default function Simulador({
         {dateFields.length > 0 && (
           <SimSlicers
             title="Segmentadores: qué simular"
-            emptyHint="Elige qué elementos entran en la simulación por un dato de texto o fecha, p. ej. solo ciertos tipos, niveles o fases. Los demás quedan como contexto."
+            emptyHint="Elige qué elementos entran en la simulación por un dato de texto o fecha, p. ej. solo ciertos tipos, niveles o fases. Al segmentar, el modelo muestra solo esos elementos; los demás se ocultan."
             fields={allFields}
             datasets={merged}
             slicers={simSlicers}
-            onChange={setSimSlicers}
+            onChange={(next) => {
+              const active = (list: SlicerSpec[]) => JSON.stringify(list.filter((x) => x.selected !== null));
+              if (active(next) !== active(simSlicers)) segmentEdit.current = true;
+              setSimSlicers(next);
+            }}
           />
         )}
         {filtering && field && (
@@ -608,24 +665,20 @@ export default function Simulador({
       {field && timeline && (
         <section style={cardStyle}>
           <h3 style={sectionTitleStyle}>Opciones</h3>
-          <fieldset style={{ border: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
-            <legend style={{ fontSize: 12.5, color: "var(--tc-gray-700)", marginBottom: 4 }}>
-              Elementos que no entran en la simulación ({context.count.toLocaleString("es")}): sin &quot;{field.label}&quot;
-              {excluded.count > 0 ? " o fuera de los segmentadores" : ""}
-            </legend>
-            {(
-              [
-                ["gris", "Mostrarlos en gris, como contexto"],
-                ["ocultar", "Ocultarlos"],
-                ["igual", "Dejarlos como están"],
-              ] as const
-            ).map(([value, label]) => (
-              <label key={value} style={radioStyle}>
-                <input type="radio" name="sim-undated" checked={undatedMode === value} onChange={() => setUndatedMode(value)} />
-                {label}
-              </label>
-            ))}
-          </fieldset>
+          {excluded.count > 0 && (
+            <ModeChoice
+              name="sim-outside"
+              legend={`Elementos fuera de los segmentadores (${excluded.count.toLocaleString("es")}):`}
+              value={outsideMode}
+              onChange={setOutsideMode}
+            />
+          )}
+          <ModeChoice
+            name="sim-undated"
+            legend={`Elementos sin "${field.label}"${filtering ? " entre los segmentados" : ""} (${timeline.undatedCount.toLocaleString("es")}):`}
+            value={undatedMode}
+            onChange={setUndatedMode}
+          />
           <label style={{ ...radioStyle, opacity: coloredChart !== null ? 0.55 : 1 }}>
             <input
               type="checkbox"
@@ -647,6 +700,36 @@ export default function Simulador({
         </section>
       )}
     </div>
+  );
+}
+
+function ModeChoice({
+  name,
+  legend,
+  value,
+  onChange,
+}: {
+  name: string;
+  legend: string;
+  value: UndatedMode;
+  onChange: (mode: UndatedMode) => void;
+}) {
+  return (
+    <fieldset style={{ border: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
+      <legend style={{ fontSize: 12.5, color: "var(--tc-gray-700)", marginBottom: 4 }}>{legend}</legend>
+      {(
+        [
+          ["ocultar", "Ocultarlos"],
+          ["gris", "Mostrarlos en gris, como contexto"],
+          ["igual", "Dejarlos como están"],
+        ] as const
+      ).map(([mode, label]) => (
+        <label key={mode} style={radioStyle}>
+          <input type="radio" name={name} checked={value === mode} onChange={() => onChange(mode)} />
+          {label}
+        </label>
+      ))}
+    </fieldset>
   );
 }
 
