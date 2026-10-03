@@ -893,7 +893,13 @@ Para eso, `Charts.tsx` admite `increments`: apila esa parte sobre cada barra.
 - **Al empezar**, se ocultan todos los elementos con esa fecha
   (`viewer.setObjectState`, `visible: false`). A medida que avanza la línea
   de tiempo van apareciendo, y retroceder los oculta de nuevo.
-- **Lo que aparece en cada paso** se resalta en naranja; se puede apagar.
+- **El naranja del modelo es el período de la tarjeta "Avance del día":**
+  los elementos del día, la semana o el mes que ya están visibles. En modo
+  Día, mientras se reproduce, marca los días que avanzó cada paso. Al hacer
+  clic en un mes (o en una semana o un día) de la tarjeta, el modelo va a esa
+  fecha y pinta en naranja lo de ese período. Al cambiar de período solo se
+  actualiza la diferencia. Se puede apagar en Opciones, y mientras un gráfico
+  colorea el modelo no se usa.
 - **Elementos que no entran:** hay dos opciones separadas.
   - **Fuera de los segmentadores:** por defecto se ocultan.
   - **Sin esa fecha entre los segmentados:** por defecto quedan en gris como

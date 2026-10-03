@@ -54,6 +54,30 @@ const UNITS: { unit: PeriodUnit; label: string }[] = [
   { unit: "mes", label: "Mes" },
 ];
 
+/** A range [from, to) of timeline indexes (items are sorted by date). */
+type IndexRange = { from: number; to: number } | null;
+
+function clampRange(range: IndexRange, limit: number): IndexRange {
+  if (!range) return null;
+  const from = Math.max(0, range.from);
+  const to = Math.min(limit, range.to);
+  return to > from ? { from, to } : null;
+}
+
+function sameRange(a: IndexRange, b: IndexRange): boolean {
+  return a === b || (!!a && !!b && a.from === b.from && a.to === b.to);
+}
+
+/** The parts of `a` outside `b` (at most two ranges). */
+function rangeMinus(a: IndexRange, b: IndexRange): [number, number][] {
+  if (!a) return [];
+  if (!b) return [[a.from, a.to]];
+  const out: [number, number][] = [];
+  if (Math.min(a.to, b.from) > a.from) out.push([a.from, Math.min(a.to, b.from)]);
+  if (a.to > Math.max(a.from, b.to)) out.push([Math.max(a.from, b.to), a.to]);
+  return out;
+}
+
 /** "05-03" from a day number (for ranges whose year is given at the end). */
 function shortDate(day: number): string {
   return isoToDisplay(isoFromDay(day)).slice(0, 5);
@@ -310,24 +334,22 @@ export default function Simulador({
   const state = useRef({
     items,
     viewerModelIds: data.viewerModelIds,
-    highlight,
     /** Elements shown so far (null: the viewer isn't prepared). */
     applied: null as number | null,
     target: 0,
     running: false,
-    highlighted: null as Members | null,
+    /** Timeline indexes painted orange now, and those that should be: the period's elements. */
+    hl: null as IndexRange,
+    hlTarget: null as IndexRange,
     /** What was changed in the viewer, to restore it. */
     touched: [] as Members[],
     /** "Colorear": element -> color of its category in the colored chart (null: off). */
     colorMap: null as Map<string, Map<number, string>> | null,
     /** The colors changed: paint the elements already shown again. */
     repaint: false,
-    /** The next elements shown are a preview (after segmenting): no orange highlight. */
-    quiet: false,
   });
   state.current.items = items;
   state.current.viewerModelIds = data.viewerModelIds;
-  state.current.highlight = highlight;
 
   const sel = useCallback((members: Members) => selectorFor(members, state.current.viewerModelIds), []);
   const isEmpty = (members: Members) => Object.values(members).every((ids) => ids.length === 0);
@@ -353,42 +375,46 @@ export default function Simulador({
     [viewer, sel]
   );
 
-  /** Brings the viewer to `target` elements shown, a step at a time, never two updates at once. */
+  /**
+   * Brings the viewer to `target` elements shown and paints orange the
+   * elements of the period (day, week or month), one update at a time.
+   */
   const pump = useCallback(async () => {
     const s = state.current;
     if (s.running) return;
     s.running = true;
     try {
-      while (s.applied !== null && (s.applied !== s.target || s.repaint)) {
+      for (;;) {
+        if (s.applied === null) break;
         if (s.repaint) {
           // The colors changed (Colorear on, off or another chart): repaint what is shown.
           s.repaint = false;
-          s.highlighted = null;
+          s.hl = null;
           await paint(0, s.applied, true);
           continue;
         }
-        const from = s.applied;
-        const to = s.target;
-        if (to > from) {
-          const batch = membersOf(s.items, from, to);
-          if (s.colorMap) {
-            // Each element appears in its category's color.
-            await viewer.setObjectState(sel(batch), { visible: true });
-            await paint(from, to, false);
-            s.highlighted = null;
+        if (s.applied !== s.target) {
+          const from = s.applied;
+          const to = s.target;
+          if (to > from) {
+            await viewer.setObjectState(sel(membersOf(s.items, from, to)), { visible: true });
+            // With "Colorear", each element appears in its category's color.
+            if (s.colorMap) await paint(from, to, false);
           } else {
-            const highlight = s.highlight && !s.quiet;
-            if (s.highlighted) await viewer.setObjectState(sel(s.highlighted), { color: "reset" });
-            await viewer.setObjectState(sel(batch), highlight ? { visible: true, color: HIGHLIGHT } : { visible: true });
-            s.highlighted = highlight ? batch : null;
+            await viewer.setObjectState(sel(membersOf(s.items, to, from)), { visible: false, color: "reset" });
+            s.hl = clampRange(s.hl, to); // the hidden ones lost their color
           }
-          s.quiet = false;
-        } else {
-          await viewer.setObjectState(sel(membersOf(s.items, to, from)), { visible: false, color: "reset" });
-          s.highlighted = null;
+          if (s.applied === null) break; // restored meanwhile
+          s.applied = to;
+          continue;
         }
-        if (s.applied === null) break; // restored meanwhile
-        s.applied = to;
+        // The orange follows the period of the card, among the elements shown (not while a chart colors).
+        const want = s.colorMap ? null : clampRange(s.hlTarget, s.applied);
+        if (sameRange(want, s.hl)) break;
+        for (const [a, b] of rangeMinus(s.hl, want)) await viewer.setObjectState(sel(membersOf(s.items, a, b)), { color: "reset" });
+        for (const [a, b] of rangeMinus(want, s.hl)) await viewer.setObjectState(sel(membersOf(s.items, a, b)), { color: HIGHLIGHT });
+        if (s.applied === null) break;
+        s.hl = want;
       }
     } catch (err) {
       setError(`El visor no aceptó el cambio: ${message(err)}`);
@@ -408,11 +434,8 @@ export default function Simulador({
    */
   const containers = useRef<{ of: unknown; ids: Map<string, Set<number>> } | null>(null);
 
-  /**
-   * Hides every element with the date and sets how the rest look; then the
-   * timeline shows them. `quiet`: what appears first isn't highlighted (a preview).
-   */
-  const prepare = useCallback(async (quiet = false) => {
+  /** Hides every element with the date and sets how the rest look; then the timeline shows them. */
+  const prepare = useCallback(async () => {
     await restoring.current;
     // Nothing simulated is still something to show when the slicers leave elements out.
     if (!timeline || (items.length === 0 && excluded.count === 0)) return false;
@@ -447,8 +470,7 @@ export default function Simulador({
         s.touched.push(outside);
       }
       s.applied = 0;
-      s.highlighted = null;
-      s.quiet = quiet;
+      s.hl = null;
       setPrepared(true);
       pump();
       return true;
@@ -466,7 +488,7 @@ export default function Simulador({
     setPlaying(false);
     const touched = s.touched;
     s.applied = null;
-    s.highlighted = null;
+    s.hl = null;
     s.touched = [];
     s.colorMap = null;
     s.repaint = false;
@@ -482,6 +504,14 @@ export default function Simulador({
     restoring.current = done;
     return done;
   }, [viewer, sel]);
+
+  // The orange in the model: the elements of the card's period (day, week or month) already shown.
+  const hlFrom = periodNow ? countUpTo(items, periodNow.from - 1) : null;
+  const hlTo = periodNow ? countUpTo(items, periodNow.to) : null;
+  useEffect(() => {
+    state.current.hlTarget = highlight && hlFrom !== null && hlTo !== null && hlTo > hlFrom ? { from: hlFrom, to: hlTo } : null;
+    if (prepared) pump();
+  }, [hlFrom, hlTo, highlight, prepared, pump]);
 
   // The viewer follows the timeline position.
   useEffect(() => {
@@ -525,7 +555,7 @@ export default function Simulador({
   useEffect(() => {
     if (!autoPrepare) return;
     setAutoPrepare(false);
-    prepareRef.current(true);
+    prepareRef.current();
   }, [autoPrepare]);
 
   // Leaving the tab pauses; closing the panel restores the model.
@@ -880,7 +910,7 @@ export default function Simulador({
               disabled={coloredChart !== null}
               onChange={(e) => setHighlight(e.target.checked)}
             />
-            Resaltar en naranja lo que aparece en cada paso
+            Resaltar en naranja en el modelo los elementos del período de la tarjeta (día, semana o mes)
           </label>
           {coloredChart !== null && (
             <span style={hintStyle}>Mientras un gráfico colorea el modelo, cada elemento aparece con el color de su categoría.</span>
