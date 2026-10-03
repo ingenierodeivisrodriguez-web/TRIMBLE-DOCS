@@ -19,7 +19,12 @@ export default function SimSlicers({
   datasets,
   slicers,
   onChange,
+  title = "Segmentadores",
+  emptyHint = "Filtra los elementos de este gráfico por un dato de texto o fecha, p. ej. solo ciertos tipos o niveles.",
 }: {
+  title?: string;
+  /** Shown while there are no slicers yet. */
+  emptyHint?: string;
   fields: GroupField[];
   /** Every element with the simulated date, unfiltered: the lists always show every value. */
   datasets: ModelDataset[];
@@ -34,7 +39,7 @@ export default function SimSlicers({
   return (
     <details style={boxStyle} open={slicers.length > 0 || undefined}>
       <summary style={summaryStyle}>
-        Segmentadores
+        {title}
         {slicers.length > 0 && (
           <span style={{ fontWeight: 600, color: active ? "var(--tc-blue-700)" : "var(--tc-gray-500)" }}>
             {" "}
@@ -71,7 +76,7 @@ export default function SimSlicers({
         </div>
         {slicers.length === 0 && (
           <span style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>
-            Filtra los elementos de este gráfico por un dato de texto o fecha, p. ej. solo ciertos tipos o niveles.
+            {emptyHint}
           </span>
         )}
         {slicers.map((slicer) => {

@@ -204,3 +204,19 @@ export function progressChart(
     totalWithData: final.objectsWithData,
   };
 }
+
+/** Elements of `all` left out of `kept` (the same datasets, filtered by slicers), per model. */
+export function excludedMembers(all: ModelDataset[], kept: ModelDataset[]): { members: Members; count: number } {
+  const keptIds = new Map(kept.map((d) => [d.modelId, new Set(d.records.map((r) => r.runtimeId))]));
+  const members: Members = {};
+  let count = 0;
+  for (const dataset of all) {
+    const ids = keptIds.get(dataset.modelId);
+    for (const record of dataset.records) {
+      if (ids?.has(record.runtimeId)) continue;
+      (members[dataset.modelId] ??= []).push(record.runtimeId);
+      count++;
+    }
+  }
+  return { members, count };
+}

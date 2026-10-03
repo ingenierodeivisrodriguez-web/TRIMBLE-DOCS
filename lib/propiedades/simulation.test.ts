@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { aggregate, Field, ModelDataset } from "../graficos/modelData";
+import { aggregate, applySlicers, Field, ModelDataset } from "../graficos/modelData";
 import {
   buildTimeline,
   countUpTo,
   datedDatasets,
   dayNumber,
+  excludedMembers,
   isoFromDay,
   memberCount,
   membersOf,
@@ -135,5 +136,33 @@ describe("gráficos del avance", () => {
     assert.equal(day15.maxValue, 10);
     const folded = progressChart(aggregate(full, spec), shownDatasets(dated, dayNumber("2026-01-15")), spec, 1);
     assert.deepEqual(folded.rows.map((r) => [r.label, r.value]), [["Otros", 12]]);
+  });
+});
+
+describe("segmentadores de la simulación", () => {
+  const TIPO: Field = { key: "@objectType", label: "Tipo", group: "General", kind: "text" };
+  const ds: ModelDataset = {
+    modelId: "est",
+    modelName: "est",
+    fields: new Map([FECHA, TIPO].map((f) => [f.key, f])),
+    coverage: new Map(),
+    records: [
+      { runtimeId: 1, values: { [FECHA.key]: "2026-01-10", [TIPO.key]: "Muro" } },
+      { runtimeId: 2, values: { [FECHA.key]: "2026-01-20", [TIPO.key]: "Viga" } },
+      { runtimeId: 3, values: { [TIPO.key]: "Muro" } },
+      { runtimeId: 4, values: { [TIPO.key]: "Losa" } },
+    ],
+  };
+
+  it("simula solo lo que pasa los segmentadores y aparta el resto", () => {
+    const kept = applySlicers([ds], [{ field: TIPO.key, kind: "text", selected: ["Muro"] }]);
+    const t = buildTimeline(kept, FECHA.key);
+    assert.deepEqual(t.items.map((i) => i.runtimeId), [1]);
+    assert.deepEqual(t.undated, { est: [3] }); // muro sin fecha: contexto
+    assert.deepEqual(excludedMembers([ds], kept), { members: { est: [2, 4] }, count: 2 });
+  });
+
+  it("sin filtro no aparta nada", () => {
+    assert.deepEqual(excludedMembers([ds], [ds]), { members: {}, count: 0 });
   });
 });

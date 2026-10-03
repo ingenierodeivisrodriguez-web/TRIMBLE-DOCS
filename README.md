@@ -836,7 +836,16 @@ elementos en el tiempo, según una fecha.
    modelos marcados: las nativas (de tipo fecha, o un texto que es una fecha)
    y los **atributos de tipo Fecha del proyecto**. Primero van los del
    proyecto, y cada una indica cuántos elementos la tienen.
-3. **Línea de tiempo.** Va desde la fecha más antigua hasta la más reciente
+3. **Segmentadores: qué simular.** Debajo de la fecha se elige qué
+   elementos entran en la simulación, por un dato de texto o fecha (p. ej.
+   solo muros, solo el "Piso 1" o una fase), con Todos / Ninguno / buscar.
+   El filtro se aplica a todo: la línea de tiempo, el % de avance, la curva
+   y los gráficos del avance (los segmentadores de cada gráfico filtran
+   además sobre esto). Los elementos que quedan fuera se tratan como los que
+   no tienen fecha: en gris como contexto, ocultos o sin cambios, según la
+   opción elegida. Se indica cuántos se simulan, por ejemplo "Se simulan 6 de
+   16 elementos con…".
+4. **Línea de tiempo.** Va desde la fecha más antigua hasta la más reciente
    de esa propiedad. Muestra:
    - la fecha actual (`DD-MM-AAAA`);
    - la **curva de avance acumulado** (curva S), con la posición actual
@@ -845,8 +854,8 @@ elementos en el tiempo, según una fecha.
    - los botones ⏮ (inicio), **▶ Reproducir / ⏸ Pausar**, ⏭ (final) y
      **Hoy** (si hoy cae dentro del rango);
    - la duración de la reproducción completa: 15 s, 30 s, 1 min o 2 min.
-4. **Avance.** Es el porcentaje de los elementos que tienen esa fecha y que
-   ya aparecieron: los que tienen una fecha igual o anterior a la actual,
+5. **Avance.** Es el porcentaje de los elementos simulados que tienen esa
+   fecha y que ya aparecieron: los que tienen una fecha igual o anterior a la actual,
    divididos por el total de elementos con la fecha. Se muestra con la
    cuenta, por ejemplo "6 de 16 elementos".
 
@@ -856,8 +865,9 @@ elementos en el tiempo, según una fecha.
   (`viewer.setObjectState`, `visible: false`). A medida que avanza la línea
   de tiempo van apareciendo, y retroceder los oculta de nuevo.
 - **Lo que aparece en cada paso** se resalta en naranja; se puede apagar.
-- **Elementos sin esa fecha:** se pueden mostrar en gris como contexto (es la
-  opción por defecto), ocultar o dejar como están.
+- **Elementos que no entran** (sin esa fecha o fuera de los segmentadores
+  del simulador): se pueden mostrar en gris como contexto (es la opción por
+  defecto), ocultar o dejar como están.
 - **"Restablecer modelo"** devuelve la visibilidad y los colores que la
   simulación cambió. También se restablece al cambiar de fecha, de modelos o
   de opción, y al cerrar el panel.

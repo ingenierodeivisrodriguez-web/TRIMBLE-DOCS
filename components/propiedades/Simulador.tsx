@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ColorGroup } from "../../lib/graficos/colors";
-import type { Members } from "../../lib/graficos/modelData";
+import { applySlicers, mergeMembers, Members, SlicerSpec } from "../../lib/graficos/modelData";
 import { selectorFor } from "../../lib/graficos/viewerReader";
 import { availableFields, GroupField } from "../../lib/propiedades/grouping";
 import type { PropiedadesViewer } from "../../lib/propiedades/selection";
@@ -10,6 +10,8 @@ import {
   buildTimeline,
   countUpTo,
   datedDatasets,
+  dayNumber,
+  excludedMembers,
   isoFromDay,
   membersOf,
   progressCurve,
@@ -21,6 +23,7 @@ import { isoToDisplay } from "../../lib/propiedades/values";
 import { noticeBase, noticeStyles, primaryButtonStyle, secondaryButtonStyle } from "../validacion/ui";
 import ModelosCard from "./ModelosCard";
 import SimChartCard, { SimChartSpec } from "./SimChartCard";
+import SimSlicers from "./SimSlicers";
 import type { ModelData } from "./useModelData";
 
 /** Viewer updates per second while playing. */
@@ -43,6 +46,16 @@ const DEFAULT_CHARTS: SimChartSpec[] = [
   { type: "horizontal", category: null, value: null },
   { type: "donut", category: null, value: null },
 ];
+
+function readSlicers(key: string): SlicerSpec[] {
+  try {
+    const stored = JSON.parse(sessionStorage.getItem(key) ?? "null");
+    if (Array.isArray(stored)) return stored as SlicerSpec[];
+  } catch {
+    // storage unavailable or not ours
+  }
+  return [];
+}
 
 function readCharts(key: string): SimChartSpec[] {
   try {
@@ -102,6 +115,9 @@ export default function Simulador({
   const [playing, setPlaying] = useState(false);
   const [prepared, setPrepared] = useState(false);
   const [error, setError] = useState("");
+  /** What takes part in the simulation ("segmentadores" of the whole simulator). */
+  const slicersKey = `propiedades.simulador.segmentadores.${projectId}`;
+  const [simSlicers, setSimSlicers] = useState<SlicerSpec[]>(() => readSlicers(slicersKey));
   const chartsKey = `propiedades.simulador.graficos.${projectId}`;
   const [charts, setCharts] = useState<SimChartSpec[]>(() => readCharts(chartsKey));
   const [chartNote, setChartNote] = useState("");
@@ -111,7 +127,8 @@ export default function Simulador({
 
   // ------------------------------------------------------------ timeline
 
-  const dateFields = useMemo(() => availableFields(merged).filter((f) => f.kind === "date"), [merged]);
+  const allFields = useMemo(() => availableFields(merged), [merged]);
+  const dateFields = useMemo(() => allFields.filter((f) => f.kind === "date"), [allFields]);
   const field = dateFields.find((f) => f.key === fieldKey) ?? null;
 
   // Pick the first date available (the project's attributes come first) when none is chosen.
@@ -133,7 +150,37 @@ export default function Simulador({
     if (fromApp) wantAppValues();
   }, [fromApp, wantAppValues]);
 
-  const timeline = useMemo(() => (field ? buildTimeline(merged, field.key) : null), [merged, field]);
+  // Only the elements that pass the simulator's slicers take part; the rest are context, like the undated ones.
+  const filtering = simSlicers.some((s) => s.selected !== null);
+  const passing = useMemo(() => applySlicers(merged, simSlicers), [merged, simSlicers]);
+  const excluded = useMemo(
+    () => (filtering ? excludedMembers(merged, passing) : { members: {}, count: 0 }),
+    [filtering, merged, passing]
+  );
+  const timeline = useMemo(() => (field ? buildTimeline(passing, field.key) : null), [passing, field]);
+  /** Elements that don't take part: without the date, or left out by the slicers. */
+  const context = useMemo(
+    () =>
+      timeline
+        ? { members: mergeMembers([timeline.undated, excluded.members]), count: timeline.undatedCount + excluded.count }
+        : { members: {}, count: 0 },
+    [timeline, excluded]
+  );
+  const datedTotal = useMemo(
+    () =>
+      field && filtering
+        ? merged.reduce((n, d) => n + d.records.filter((r) => dayNumber(r.values[field.key]) !== null).length, 0)
+        : 0,
+    [field, filtering, merged]
+  );
+
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(slicersKey, JSON.stringify(simSlicers));
+    } catch {
+      // storage unavailable
+    }
+  }, [slicersKey, simSlicers]);
   const items = useMemo(() => timeline?.items ?? [], [timeline]);
   const start = timeline?.start ?? null;
   const end = timeline?.end ?? null;
@@ -147,8 +194,7 @@ export default function Simulador({
   // ------------------------------------------------------------ charts
 
   // The charts use the elements with the date; at each moment, only those already shown.
-  const allFields = useMemo(() => availableFields(merged), [merged]);
-  const dated = useMemo(() => (field ? datedDatasets(merged, field.key) : []), [merged, field]);
+  const dated = useMemo(() => (field ? datedDatasets(passing, field.key) : []), [passing, field]);
   const fullDated = useMemo(() => dated.map((d) => d.dataset), [dated]);
   const cutoff = shown > 0 ? items[shown - 1].day : null;
   const shownData = useMemo(() => shownDatasets(dated, cutoff), [dated, cutoff]);
@@ -264,9 +310,9 @@ export default function Simulador({
       const all = membersOf(items, 0, items.length);
       await viewer.setObjectState(sel(all), { visible: false });
       s.touched = [all];
-      if (timeline.undatedCount > 0 && undatedMode !== "igual") {
-        await viewer.setObjectState(sel(timeline.undated), undatedMode === "gris" ? { color: GHOST } : { visible: false });
-        s.touched.push(timeline.undated);
+      if (context.count > 0 && undatedMode !== "igual") {
+        await viewer.setObjectState(sel(context.members), undatedMode === "gris" ? { color: GHOST } : { visible: false });
+        s.touched.push(context.members);
       }
       s.applied = 0;
       s.highlighted = null;
@@ -277,7 +323,7 @@ export default function Simulador({
       setError(`No se pudo preparar la simulación en el visor: ${message(err)}`);
       return false;
     }
-  }, [timeline, items, undatedMode, viewer, sel, pump]);
+  }, [timeline, items, context, undatedMode, viewer, sel, pump]);
 
   /** Puts back the visibility and colors the simulation changed. */
   const restore = useCallback(async () => {
@@ -424,6 +470,21 @@ export default function Simulador({
             ))}
           </select>
         )}
+        {dateFields.length > 0 && (
+          <SimSlicers
+            title="Segmentadores: qué simular"
+            emptyHint="Elige qué elementos entran en la simulación por un dato de texto o fecha, p. ej. solo ciertos tipos, niveles o fases. Los demás quedan como contexto."
+            fields={allFields}
+            datasets={merged}
+            slicers={simSlicers}
+            onChange={setSimSlicers}
+          />
+        )}
+        {filtering && field && (
+          <span style={{ fontSize: 12, color: "var(--tc-blue-900)" }}>
+            Se simulan {items.length.toLocaleString("es")} de {datedTotal.toLocaleString("es")} elementos con &quot;{field.label}&quot;.
+          </span>
+        )}
         {data.propNote && <span style={hintStyle}>{data.propNote}</span>}
         {data.guidBusy && fromApp && <span style={hintStyle}>{data.guidBusy}</span>}
       </section>
@@ -549,7 +610,8 @@ export default function Simulador({
           <h3 style={sectionTitleStyle}>Opciones</h3>
           <fieldset style={{ border: "none", margin: 0, padding: 0, display: "flex", flexDirection: "column", gap: 4 }}>
             <legend style={{ fontSize: 12.5, color: "var(--tc-gray-700)", marginBottom: 4 }}>
-              Elementos sin &quot;{field.label}&quot; ({timeline.undatedCount.toLocaleString("es")}):
+              Elementos que no entran en la simulación ({context.count.toLocaleString("es")}): sin &quot;{field.label}&quot;
+              {excluded.count > 0 ? " o fuera de los segmentadores" : ""}
             </legend>
             {(
               [
