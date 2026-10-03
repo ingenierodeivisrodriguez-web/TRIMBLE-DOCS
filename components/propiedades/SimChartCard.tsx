@@ -54,6 +54,8 @@ export default function SimChartCard({
   colored,
   onToggleColors,
   onColorGroups,
+  before,
+  periodLabel,
 }: {
   spec: SimChartSpec;
   onChange: (spec: SimChartSpec) => void;
@@ -71,6 +73,10 @@ export default function SimChartCard({
   onToggleColors: () => void;
   /** While colored: the chart's categories (all their elements in the timeline) with their colors. */
   onColorGroups: (groups: ColorGroup[]) => void;
+  /** The elements shown before the current day / week / month: the rest is that period's progress. */
+  before: ModelDataset[] | null;
+  /** How that period reads, e.g. "el 05-03-2026" or "esta semana". */
+  periodLabel: string;
 }) {
   const slicers = useMemo(() => spec.slicers ?? [], [spec.slicers]);
   const byKey = useMemo(() => new Map(fields.map((f) => [f.key, f])), [fields]);
@@ -96,6 +102,25 @@ export default function SimChartCard({
         : null,
     [final, shownSliced, category, value, maxRows]
   );
+
+  // What the current period added to each bar: drawn in orange on top of what was there before.
+  const beforeSliced = useMemo(() => (before ? applySlicers(before, slicers) : null), [before, slicers]);
+  const increments = useMemo(() => {
+    if (!chart || !final || !category || !beforeSliced) return null;
+    const previous = progressChart(final, beforeSliced, { category: category.key, categoryKind: category.kind, value: value?.key ?? null }, maxRows);
+    return chart.rows.map((row, i) => Math.max(0, row.value - (previous.rows[i]?.value ?? 0)));
+  }, [chart, final, beforeSliced, category, value, maxRows]);
+  const added = useMemo(
+    () =>
+      chart && increments
+        ? chart.rows
+            .map((row, i) => ({ label: row.label, value: increments[i] }))
+            .filter((r) => r.value > 0)
+            .sort((a, b) => b.value - a.value)
+        : [],
+    [chart, increments]
+  );
+  const addedTotal = added.reduce((sum, r) => sum + r.value, 0);
 
   // Colors are fixed per category from the final chart, so a bar or slice keeps its color as it grows.
   const colorByKey = useMemo(() => {
@@ -228,6 +253,8 @@ export default function SimChartCard({
             colors={barColors}
             animate={animate}
             maxValue={chart.maxValue}
+            increments={increments}
+            incrementLabel={periodLabel}
           />
         ) : (
           <HorizontalBarChart
@@ -238,9 +265,34 @@ export default function SimChartCard({
             colors={barColors}
             animate={animate}
             maxValue={chart.maxValue}
+            increments={increments}
+            incrementLabel={periodLabel}
           />
         )}
       </div>
+
+      {chart && chart.totalWithData > 0 && increments && (
+        <div style={periodLineStyle}>
+          <span style={{ width: 10, height: 10, borderRadius: 3, background: "#eb6834", flexShrink: 0, marginTop: 3 }} />
+          <span>
+            {added.length === 0 ? (
+              <>Sin avance {periodLabel} en este gráfico.</>
+            ) : (
+              <>
+                <strong>
+                  Avance {periodLabel}: +{formatNumber(addedTotal)} {value ? unitLabel : addedTotal === 1 ? "objeto" : "objetos"}
+                </strong>
+                {" · "}
+                {added
+                  .slice(0, 6)
+                  .map((r) => `${r.label} +${formatNumber(r.value)}`)
+                  .join(" · ")}
+                {added.length > 6 ? ` · y ${added.length - 6} más` : ""}
+              </>
+            )}
+          </span>
+        </div>
+      )}
 
       {colored && chart && chart.totalWithData > 0 && spec.type !== "donut" && (
         <div style={{ display: "flex", flexWrap: "wrap", gap: "4px 12px" }}>
@@ -336,6 +388,13 @@ const colorButtonActiveStyle: React.CSSProperties = {
   background: "var(--tc-blue-600)",
   color: "var(--tc-white)",
   borderColor: "var(--tc-blue-600)",
+};
+const periodLineStyle: React.CSSProperties = {
+  display: "flex",
+  gap: 6,
+  fontSize: 12,
+  color: "var(--tc-gray-700)",
+  lineHeight: 1.4,
 };
 const legendItemStyle: React.CSSProperties = {
   display: "inline-flex",

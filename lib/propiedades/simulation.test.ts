@@ -11,7 +11,10 @@ import {
   isoFromDay,
   memberCount,
   membersOf,
+  periodBars,
+  periodEndOf,
   periodProgress,
+  periodStartOf,
   progressChart,
   progressCurve,
   progressPercent,
@@ -188,5 +191,35 @@ describe("avance del día", () => {
     assert.ok(weekly.days > 1 && weekly.bars.length <= 10);
     assert.equal(weekly.bars.reduce((sum, b) => sum + b.percent, 0), 100);
     assert.deepEqual(dailyBars([], 0, 10), { days: 1, bars: [] });
+  });
+});
+
+describe("avance por semana o mes", () => {
+  const d = (iso: string) => dayNumber(iso)!;
+
+  it("ubica la semana (lunes a domingo) y el mes de una fecha", () => {
+    // 2026-03-12 es jueves
+    assert.equal(isoFromDay(periodStartOf(d("2026-03-12"), "semana")), "2026-03-09");
+    assert.equal(isoFromDay(periodEndOf(d("2026-03-12"), "semana")), "2026-03-15");
+    assert.equal(isoFromDay(periodStartOf(d("2026-03-09"), "semana")), "2026-03-09");
+    assert.equal(isoFromDay(periodStartOf(d("2026-03-15"), "semana")), "2026-03-09");
+    assert.equal(isoFromDay(periodStartOf(d("2026-02-17"), "mes")), "2026-02-01");
+    assert.equal(isoFromDay(periodEndOf(d("2026-02-17"), "mes")), "2026-02-28");
+    assert.equal(isoFromDay(periodEndOf(d("2028-02-10"), "mes")), "2028-02-29");
+    assert.equal(periodStartOf(d("2026-02-17"), "dia"), d("2026-02-17"));
+  });
+
+  it("arma barras por semana y por mes que suman el 100 %", () => {
+    const t = buildTimeline([est, arq], FECHA.key); // 10-01 (x2), 15-02, 01-03
+    const months = periodBars(t.items, t.start!, t.end!, "mes");
+    assert.deepEqual(months.bars.map((b) => [isoFromDay(b.from), b.count]), [
+      ["2026-01-01", 2],
+      ["2026-02-01", 1],
+      ["2026-03-01", 1],
+    ]);
+    const weeks = periodBars(t.items, t.start!, t.end!, "semana");
+    assert.equal(isoFromDay(weeks.bars[0].from), "2026-01-05");
+    assert.equal(weeks.bars.reduce((sum, b) => sum + b.percent, 0), 100);
+    assert.ok(weeks.bars.every((b) => b.to - b.from === 6));
   });
 });

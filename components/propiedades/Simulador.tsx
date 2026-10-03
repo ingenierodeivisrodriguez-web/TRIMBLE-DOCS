@@ -10,13 +10,16 @@ import type { PropiedadesViewer } from "../../lib/propiedades/selection";
 import {
   buildTimeline,
   countUpTo,
-  dailyBars,
   datedDatasets,
   dayNumber,
   excludedMembers,
   isoFromDay,
   membersOf,
+  periodBars,
+  periodEndOf,
   periodProgress,
+  PeriodUnit,
+  periodStartOf,
   progressCurve,
   progressPercent,
   shownDatasets,
@@ -43,6 +46,18 @@ const HIGHLIGHT = "#eb6834";
 const GHOST = "#d7dee6";
 
 type UndatedMode = "gris" | "ocultar" | "igual";
+
+const MONTH_NAMES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
+const UNITS: { unit: PeriodUnit; label: string }[] = [
+  { unit: "dia", label: "Día" },
+  { unit: "semana", label: "Semana" },
+  { unit: "mes", label: "Mes" },
+];
+
+/** "05-03" from a day number (for ranges whose year is given at the end). */
+function shortDate(day: number): string {
+  return isoToDisplay(isoFromDay(day)).slice(0, 5);
+}
 
 const DEFAULT_CHARTS: SimChartSpec[] = [
   { type: "column", category: null, value: null },
@@ -203,12 +218,68 @@ export default function Simulador({
     if (day === null) return setPeriod(null);
     setPeriod(playing && prev !== null && day > prev + 1 ? { from: prev + 1, to: day } : { from: day, to: day });
   }, [day, playing]);
-  const periodNow = day === null ? null : period && period.to === day ? period : { from: day, to: day };
+  // The card (and the charts) can also give the progress of the week or the month, up to the current date.
+  const unitKey = `propiedades.simulador.periodo.${projectId}`;
+  const [unit, setUnit] = useState<PeriodUnit>(() => {
+    try {
+      const stored = sessionStorage.getItem(unitKey);
+      return stored === "semana" || stored === "mes" ? stored : "dia";
+    } catch {
+      return "dia";
+    }
+  });
+  useEffect(() => {
+    try {
+      sessionStorage.setItem(unitKey, unit);
+    } catch {
+      // storage unavailable
+    }
+  }, [unitKey, unit]);
+
+  const periodNow =
+    day === null
+      ? null
+      : unit === "dia"
+        ? period && period.to === day
+          ? period
+          : { from: day, to: day }
+        : { from: periodStartOf(day, unit), to: day };
   const ofPeriod = periodNow ? periodProgress(items, periodNow.from, periodNow.to) : null;
   /** The last date with progress on or before the current one, for days without any. */
   const lastProgressDay = shown > 0 ? items[shown - 1].day : null;
-  const daily = useMemo(() => (start !== null && end !== null ? dailyBars(items, start, end, 60) : null), [items, start, end]);
+  const daily = useMemo(() => (start !== null && end !== null ? periodBars(items, start, end, unit, 60) : null), [items, start, end, unit]);
   const maxBar = daily ? daily.bars.reduce((m, b) => Math.max(m, b.percent), 0) : 0;
+
+  // How the period reads in the card and in the charts ("Avance del 05-03-2026: +3").
+  const periodTexts = (() => {
+    if (!periodNow || day === null) return null;
+    const upTo = (last: number) => (day < last ? ` · hasta el ${shortDate(day)}` : "");
+    if (unit === "semana") {
+      const last = periodEndOf(day, "semana");
+      return {
+        title: "Avance de la semana",
+        subtitle: `Semana del ${shortDate(periodNow.from)} al ${isoToDisplay(isoFromDay(last))}${upTo(last)}`,
+        when: "esta semana",
+        charts: "de esta semana",
+      };
+    }
+    if (unit === "mes") {
+      const last = periodEndOf(day, "mes");
+      const date = new Date(day * 86_400_000);
+      return {
+        title: "Avance del mes",
+        subtitle: `${MONTH_NAMES[date.getUTCMonth()]} ${date.getUTCFullYear()}${upTo(last)}`,
+        when: "este mes",
+        charts: "de este mes",
+      };
+    }
+    if (periodNow.from === periodNow.to) {
+      const date = isoToDisplay(isoFromDay(day));
+      return { title: "Avance del día", subtitle: date, when: "este día", charts: `del ${date}` };
+    }
+    const range = `del ${shortDate(periodNow.from)} al ${isoToDisplay(isoFromDay(periodNow.to))}`;
+    return { title: "Avance del período", subtitle: range, when: "en estos días", charts: range };
+  })();
 
   // ------------------------------------------------------------ charts
 
@@ -217,6 +288,8 @@ export default function Simulador({
   const fullDated = useMemo(() => dated.map((d) => d.dataset), [dated]);
   const cutoff = shown > 0 ? items[shown - 1].day : null;
   const shownData = useMemo(() => shownDatasets(dated, cutoff), [dated, cutoff]);
+  const periodFrom = periodNow?.from ?? null;
+  const shownBefore = useMemo(() => (periodFrom === null ? null : shownDatasets(dated, periodFrom - 1)), [dated, periodFrom]);
   const chartsUseApp = charts.some((c) => [c.category, c.value].some((k) => k?.startsWith("prop:")));
 
   useEffect(() => {
@@ -677,15 +750,28 @@ export default function Simulador({
 
       {field && periodNow && ofPeriod && daily && start !== null && items.length > 0 && (
         <section style={cardStyle} aria-label="Avance del día">
-          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
-            <div>
-              <div style={labelStyle}>{periodNow.from === periodNow.to ? "Avance del día" : "Avance del período"}</div>
-              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tc-gray-700)" }}>
-                {periodNow.from === periodNow.to
-                  ? isoToDisplay(isoFromDay(periodNow.to))
-                  : `del ${isoToDisplay(isoFromDay(periodNow.from))} al ${isoToDisplay(isoFromDay(periodNow.to))}`}
-              </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, flexWrap: "wrap" }}>
+            <div style={labelStyle}>{periodTexts?.title}</div>
+            <div role="group" aria-label="Ver el avance por" style={segmentGroupStyle}>
+              {UNITS.map((u) => (
+                <button
+                  key={u.unit}
+                  type="button"
+                  onClick={() => setUnit(u.unit)}
+                  aria-pressed={unit === u.unit}
+                  style={{
+                    ...segmentStyle,
+                    background: unit === u.unit ? "var(--tc-blue-600)" : "var(--tc-white)",
+                    color: unit === u.unit ? "var(--tc-white)" : "var(--tc-gray-700)",
+                  }}
+                >
+                  {u.label}
+                </button>
+              ))}
             </div>
+          </div>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+            <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tc-gray-700)" }}>{periodTexts?.subtitle}</div>
             <div style={{ ...bigStyle, color: ofPeriod.count ? HIGHLIGHT : "var(--tc-gray-500)" }} aria-live="polite">
               {ofPeriod.count ? "+" : ""}
               {percentText(ofPeriod.percent)}
@@ -693,8 +779,10 @@ export default function Simulador({
           </div>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>
             {ofPeriod.count
-              ? `${ofPeriod.count.toLocaleString("es")} ${ofPeriod.count === 1 ? "elemento aparece" : "elementos aparecen"} ${periodNow.from === periodNow.to ? "este día" : "en estos días"}`
-              : `Ningún elemento tiene ${periodNow.from === periodNow.to ? "esta fecha" : "fechas en este período"}`}
+              ? `${ofPeriod.count.toLocaleString("es")} ${ofPeriod.count === 1 ? "elemento aparece" : "elementos aparecen"} ${periodTexts?.when ?? ""}`
+              : unit === "dia" && periodNow.from === periodNow.to
+                ? "Ningún elemento tiene esta fecha"
+                : `Ningún elemento aparece ${periodTexts?.when ?? ""}`}
             {!ofPeriod.count && lastProgressDay !== null
               ? ` · último avance el ${isoToDisplay(isoFromDay(lastProgressDay))} (+${percentText(periodProgress(items, lastProgressDay, lastProgressDay).percent)})`
               : ""}
@@ -714,7 +802,7 @@ export default function Simulador({
                   height={Math.max(h, bar.count ? 0.8 : 0)}
                   fill={current ? HIGHLIGHT : "#9cc9ef"}
                   style={{ cursor: "pointer" }}
-                  onClick={() => jump(bar.to - start)}
+                  onClick={() => jump(Math.min(bar.to, end ?? bar.to) - start)}
                 >
                   <title>
                     {bar.from === bar.to
@@ -727,7 +815,8 @@ export default function Simulador({
             })}
           </svg>
           <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
-            Avance por {daily.days === 1 ? "día" : `cada ${daily.days} días`} · clic en una barra para ir a esa fecha.
+            Avance por {unit === "semana" ? "semana" : unit === "mes" ? "mes" : daily.days === 1 ? "día" : `cada ${daily.days} días`} · clic en
+            una barra para ir a esa fecha.
           </div>
         </section>
       )}
@@ -736,7 +825,9 @@ export default function Simulador({
         <section style={{ display: "flex", flexDirection: "column", gap: 8 }} aria-label="Gráficos del avance">
           <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", gap: 8, flexWrap: "wrap" }}>
             <h3 style={sectionTitleStyle}>Gráficos del avance</h3>
-            <span style={hintStyle}>Muestran solo los elementos que ya aparecieron.</span>
+            <span style={hintStyle}>
+              Muestran solo los elementos que ya aparecieron; en naranja, lo que aparece {periodTexts?.when ?? "en el período"}.
+            </span>
           </div>
           {chartNote && (
             <div style={{ ...noticeBase, ...noticeStyles.info }} role="status">
@@ -757,6 +848,8 @@ export default function Simulador({
                 colored={coloredChart === i}
                 onToggleColors={() => toggleColors(i)}
                 onColorGroups={receiveColorGroups}
+                before={shownBefore}
+                periodLabel={periodTexts?.charts ?? ""}
               />
             ))}
           </div>
@@ -865,5 +958,15 @@ const inputStyle: React.CSSProperties = {
   width: "100%",
 };
 const controlStyle: React.CSSProperties = { ...secondaryButtonStyle, padding: "6px 10px", fontSize: 14, lineHeight: 1 };
+const segmentGroupStyle: React.CSSProperties = { display: "inline-flex", border: "1px solid var(--tc-blue-500)", borderRadius: 6, overflow: "hidden" };
+const segmentStyle: React.CSSProperties = {
+  border: "none",
+  borderLeft: "1px solid var(--tc-blue-100)",
+  padding: "3px 10px",
+  fontSize: 12,
+  fontWeight: 600,
+  cursor: "pointer",
+  fontFamily: "inherit",
+};
 const chartsGridStyle: React.CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))", gap: 12 };
 const radioStyle: React.CSSProperties = { display: "flex", alignItems: "center", gap: 8, fontSize: 13, color: "var(--tc-gray-700)", cursor: "pointer" };

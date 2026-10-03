@@ -876,6 +876,17 @@ porcentaje del total aparece en la fecha que se está viendo, por ejemplo
 - **Barras de avance por fecha:** una por día, o por cada N días en líneas de
   tiempo largas, con la fecha actual resaltada. Al hacer clic en una barra se
   va a esa fecha.
+- **Día | Semana | Mes:** la tarjeta también da el avance de la **semana**
+  (lunes a domingo) o del **mes** calendario hasta la fecha actual, por
+  ejemplo "Semana del 09-03 al 15-03-2026 · hasta el 11-03". Las barras pasan
+  a ser una por semana o por mes.
+
+**El avance del período en los gráficos.** En los gráficos del avance, la
+parte de cada barra que aparece en el día, la semana o el mes elegidos se
+dibuja **en naranja** encima de lo acumulado antes, y el tooltip la indica.
+Cada gráfico, también el circular, dice cuánto avanzó y en qué categorías,
+por ejemplo "Avance del 09-03-2026: +3 objetos · IFCCOLUMN +2 · IFCSLAB +1".
+Para eso, `Charts.tsx` admite `increments`: apila esa parte sobre cada barra.
 
 **Qué pasa en el visor:**
 

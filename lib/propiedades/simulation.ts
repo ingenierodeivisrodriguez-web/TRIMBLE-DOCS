@@ -252,3 +252,38 @@ export function dailyBars(items: TimelineItem[], start: number, end: number, max
   }
   return { days, bars };
 }
+
+// ---------------------------------------------------------------- progress by week or month
+
+export type PeriodUnit = "dia" | "semana" | "mes";
+
+/** The first day of the day, week (Monday) or calendar month that contains `day`. */
+export function periodStartOf(day: number, unit: PeriodUnit): number {
+  if (unit === "dia") return day;
+  const date = new Date(day * DAY_MS);
+  if (unit === "semana") return day - ((date.getUTCDay() + 6) % 7);
+  return Math.round(Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), 1) / DAY_MS);
+}
+
+/** The last day of that day, week (Sunday) or month. */
+export function periodEndOf(day: number, unit: PeriodUnit): number {
+  if (unit === "dia") return day;
+  if (unit === "semana") return periodStartOf(day, "semana") + 6;
+  const date = new Date(day * DAY_MS);
+  return Math.round(Date.UTC(date.getUTCFullYear(), date.getUTCMonth() + 1, 1) / DAY_MS) - 1;
+}
+
+/**
+ * Progress bars of the timeline per day (grouped by N days when there are
+ * more than `maxBars`), per week or per calendar month.
+ */
+export function periodBars(items: TimelineItem[], start: number, end: number, unit: PeriodUnit, maxBars = 60): { days: number; bars: DailyBar[] } {
+  if (unit === "dia") return dailyBars(items, start, end, maxBars);
+  if (items.length === 0 || end < start) return { days: unit === "semana" ? 7 : 30, bars: [] };
+  const bars: DailyBar[] = [];
+  for (let from = periodStartOf(start, unit); from <= end; from = periodEndOf(from, unit) + 1) {
+    const to = periodEndOf(from, unit);
+    bars.push({ from, to, ...periodProgress(items, from, to) });
+  }
+  return { days: unit === "semana" ? 7 : 30, bars };
+}

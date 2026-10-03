@@ -19,6 +19,8 @@ import { ChartRow, CompareRow, formatNumber } from "../../lib/graficos/modelData
 // takes its category's color (the same one painted on the model). The donut
 // always colors by category. Past 8 categories the palette repeats (see assignColors).
 const SERIES_COLOR = CATEGORY_COLORS[0];
+/** The part of each bar added in a period (Simulador: the progress of the day). */
+const INCREMENT_COLOR = "#eb6834";
 const GRID_COLOR = "#e6e9ee";
 const TICK = { fontSize: 11, fill: "#6b7684" };
 // Marks outside the clicked category recede so the selection reads at a glance.
@@ -69,10 +71,12 @@ function RowTooltip({
   active,
   payload,
   unitLabel,
+  incrementLabel,
 }: {
   active?: boolean;
-  payload?: { payload: ChartRow }[];
+  payload?: { payload: ChartRow & { inc?: number } }[];
   unitLabel: string;
+  incrementLabel?: string;
 }) {
   if (!active || !payload?.length) return null;
   const row = payload[0].payload;
@@ -82,6 +86,11 @@ function RowTooltip({
       <div style={{ color: "var(--tc-gray-700)" }}>
         {formatNumber(row.value)} {unitLabel}
       </div>
+      {!!row.inc && (
+        <div style={{ color: INCREMENT_COLOR, fontWeight: 600 }}>
+          +{formatNumber(row.inc)} {unitLabel} {incrementLabel ?? ""}
+        </div>
+      )}
       <div style={{ color: "var(--tc-gray-500)" }}>{formatNumber(row.objects)} objetos · clic para seleccionarlos</div>
     </div>
   );
@@ -98,15 +107,41 @@ interface SingleSeriesProps {
   animate?: boolean;
   /** Fixed top of the value axis (bars): lets a chart fill up toward a known total, e.g. in the Simulador. */
   maxValue?: number;
+  /**
+   * Per row, how much of its value was added in a period (Simulador: the day):
+   * drawn stacked on top of the rest, in orange. Absent: plain bars.
+   */
+  increments?: number[] | null;
+  /** How the tooltip names that period, e.g. "el 05-03-2026". */
+  incrementLabel?: string;
 }
 
-export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true, maxValue }: SingleSeriesProps) {
+/** Rows split for a stacked bar: what was there before (`base`) and what the period added (`inc`). */
+function stacked(rows: ChartRow[], increments: number[]) {
+  return rows.map((row, i) => {
+    const inc = Math.max(0, Math.min(row.value, increments[i] ?? 0));
+    return { ...row, base: row.value - inc, inc };
+  });
+}
+
+export function ColumnChart({
+  rows,
+  unitLabel,
+  activeKey,
+  onRowClick,
+  colors,
+  animate = true,
+  maxValue,
+  increments,
+  incrementLabel,
+}: SingleSeriesProps) {
+  const data = increments ? stacked(rows, increments) : rows;
   return (
     <div style={{ overflowX: "auto", overflowY: "hidden" }}>
       <div style={{ minWidth: rows.length * COLUMN_WIDTH + 64, overflow: "hidden" }}>
         <ResponsiveContainer width="100%" height={280}>
           <BarChart
-            data={rows}
+            data={data}
             margin={{ top: 8, right: 8, left: 0, bottom: 4 }}
             onClick={(state) => {
               const row = rowAt(rows, state);
@@ -134,12 +169,27 @@ export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, an
               axisLine={false}
               domain={maxValue ? [0, maxValue] : undefined}
             />
-            <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
-            <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
-              {rows.map((row, i) => (
-                <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
-              ))}
-            </Bar>
+            <Tooltip content={<RowTooltip unitLabel={unitLabel} incrementLabel={incrementLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
+            {increments ? (
+              [
+                <Bar key="base" dataKey="base" stackId="s" maxBarSize={36} isAnimationActive={animate}>
+                  {rows.map((row, i) => (
+                    <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+                  ))}
+                </Bar>,
+                <Bar key="inc" dataKey="inc" stackId="s" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
+                  {rows.map((row) => (
+                    <Cell key={row.key} fill={INCREMENT_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+                  ))}
+                </Bar>,
+              ]
+            ) : (
+              <Bar dataKey="value" radius={[4, 4, 0, 0]} maxBarSize={36} isAnimationActive={animate}>
+                {rows.map((row, i) => (
+                  <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+                ))}
+              </Bar>
+            )}
           </BarChart>
         </ResponsiveContainer>
       </div>
@@ -147,13 +197,24 @@ export function ColumnChart({ rows, unitLabel, activeKey, onRowClick, colors, an
   );
 }
 
-export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, colors, animate = true, maxValue }: SingleSeriesProps) {
+export function HorizontalBarChart({
+  rows,
+  unitLabel,
+  activeKey,
+  onRowClick,
+  colors,
+  animate = true,
+  maxValue,
+  increments,
+  incrementLabel,
+}: SingleSeriesProps) {
   const height = Math.max(120, rows.length * 26 + 40);
+  const data = increments ? stacked(rows, increments) : rows;
   return (
     <div style={{ maxHeight: HORIZONTAL_MAX_HEIGHT, overflowY: "auto", overflowX: "hidden" }}>
       <ResponsiveContainer width="100%" height={height}>
         <BarChart
-          data={rows}
+          data={data}
           layout="vertical"
           margin={{ top: 4, right: 16, left: 0, bottom: 4 }}
           onClick={(state) => {
@@ -181,12 +242,27 @@ export function HorizontalBarChart({ rows, unitLabel, activeKey, onRowClick, col
             tickLine={false}
             axisLine={{ stroke: GRID_COLOR }}
           />
-          <Tooltip content={<RowTooltip unitLabel={unitLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
-          <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={animate}>
-            {rows.map((row, i) => (
-              <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
-            ))}
-          </Bar>
+          <Tooltip content={<RowTooltip unitLabel={unitLabel} incrementLabel={incrementLabel} />} cursor={{ fill: "var(--tc-blue-50)" }} />
+          {increments ? (
+            [
+              <Bar key="base" dataKey="base" stackId="s" maxBarSize={18} isAnimationActive={animate}>
+                {rows.map((row, i) => (
+                  <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+                ))}
+              </Bar>,
+              <Bar key="inc" dataKey="inc" stackId="s" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={animate}>
+                {rows.map((row) => (
+                  <Cell key={row.key} fill={INCREMENT_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+                ))}
+              </Bar>,
+            ]
+          ) : (
+            <Bar dataKey="value" radius={[0, 4, 4, 0]} maxBarSize={18} isAnimationActive={animate}>
+              {rows.map((row, i) => (
+                <Cell key={row.key} fill={colors?.[i] ?? SERIES_COLOR} fillOpacity={opacity(activeKey, row.key)} />
+              ))}
+            </Bar>
+          )}
         </BarChart>
       </ResponsiveContainer>
     </div>
