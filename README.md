@@ -880,6 +880,17 @@ elementos en el tiempo, según una fecha.
 - **"Restablecer modelo"** devuelve la visibilidad y los colores que la
   simulación cambió. También se restablece al cambiar de fecha, de modelos o
   de opción, y al cerrar el panel.
+- **Contenedores del modelo:** proyecto, edificio, niveles y ensambles
+  (como un muro cortina) **nunca se ocultan ni se pintan**. En Trimble
+  Connect, ocultar un padre oculta todo lo que tiene debajo, y mostrar un hijo
+  no lo trae de vuelta mientras el padre siga oculto: por eso, en un modelo
+  real, segmentar "solo columnas" dejaba el visor vacío. Antes de preparar la
+  simulación se leen, una vez por conjunto de modelos, los ancestros de todos
+  los elementos (`viewer.getHierarchyParents`, en los árboles espacial, de
+  contención y de ensambles; ver
+  [`lib/propiedades/hierarchy.ts`](lib/propiedades/hierarchy.ts)), y se
+  excluyen de todo lo que se oculta o se pone en gris. Los elementos con la
+  fecha simulada sí se ocultan y se muestran siempre.
 - **Pausa automática:** la reproducción se pausa al salir de la pestaña.
 - **Cola de cambios:** los cambios al visor van en cola, uno a la vez. Si la
   reproducción va más rápido que el visor, se juntan en un solo cambio.

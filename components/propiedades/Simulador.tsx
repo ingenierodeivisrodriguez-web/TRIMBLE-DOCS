@@ -5,6 +5,7 @@ import type { ColorGroup } from "../../lib/graficos/colors";
 import { applySlicers, mergeMembers, Members, SlicerSpec } from "../../lib/graficos/modelData";
 import { selectorFor } from "../../lib/graficos/viewerReader";
 import { availableFields, GroupField } from "../../lib/propiedades/grouping";
+import { ancestorsOf, withoutProtected } from "../../lib/propiedades/hierarchy";
 import type { PropiedadesViewer } from "../../lib/propiedades/selection";
 import {
   buildTimeline,
@@ -305,6 +306,13 @@ export default function Simulador({
 
   /** A restore still sending its changes to the viewer: preparing waits for it. */
   const restoring = useRef<Promise<void>>(Promise.resolve());
+  const [preparing, setPreparing] = useState(false);
+  /**
+   * Containers of the model's elements (levels, building, assemblies), read once
+   * per set of models: hiding or graying one would hide or gray everything under
+   * it - including the elements the simulation shows - so they are left alone.
+   */
+  const containers = useRef<{ of: unknown; ids: Map<string, Set<number>> } | null>(null);
 
   /**
    * Hides every element with the date and sets how the rest look; then the
@@ -316,7 +324,19 @@ export default function Simulador({
     if (!timeline || (items.length === 0 && excluded.count === 0)) return false;
     const s = state.current;
     setError("");
+    setPreparing(true);
     try {
+      if (containers.current?.of !== merged) {
+        const everything: Members = Object.fromEntries(merged.map((d) => [d.modelId, d.records.map((r) => r.runtimeId)]));
+        containers.current = { of: merged, ids: await ancestorsOf(viewer, everything, s.viewerModelIds) };
+      }
+      // The simulated elements themselves are always hidden and shown, even if something hangs under them.
+      const dated = new Set(items.map((i) => `${i.model}:${i.runtimeId}`));
+      const keep = new Map(
+        [...containers.current.ids].map(([model, ids]) => [model, new Set([...ids].filter((id) => !dated.has(`${model}:${id}`)))])
+      );
+      const undated = withoutProtected(timeline.undated, keep);
+      const outside = withoutProtected(excluded.members, keep);
       const all = membersOf(items, 0, items.length);
       s.touched = [];
       if (!isEmpty(all)) {
@@ -324,13 +344,13 @@ export default function Simulador({
         s.touched.push(all);
       }
       const look = (mode: UndatedMode) => (mode === "gris" ? { color: GHOST } : { visible: false });
-      if (timeline.undatedCount > 0 && undatedMode !== "igual") {
-        await viewer.setObjectState(sel(timeline.undated), look(undatedMode));
-        s.touched.push(timeline.undated);
+      if (!isEmpty(undated) && undatedMode !== "igual") {
+        await viewer.setObjectState(sel(undated), look(undatedMode));
+        s.touched.push(undated);
       }
-      if (excluded.count > 0 && outsideMode !== "igual") {
-        await viewer.setObjectState(sel(excluded.members), look(outsideMode));
-        s.touched.push(excluded.members);
+      if (!isEmpty(outside) && outsideMode !== "igual") {
+        await viewer.setObjectState(sel(outside), look(outsideMode));
+        s.touched.push(outside);
       }
       s.applied = 0;
       s.highlighted = null;
@@ -341,8 +361,10 @@ export default function Simulador({
     } catch (err) {
       setError(`No se pudo preparar la simulación en el visor: ${message(err)}`);
       return false;
+    } finally {
+      setPreparing(false);
     }
-  }, [timeline, items, excluded, undatedMode, outsideMode, viewer, sel, pump]);
+  }, [timeline, items, excluded, merged, undatedMode, outsideMode, viewer, sel, pump]);
 
   /** Puts back the visibility and colors the simulation changed. */
   const restore = useCallback(() => {
@@ -565,6 +587,7 @@ export default function Simulador({
           </div>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>
             {shown.toLocaleString("es")} de {items.length.toLocaleString("es")} elementos con &quot;{field.label}&quot;
+            {preparing ? " · Preparando el modelo en el visor..." : ""}
           </div>
 
           <svg viewBox="0 0 100 40" preserveAspectRatio="none" style={{ width: "100%", height: 70, display: "block" }} role="img" aria-label="Curva de avance acumulado">
