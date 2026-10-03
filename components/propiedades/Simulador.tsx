@@ -10,11 +10,13 @@ import type { PropiedadesViewer } from "../../lib/propiedades/selection";
 import {
   buildTimeline,
   countUpTo,
+  dailyBars,
   datedDatasets,
   dayNumber,
   excludedMembers,
   isoFromDay,
   membersOf,
+  periodProgress,
   progressCurve,
   progressPercent,
   shownDatasets,
@@ -188,6 +190,25 @@ export default function Simulador({
   const percent = progressPercent(shown, items.length);
   const curve = useMemo(() => (start !== null && end !== null ? progressCurve(items, start, end, 80) : []), [items, start, end]);
   const todayOffset = start !== null && end !== null && today() >= start && today() <= end ? today() - start : null;
+
+  // ------------------------------------------------------------ progress of the day
+
+  // Playing can move several days per step: the card then shows those days
+  // together instead of the one day the step landed on.
+  const [period, setPeriod] = useState<{ from: number; to: number } | null>(null);
+  const previousDay = useRef<number | null>(null);
+  useEffect(() => {
+    const prev = previousDay.current;
+    previousDay.current = day;
+    if (day === null) return setPeriod(null);
+    setPeriod(playing && prev !== null && day > prev + 1 ? { from: prev + 1, to: day } : { from: day, to: day });
+  }, [day, playing]);
+  const periodNow = day === null ? null : period && period.to === day ? period : { from: day, to: day };
+  const ofPeriod = periodNow ? periodProgress(items, periodNow.from, periodNow.to) : null;
+  /** The last date with progress on or before the current one, for days without any. */
+  const lastProgressDay = shown > 0 ? items[shown - 1].day : null;
+  const daily = useMemo(() => (start !== null && end !== null ? dailyBars(items, start, end, 60) : null), [items, start, end]);
+  const maxBar = daily ? daily.bars.reduce((m, b) => Math.max(m, b.percent), 0) : 0;
 
   // ------------------------------------------------------------ charts
 
@@ -650,6 +671,63 @@ export default function Simulador({
                 ))}
               </select>
             </label>
+          </div>
+        </section>
+      )}
+
+      {field && periodNow && ofPeriod && daily && start !== null && items.length > 0 && (
+        <section style={cardStyle} aria-label="Avance del día">
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-end", gap: 12, flexWrap: "wrap" }}>
+            <div>
+              <div style={labelStyle}>{periodNow.from === periodNow.to ? "Avance del día" : "Avance del período"}</div>
+              <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tc-gray-700)" }}>
+                {periodNow.from === periodNow.to
+                  ? isoToDisplay(isoFromDay(periodNow.to))
+                  : `del ${isoToDisplay(isoFromDay(periodNow.from))} al ${isoToDisplay(isoFromDay(periodNow.to))}`}
+              </div>
+            </div>
+            <div style={{ ...bigStyle, color: ofPeriod.count ? HIGHLIGHT : "var(--tc-gray-500)" }} aria-live="polite">
+              {ofPeriod.count ? "+" : ""}
+              {percentText(ofPeriod.percent)}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>
+            {ofPeriod.count
+              ? `${ofPeriod.count.toLocaleString("es")} ${ofPeriod.count === 1 ? "elemento aparece" : "elementos aparecen"} ${periodNow.from === periodNow.to ? "este día" : "en estos días"}`
+              : `Ningún elemento tiene ${periodNow.from === periodNow.to ? "esta fecha" : "fechas en este período"}`}
+            {!ofPeriod.count && lastProgressDay !== null
+              ? ` · último avance el ${isoToDisplay(isoFromDay(lastProgressDay))} (+${percentText(periodProgress(items, lastProgressDay, lastProgressDay).percent)})`
+              : ""}
+            {` · acumulado: ${percentText(percent)}`}
+          </div>
+          <svg viewBox="0 0 100 30" preserveAspectRatio="none" style={{ width: "100%", height: 56, display: "block" }} role="img" aria-label="Avance por día">
+            {daily.bars.map((bar, i) => {
+              const w = 100 / daily.bars.length;
+              const h = maxBar > 0 ? (bar.percent / maxBar) * 28 : 0;
+              const current = bar.to >= periodNow.from && bar.from <= periodNow.to;
+              return (
+                <rect
+                  key={bar.from}
+                  x={i * w + w * 0.1}
+                  y={30 - Math.max(h, bar.count ? 0.8 : 0)}
+                  width={w * 0.8}
+                  height={Math.max(h, bar.count ? 0.8 : 0)}
+                  fill={current ? HIGHLIGHT : "#9cc9ef"}
+                  style={{ cursor: "pointer" }}
+                  onClick={() => jump(bar.to - start)}
+                >
+                  <title>
+                    {bar.from === bar.to
+                      ? isoToDisplay(isoFromDay(bar.from))
+                      : `${isoToDisplay(isoFromDay(bar.from))} – ${isoToDisplay(isoFromDay(bar.to))}`}
+                    : +{percentText(bar.percent)} ({bar.count.toLocaleString("es")} elementos)
+                  </title>
+                </rect>
+              );
+            })}
+          </svg>
+          <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>
+            Avance por {daily.days === 1 ? "día" : `cada ${daily.days} días`} · clic en una barra para ir a esa fecha.
           </div>
         </section>
       )}

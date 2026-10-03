@@ -220,3 +220,35 @@ export function excludedMembers(all: ModelDataset[], kept: ModelDataset[]): { me
   }
   return { members, count };
 }
+
+// ---------------------------------------------------------------- progress of a day
+
+/** Elements whose date falls in [fromDay, toDay], as a count and a share of all the items. */
+export function periodProgress(items: TimelineItem[], fromDay: number, toDay: number): { count: number; percent: number } {
+  const count = Math.max(0, countUpTo(items, toDay) - countUpTo(items, fromDay - 1));
+  return { count, percent: progressPercent(count, items.length) };
+}
+
+export interface DailyBar {
+  /** First and last day of the bar (a bar covers several days on long timelines). */
+  from: number;
+  to: number;
+  count: number;
+  percent: number;
+}
+
+/**
+ * The progress of each day of the timeline, as bars: one per day, or per
+ * group of consecutive days when the timeline is longer than `maxBars` days.
+ */
+export function dailyBars(items: TimelineItem[], start: number, end: number, maxBars = 60): { days: number; bars: DailyBar[] } {
+  if (items.length === 0 || end < start) return { days: 1, bars: [] };
+  const span = end - start + 1;
+  const days = Math.max(1, Math.ceil(span / maxBars));
+  const bars: DailyBar[] = [];
+  for (let from = start; from <= end; from += days) {
+    const to = Math.min(end, from + days - 1);
+    bars.push({ from, to, ...periodProgress(items, from, to) });
+  }
+  return { days, bars };
+}

@@ -864,6 +864,19 @@ elementos en el tiempo, según una fecha.
    divididos por el total de elementos con la fecha. Se muestra con la
    cuenta, por ejemplo "6 de 16 elementos".
 
+**Avance del día.** Una tarjeta debajo de la línea de tiempo muestra qué
+porcentaje del total aparece en la fecha que se está viendo, por ejemplo
+"+5,3 % · 1 elemento aparece este día", junto con el acumulado.
+
+- **Días sin avance:** dice desde cuándo no hay avance ("último avance el
+  …").
+- **Durante la reproducción:** si cada paso salta varios días (obras largas),
+  muestra el avance de esos días juntos ("Avance del período, del … al …"),
+  para no quedar en 0 % entre fechas.
+- **Barras de avance por fecha:** una por día, o por cada N días en líneas de
+  tiempo largas, con la fecha actual resaltada. Al hacer clic en una barra se
+  va a esa fecha.
+
 **Qué pasa en el visor:**
 
 - **Al empezar**, se ocultan todos los elementos con esa fecha

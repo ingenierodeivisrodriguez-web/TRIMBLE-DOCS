@@ -4,12 +4,14 @@ import { aggregate, applySlicers, Field, ModelDataset } from "../graficos/modelD
 import {
   buildTimeline,
   countUpTo,
+  dailyBars,
   datedDatasets,
   dayNumber,
   excludedMembers,
   isoFromDay,
   memberCount,
   membersOf,
+  periodProgress,
   progressChart,
   progressCurve,
   progressPercent,
@@ -164,5 +166,27 @@ describe("segmentadores de la simulación", () => {
 
   it("sin filtro no aparta nada", () => {
     assert.deepEqual(excludedMembers([ds], [ds]), { members: {}, count: 0 });
+  });
+});
+
+describe("avance del día", () => {
+  const t = buildTimeline([est, arq], FECHA.key); // 10-01 (x2), 15-02, 01-03
+
+  it("da el % de los elementos de una fecha o de un tramo de fechas", () => {
+    const d10 = dayNumber("2026-01-10")!;
+    assert.deepEqual(periodProgress(t.items, d10, d10), { count: 2, percent: 50 });
+    assert.deepEqual(periodProgress(t.items, d10 + 1, d10 + 1), { count: 0, percent: 0 });
+    assert.deepEqual(periodProgress(t.items, d10 + 1, dayNumber("2026-03-01")!), { count: 2, percent: 50 });
+  });
+
+  it("arma una barra por día, o por varios días en líneas de tiempo largas", () => {
+    const daily = dailyBars(t.items, t.start!, t.end!, 1000);
+    assert.equal(daily.days, 1);
+    assert.equal(daily.bars.length, t.end! - t.start! + 1);
+    assert.equal(daily.bars.reduce((sum, b) => sum + b.count, 0), 4);
+    const weekly = dailyBars(t.items, t.start!, t.end!, 10);
+    assert.ok(weekly.days > 1 && weekly.bars.length <= 10);
+    assert.equal(weekly.bars.reduce((sum, b) => sum + b.percent, 0), 100);
+    assert.deepEqual(dailyBars([], 0, 10), { days: 1, bars: [] });
   });
 });
