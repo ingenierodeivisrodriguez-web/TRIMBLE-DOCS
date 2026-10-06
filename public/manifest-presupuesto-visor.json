@@ -1,0 +1,10 @@
+{
+  "url": "https://trimble-docs.vercel.app/presupuesto/visor",
+  "title": "Presupuesto",
+  "description": "Asocia las partidas del presupuesto a los elementos seleccionados en el visor 3D (por IFCGUID) y toma su metrado del modelo.",
+  "icon": "https://trimble-docs.vercel.app/icon-presupuesto.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "panel",
+  "enabled": true
+}

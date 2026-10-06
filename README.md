@@ -10,6 +10,7 @@ ambos lugares** para Trimble Connect:
 | **Validación** — valida la nomenclatura de los archivos contra reglas configurables | Menú lateral del proyecto | `/validacion` | `/manifest-validacion.json` |
 | **Gráficos de Modelos** — gráficos con los datos de los modelos 3D cargados | Panel de extensiones del visor 3D | `/graficos` | `/manifest-graficos.json` |
 | **Propiedades** — atributos propios asignados por IFCGUID a los elementos de los modelos | Menú lateral del proyecto (catálogo) **y** panel del visor 3D (asignación) | `/propiedades` | `/manifest-propiedades.json` |
+| **Presupuesto** — presupuesto con catálogos de insumos y partidas (APU) bajo OmniClass, asociado a los modelos por IFCGUID | Menú lateral del proyecto (presupuesto) **y** panel del visor 3D (asociar elementos) | `/presupuesto` | `/manifest-presupuesto.json` |
 
 Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
@@ -25,6 +26,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Validación](#validación)
 - [Gráficos de Modelos (visor 3D)](#gráficos-de-modelos-visor-3d)
 - [Propiedades (proyecto + visor 3D)](#propiedades-proyecto--visor-3d)
+- [Presupuesto (proyecto + visor 3D)](#presupuesto-proyecto--visor-3d)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -1045,6 +1047,210 @@ En `npm run dev` sin variables de Supabase, los datos se guardan en memoria.
 
 ---
 
+## Presupuesto (proyecto + visor 3D)
+
+Presupuesto del proyecto con **catálogos de insumos y de partidas (APU)**
+clasificados con **OmniClass**, y con sus partidas asociadas a los elementos
+de los modelos 3D por **IFCGUID**, de donde puede salir el metrado. Todo se
+guarda en la base de datos de esta app (Supabase); no se usan los Property
+Sets ni los UDA de Trimble Connect.
+
+| Dónde | Qué hace |
+|---|---|
+| **Menú lateral del proyecto → Presupuesto** (`/presupuesto`) | El presupuesto: subpresupuestos con títulos y partidas, análisis de precios unitarios, catálogos, lista de insumos, gastos generales, pie, importación y exportación |
+| **Visor 3D → panel de extensiones → Presupuesto** (`/presupuesto/visor`) | Elegir una partida del presupuesto guardado y **agregar o quitar** los elementos seleccionados; medirlos (volumen, área, longitud, peso o conteo) y seleccionarlos en el modelo |
+
+Como Propiedades, es una sola página con `"extensionType": ["project", "3dviewer"]`
+([`public/manifest-presupuesto.json`](public/manifest-presupuesto.json)) y un
+respaldo solo para el visor ([`public/manifest-presupuesto-visor.json`](public/manifest-presupuesto-visor.json)).
+La conexión con Trimble Connect (token, menú, visor) es común a las dos:
+[`components/trimble/ExtensionShell.tsx`](components/trimble/ExtensionShell.tsx).
+
+### Catálogos y base maestra
+
+- **Insumos**: código, descripción, unidad, precio, tipo (**MO** mano de obra,
+  **MT** materiales, **EQ** equipos y herramientas, **SC** subcontratos), IU
+  (índice unificado) y código OmniClass (p. ej. Tabla 23 Productos, 41
+  Materiales o 34 Roles). Las herramientas que se cobran como porcentaje de
+  la mano de obra usan la unidad **%MO**.
+- **Partidas**: código, descripción, unidad, rendimiento (unidades por día),
+  jornada (horas), código OmniClass de la **Tabla 22 (Resultados de trabajo)**
+  y su APU: insumos y subpartidas (otras partidas del catálogo) con cuadrilla o
+  cantidad. La app trae las divisiones de la Tabla 22; cualquier otra tabla se
+  importa desde Excel (hoja OmniClass).
+- **Base maestra.** Los catálogos pertenecen a un proyecto. Cada proyecto usa
+  los suyos o, desde ⚙ Configuración, los de un **proyecto base** (por ejemplo
+  "BASE DE DATOS PRESUPUESTOS"): una sola base para toda la empresa, que
+  mantienen los administradores y editores de ese proyecto. Las obras la usan
+  en solo lectura. Para conectar una base hay que ser administrador de la obra
+  y administrador o editor de la base, para que nadie comparta sus precios sin
+  permiso.
+- No se elimina un insumo que usa alguna partida del catálogo, ni una partida
+  que es subpartida de otra (409 `in-use`). Los códigos no se repiten dentro
+  de un catálogo.
+
+### El presupuesto
+
+- **Subpresupuestos** (SP: ESTRUCTURAS, ARQUITECTURA...) con **títulos** y
+  **partidas**, con numeración automática (1, 1.1, 1.1.1...). La barra
+  reproduce la herramienta de referencia: Guardar, + Título, + Partida,
+  editar, eliminar, copiar, cortar y pegar, ← → (sacar del título o meterlo
+  en el de arriba), ↑ ↓, y el selector de SP con nuevo, renombrar y eliminar.
+  Los títulos se contraen con ▼ y la descripción, la unidad y el metrado se
+  editan con doble clic.
+- Una partida nueva se escribe o se **copia del catálogo** (con sus insumos y
+  subpartidas). Es una copia: su APU se ajusta en el presupuesto sin cambiar
+  el catálogo.
+- **Precios del presupuesto.** Al usarse por primera vez, cada insumo copia el
+  precio del catálogo. Cambiar su PU (en un APU o en la Lista de insumos) lo
+  cambia en todas las partidas de ese presupuesto. "Actualizar precios del
+  catálogo" vuelve a traer los del catálogo.
+- **Cálculo** (igual que en la referencia, verificado con sus cifras):
+  - cantidad de una línea con cuadrilla = cuadrilla × jornada ÷ rendimiento
+    (si escribes la cantidad, se recalcula la cuadrilla);
+  - parcial = cantidad × PU, redondeado a 2 decimales (cantidades a 4);
+  - una línea %MO = su porcentaje de la mano de obra de la partida;
+  - una subpartida aporta su CU por la cantidad;
+  - CU = MO + MT + EQ + SC + SP;
+  - el parcial de una partida es metrado × CU, y un título suma sus partidas
+    por columna;
+  - CD (costo directo) es la suma del subpresupuesto.
+- Al seleccionar una partida se abre abajo su **análisis de precios
+  unitarios**, editable: rendimiento, jornada, cuadrillas, cantidades, PU,
+  agregar insumo (buscador por nombre o código), agregar subpartida (del
+  presupuesto o del catálogo) o crear una nueva. Se impide una subpartida que
+  se contenga a sí misma.
+- **Guardar** guarda el presupuesto entero (también con Ctrl+S). Si otra
+  persona guardó entre tanto, no se pisa su versión: aparece un aviso para
+  recargar (409 `version-conflict`). Al cerrar la página con cambios sin
+  guardar, el navegador pide confirmación.
+- **Lista de insumos**: todos los insumos sumados (metrado × cantidad,
+  entrando en las subpartidas), por subpresupuesto o de todos, con PU e IU
+  editables, total, PDF y Excel.
+- **Gastos generales**: fijos y variables, por títulos con sus items, en
+  formato General (cantidad × precio) o Personal (cantidad × % participación ×
+  tiempo × precio). Muestra **PGG** = GG ÷ CD de todo el presupuesto.
+- **Pie del subpresupuesto**: filas `variable = fórmula` con CD, **FGG**
+  (factor de gastos generales = GG ÷ CD total) y las variables de las filas de
+  arriba. Admite + − × ÷, paréntesis y `%`, y se evalúa con un intérprete
+  propio, nunca con `eval`. Se puede aplicar a todos los subpresupuestos. El
+  pie inicial es PGG = `CD * FGG`, UTI = `CD * 0.10`, ST, IGV = `ST * 0.18` y
+  TOTAL, editable. También aparece al final de la grilla.
+- **Exportar**: Excel con todos los subpresupuestos (con el desglose
+  MO/MT/EQ/SC/SP y su pie), la lista de insumos y los gastos generales; PDF
+  del subpresupuesto abierto con su pie.
+
+### Metrado desde el modelo (visor)
+
+En el panel del visor se elige una partida y se usan **⊕ Agregar selección** /
+**⊖ Quitar selección** sobre los elementos seleccionados. Cada elemento se
+guarda por su IFCGUID, con la misma regla que Propiedades: primero una
+propiedad GUID y, si no hay, el id externo convertido.
+
+"Metrado desde el modelo" decide cómo mide la partida:
+
+- **Solo asociar**: la partida usa su metrado manual.
+- **Conteo de elementos**.
+- **Una propiedad numérica** de los elementos.
+
+La app sugiere la propiedad según la unidad de la partida: M3 → volumen (el
+neto primero), M2 → área, M/ML → longitud, KG → peso, y UND/GLB/PZA → conteo.
+Las longitudes se pasan a metros. Si cambias la medición, se vuelven a medir
+los elementos que estén en los modelos abiertos.
+
+Cuando una partida mide sus elementos, su metrado en el presupuesto es la suma
+y aparece con la marca **3D**. Cada elemento puede pertenecer a varias
+partidas, por ejemplo concreto en M3 y encofrado en M2. La lista indica qué
+partidas tienen elementos de la selección actual, y "Seleccionar sus elementos
+en el modelo" los busca así:
+
+1. por el GUID como id externo;
+2. si no aparece, revisando los ids externos del modelo;
+3. por último, leyendo una vez sus propiedades GUID.
+
+El panel muestra el presupuesto **guardado**. Al guardar, se borran los
+elementos de las partidas que ya no existen.
+
+### Importar desde Excel
+
+"Importar Excel" descarga una plantilla con instrucciones y estas hojas:
+
+- **Insumos**
+- **Partidas**
+- **APU**: una fila por insumo o subpartida de cada partida, con su cuadrilla
+  o cantidad.
+- **OmniClass**
+
+También descarga el **catálogo actual** en el mismo formato, para editarlo en
+Excel e importarlo de vuelta.
+
+Al subir el archivo:
+
+- Se reconocen los registros por código; si no tienen, por descripción +
+  unidad. Los existentes se actualizan y los demás se crean.
+- Las filas del APU reemplazan el análisis de su partida.
+- Antes de importar, la app muestra cuántos registros son nuevos, cuántos se
+  actualizan y cuántos quedan sin cambios, y qué filas tienen problemas (tipo
+  inválido, insumo no encontrado, código repetido, subpartidas circulares...).
+- Se envía por lotes de 1.000.
+
+### Permisos
+
+| Acción | Quién |
+|---|---|
+| Ver el presupuesto, los catálogos y los elementos asociados | Cualquier miembro del proyecto |
+| Editar el presupuesto y asociar elementos en el visor | Administradores del proyecto y los **editores** (personas o grupos) que elijan en ⚙ Configuración |
+| Editar los catálogos | Administradores y editores del proyecto **dueño** de los catálogos (la base) |
+| Elegir editores y base | Administradores del proyecto |
+
+### Esquema de la base de datos
+
+[`supabase/presupuesto.sql`](supabase/presupuesto.sql) (se puede volver a
+ejecutar sin perder datos):
+
+| Tabla / función | Contenido |
+|---|---|
+| `presupuesto_config` | Por proyecto: base de catálogos y editores |
+| `presupuesto_insumos`, `presupuesto_partidas` | Catálogos, por `base_id` (el proyecto dueño); código único por catálogo; el APU es `componentes` (jsonb) |
+| `presupuesto_omniclass` | Códigos OmniClass importados |
+| `presupuesto_documentos` | El presupuesto de cada proyecto (jsonb) con su `version` |
+| `presupuesto_elementos` | IFCGUID + modelo + cantidad por partida (`item_id`) |
+| `presupuesto_mediciones` | Qué mide cada partida (propiedad, conteo o nada) |
+| `presupuesto_resumen_elementos` | Vista: elementos y suma de cantidades por partida |
+| `presupuesto_guardar_insumos` / `_partidas` | Guardan lotes; una fila con el id de otro catálogo no se toca |
+| `presupuesto_guardar` | Guarda el presupuesto si la versión coincide y limpia los elementos de partidas borradas |
+
+RLS está activado y sin políticas: solo el servidor, con la clave de
+servicio, lee y escribe.
+
+### API
+
+Todas las rutas usan `?projectId=` y el token del usuario
+(`Authorization: Bearer`).
+
+| Método y ruta | Uso |
+|---|---|
+| `GET /api/presupuesto/estado` | Configuración y qué puede hacer el usuario (`canEdit`, `canEditBase`) |
+| `PUT /api/presupuesto/config` | `{ baseProjectId?, editores? }` (administradores) |
+| `GET /api/presupuesto/contactos` | Personas y grupos para elegir editores (administradores) |
+| `GET /api/presupuesto/catalogo` | Insumos, partidas y códigos OmniClass de la base |
+| `POST /api/presupuesto/catalogo/insumos` · `.../partidas` · `.../omniclass` | Crear o actualizar en lote (hasta 1.000 por envío) |
+| `DELETE /api/presupuesto/catalogo/insumos/{id}` · `.../partidas/{id}` | Eliminar (409 `in-use` si se usa) |
+| `GET` / `PUT /api/presupuesto/documento` | Leer / guardar `{ doc, version }` (409 `version-conflict`) |
+| `GET /api/presupuesto/elementos/resumen` | Mediciones y conteos por partida |
+| `POST /api/presupuesto/elementos/consulta` | `{ itemIds }` o `{ ifcGuids }` |
+| `PUT /api/presupuesto/elementos` | `{ itemId, upsert: [{ ifcGuid, modelId, cantidad }], remove: [ifcGuid] }` |
+| `PUT /api/presupuesto/mediciones` | `{ itemId, campo, campoLabel, unidad }` |
+
+### Configuración
+
+Usa las mismas `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`. Basta con
+ejecutar una vez [`supabase/presupuesto.sql`](supabase/presupuesto.sql) en el
+**SQL Editor** de Supabase: mientras no se haga, la API responde con un
+mensaje que indica ese paso.
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -1251,6 +1457,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Validación | `https://trimble-docs.vercel.app/manifest-validacion.json` |
    | Gráficos de Modelos | `https://trimble-docs.vercel.app/manifest-graficos.json` |
    | Propiedades | `https://trimble-docs.vercel.app/manifest-propiedades.json` |
+   | Presupuesto | `https://trimble-docs.vercel.app/manifest-presupuesto.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
@@ -1264,6 +1471,9 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    del visor 3D. Si no aparece en el visor, instala además
    `https://trimble-docs.vercel.app/manifest-propiedades-visor.json` desde
    la configuración de extensiones del visor.
+   **Presupuesto** funciona igual: el presupuesto en el menú lateral y la
+   asociación de partidas en el visor (respaldo:
+   `https://trimble-docs.vercel.app/manifest-presupuesto-visor.json`).
 6. Al abrir Resumen Archivos o Validación por primera vez, Trimble Connect
    pedira tu consentimiento para que la extension pueda leer el access token
    del usuario actual (esto es lo que permite leer los documentos del

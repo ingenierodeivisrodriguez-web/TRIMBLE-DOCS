@@ -48,34 +48,7 @@ export interface TokenSource {
 
 /** The HTTP client for /api/propiedades, authenticated with the user's Trimble token. */
 export function httpApi(projectId: string, auth: TokenSource): PropiedadesApi {
-  async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-    const sep = path.includes("?") ? "&" : "?";
-    const send = (token: string) =>
-      fetch(`/api/propiedades${path}${sep}projectId=${encodeURIComponent(projectId)}`, {
-        ...init,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          ...(init.body ? { "Content-Type": "application/json" } : {}),
-        },
-      });
-
-    let token = auth.get();
-    if (auth.refresh && (!token || expiresSoon(token))) token = (await auth.refresh()) || token;
-    let res = await send(token);
-    // Trimble Connect rejected the token (expired or stale): ask for it again, once.
-    if (res.status === 401 && auth.refresh) {
-      const fresh = await auth.refresh();
-      if (fresh) res = await send(fresh);
-    }
-
-    const body = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      let text: string = body.error ?? `Error ${res.status}`;
-      if (res.status === 401 && auth.describe) text += ` (Diagnóstico: ${auth.describe()}.)`;
-      throw new ApiError(text, res.status, body.code);
-    }
-    return body as T;
-  }
+  const request = createRequester("/api/propiedades", projectId, auth);
 
   return {
     getCatalog: () => request<CatalogResponse>("/definiciones"),
@@ -112,5 +85,41 @@ export function httpApi(projectId: string, auth: TokenSource): PropiedadesApi {
         });
       }
     },
+  };
+}
+
+/**
+ * A JSON request function for one of this app's APIs (`basePath`, e.g.
+ * "/api/propiedades"), authenticated with the user's Trimble token: refreshed
+ * when it is about to expire, and asked for again once if the server rejects it.
+ */
+export function createRequester(basePath: string, projectId: string, auth: TokenSource) {
+  return async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
+    const sep = path.includes("?") ? "&" : "?";
+    const send = (token: string) =>
+      fetch(`${basePath}${path}${sep}projectId=${encodeURIComponent(projectId)}`, {
+        ...init,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(init.body ? { "Content-Type": "application/json" } : {}),
+        },
+      });
+
+    let token = auth.get();
+    if (auth.refresh && (!token || expiresSoon(token))) token = (await auth.refresh()) || token;
+    let res = await send(token);
+    // Trimble Connect rejected the token (expired or stale): ask for it again, once.
+    if (res.status === 401 && auth.refresh) {
+      const fresh = await auth.refresh();
+      if (fresh) res = await send(fresh);
+    }
+
+    const body = await res.json().catch(() => ({}));
+    if (!res.ok) {
+      let text: string = body.error ?? `Error ${res.status}`;
+      if (res.status === 401 && auth.describe) text += ` (Diagnóstico: ${auth.describe()}.)`;
+      throw new ApiError(text, res.status, body.code);
+    }
+    return body as T;
   };
 }

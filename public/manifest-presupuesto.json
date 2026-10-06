@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/presupuesto",
+  "title": "Presupuesto",
+  "description": "Presupuesto del proyecto con catálogos de insumos y partidas (APU) clasificados con OmniClass: se arma desde el menú del proyecto y sus partidas se asocian a los elementos de los modelos (por IFCGUID) desde el visor 3D.",
+  "icon": "https://trimble-docs.vercel.app/icon-presupuesto.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project", "3dviewer"],
+  "enabled": true
+}

@@ -1,4 +1,5 @@
 import type { ModelSpec, ViewerAPI } from "trimble-connect-workspace-api";
+import type { RawObject } from "../graficos/modelData";
 import { GuidResolution, PropertySetLike, resolveIfcGuid } from "./ifcGuid";
 
 /** The slice of the 3D Viewer API the panel uses (also lets it run against a fake viewer). */
@@ -18,6 +19,8 @@ export interface SelectedElement {
   /** Product name, or IFC class, for messages and diagnostics. */
   name: string;
   resolution: GuidResolution;
+  /** The object as the viewer described it (only when asked for, see readSelection). */
+  properties?: RawObject;
 }
 
 export interface SelectionRead {
@@ -50,11 +53,12 @@ async function externalIds(viewer: PropiedadesViewer, modelId: string, ids: numb
   }
 }
 
-/** Reads the selected objects' properties and resolves each one's IFCGUID. */
+/** Reads the selected objects' properties and resolves each one's IFCGUID (keeping the properties if asked). */
 export async function readSelection(
   viewer: PropiedadesViewer,
   selection: { modelId: string; objectRuntimeIds?: number[] }[],
-  onProgress?: (done: number, total: number) => void
+  onProgress?: (done: number, total: number) => void,
+  options: { keepProperties?: boolean } = {}
 ): Promise<SelectionRead> {
   const models: ModelSpec[] = (await viewer.getModels("loaded").catch(() => [])) ?? [];
   const groups = selection.filter((g) => g && g.modelId && (g.objectRuntimeIds ?? []).length > 0);
@@ -84,6 +88,7 @@ export async function readSelection(
           runtimeId,
           name: p?.product?.name || p?.class || `Objeto ${runtimeId}`,
           resolution: resolveIfcGuid(extIds[index], (p?.properties ?? []) as PropertySetLike[]),
+          ...(options.keepProperties && p ? { properties: p as RawObject } : {}),
         });
       });
       done += chunk.length;
