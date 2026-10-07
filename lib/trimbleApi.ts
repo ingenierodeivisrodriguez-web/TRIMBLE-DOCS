@@ -154,6 +154,87 @@ export async function getProjectDetails(
   };
 }
 
+export interface PathEntry {
+  id: string;
+  name: string;
+}
+
+export interface FolderDetails {
+  id: string;
+  name: string;
+  parentId: string | null;
+  projectId: string | null;
+  /** The caller's access to it. */
+  permission: "READ" | "FULL_ACCESS" | null;
+  /** Its ancestors, from the project's root (see `fields=path`). */
+  path: PathEntry[];
+}
+
+function pathOf(data: { path?: unknown }): PathEntry[] {
+  return Array.isArray(data.path)
+    ? (data.path as { id?: unknown; name?: unknown }[])
+        .filter((p) => typeof p?.id === "string")
+        .map((p) => ({ id: p.id as string, name: typeof p.name === "string" ? p.name : "" }))
+    : [];
+}
+
+/** GET /folders/{folderId}?fields=path - 403/404 when the caller can't see it. */
+export async function getFolderDetails(baseUrl: string, accessToken: string, folderId: string): Promise<FolderDetails> {
+  const data = await trimbleFetch(`${baseUrl}/folders/${encodeURIComponent(folderId)}?fields=path`, accessToken);
+  return {
+    id: data.id,
+    name: data.name ?? "",
+    parentId: data.parentId ?? null,
+    projectId: data.projectId ?? null,
+    permission: data.permission === "READ" || data.permission === "FULL_ACCESS" ? data.permission : null,
+    path: pathOf(data),
+  };
+}
+
+export interface FileDetails {
+  id: string;
+  name: string;
+  parentId: string | null;
+  versionId: string;
+  size: number;
+  path: PathEntry[];
+}
+
+/** GET /files/{fileId}?fields=path - 403/404 when the caller can't see it. */
+export async function getFileDetails(baseUrl: string, accessToken: string, fileId: string): Promise<FileDetails> {
+  const data = await trimbleFetch(`${baseUrl}/files/${encodeURIComponent(fileId)}?fields=path`, accessToken);
+  return {
+    id: data.id ?? fileId,
+    name: data.name ?? "",
+    parentId: data.parentId ?? null,
+    versionId: data.versionId ?? data.id ?? fileId,
+    size: typeof data.size === "number" ? data.size : 0,
+    path: pathOf(data),
+  };
+}
+
+/**
+ * GET /files/fs/{fileId}/downloadurl - a short-lived pre-signed URL to the
+ * file's content (its latest version unless one is given). `format: "PDF"`
+ * asks Trimble Connect for a PDF rendition of documents it can convert.
+ */
+export async function getDownloadUrl(
+  baseUrl: string,
+  accessToken: string,
+  fileId: string,
+  options: { versionId?: string; format?: "PDF" } = {}
+): Promise<string> {
+  const query = new URLSearchParams();
+  if (options.versionId) query.set("versionId", options.versionId);
+  if (options.format) query.set("format", options.format);
+  const qs = query.toString();
+  const data = await trimbleFetch(`${baseUrl}/files/fs/${encodeURIComponent(fileId)}/downloadurl${qs ? `?${qs}` : ""}`, accessToken);
+  if (typeof data?.url !== "string" || !data.url) {
+    throw new TrimbleApiError("Trimble Connect no entregó el enlace del archivo.", 502);
+  }
+  return data.url;
+}
+
 export interface RawFolderItem {
   id: string;
   name: string;

@@ -11,6 +11,7 @@ ambos lugares** para Trimble Connect:
 | **Gráficos de Modelos** — gráficos con los datos de los modelos 3D cargados | Panel de extensiones del visor 3D | `/graficos` | `/manifest-graficos.json` |
 | **Propiedades** — atributos propios asignados por IFCGUID a los elementos de los modelos | Menú lateral del proyecto (catálogo) **y** panel del visor 3D (asignación) | `/propiedades` | `/manifest-propiedades.json` |
 | **Presupuesto** — presupuesto con catálogos de insumos y partidas (APU) bajo OmniClass, asociado a los modelos por IFCGUID | Menú lateral del proyecto (presupuesto) **y** panel del visor 3D (asociar elementos) | `/presupuesto` | `/manifest-presupuesto.json` |
+| **Manuales** — los manuales de la empresa, leídos desde la carpeta del proyecto de manuales con los permisos de cada usuario | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
 
 Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
@@ -27,6 +28,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Gráficos de Modelos (visor 3D)](#gráficos-de-modelos-visor-3d)
 - [Propiedades (proyecto + visor 3D)](#propiedades-proyecto--visor-3d)
 - [Presupuesto (proyecto + visor 3D)](#presupuesto-proyecto--visor-3d)
+- [Manuales (proyecto)](#manuales-proyecto)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -1251,6 +1253,57 @@ mensaje que indica ese paso.
 
 ---
 
+## Manuales (proyecto)
+
+Los manuales de la empresa viven en **una carpeta de un solo proyecto** de
+Trimble Connect (el "MANAGER PROJECT"). En cada proyecto donde se instala,
+**Manuales** (`/manuales`) muestra esa carpeta sin que nadie la tenga que
+configurar en la obra: se recorren sus subcarpetas, se busca por nombre y los
+documentos se leen dentro de la app.
+
+**Quién entra lo decide Trimble Connect.** La app lee la carpeta con la sesión
+de cada usuario, nunca con una cuenta de servicio. Para ver los manuales, el
+usuario debe ser **miembro del MANAGER PROJECT** y tener **permiso sobre la
+carpeta** (o sus subcarpetas). Esos permisos los da el administrador de ese
+proyecto en Trimble Connect. Si no los tiene, la app muestra **"No tiene
+acceso"**, y una subcarpeta sin permiso muestra el mismo aviso solo para ella.
+Los documentos se suben y se actualizan en el MANAGER PROJECT como siempre;
+las obras solo leen.
+
+| Archivo | Cómo se ve |
+|---|---|
+| PDF | Dentro de la app (visor PDF del navegador) |
+| Word, Excel, PowerPoint, DWG/DXF | La versión PDF que genera Trimble Connect, cuando la tiene |
+| Imágenes, video, audio | Dentro de la app |
+| TXT, CSV, MD | Como texto |
+| Otros (ZIP...) | "Abrir en Trimble Connect" o "Descargar" |
+
+Todos tienen **Abrir en Trimble Connect**, que abre el visor de Trimble en una
+pestaña nueva, y **Descargar**, que pide un enlace nuevo porque los enlaces de
+descarga vencen. Los PDF de más de 100 MB no se cargan dentro de la app.
+
+**Configuración (una vez).** En Vercel → *Settings → Environment Variables*,
+agrega `MANUALES_CARPETA` con el **enlace de la carpeta**: ábrela en Trimble
+Connect y copia la dirección del navegador, por ejemplo
+`https://web.connect.trimble.com/projects/{proyecto}/data/folder/{carpeta}`.
+Con el enlace del proyecto, sin carpeta, se muestra todo el proyecto. Después
+vuelve a desplegar. Mientras falte, la app dice "Manuales aún no está
+configurado". No es un secreto: solo dice dónde están los manuales.
+
+**API** (token del usuario en `Authorization: Bearer`):
+
+| Ruta | Uso |
+|---|---|
+| `GET /api/manuales/carpeta?folderId=` | La carpeta de manuales o una de sus subcarpetas: carpetas, archivos y ruta. No sale de la carpeta de manuales (404 `fuera`) |
+| `GET /api/manuales/buscar?q=` | Archivos y carpetas con esas palabras en el nombre, en todas las subcarpetas (hasta 400 carpetas o 200 resultados) |
+| `GET /api/manuales/archivo?fileId=&pdf=1` | Enlace nuevo al archivo (o a su versión PDF) y enlace para abrirlo en Trimble Connect |
+| `GET /api/manuales/archivo/contenido?fileId=&pdf=1` | El contenido del archivo, transmitido desde el almacenamiento de Trimble para mostrarlo dentro de la app |
+
+Errores con código: `sin-acceso` (403), `sin-configurar` (503) y
+`trimble-session` (401: recargar Trimble Connect).
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -1458,6 +1511,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Gráficos de Modelos | `https://trimble-docs.vercel.app/manifest-graficos.json` |
    | Propiedades | `https://trimble-docs.vercel.app/manifest-propiedades.json` |
    | Presupuesto | `https://trimble-docs.vercel.app/manifest-presupuesto.json` |
+   | Manuales | `https://trimble-docs.vercel.app/manifest-manuales.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
