@@ -1,8 +1,16 @@
 import { ApiError, createRequester, TokenSource } from "../propiedades/client";
 import { expiresSoon } from "../propiedades/token";
-import type { ArchivoResponse, BusquedaResponse, CarpetaResponse } from "./types";
+import type { ArchivoResponse, AutorizadoInfo, BusquedaResponse, CarpetaResponse, EstadoManuales } from "./types";
 
 export interface ManualesApi {
+  /** Who the user is and what they can do (and, for administrators, the technical account). */
+  estado(): Promise<EstadoManuales>;
+  /** Administrators: the Trimble sign-in URL to connect the technical account. */
+  conectar(): Promise<{ url: string }>;
+  desconectar(): Promise<void>;
+  autorizados(): Promise<AutorizadoInfo[]>;
+  autorizar(texto: string): Promise<{ agregados: number; invalidos: string[] }>;
+  quitarAutorizado(email: string): Promise<void>;
   carpeta(folderId?: string | null): Promise<CarpetaResponse>;
   buscar(q: string): Promise<BusquedaResponse>;
   /** A fresh link to the file (or its PDF rendition) and the link to open it in Trimble Connect. */
@@ -50,7 +58,19 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
     return new Blob(partes as BlobPart[], { type });
   }
 
+  const send = (method: string, body?: unknown): RequestInit => ({ method, ...(body !== undefined ? { body: JSON.stringify(body) } : {}) });
+
   return {
+    estado: () => request("/estado"),
+    conectar: () => request("/admin/conectar", send("POST", {})),
+    async desconectar() {
+      await request("/admin/cuenta", send("DELETE"));
+    },
+    autorizados: () => request<{ autorizados: AutorizadoInfo[] }>("/admin/autorizados").then((r) => r.autorizados),
+    autorizar: (texto) => request("/admin/autorizados", send("POST", { texto })),
+    async quitarAutorizado(email) {
+      await request(`/admin/autorizados${q({ email })}`, send("DELETE"));
+    },
     carpeta: (folderId) => request(`/carpeta${q({ folderId })}`),
     buscar: (text) => request(`/buscar${q({ q: text })}`),
     archivo: (fileId, pdf) => request(`/archivo${q({ fileId, pdf: pdf ? "1" : null })}`),

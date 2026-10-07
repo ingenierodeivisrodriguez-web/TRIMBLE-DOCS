@@ -11,7 +11,7 @@ ambos lugares** para Trimble Connect:
 | **Gráficos de Modelos** — gráficos con los datos de los modelos 3D cargados | Panel de extensiones del visor 3D | `/graficos` | `/manifest-graficos.json` |
 | **Propiedades** — atributos propios asignados por IFCGUID a los elementos de los modelos | Menú lateral del proyecto (catálogo) **y** panel del visor 3D (asignación) | `/propiedades` | `/manifest-propiedades.json` |
 | **Presupuesto** — presupuesto con catálogos de insumos y partidas (APU) bajo OmniClass, asociado a los modelos por IFCGUID | Menú lateral del proyecto (presupuesto) **y** panel del visor 3D (asociar elementos) | `/presupuesto` | `/manifest-presupuesto.json` |
-| **Manuales** — los manuales de la empresa, leídos desde la carpeta del proyecto de manuales con los permisos de cada usuario | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
+| **Manuales** — los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT para las personas que autorice su administrador | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
 
 Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
@@ -1256,52 +1256,100 @@ mensaje que indica ese paso.
 ## Manuales (proyecto)
 
 Los manuales de la empresa viven en **una carpeta de un solo proyecto** de
-Trimble Connect (el "MANAGER PROJECT"). En cada proyecto donde se instala,
-**Manuales** (`/manuales`) muestra esa carpeta sin que nadie la tenga que
-configurar en la obra: se recorren sus subcarpetas, se busca por nombre y los
-documentos se leen dentro de la app.
+Trimble Connect, el "MANAGER PROJECT", que funciona solo como repositorio. En
+cada proyecto donde se instala, **Manuales** (`/manuales`) muestra esa
+carpeta: se recorren sus subcarpetas, se busca por nombre y los documentos se
+leen dentro de la app.
 
-**Quién entra lo decide Trimble Connect.** La app lee la carpeta con la sesión
-de cada usuario, nunca con una cuenta de servicio. Para ver los manuales, el
-usuario debe ser **miembro del MANAGER PROJECT** y tener **permiso sobre la
-carpeta** (o sus subcarpetas). Esos permisos los da el administrador de ese
-proyecto en Trimble Connect. Si no los tiene, la app muestra **"No tiene
-acceso"**, y una subcarpeta sin permiso muestra el mismo aviso solo para ella.
-Los documentos se suben y se actualizan en el MANAGER PROJECT como siempre;
-las obras solo leen.
+**Los lectores no entran a MANAGER PROJECT.** La app lee la carpeta con una
+**cuenta técnica**: un usuario de Trimble Connect, idealmente dedicado (por
+ejemplo `manuales@empresa.com`), miembro solo de MANAGER PROJECT y con permiso
+de lectura sobre la carpeta. Quién puede leer lo decide la app, con una
+**lista de personas autorizadas por correo**. Quien abre Manuales sin estar
+autorizado ve **"No tiene acceso"**. Los administradores de MANAGER PROJECT
+siempre pueden leer, y son los únicos que ven la pestaña **"Administrar
+acceso"**, donde:
+
+- conectan la cuenta técnica: un inicio de sesión de Trimble en una pestaña
+  nueva; la sesión se guarda **cifrada** y se renueva sola;
+- autorizan o quitan personas, pegando varios correos a la vez, incluso con
+  la forma `Nombre <correo>`.
+
+Los documentos se suben y actualizan en MANAGER PROJECT como siempre, y Manuales
+muestra siempre la versión actual.
+
+**Cómo funciona la cuenta técnica.** Trimble Connect no acepta tokens de
+aplicación (*client credentials*): una persona inicia sesión una vez con la
+cuenta y el servidor guarda su *refresh token*.
+
+- El inicio de sesión usa el flujo *authorization code* con PKCE de Trimble
+  Identity y la app OAuth "apibasedatos".
+- Los *refresh tokens* son de un solo uso: cada renovación guarda el nuevo, y
+  solo un servidor renueva a la vez (`manuales_tomar_turno`).
+- Se cifran con AES-256-GCM, con una clave derivada de
+  `TRIMBLE_CLIENT_SECRET`: sin ese secreto, una fila robada no sirve.
+- Trimble pide renovar al menos cada 9 días. La tarea diaria de Vercel
+  ([`vercel.json`](vercel.json) → `/api/manuales/mantener`) la renueva si
+  la última renovación tiene más de 20 horas.
+
+Si la sesión se pierde (por ejemplo, porque cambió el secreto), Manuales
+pide al administrador volver a conectar la cuenta.
 
 | Archivo | Cómo se ve |
 |---|---|
-| PDF | Dentro de la app (visor PDF del navegador) |
+| PDF | Dentro de la app, dibujado con **pdf.js**. El visor PDF de Chrome no funciona en el marco restringido donde Trimble Connect carga las extensiones ("Chrome ha bloqueado esta página") |
 | Word, Excel, PowerPoint, DWG/DXF | La versión PDF que genera Trimble Connect, cuando la tiene |
 | Imágenes, video, audio | Dentro de la app |
 | TXT, CSV, MD | Como texto |
-| Otros (ZIP...) | "Abrir en Trimble Connect" o "Descargar" |
+| Otros (ZIP...) | "Descargar" |
 
-Todos tienen **Abrir en Trimble Connect**, que abre el visor de Trimble en una
-pestaña nueva, y **Descargar**, que pide un enlace nuevo porque los enlaces de
-descarga vencen. Los PDF de más de 100 MB no se cargan dentro de la app.
+"Abrir en Trimble Connect" aparece solo para los administradores, que son
+miembros de MANAGER PROJECT. Los PDF de más de 100 MB no se cargan dentro de
+la app.
 
-**Configuración.** La carpeta está fijada en el código
-([`lib/manuales/config.ts`](lib/manuales/config.ts), `CARPETA_PREDETERMINADA`):
+**Configuración (una vez):**
+
+1. Supabase → SQL Editor: ejecuta [`supabase/manuales.sql`](supabase/manuales.sql).
+2. Vercel → Environment Variables:
+   - `TRIMBLE_CLIENT_SECRET`, con el Client Secret de "apibasedatos";
+   - opcional: `CRON_SECRET`, para que solo Vercel llame a la tarea diaria.
+
+   Después, vuelve a desplegar.
+3. Trimble Developer Console → app "apibasedatos" → *Callback URLs*: agrega
+   `https://trimble-docs.vercel.app/api/manuales/oauth/callback` (la pestaña
+   "Administrar acceso" muestra la URL exacta).
+4. En MANAGER PROJECT, invita a la cuenta técnica con permiso de lectura
+   sobre la carpeta. Luego, en Manuales → "Administrar acceso", conéctala e
+   inicia sesión con ella en la pestaña que se abre.
+
+La carpeta está fijada en
+[`lib/manuales/config.ts`](lib/manuales/config.ts) (`CARPETA_PREDETERMINADA`):
 `https://web.connect.trimble.com/projects/KU8qY2Zf234/data/folder/T3InEwS6b9g`.
-Para usar otra sin cambiar el código, define en Vercel la variable `MANUALES_CARPETA`
-con el enlace de la nueva carpeta (se copia de la barra de direcciones de Trimble
-Connect) y vuelve a desplegar. Con el enlace de un proyecto, sin carpeta, se
-muestra el proyecto entero. No es un secreto: solo dice dónde están los
-manuales.
+La variable `MANUALES_CARPETA` en Vercel la reemplaza por el enlace de otra
+carpeta o proyecto.
 
-**API** (token del usuario en `Authorization: Bearer`):
+**API.** Todas las rutas llevan el token del usuario en
+`Authorization: Bearer` y `?projectId=` del proyecto donde se abrió.
 
 | Ruta | Uso |
 |---|---|
-| `GET /api/manuales/carpeta?folderId=` | La carpeta de manuales o una de sus subcarpetas: carpetas, archivos y ruta. No sale de la carpeta de manuales (404 `fuera`) |
-| `GET /api/manuales/buscar?q=` | Archivos y carpetas con esas palabras en el nombre, en todas las subcarpetas (hasta 400 carpetas o 200 resultados) |
-| `GET /api/manuales/archivo?fileId=&pdf=1` | Enlace nuevo al archivo (o a su versión PDF) y enlace para abrirlo en Trimble Connect |
-| `GET /api/manuales/archivo/contenido?fileId=&pdf=1` | El contenido del archivo, transmitido desde el almacenamiento de Trimble para mostrarlo dentro de la app |
+| `GET /api/manuales/estado` | Quién es el usuario, si está autorizado o es administrador, y (para administradores) la cuenta técnica |
+| `GET /api/manuales/carpeta?folderId=` | La carpeta de manuales o una subcarpeta (403 `no-autorizado`; 404 `fuera` si no es de los manuales) |
+| `GET /api/manuales/buscar?q=` | Búsqueda por nombre en todas las subcarpetas (hasta 400 carpetas o 200 resultados) |
+| `GET /api/manuales/archivo?fileId=&pdf=1` | Enlace nuevo al archivo (o a su versión PDF) |
+| `GET /api/manuales/archivo/contenido?fileId=&pdf=1` | El contenido, transmitido desde el almacenamiento de Trimble |
+| `POST /api/manuales/admin/conectar` | URL de inicio de sesión para conectar la cuenta técnica (administradores) |
+| `DELETE /api/manuales/admin/cuenta` | Desconectar la cuenta técnica (revoca su sesión) |
+| `GET` / `POST` / `DELETE /api/manuales/admin/autorizados` | Listar, autorizar (`{ texto }` con correos) o quitar (`?email=`) personas |
+| `GET /api/manuales/oauth/callback` | Vuelta del inicio de sesión de Trimble Identity (sin token: lo valida el `state` de un solo uso) |
+| `GET /api/manuales/mantener` | Tarea diaria que mantiene viva la sesión |
 
-Errores con código: `sin-acceso` (403), `sin-configurar` (503) y
-`trimble-session` (401: recargar Trimble Connect).
+Códigos de error:
+
+- `no-autorizado` (403);
+- `sin-cuenta`, `cuenta-vencida`, `cuenta-sin-acceso`, `sin-oauth` (503:
+  el administrador debe revisar la cuenta técnica);
+- `trimble-session` (401: recargar Trimble Connect).
 
 ---
 

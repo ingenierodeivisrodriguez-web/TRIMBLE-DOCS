@@ -1,7 +1,7 @@
 {
   "url": "https://trimble-docs.vercel.app/manuales",
   "title": "Manuales",
-  "description": "Los manuales de la empresa, leídos desde la carpeta del proyecto de manuales (MANAGER PROJECT): cada usuario ve solo lo que sus permisos de Trimble Connect le permiten.",
+  "description": "Los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT por las personas que autorice su administrador (sin ser miembros de ese proyecto).",
   "icon": "https://trimble-docs.vercel.app/icon-manuales.svg",
   "infoUrl": "https://trimble-docs.vercel.app",
   "extensionType": ["project"],

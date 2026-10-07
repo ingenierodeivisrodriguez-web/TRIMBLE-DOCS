@@ -56,3 +56,34 @@ export interface ArchivoResponse {
   /** Opens the file in Trimble Connect's own viewer. */
   enTrimble: string;
 }
+
+export interface CuentaInfo {
+  nombre: string;
+  email: string;
+  conectadaPor: string | null;
+  conectadaEn: string;
+  renovadaEn: string;
+}
+
+export interface EstadoManuales {
+  usuario: { email: string; nombre: string };
+  /** Administrator of the manager project: manages the account and who reads. */
+  esAdmin: boolean;
+  autorizado: boolean;
+  /** The technical account is connected (the manuals can be read). */
+  disponible: boolean;
+  /** Only for administrators. */
+  admin?: {
+    oauthConfigurado: boolean;
+    /** The callback URL to register in Trimble Developer Console. */
+    redirectUri: string;
+    cuenta: CuentaInfo | null;
+  };
+}
+
+export interface AutorizadoInfo {
+  email: string;
+  nombre: string;
+  agregadoPor: string | null;
+  agregadoEn: string;
+}

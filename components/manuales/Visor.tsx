@@ -1,18 +1,19 @@
 "use client";
 
-import { CSSProperties, useEffect, useRef, useState } from "react";
+import { CSSProperties, useEffect, useState } from "react";
 import { formatBytes } from "../../lib/format";
 import { ApiError } from "../../lib/propiedades/client";
 import type { ManualesApi } from "../../lib/manuales/client";
 import { vistaDe } from "../../lib/manuales/tipos";
 import type { ArchivoResponse, ItemManual } from "../../lib/manuales/types";
+import VisorPdf from "./VisorPdf";
 
 const MAX_VISTA_BYTES = 100 * 1024 * 1024;
 const MAX_TEXTO_BYTES = 2 * 1024 * 1024;
 
 type Estado =
   | { fase: "cargando"; loaded: number; total: number | null }
-  | { fase: "pdf"; url: string }
+  | { fase: "pdf"; blob: Blob }
   | { fase: "imagen" | "video" | "audio"; url: string }
   | { fase: "texto"; texto: string }
   | { fase: "sin-vista"; motivo: string };
@@ -21,12 +22,15 @@ function message(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-/** Shows a manual inline when the browser can (PDF, images, video, text, or a PDF rendition), with links to open or download it. */
-export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item: ItemManual; onCerrar?: () => void }) {
+/**
+ * Shows a manual inline when the browser can (PDF, images, video, text, or a
+ * PDF rendition), with a download link; administrators can also open it in
+ * Trimble Connect (readers aren't members of the manuals project).
+ */
+export default function Visor({ api, item, onCerrar, enTrimble }: { api: ManualesApi; item: ItemManual; onCerrar?: () => void; enTrimble: boolean }) {
   const [estado, setEstado] = useState<Estado>({ fase: "cargando", loaded: 0, total: null });
   const [info, setInfo] = useState<ArchivoResponse | null>(null);
   const [error, setError] = useState("");
-  const blobUrl = useRef<string | null>(null);
 
   useEffect(() => {
     const control = new AbortController();
@@ -34,12 +38,6 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
     setEstado({ fase: "cargando", loaded: 0, total: item.tamano || null });
     setInfo(null);
     setError("");
-
-    const mostrarBlob = (blob: Blob) => {
-      const url = URL.createObjectURL(blob);
-      blobUrl.current = url;
-      return url;
-    };
 
     (async () => {
       const vista = vistaDe(item.ext);
@@ -56,7 +54,7 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
           return;
         }
         if (item.tamano > (vista === "texto" ? MAX_TEXTO_BYTES : MAX_VISTA_BYTES)) {
-          setEstado({ fase: "sin-vista", motivo: `El archivo pesa ${formatBytes(item.tamano)}: ábrelo en Trimble Connect o descárgalo.` });
+          setEstado({ fase: "sin-vista", motivo: `El archivo pesa ${formatBytes(item.tamano)}: descárgalo para verlo.` });
           return;
         }
         const progreso = (loaded: number, total: number | null) => vivo && setEstado({ fase: "cargando", loaded, total });
@@ -67,7 +65,7 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
         }
         try {
           const blob = await api.contenido(item.id, vista === "convertir", progreso, control.signal);
-          if (vivo) setEstado({ fase: "pdf", url: mostrarBlob(new Blob([blob], { type: "application/pdf" })) });
+          if (vivo) setEstado({ fase: "pdf", blob });
         } catch (err) {
           if (!vivo || control.signal.aborted) return;
           if (vista === "convertir" || (err instanceof ApiError && err.code === "sin-contenido")) {
@@ -87,8 +85,6 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
     return () => {
       vivo = false;
       control.abort();
-      if (blobUrl.current) URL.revokeObjectURL(blobUrl.current);
-      blobUrl.current = null;
     };
   }, [api, item]);
 
@@ -117,9 +113,11 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
           {item.nombre}
         </strong>
         <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)" }}>v{item.version}</span>
-        <a href={info?.enTrimble} target="_blank" rel="noreferrer" style={{ ...botonSecundario, pointerEvents: info ? "auto" : "none", opacity: info ? 1 : 0.5, textDecoration: "none" }}>
-          Abrir en Trimble Connect
-        </a>
+        {enTrimble && (
+          <a href={info?.enTrimble} target="_blank" rel="noreferrer" style={{ ...botonSecundario, pointerEvents: info ? "auto" : "none", opacity: info ? 1 : 0.5, textDecoration: "none" }}>
+            Abrir en Trimble Connect
+          </a>
+        )}
         <button type="button" onClick={descargar} style={botonPrimario}>
           Descargar
         </button>
@@ -142,7 +140,7 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
             )}
           </div>
         )}
-        {estado.fase === "pdf" && <iframe src={estado.url} title={item.nombre} style={{ border: "none", width: "100%", height: "100%" }} />}
+        {estado.fase === "pdf" && <VisorPdf datos={estado.blob} nombre={item.nombre} />}
         {estado.fase === "imagen" && (
           // eslint-disable-next-line @next/next/no-img-element
           <img src={estado.url} alt={item.nombre} style={{ maxWidth: "100%", maxHeight: "100%", objectFit: "contain", alignSelf: "center" }} onError={() => setEstado({ fase: "sin-vista", motivo: "No se pudo mostrar la imagen." })} />
@@ -155,7 +153,7 @@ export default function Visor({ api, item, onCerrar }: { api: ManualesApi; item:
         {estado.fase === "sin-vista" && (
           <div style={{ alignSelf: "center", textAlign: "center", maxWidth: 420, padding: 20, color: "var(--tc-gray-700)", fontSize: 14, lineHeight: 1.5 }}>
             {estado.motivo && <p style={{ marginTop: 0 }}>{estado.motivo}</p>}
-            {!error && <p style={{ marginBottom: 0 }}>Usa &quot;Abrir en Trimble Connect&quot; para verlo en el visor de Trimble, o &quot;Descargar&quot;.</p>}
+            {!error && <p style={{ marginBottom: 0 }}>Usa &quot;Descargar&quot; para abrirlo en tu equipo.</p>}
           </div>
         )}
       </div>

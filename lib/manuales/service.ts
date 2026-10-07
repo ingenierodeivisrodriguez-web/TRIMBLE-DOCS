@@ -1,7 +1,6 @@
 // "Manuales": reads the documents of the company's manuals folder (in
-// another Trimble Connect project) with the caller's own Trimble session, so
-// Trimble Connect's folder permissions decide who gets in. Anything the
-// caller can't see answers "No tiene acceso".
+// another Trimble Connect project) through the technical account (see
+// acceso.ts), never outside that folder.
 import { buildFileViewerUrl } from "../format";
 import type { FileDetails, FolderDetails, RawFolderItem } from "../trimbleApi";
 import { TrimbleApiError } from "../trimbleApi";
@@ -18,10 +17,9 @@ export class ManualesError extends Error {
   }
 }
 
-export const SIN_ACCESO =
-  "No tiene acceso. Pide al administrador del proyecto de manuales que te invite al proyecto y te dé permiso sobre la carpeta de manuales.";
+export const SIN_ACCESO = "La cuenta de los manuales no tiene acceso a esta carpeta o archivo en el proyecto de manuales.";
 
-/** Trimble Connect, as the caller sees it (their token is inside). */
+/** Trimble Connect, as the technical account sees it (its token is inside). */
 export interface Tc {
   /** The API host of the project's region; fails (404) when the caller isn't a member. */
   baseUrl(projectId: string): Promise<string>;
@@ -43,7 +41,7 @@ function noVisible(err: unknown): boolean {
   return err instanceof TrimbleApiError && (err.status === 403 || err.status === 404);
 }
 
-/** Runs a Trimble call; "can't see it" becomes No tiene acceso. */
+/** Runs a Trimble call; "can't see it" becomes "sin-acceso". */
 async function conAcceso<T>(call: () => Promise<T>): Promise<T> {
   try {
     return await call();
@@ -53,7 +51,7 @@ async function conAcceso<T>(call: () => Promise<T>): Promise<T> {
   }
 }
 
-/** Opens the manuals folder; throws "sin-acceso" when the caller can't reach it. */
+/** Opens the manuals folder; throws "sin-acceso" when the account can't reach it. */
 export async function abrirBiblioteca(tc: Tc, cfg: ConfigManuales): Promise<Abierta> {
   const baseUrl = await conAcceso(() => tc.baseUrl(cfg.projectId));
   const project = await conAcceso(() => tc.project(baseUrl, cfg.projectId));

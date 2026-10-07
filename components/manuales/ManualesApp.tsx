@@ -1,14 +1,18 @@
 "use client";
 
-import { CSSProperties, useCallback, useEffect, useState } from "react";
+import { CSSProperties, ReactNode, useCallback, useEffect, useState } from "react";
 import { formatBytes } from "../../lib/format";
 import { ApiError } from "../../lib/propiedades/client";
 import type { ManualesApi } from "../../lib/manuales/client";
 import { etiquetaTipo } from "../../lib/manuales/tipos";
-import type { BusquedaResponse, CarpetaResponse, ItemManual, ResultadoBusqueda } from "../../lib/manuales/types";
+import type { BusquedaResponse, CarpetaResponse, EstadoManuales, ItemManual, ResultadoBusqueda } from "../../lib/manuales/types";
+import AdminAcceso from "./AdminAcceso";
 import Visor from "./Visor";
 
-type Bloqueo = { code: "sin-acceso" | "sin-configurar" | "error"; texto: string };
+type Bloqueo = { code: "sin-acceso" | "no-disponible" | "error"; texto: string };
+
+/** Codes of the API that mean the manuals can't be read now (the technical account isn't usable). */
+const NO_DISPONIBLE = ["sin-cuenta", "cuenta-vencida", "cuenta-sin-acceso", "sin-oauth", "cuenta-ocupada", "sin-configurar"];
 
 function fecha(iso: string): string {
   const d = new Date(iso);
@@ -18,16 +22,112 @@ function fecha(iso: string): string {
 }
 
 function bloqueoDe(err: unknown): Bloqueo {
-  if (err instanceof ApiError && (err.code === "sin-acceso" || err.code === "sin-configurar")) return { code: err.code, texto: err.message };
+  if (err instanceof ApiError && err.code === "no-autorizado") return { code: "sin-acceso", texto: err.message };
+  if (err instanceof ApiError && err.code && NO_DISPONIBLE.includes(err.code)) return { code: "no-disponible", texto: err.message };
+  if (err instanceof ApiError && err.code === "sin-acceso") return { code: "sin-acceso", texto: err.message };
   return { code: "error", texto: err instanceof Error ? err.message : String(err) };
 }
 
+type Vista = "manuales" | "acceso";
+
 /**
- * The company's manuals, read from the folder of the manager project with the
- * user's own Trimble Connect permissions: browse folders, search, and read
- * the documents inline.
+ * "Manuales": who the user is decides what they see. Authorized people (and
+ * administrators of the manuals project) read the manuals; administrators
+ * also manage the technical account and who reads, in "Administrar acceso";
+ * everyone else sees "No tiene acceso".
  */
 export default function ManualesApp({ api }: { api: ManualesApi }) {
+  const [estado, setEstado] = useState<EstadoManuales | null>(null);
+  const [bloqueo, setBloqueo] = useState<Bloqueo | null>(null);
+  const [vista, setVista] = useState<Vista>("manuales");
+
+  const cargar = useCallback(async () => {
+    setBloqueo(null);
+    try {
+      const e = await api.estado();
+      setEstado(e);
+      if (e.esAdmin && !e.disponible) setVista("acceso");
+    } catch (err) {
+      setBloqueo(bloqueoDe(err));
+    }
+  }, [api]);
+
+  useEffect(() => {
+    cargar();
+  }, [cargar]);
+
+  if (bloqueo) return <Bloqueado bloqueo={bloqueo} onReintentar={cargar} />;
+  if (!estado) return <div style={{ padding: 24, color: "var(--tc-gray-500)" }}>Abriendo los manuales...</div>;
+  if (!estado.esAdmin && !estado.autorizado) {
+    return (
+      <Bloqueado
+        bloqueo={{
+          code: "sin-acceso",
+          texto: `Pide al administrador de los manuales que te autorice${estado.usuario.email ? ` con tu correo ${estado.usuario.email}` : ""}.`,
+        }}
+        onReintentar={cargar}
+      />
+    );
+  }
+  if (!estado.disponible && !estado.esAdmin) {
+    return (
+      <Bloqueado
+        bloqueo={{ code: "no-disponible", texto: "El administrador aún no ha conectado la cuenta con la que la app lee los manuales. Inténtalo más tarde." }}
+        onReintentar={cargar}
+      />
+    );
+  }
+
+  const pestanas = estado.esAdmin ? (
+    <div role="tablist" aria-label="Secciones" style={{ display: "inline-flex", border: "1px solid rgba(255,255,255,0.5)", borderRadius: 5, overflow: "hidden" }}>
+      {(["manuales", "acceso"] as Vista[]).map((v) => (
+        <button
+          key={v}
+          type="button"
+          role="tab"
+          aria-selected={vista === v}
+          onClick={() => setVista(v)}
+          style={{
+            border: "none",
+            padding: "5px 12px",
+            fontSize: 13,
+            cursor: "pointer",
+            fontFamily: "inherit",
+            background: vista === v ? "#fff" : "transparent",
+            color: vista === v ? "#2f55b0" : "#fff",
+            fontWeight: 600,
+          }}
+        >
+          {v === "manuales" ? "Manuales" : "Administrar acceso"}
+        </button>
+      ))}
+    </div>
+  ) : null;
+
+  if (vista === "acceso" || !estado.disponible) {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
+        <Cabecera subtitulo="Cuenta técnica y personas autorizadas" pestanas={pestanas} />
+        <AdminAcceso api={api} estado={estado} onCambio={cargar} />
+      </div>
+    );
+  }
+  return <Biblioteca api={api} esAdmin={estado.esAdmin} pestanas={pestanas} />;
+}
+
+function Cabecera({ subtitulo, pestanas, children }: { subtitulo: string; pestanas: ReactNode; children?: ReactNode }) {
+  return (
+    <header style={{ background: "#2f55b0", color: "#fff", padding: "8px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
+      <strong style={{ fontSize: 17 }}>Manuales</strong>
+      <span style={{ fontSize: 12.5, opacity: 0.85, flex: 1, minWidth: 180 }}>{subtitulo}</span>
+      {pestanas}
+      {children}
+    </header>
+  );
+}
+
+/** The manuals (read through the technical account): browse folders, search, and read the documents inline. */
+function Biblioteca({ api, esAdmin, pestanas }: { api: ManualesApi; esAdmin: boolean; pestanas: ReactNode }) {
   const [carpeta, setCarpeta] = useState<CarpetaResponse | null>(null);
   const [cargando, setCargando] = useState(true);
   const [bloqueo, setBloqueo] = useState<Bloqueo | null>(null);
@@ -54,7 +154,7 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
       } catch (err) {
         const b = bloqueoDe(err);
         // Without access to the library itself everything is blocked; a subfolder only blocks itself.
-        if (!carpeta || b.code === "sin-configurar") setBloqueo(b);
+        if (!carpeta || b.code !== "sin-acceso") setBloqueo(b);
         else setErrorCarpeta(b.code === "sin-acceso" ? `No tiene acceso a la carpeta «${nombre ?? "seleccionada"}».` : b.texto);
       } finally {
         setCargando(false);
@@ -157,11 +257,7 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
-      <header style={{ background: "#2f55b0", color: "#fff", padding: "8px 14px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-        <strong style={{ fontSize: 17 }}>Manuales</strong>
-        <span style={{ fontSize: 12.5, opacity: 0.85, flex: 1, minWidth: 180 }}>
-          {b.projectName} › {b.carpetaNombre} · solo lectura
-        </span>
+      <Cabecera subtitulo={`${b.projectName} › ${b.carpetaNombre} · solo lectura`} pestanas={pestanas}>
         <form
           role="search"
           onSubmit={(e) => {
@@ -188,15 +284,15 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
         <button type="button" style={botonCabecera} onClick={() => abrirCarpeta(carpeta.carpeta.id === b.carpetaId ? null : carpeta.carpeta.id)} title="Volver a cargar la carpeta">
           ↻
         </button>
-      </header>
+      </Cabecera>
 
       {angosto ? (
-        <div style={{ flex: 1, minHeight: 0 }}>{abierto ? <Visor api={api} item={abierto} onCerrar={() => setAbierto(null)} /> : lista}</div>
+        <div style={{ flex: 1, minHeight: 0 }}>{abierto ? <Visor api={api} item={abierto} onCerrar={() => setAbierto(null)} enTrimble={esAdmin} /> : lista}</div>
       ) : (
         <div style={{ flex: 1, minHeight: 0, display: "grid", gridTemplateColumns: "minmax(280px, 380px) 1fr" }}>
           {lista}
           {abierto ? (
-            <Visor api={api} item={abierto} />
+            <Visor api={api} item={abierto} enTrimble={esAdmin} />
           ) : (
             <div style={{ display: "flex", alignItems: "center", justifyContent: "center", color: "var(--tc-gray-500)", background: "#eef1f5", padding: 24, textAlign: "center" }}>
               Elige un documento de la lista para leerlo aquí.
@@ -251,7 +347,7 @@ function Fila({ item, detalle, activo, onClick }: { item: ItemManual; detalle: s
 
 /** "No tiene acceso" (or not configured yet): the whole tool is blocked. */
 function Bloqueado({ bloqueo, onReintentar }: { bloqueo: Bloqueo; onReintentar: () => void }) {
-  const titulo = bloqueo.code === "sin-acceso" ? "No tiene acceso" : bloqueo.code === "sin-configurar" ? "Manuales aún no está configurado" : "No se pudieron abrir los manuales";
+  const titulo = bloqueo.code === "sin-acceso" ? "No tiene acceso" : bloqueo.code === "no-disponible" ? "Los manuales no están disponibles" : "No se pudieron abrir los manuales";
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
       <div role="alert" style={{ maxWidth: 460, textAlign: "center", background: "#fff", borderRadius: 10, boxShadow: "0 1px 3px rgba(10,61,98,0.12)", padding: 28 }}>

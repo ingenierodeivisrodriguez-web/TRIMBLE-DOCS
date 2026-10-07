@@ -77,11 +77,11 @@ async function sinAcceso(promise: Promise<unknown>, code = "sin-acceso") {
 }
 
 describe("acceso a los manuales", () => {
-  it("quien no es miembro del proyecto de manuales no tiene acceso", async () => {
+  it("si la cuenta no es miembro del proyecto de manuales, no hay acceso", async () => {
     await sinAcceso(abrirBiblioteca(fakeTc({ miembro: false }), CFG));
   });
 
-  it("quien no tiene permiso sobre la carpeta no tiene acceso", async () => {
+  it("si la cuenta no tiene permiso sobre la carpeta, no hay acceso", async () => {
     await sinAcceso(abrirBiblioteca(fakeTc({ sinAcceso: ["M"] }), CFG));
   });
 
@@ -109,7 +109,7 @@ describe("acceso a los manuales", () => {
     await sinAcceso(listarCarpeta(tc, abierta, "R"), "fuera");
   });
 
-  it("una subcarpeta sin permiso dice que no tiene acceso", async () => {
+  it("una subcarpeta sin permiso para la cuenta dice que no hay acceso", async () => {
     const tc = fakeTc({ sinAcceso: ["S"] });
     const abierta = await abrirBiblioteca(tc, CFG);
     await sinAcceso(listarCarpeta(tc, abierta, "S"));

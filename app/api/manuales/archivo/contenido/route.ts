@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { handle, idParam } from "../../../../../lib/manuales/routes";
+import { handleLector, idParam } from "../../../../../lib/manuales/routes";
 import { archivo } from "../../../../../lib/manuales/service";
 import { tipoMime } from "../../../../../lib/manuales/tipos";
 
@@ -11,7 +11,7 @@ export const dynamic = "force-dynamic";
  * storage link alone may make the browser download it).
  */
 export async function GET(req: NextRequest) {
-  return handle(req, async ({ tc, abierta }) => {
+  return handleLector(req, async ({ tc, abierta }) => {
     const fileId = idParam(req, "fileId", true)!;
     const pdf = req.nextUrl.searchParams.get("pdf") === "1";
     const a = await archivo(tc, abierta, fileId, pdf);
