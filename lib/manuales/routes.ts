@@ -15,7 +15,8 @@ import {
 } from "../trimbleApi";
 import { CuentaDeps, NO_AUTORIZADO, puedeLeer, requireAdmin, tokenTecnico } from "./acceso";
 import { ConfigManuales, configManuales } from "./config";
-import { oauthConfig, renovar } from "./oauth";
+import type { ConexionDeps } from "./conexion";
+import { canjearCodigo, oauthConfig, renovar, revocar } from "./oauth";
 import { Abierta, abrirBiblioteca, ManualesError, Tc } from "./service";
 import { ManualesStore, manualesStore } from "./store";
 
@@ -190,9 +191,32 @@ export function idParam(req: NextRequest, name: string, required: boolean): stri
   return value;
 }
 
-/** Where Trimble Identity sends the technical account back (must be registered in Trimble Developer Console). */
-export function redirectUri(req: NextRequest): string {
-  return process.env.MANUALES_REDIRECT_URI?.trim() || `${req.nextUrl.origin}/api/manuales/oauth/callback`;
+/**
+ * Where Trimble Identity sends the browser back after the technical account
+ * signs in. It must be one of the Trimble app's registered callback URLs:
+ * "apibasedatos" only has http://localhost (and external developers can't
+ * edit it in Trimble's console), so by default the browser lands on a page
+ * that doesn't load and the administrator pastes its address in Manuales.
+ * If this app's own callback gets registered, set MANUALES_REDIRECT_URI to
+ * it and the connection completes by itself.
+ */
+export function redirectUri(): string {
+  return process.env.MANUALES_REDIRECT_URI?.trim() || "http://localhost";
+}
+
+/** This app's own callback (automatic connection) for this request's host. */
+export function callbackPropio(req: NextRequest): string {
+  return `${req.nextUrl.origin}/api/manuales/oauth/callback`;
+}
+
+export function conexionDeps(): ConexionDeps {
+  return {
+    canjear: canjearCodigo,
+    revocar,
+    tc: tcCon,
+    usuario: getCurrentUser,
+    olvidar: olvidarBiblioteca,
+  };
 }
 
 export { errorResponse };

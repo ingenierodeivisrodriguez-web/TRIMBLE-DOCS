@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { puedeLeer } from "../../../../lib/manuales/acceso";
 import { oauthConfig } from "../../../../lib/manuales/oauth";
-import { handle, redirectUri } from "../../../../lib/manuales/routes";
+import { callbackPropio, handle, redirectUri } from "../../../../lib/manuales/routes";
 import type { EstadoManuales } from "../../../../lib/manuales/types";
 
 export const dynamic = "force-dynamic";
@@ -21,7 +21,9 @@ export async function GET(req: NextRequest) {
     if (persona.esAdmin) {
       body.admin = {
         oauthConfigurado: !!oauth,
-        redirectUri: redirectUri(req),
+        redirectUri: redirectUri(),
+        manual: redirectUri() !== callbackPropio(req),
+        callbackPropio: callbackPropio(req),
         cuenta: cuenta
           ? { nombre: cuenta.cuentaNombre, email: cuenta.cuentaEmail, conectadaPor: cuenta.conectadaPor, conectadaEn: cuenta.conectadaEn, renovadaEn: cuenta.renovadaEn }
           : null,

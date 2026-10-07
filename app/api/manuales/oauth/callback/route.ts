@@ -1,11 +1,9 @@
 import { NextRequest } from "next/server";
-import { olvidarToken } from "../../../../../lib/manuales/acceso";
 import { configManuales } from "../../../../../lib/manuales/config";
-import { canjearCodigo, cifrar, oauthConfig, revocar } from "../../../../../lib/manuales/oauth";
-import { olvidarBiblioteca, tcCon } from "../../../../../lib/manuales/routes";
-import { abrirBiblioteca, ManualesError } from "../../../../../lib/manuales/service";
+import { completarConexion, leerRetorno } from "../../../../../lib/manuales/conexion";
+import { oauthConfig } from "../../../../../lib/manuales/oauth";
+import { conexionDeps } from "../../../../../lib/manuales/routes";
 import { manualesStore } from "../../../../../lib/manuales/store";
-import { getCurrentUser } from "../../../../../lib/trimbleApi";
 
 export const dynamic = "force-dynamic";
 
@@ -24,51 +22,17 @@ h1{font-size:20px;margin:0 0 10px;color:${ok ? "#1d6b2f" : "#8a1c14"}}p{font-siz
 }
 
 /**
- * Trimble Identity's callback after the technical account signs in: trades
- * the code for tokens, checks the account can open the manuals folder, and
- * keeps its session (encrypted).
+ * Trimble Identity's callback, when this URL is registered in the Trimble app
+ * (MANUALES_REDIRECT_URI): completes the technical account's connection by
+ * itself. Otherwise the administrator pastes the address in Manuales.
  */
 export async function GET(req: NextRequest) {
-  const q = req.nextUrl.searchParams;
-  if (q.get("error")) return pagina(false, "No se conectó la cuenta", q.get("error_description") || q.get("error") || "Trimble Identity canceló el inicio de sesión.");
-  const code = q.get("code");
-  const state = q.get("state");
-  if (!code || !state) return pagina(false, "Enlace incompleto", "Vuelve a Manuales y pulsa otra vez \"Conectar cuenta técnica\".");
   const oauth = oauthConfig();
   const cfg = configManuales();
   if (!oauth || !cfg) return pagina(false, "Falta configuración", "Falta TRIMBLE_CLIENT_SECRET en Vercel o la carpeta de manuales no está bien indicada.");
   try {
-    const store = manualesStore();
-    const estado = await store.consumirEstado(state);
-    if (!estado) return pagina(false, "El enlace venció", "Han pasado más de 10 minutos o el enlace ya se usó. Vuelve a Manuales y pulsa otra vez \"Conectar cuenta técnica\".");
-    const tokens = await canjearCodigo(oauth, code, estado.redirectUri, estado.verifier);
-    let abierta;
-    try {
-      abierta = await abrirBiblioteca(tcCon(tokens.accessToken), cfg);
-    } catch (err) {
-      await revocar(oauth, tokens.refreshToken);
-      if (err instanceof ManualesError && err.code === "sin-acceso") {
-        return pagina(
-          false,
-          "Esa cuenta no tiene acceso a los manuales",
-          "La cuenta con la que entraste no es miembro de MANAGER PROJECT o no tiene permiso sobre la carpeta de manuales. Invítala con permiso de lectura y vuelve a conectar."
-        );
-      }
-      throw err;
-    }
-    const me = await getCurrentUser(abierta.baseUrl, tokens.accessToken);
-    await store.guardarCuenta({
-      refreshCifrado: cifrar(tokens.refreshToken, oauth.secret),
-      accessCifrado: cifrar(tokens.accessToken, oauth.secret),
-      accessExpira: new Date(tokens.expiresAt).toISOString(),
-      cuentaId: me.id,
-      cuentaNombre: [me.firstName, me.lastName].filter(Boolean).join(" ").trim(),
-      cuentaEmail: me.email ?? "",
-      conectadaPor: estado.creadoPor || null,
-    });
-    olvidarToken();
-    olvidarBiblioteca();
-    return pagina(true, "Cuenta técnica conectada", `Manuales leerá «${abierta.biblioteca.carpetaNombre}» con la cuenta ${me.email ?? me.id}. Ya puedes cerrar esta pestaña y volver a Trimble Connect.`);
+    const r = await completarConexion(manualesStore(), oauth, cfg, leerRetorno(req.nextUrl.toString()), conexionDeps());
+    return pagina(r.ok, r.titulo, r.ok ? `${r.texto} Ya puedes cerrar esta pestaña y volver a Trimble Connect.` : r.texto);
   } catch (err) {
     console.error("[manuales] conexión de la cuenta técnica:", err);
     return pagina(false, "No se pudo conectar la cuenta", err instanceof Error ? err.message : "Error desconocido.");

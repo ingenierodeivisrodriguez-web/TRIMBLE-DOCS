@@ -75,8 +75,12 @@ export interface EstadoManuales {
   /** Only for administrators. */
   admin?: {
     oauthConfigurado: boolean;
-    /** The callback URL to register in Trimble Developer Console. */
+    /** Where Trimble sends the browser back after signing in. */
     redirectUri: string;
+    /** That address doesn't reach this app: the administrator pastes it in Manuales. */
+    manual: boolean;
+    /** This app's own callback, to register in Trimble's console if possible. */
+    callbackPropio: string;
     cuenta: CuentaInfo | null;
   };
 }

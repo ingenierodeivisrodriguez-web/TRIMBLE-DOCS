@@ -13,7 +13,7 @@ export async function POST(req: NextRequest) {
       throw new ManualesError("Falta la variable TRIMBLE_CLIENT_SECRET en Vercel (el Client Secret de la app \"apibasedatos\").", 503, "sin-oauth");
     }
     const { verifier, challenge, state } = nuevoPkce();
-    const uri = redirectUri(req);
+    const uri = redirectUri();
     await store.crearEstado({
       state,
       verifier,

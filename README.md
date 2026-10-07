@@ -1315,12 +1315,26 @@ la app.
    - opcional: `CRON_SECRET`, para que solo Vercel llame a la tarea diaria.
 
    Después, vuelve a desplegar.
-3. Trimble Developer Console → app "apibasedatos" → *Callback URLs*: agrega
-   `https://trimble-docs.vercel.app/api/manuales/oauth/callback` (la pestaña
-   "Administrar acceso" muestra la URL exacta).
-4. En MANAGER PROJECT, invita a la cuenta técnica con permiso de lectura
-   sobre la carpeta. Luego, en Manuales → "Administrar acceso", conéctala e
-   inicia sesión con ella en la pestaña que se abre.
+3. En MANAGER PROJECT, invita a la cuenta técnica con permiso de lectura
+   sobre la carpeta.
+4. Conéctala en Manuales → "Administrar acceso" → **Conectar cuenta
+   técnica**:
+   1. Inicia sesión con la cuenta técnica en la pestaña que se abre.
+   2. Al terminar, esa pestaña muestra una página de `http://localhost` que
+      no carga.
+   3. Copia la dirección completa de la barra y pégala en **Completar
+      conexión**.
+
+   **Por qué hay que pegar la dirección:** la app "apibasedatos" solo tiene
+   registradas como *Callback URLs* `http://localhost` y la de Postman, y
+   la consola de Trimble (console.trimble.com) hoy solo admite usuarios
+   internos de Trimble, así que no se puede agregar la de esta app.
+   Comprobado contra id.trimble.com: la URL de Manuales responde
+   `invalid_grant`, `http://localhost` sí se acepta.
+
+   Si algún día se registra
+   `https://trimble-docs.vercel.app/api/manuales/oauth/callback`, define
+   `MANUALES_REDIRECT_URI` con esa URL y la conexión se completa sola.
 
 La carpeta está fijada en
 [`lib/manuales/config.ts`](lib/manuales/config.ts) (`CARPETA_PREDETERMINADA`):
@@ -1339,9 +1353,10 @@ carpeta o proyecto.
 | `GET /api/manuales/archivo?fileId=&pdf=1` | Enlace nuevo al archivo (o a su versión PDF) |
 | `GET /api/manuales/archivo/contenido?fileId=&pdf=1` | El contenido, transmitido desde el almacenamiento de Trimble |
 | `POST /api/manuales/admin/conectar` | URL de inicio de sesión para conectar la cuenta técnica (administradores) |
+| `POST /api/manuales/admin/completar` | `{ enlace }`: la dirección de `http://localhost/?code=…&state=…` pegada por el administrador; completa la conexión |
 | `DELETE /api/manuales/admin/cuenta` | Desconectar la cuenta técnica (revoca su sesión) |
 | `GET` / `POST` / `DELETE /api/manuales/admin/autorizados` | Listar, autorizar (`{ texto }` con correos) o quitar (`?email=`) personas |
-| `GET /api/manuales/oauth/callback` | Vuelta del inicio de sesión de Trimble Identity (sin token: lo valida el `state` de un solo uso) |
+| `GET /api/manuales/oauth/callback` | Vuelta automática del inicio de sesión, si esa URL está registrada (`MANUALES_REDIRECT_URI`). Sin token: la valida el `state` de un solo uso |
 | `GET /api/manuales/mantener` | Tarea diaria que mantiene viva la sesión |
 
 Códigos de error:

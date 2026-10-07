@@ -7,6 +7,8 @@ export interface ManualesApi {
   estado(): Promise<EstadoManuales>;
   /** Administrators: the Trimble sign-in URL to connect the technical account. */
   conectar(): Promise<{ url: string }>;
+  /** Administrators: finishes the connection with the address Trimble sent the browser to. */
+  completar(enlace: string): Promise<{ ok: boolean; titulo: string; texto: string }>;
   desconectar(): Promise<void>;
   autorizados(): Promise<AutorizadoInfo[]>;
   autorizar(texto: string): Promise<{ agregados: number; invalidos: string[] }>;
@@ -63,6 +65,7 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
   return {
     estado: () => request("/estado"),
     conectar: () => request("/admin/conectar", send("POST", {})),
+    completar: (enlace) => request("/admin/completar", send("POST", { enlace })),
     async desconectar() {
       await request("/admin/cuenta", send("DELETE"));
     },

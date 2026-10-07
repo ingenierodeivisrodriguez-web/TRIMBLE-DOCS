@@ -31,6 +31,9 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
   const [filtro, setFiltro] = useState("");
   const [quitando, setQuitando] = useState<string | null>(null);
   const [confirmarDesconexion, setConfirmarDesconexion] = useState(false);
+  /** The sign-in was started and its return address must be pasted here (Trimble only returns to http://localhost). */
+  const [esperandoRetorno, setEsperandoRetorno] = useState(false);
+  const [retorno, setRetorno] = useState("");
 
   const cargarLista = useCallback(async () => {
     try {
@@ -54,9 +57,30 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
       const { url } = await api.conectar();
       setEnlace(url);
       if (ventana) ventana.location.href = url;
-      setAviso("Inicia sesión con la cuenta técnica en la pestaña que se abrió. Al terminar, vuelve aquí y pulsa \"Ya conecté la cuenta\".");
+      if (admin.manual) setEsperandoRetorno(true);
+      else setAviso("Inicia sesión con la cuenta técnica en la pestaña que se abrió. Al terminar, vuelve aquí y pulsa \"Ya conecté la cuenta\".");
     } catch (err) {
       ventana?.close();
+      setError(message(err));
+    } finally {
+      setOcupado("");
+    }
+  }
+
+  async function completar() {
+    setOcupado("Conectando la cuenta...");
+    setError("");
+    setAviso("");
+    try {
+      const r = await api.completar(retorno);
+      if (r.ok) {
+        setEsperandoRetorno(false);
+        setRetorno("");
+        setEnlace("");
+        setAviso(`${r.titulo}. ${r.texto}`);
+        onCambio();
+      } else setError(`${r.titulo}: ${r.texto}`);
+    } catch (err) {
       setError(message(err));
     } finally {
       setOcupado("");
@@ -165,26 +189,44 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
                 <button type="button" style={primario} onClick={conectar} disabled={!!ocupado}>
                   Conectar cuenta técnica
                 </button>
-                <button type="button" style={secundario} onClick={onCambio}>
-                  Ya conecté la cuenta
-                </button>
+                {!admin.manual && (
+                  <button type="button" style={secundario} onClick={onCambio}>
+                    Ya conecté la cuenta
+                  </button>
+                )}
               </div>
             </>
           )}
+          {esperandoRetorno && (
+            <div style={{ marginTop: 14, padding: "12px 14px", border: "1px solid var(--tc-blue-500)", borderRadius: 8, background: "var(--tc-blue-50)" }}>
+              <ol style={{ margin: "0 0 10px", paddingLeft: 20, fontSize: 14, lineHeight: 1.6 }}>
+                <li>En la pestaña que se abrió, inicia sesión con la <strong>cuenta técnica</strong>.</li>
+                <li>
+                  Al terminar, esa pestaña mostrará una página que <strong>no carga</strong> (&quot;localhost rechazó la conexión&quot;). Es normal.
+                </li>
+                <li>
+                  Copia la dirección completa de su barra (empieza por <code>http://localhost/?code=</code>) y pégala aquí. Tienes 10 minutos.
+                </li>
+              </ol>
+              <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                <input
+                  value={retorno}
+                  onChange={(e) => setRetorno(e.target.value)}
+                  placeholder="http://localhost/?code=...&state=..."
+                  aria-label="Dirección a la que te llevó Trimble"
+                  style={{ flex: "1 1 320px", border: "1px solid var(--tc-gray-300)", borderRadius: 5, padding: "7px 10px", fontSize: 13.5, fontFamily: "inherit" }}
+                />
+                <button type="button" style={primario} onClick={completar} disabled={!!ocupado || !retorno.trim()}>
+                  Completar conexión
+                </button>
+              </div>
+            </div>
+          )}
           {enlace && (
             <p style={{ ...p, fontSize: 12.5, color: "var(--tc-gray-500)", marginTop: 10, wordBreak: "break-all" }}>
-              Si no se abrió la pestaña, copia este enlace en el navegador (vale 10 minutos): {enlace}
+              Si no se abrió la pestaña, copia este enlace en una pestaña nueva del navegador (vale 10 minutos): {enlace}
             </p>
           )}
-          <details style={{ marginTop: 12, fontSize: 13, color: "var(--tc-gray-700)" }}>
-            <summary style={{ cursor: "pointer" }}>Requisito en Trimble Developer Console</summary>
-            <p style={{ ...p, fontSize: 13, marginTop: 8 }}>
-              En la app &quot;apibasedatos&quot;, agrega esta URL a sus <strong>Callback URLs</strong> (una sola vez):
-            </p>
-            <code style={{ display: "block", background: "#fff", border: "1px solid #dfe4ea", padding: "6px 8px", borderRadius: 4, wordBreak: "break-all" }}>
-              {admin.redirectUri}
-            </code>
-          </details>
         </section>
 
         <section style={tarjeta}>
