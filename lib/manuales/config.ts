@@ -27,6 +27,10 @@ export function parseCarpeta(text: string): ConfigManuales | null {
   return m ? { projectId: m[1], folderId: m[2] ?? null } : null;
 }
 
+/** The company's manuals folder in "MANAGER PROJECT" (MANUALES_CARPETA overrides it). */
+export const CARPETA_PREDETERMINADA = "https://web.connect.trimble.com/projects/KU8qY2Zf234/data/folder/T3InEwS6b9g";
+
 export function configManuales(): ConfigManuales | null {
-  return parseCarpeta(process.env.MANUALES_CARPETA ?? "");
+  const env = process.env.MANUALES_CARPETA?.trim();
+  return parseCarpeta(env || CARPETA_PREDETERMINADA);
 }

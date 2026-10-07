@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { FileDetails, FolderDetails, RawFolderItem } from "../trimbleApi";
 import { TrimbleApiError } from "../trimbleApi";
-import { parseCarpeta } from "./config";
+import { configManuales, parseCarpeta } from "./config";
 import { abrirBiblioteca, archivo, buscar, listarCarpeta, ManualesError, Tc } from "./service";
 import { vistaDe } from "./tipos";
 
@@ -158,6 +158,19 @@ describe("configuración y tipos", () => {
     assert.deepEqual(parseCarpeta(" AbC1/F0lder "), { projectId: "AbC1", folderId: "F0lder" });
     assert.equal(parseCarpeta(""), null);
     assert.equal(parseCarpeta("no es un enlace"), null);
+  });
+
+  it("usa la carpeta de MANAGER PROJECT, salvo que MANUALES_CARPETA indique otra", () => {
+    const antes = process.env.MANUALES_CARPETA;
+    try {
+      delete process.env.MANUALES_CARPETA;
+      assert.deepEqual(configManuales(), { projectId: "KU8qY2Zf234", folderId: "T3InEwS6b9g" });
+      process.env.MANUALES_CARPETA = "Otro1234/Carpeta99";
+      assert.deepEqual(configManuales(), { projectId: "Otro1234", folderId: "Carpeta99" });
+    } finally {
+      if (antes === undefined) delete process.env.MANUALES_CARPETA;
+      else process.env.MANUALES_CARPETA = antes;
+    }
   });
 
   it("decide cómo mostrar cada archivo", () => {

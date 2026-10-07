@@ -1282,13 +1282,14 @@ Todos tienen **Abrir en Trimble Connect**, que abre el visor de Trimble en una
 pestaña nueva, y **Descargar**, que pide un enlace nuevo porque los enlaces de
 descarga vencen. Los PDF de más de 100 MB no se cargan dentro de la app.
 
-**Configuración (una vez).** En Vercel → *Settings → Environment Variables*,
-agrega `MANUALES_CARPETA` con el **enlace de la carpeta**: ábrela en Trimble
-Connect y copia la dirección del navegador, por ejemplo
-`https://web.connect.trimble.com/projects/{proyecto}/data/folder/{carpeta}`.
-Con el enlace del proyecto, sin carpeta, se muestra todo el proyecto. Después
-vuelve a desplegar. Mientras falte, la app dice "Manuales aún no está
-configurado". No es un secreto: solo dice dónde están los manuales.
+**Configuración.** La carpeta está fijada en el código
+([`lib/manuales/config.ts`](lib/manuales/config.ts), `CARPETA_PREDETERMINADA`):
+`https://web.connect.trimble.com/projects/KU8qY2Zf234/data/folder/T3InEwS6b9g`.
+Para usar otra sin cambiar el código, define en Vercel la variable `MANUALES_CARPETA`
+con el enlace de la nueva carpeta (se copia de la barra de direcciones de Trimble
+Connect) y vuelve a desplegar. Con el enlace de un proyecto, sin carpeta, se
+muestra el proyecto entero. No es un secreto: solo dice dónde están los
+manuales.
 
 **API** (token del usuario en `Authorization: Bearer`):
 
