@@ -1295,6 +1295,39 @@ licencia. Quien tiene la licencia vencida o suspendida ve "No tiene acceso"
 con el motivo y la fecha. La lista muestra cuántas personas hay en cada
 estado y se puede filtrar por estado.
 
+**Venta en línea con Mercado Pago.** En la pestaña **"Ventas"**, el
+administrador abre la venta y define los planes: meses (1 a 12) y precio en
+pesos. Quien no tiene acceso, o tiene la licencia vencida, ve los planes en
+"No tiene acceso". Quien tiene la licencia vigente ve **Renovar** en la
+cabecera, resaltado cuando está por vencer. La persona elige un plan, paga
+en Mercado Pago (Checkout Pro, en una pestaña nueva) y, **al aprobarse el
+pago, su licencia se crea o se extiende sola**, sin que el administrador
+haga nada:
+
+- La licencia va al correo de Trimble Connect de quien compra, y el precio
+  sale del plan, nunca de la solicitud.
+- Si la licencia sigue vigente, los meses se suman desde su vencimiento; si
+  venció (o es nueva), desde hoy.
+- Cada compra se aplica **una sola vez** (`manuales_aplicar_pago`, todo en
+  una transacción), aunque el pago se notifique varias veces.
+- El pago siempre se lee de Mercado Pago con nuestras credenciales antes de
+  aplicarlo, así que un aviso falso no abre los manuales. Se confirma por
+  cuatro caminos:
+  1. el aviso de Mercado Pago (`notification_url` de cada compra);
+  2. la página a la que vuelve quien paga;
+  3. la pantalla de Manuales, que espera el pago y consulta cada 5 segundos;
+  4. la tarea diaria, que revisa las compras pendientes de los últimos 3
+     días.
+- Un pago por menos del valor queda en **Revisar**, sin licencia.
+- Un reembolso o contracargo marca la compra **Reembolsada**. La licencia
+  no se quita sola: el administrador decide si la suspende.
+- Las cuentas suspendidas o sin vencimiento no pueden comprar.
+
+La pestaña "Ventas" lista las compras con su estado (pendiente, aprobada,
+revisar, reembolsada), el pago de Mercado Pago y el nuevo vencimiento. Las
+compras pendientes tienen el botón **Verificar pago**, que consulta Mercado
+Pago al momento.
+
 Los documentos se suben y actualizan en MANAGER PROJECT como siempre, y Manuales
 muestra siempre la versión actual.
 
@@ -1332,7 +1365,17 @@ la app.
 1. Supabase → SQL Editor: ejecuta [`supabase/manuales.sql`](supabase/manuales.sql).
 2. Vercel → Environment Variables:
    - `TRIMBLE_CLIENT_SECRET`, con el Client Secret de "apibasedatos";
-   - opcional: `CRON_SECRET`, para que solo Vercel llame a la tarea diaria.
+   - opcional: `CRON_SECRET`, para que solo Vercel llame a la tarea diaria;
+   - para vender licencias: `MERCADOPAGO_ACCESS_TOKEN`, el Access Token de
+     tu aplicación de Mercado Pago (Tus integraciones → Credenciales de
+     producción; las de prueba abren el checkout de pruebas);
+   - opcional: `MERCADOPAGO_WEBHOOK_SECRET`, la clave secreta de los
+     Webhooks de Mercado Pago, configurados con la URL
+     `https://trimble-docs.vercel.app/api/manuales/pagos/webhook` y el evento
+     "Pagos": se verifica la firma de los avisos. Sin ella, igual funciona,
+     porque cada pago se lee de Mercado Pago antes de aplicarlo;
+   - opcional: `MANUALES_URL_PUBLICA`, la dirección pública de la app, si no
+     es la de las solicitudes.
 
    Después, vuelve a desplegar.
 3. En MANAGER PROJECT, invita a la cuenta técnica con permiso de lectura
@@ -1376,15 +1419,24 @@ carpeta o proyecto.
 | `POST /api/manuales/admin/completar` | `{ enlace }`: la dirección de `http://localhost/?code=…&state=…` pegada por el administrador; completa la conexión |
 | `DELETE /api/manuales/admin/cuenta` | Desconectar la cuenta técnica (revoca su sesión) |
 | `GET` / `POST` / `PATCH` / `DELETE /api/manuales/admin/autorizados` | Listar (con el estado de cada licencia), autorizar (`{ texto, licencia }`), cambiar la licencia o suspender/reactivar (`{ email, licencia?, suspendido? }`) o quitar (`?email=`). La licencia es `{ meses: 1-12, inicio? }`, `{ vence, inicio? }` o `{ sinVencimiento: true }` |
+| `GET` / `PUT /api/manuales/admin/venta` | La venta en línea y cómo está configurado Mercado Pago; guardar `{ habilitada, planes: [{ meses, precio }] }` (administradores) |
+| `GET` / `POST /api/manuales/admin/pagos` | Las compras, de la más nueva a la más vieja; `{ orden }` consulta Mercado Pago por una compra pendiente (administradores) |
+| `POST /api/manuales/pagos` | `{ meses }`: inicia la compra de una licencia para el correo de quien llama y devuelve el checkout de Mercado Pago (`url`) y la compra (`orden`) |
+| `GET /api/manuales/pagos/orden?id=` | Cómo va la compra de quien llama; mientras está pendiente, también consulta Mercado Pago |
+| `POST /api/manuales/pagos/webhook` | Avisos de pago de Mercado Pago (Webhooks e IPN). Sin token: el pago se lee de Mercado Pago, y con `MERCADOPAGO_WEBHOOK_SECRET` se exige la firma de los avisos firmados |
+| `GET /api/manuales/pagos/retorno` | Página a la que vuelve quien paga (`back_urls`); aplica el pago al momento. Sin token |
 | `GET /api/manuales/oauth/callback` | Vuelta automática del inicio de sesión, si esa URL está registrada (`MANUALES_REDIRECT_URI`). Sin token: la valida el `state` de un solo uso |
-| `GET /api/manuales/mantener` | Tarea diaria que mantiene viva la sesión |
+| `GET /api/manuales/mantener` | Tarea diaria que mantiene viva la sesión y revisa las compras pendientes |
 
 Códigos de error:
 
 - `no-autorizado` (403);
 - `sin-cuenta`, `cuenta-vencida`, `cuenta-sin-acceso`, `sin-oauth` (503:
   el administrador debe revisar la cuenta técnica);
-- `trimble-session` (401: recargar Trimble Connect).
+- `trimble-session` (401: recargar Trimble Connect);
+- compras (409): `venta-cerrada`, `sin-mercadopago`, `suspendida`,
+  `sin-vencimiento`, `plan`; `demasiadas` (429: más de 10 compras en
+  una hora).
 
 ---
 

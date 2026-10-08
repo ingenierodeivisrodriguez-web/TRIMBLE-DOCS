@@ -1,6 +1,17 @@
 import { ApiError, createRequester, TokenSource } from "../propiedades/client";
 import { expiresSoon } from "../propiedades/token";
-import type { ArchivoResponse, AutorizadoInfo, BusquedaResponse, CarpetaResponse, EstadoManuales } from "./types";
+import type {
+  ArchivoResponse,
+  AutorizadoInfo,
+  BusquedaResponse,
+  CarpetaResponse,
+  CompraIniciada,
+  ConfigVentaInfo,
+  EstadoCompra,
+  EstadoManuales,
+  Orden,
+  Plan,
+} from "./types";
 
 /** A license as the administrator sets it: 1-12 months from a date, up to a date, or without expiry. */
 export type LicenciaPedido = { meses: number; inicio?: string } | { vence: string; inicio?: string } | { sinVencimiento: true };
@@ -18,6 +29,17 @@ export interface ManualesApi {
   autorizar(texto: string, licencia: LicenciaPedido): Promise<{ agregados: number; invalidos: string[] }>;
   actualizarAutorizado(email: string, cambios: { licencia?: LicenciaPedido; suspendido?: boolean }): Promise<void>;
   quitarAutorizado(email: string): Promise<void>;
+  /** Starts the purchase of a license of `meses` for the user's own e-mail (pay it at the returned `url`). */
+  comprar(meses: number): Promise<CompraIniciada>;
+  /** How the user's purchase is going (also checked against Mercado Pago while pending). */
+  compra(orden: string): Promise<EstadoCompra>;
+  /** Administrators: online sales and how Mercado Pago is set up. */
+  venta(): Promise<ConfigVentaInfo>;
+  guardarVenta(v: { habilitada: boolean; planes: Plan[] }): Promise<void>;
+  /** Administrators: the purchases, newest first. */
+  pagos(): Promise<{ hoy: string; ordenes: Orden[] }>;
+  /** Administrators: checks a pending purchase against Mercado Pago now. */
+  verificarPago(orden: string): Promise<Orden>;
   carpeta(folderId?: string | null): Promise<CarpetaResponse>;
   buscar(q: string): Promise<BusquedaResponse>;
   /** A fresh link to the file (or its PDF rendition) and the link to open it in Trimble Connect. */
@@ -81,6 +103,16 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
     },
     async quitarAutorizado(email) {
       await request(`/admin/autorizados${q({ email })}`, send("DELETE"));
+    },
+    comprar: (meses) => request("/pagos", send("POST", { meses })),
+    compra: (orden) => request(`/pagos/orden${q({ id: orden })}`),
+    venta: () => request("/admin/venta"),
+    async guardarVenta(v) {
+      await request("/admin/venta", send("PUT", v));
+    },
+    pagos: () => request("/admin/pagos"),
+    async verificarPago(orden) {
+      return (await request<{ orden: Orden }>("/admin/pagos", send("POST", { orden }))).orden;
     },
     carpeta: (folderId) => request(`/carpeta${q({ folderId })}`),
     buscar: (text) => request(`/buscar${q({ q: text })}`),

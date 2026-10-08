@@ -8,6 +8,8 @@ import { fechaVisible } from "../../lib/manuales/licencia";
 import { etiquetaTipo } from "../../lib/manuales/tipos";
 import type { BusquedaResponse, CarpetaResponse, EstadoManuales, ItemManual, ResultadoBusqueda } from "../../lib/manuales/types";
 import AdminAcceso from "./AdminAcceso";
+import Comprar from "./Comprar";
+import Ventas from "./Ventas";
 import Visor from "./Visor";
 
 type Bloqueo = { code: "sin-acceso" | "no-disponible" | "error"; texto: string };
@@ -29,18 +31,26 @@ function bloqueoDe(err: unknown): Bloqueo {
   return { code: "error", texto: err instanceof Error ? err.message : String(err) };
 }
 
-type Vista = "manuales" | "acceso";
+type Vista = "manuales" | "acceso" | "ventas";
+
+const VISTAS: { id: Vista; label: string }[] = [
+  { id: "manuales", label: "Manuales" },
+  { id: "acceso", label: "Administrar acceso" },
+  { id: "ventas", label: "Ventas" },
+];
 
 /**
  * "Manuales": who the user is decides what they see. Authorized people (and
  * administrators of the manuals project) read the manuals; administrators
- * also manage the technical account and who reads, in "Administrar acceso";
- * everyone else sees "No tiene acceso".
+ * also manage the technical account and who reads, in "Administrar acceso",
+ * and online sales, in "Ventas"; everyone else sees "No tiene acceso" (and,
+ * when sales are open, can buy a license with Mercado Pago).
  */
 export default function ManualesApp({ api }: { api: ManualesApi }) {
   const [estado, setEstado] = useState<EstadoManuales | null>(null);
   const [bloqueo, setBloqueo] = useState<Bloqueo | null>(null);
   const [vista, setVista] = useState<Vista>("manuales");
+  const [renovando, setRenovando] = useState(false);
 
   const cargar = useCallback(async () => {
     setBloqueo(null);
@@ -60,19 +70,22 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
   if (bloqueo) return <Bloqueado bloqueo={bloqueo} onReintentar={cargar} />;
   if (!estado) return <div style={{ padding: 24, color: "var(--tc-gray-500)" }}>Abriendo los manuales...</div>;
   if (!estado.esAdmin && !estado.autorizado) {
+    const venta = estado.venta;
     return (
       <Bloqueado
         bloqueo={{
           code: "sin-acceso",
           texto:
             estado.motivo === "vencida"
-              ? `Tu licencia para leer los manuales venció el ${fechaVisible(estado.licencia?.vence ?? null)}. Pide al administrador que la renueve.`
+              ? `Tu licencia para leer los manuales venció el ${fechaVisible(estado.licencia?.vence ?? null)}. ${venta ? "Renuévala aquí o pide" : "Pide"} al administrador que la renueve.`
               : estado.motivo === "suspendida"
                 ? "Tu acceso a los manuales está suspendido. Pide al administrador que lo reactive."
-                : `Pide al administrador de los manuales que te autorice${estado.usuario.email ? ` con tu correo ${estado.usuario.email}` : ""}.`,
+                : `${venta ? "Compra una licencia o pide" : "Pide"} al administrador de los manuales que te autorice${estado.usuario.email ? ` con tu correo ${estado.usuario.email}` : ""}.`,
         }}
         onReintentar={cargar}
-      />
+      >
+        {venta && <Comprar api={api} venta={venta} vence={estado.licencia ? estado.licencia.vence : undefined} onListo={cargar} />}
+      </Bloqueado>
     );
   }
   if (!estado.disponible && !estado.esAdmin) {
@@ -86,7 +99,7 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
 
   const pestanas = estado.esAdmin ? (
     <div role="tablist" aria-label="Secciones" style={{ display: "inline-flex", border: "1px solid rgba(255,255,255,0.5)", borderRadius: 5, overflow: "hidden" }}>
-      {(["manuales", "acceso"] as Vista[]).map((v) => (
+      {VISTAS.map(({ id: v, label }) => (
         <button
           key={v}
           type="button"
@@ -104,12 +117,20 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
             fontWeight: 600,
           }}
         >
-          {v === "manuales" ? "Manuales" : "Administrar acceso"}
+          {label}
         </button>
       ))}
     </div>
   ) : null;
 
+  if (vista === "ventas" && estado.esAdmin) {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
+        <Cabecera subtitulo="Venta de licencias con Mercado Pago" pestanas={pestanas} />
+        <Ventas api={api} />
+      </div>
+    );
+  }
   if (vista === "acceso" || !estado.disponible) {
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
@@ -119,7 +140,56 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
     );
   }
   const hasta = !estado.esAdmin && estado.licencia?.vence ? ` · acceso hasta el ${fechaVisible(estado.licencia.vence)}` : "";
-  return <Biblioteca api={api} esAdmin={estado.esAdmin} pestanas={pestanas} extra={hasta} />;
+  const venta = estado.venta;
+  const porVencer = estado.licencia?.estado === "por-vencer";
+  const renovar =
+    venta && !estado.esAdmin ? (
+      <button
+        type="button"
+        style={{ ...botonCabecera, ...(porVencer ? { background: "#fff", color: "#2f55b0", fontWeight: 700 } : {}) }}
+        onClick={() => setRenovando(true)}
+        title={porVencer ? `Tu acceso vence en ${estado.licencia?.diasRestantes} día(s)` : "Renovar tu acceso a los manuales"}
+      >
+        {porVencer ? `Renovar (vence en ${estado.licencia?.diasRestantes} d)` : "Renovar"}
+      </button>
+    ) : null;
+  return (
+    <>
+      <Biblioteca api={api} esAdmin={estado.esAdmin} pestanas={pestanas} extra={hasta} acciones={renovar} />
+      {renovando && venta && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Renovar mi acceso"
+          style={{ position: "fixed", inset: 0, background: "rgba(10,30,60,0.45)", display: "flex", alignItems: "center", justifyContent: "center", padding: 16, zIndex: 50 }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setRenovando(false);
+          }}
+        >
+          <div style={{ background: "#fff", borderRadius: 10, padding: "6px 18px 18px", maxWidth: 460, width: "100%", maxHeight: "90vh", overflow: "auto", position: "relative" }}>
+            <button
+              type="button"
+              aria-label="Cerrar"
+              onClick={() => setRenovando(false)}
+              style={{ position: "absolute", top: 6, right: 8, border: "none", background: "transparent", fontSize: 20, cursor: "pointer", color: "var(--tc-gray-500)" }}
+            >
+              ×
+            </button>
+            <Comprar
+              api={api}
+              venta={venta}
+              vence={estado.licencia ? estado.licencia.vence : undefined}
+              renovar
+              onListo={() => {
+                setRenovando(false);
+                cargar();
+              }}
+            />
+          </div>
+        </div>
+      )}
+    </>
+  );
 }
 
 function Cabecera({ subtitulo, pestanas, children }: { subtitulo: string; pestanas: ReactNode; children?: ReactNode }) {
@@ -134,7 +204,7 @@ function Cabecera({ subtitulo, pestanas, children }: { subtitulo: string; pestan
 }
 
 /** The manuals (read through the technical account): browse folders, search, and read the documents inline. */
-function Biblioteca({ api, esAdmin, pestanas, extra = "" }: { api: ManualesApi; esAdmin: boolean; pestanas: ReactNode; extra?: string }) {
+function Biblioteca({ api, esAdmin, pestanas, extra = "", acciones }: { api: ManualesApi; esAdmin: boolean; pestanas: ReactNode; extra?: string; acciones?: ReactNode }) {
   const [carpeta, setCarpeta] = useState<CarpetaResponse | null>(null);
   const [cargando, setCargando] = useState(true);
   const [bloqueo, setBloqueo] = useState<Bloqueo | null>(null);
@@ -291,6 +361,7 @@ function Biblioteca({ api, esAdmin, pestanas, extra = "" }: { api: ManualesApi; 
         <button type="button" style={botonCabecera} onClick={() => abrirCarpeta(carpeta.carpeta.id === b.carpetaId ? null : carpeta.carpeta.id)} title="Volver a cargar la carpeta">
           ↻
         </button>
+        {acciones}
       </Cabecera>
 
       {angosto ? (
@@ -353,7 +424,7 @@ function Fila({ item, detalle, activo, onClick }: { item: ItemManual; detalle: s
 }
 
 /** "No tiene acceso" (or not configured yet): the whole tool is blocked. */
-function Bloqueado({ bloqueo, onReintentar }: { bloqueo: Bloqueo; onReintentar: () => void }) {
+function Bloqueado({ bloqueo, onReintentar, children }: { bloqueo: Bloqueo; onReintentar: () => void; children?: ReactNode }) {
   const titulo = bloqueo.code === "sin-acceso" ? "No tiene acceso" : bloqueo.code === "no-disponible" ? "Los manuales no están disponibles" : "No se pudieron abrir los manuales";
   return (
     <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", padding: 24 }}>
@@ -369,6 +440,7 @@ function Bloqueado({ bloqueo, onReintentar }: { bloqueo: Bloqueo; onReintentar: 
         <button type="button" onClick={onReintentar} style={{ ...botonCabecera, background: "var(--tc-blue-600)", border: "none", marginTop: 6 }}>
           Reintentar
         </button>
+        {children}
       </div>
     </div>
   );

@@ -18,6 +18,8 @@ import { hoyIso } from "./licencia";
 import { ConfigManuales, configManuales } from "./config";
 import type { ConexionDeps } from "./conexion";
 import { canjearCodigo, oauthConfig, renovar, revocar } from "./oauth";
+import { mercadoPago, Mp, MpConfig, mpConfig } from "./mercadopago";
+import type { UrlsPago } from "./pagos";
 import { Abierta, abrirBiblioteca, ManualesError, Tc } from "./service";
 import { ManualesStore, manualesStore } from "./store";
 
@@ -226,3 +228,25 @@ export function conexionDeps(): ConexionDeps {
 }
 
 export { errorResponse };
+
+// ---------------------------------------------------------------- online sales
+
+/** This app's public address (MANUALES_URL_PUBLICA, or the one the request came to). */
+export function urlPublica(req: NextRequest): string {
+  return process.env.MANUALES_URL_PUBLICA?.trim().replace(/\/+$/, "") || req.nextUrl.origin;
+}
+
+/** Where buyers come back from Mercado Pago, and where it notifies payments (only to a public https address). */
+export function urlsPago(req: NextRequest): UrlsPago {
+  const base = urlPublica(req);
+  return {
+    retorno: `${base}/api/manuales/pagos/retorno`,
+    notificacion: base.startsWith("https://") ? `${base}/api/manuales/pagos/webhook?source_news=webhooks` : null,
+  };
+}
+
+/** Mercado Pago with Vercel's credentials, or null when they aren't set. */
+export function mercadoPagoDe(): { cfg: MpConfig; mp: Mp } | null {
+  const cfg = mpConfig();
+  return cfg ? { cfg, mp: mercadoPago(cfg) } : null;
+}

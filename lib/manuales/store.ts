@@ -1,4 +1,6 @@
 import { StoreError } from "../propiedades/store";
+import { periodoComprado } from "./licencia";
+import type { EstadoOrden, Orden, Plan } from "./types";
 
 /**
  * Persistence of "Manuales" (tables of supabase/manuales.sql): the technical
@@ -41,6 +43,37 @@ export interface EstadoOauth {
   expira: string;
 }
 
+export interface ConfigVenta {
+  habilitada: boolean;
+  planes: Plan[];
+  actualizadoPor: string | null;
+  actualizadoEn: string | null;
+}
+
+export const VENTA_CERRADA: ConfigVenta = { habilitada: false, planes: [], actualizadoPor: null, actualizadoEn: null };
+
+/** A payment reported by Mercado Pago, to apply to its order. */
+export interface PagoAplicable {
+  orden: string;
+  pagoId: string;
+  estadoMp: string;
+  detalleMp: string;
+  monto: number;
+  moneda: string;
+  /** Today (ISO): a license in force is extended from its end, otherwise from today. */
+  hoy: string;
+}
+
+export interface ResultadoAplicar {
+  resultado: "aplicada" | "ya-aplicada" | "pendiente" | "revisar" | "reembolsada" | "duplicado" | "sin-cambios" | "no-existe";
+  email?: string;
+  /** The license's new expiry (null: it doesn't expire). */
+  vence?: string | null;
+}
+
+/** Who the license of a person who bought it says added them. */
+export const POR_PAGO = "Compra en Mercado Pago";
+
 export interface ManualesStore {
   getCuenta(): Promise<CuentaTecnica | null>;
   /** A newly connected account (replaces the previous one). */
@@ -61,10 +94,26 @@ export interface ManualesStore {
   getAutorizado(email: string): Promise<Autorizado | null>;
   /** False when the e-mail isn't authorized. */
   actualizarLicencia(email: string, licencia: Partial<Licencia>): Promise<boolean>;
+  /** Online sales: whether they are open and the plans on sale. */
+  getVenta(): Promise<ConfigVenta>;
+  guardarVenta(v: { habilitada: boolean; planes: Plan[] }, por: string): Promise<void>;
+  crearOrden(o: Pick<Orden, "id" | "email" | "nombre" | "meses" | "monto" | "moneda">): Promise<void>;
+  marcarPreferencia(id: string, preferenciaId: string): Promise<void>;
+  getOrden(id: string): Promise<Orden | null>;
+  /** Newest first. */
+  listarOrdenes(f: { email?: string; estado?: EstadoOrden; desde?: string; limite: number }): Promise<Orden[]>;
+  /**
+   * Applies a payment to its order, all at once: an approved one (for the
+   * order's amount) creates or extends the person's license by the months
+   * bought, only once per order; other statuses are only recorded.
+   */
+  aplicarPago(p: PagoAplicable): Promise<ResultadoAplicar>;
 }
 
 const SETUP_HINT =
   "Faltan las tablas de Manuales en Supabase: abre Supabase → SQL Editor y ejecuta una vez el archivo supabase/manuales.sql del repositorio.";
+const VENTAS_HINT =
+  "Faltan las tablas de la venta en línea de Manuales: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/manuales.sql (es seguro repetirlo; no borra datos).";
 const UPGRADE_HINT =
   "Falta actualizar las tablas de Manuales para las licencias: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/manuales.sql (es seguro repetirlo; no borra datos).";
 
@@ -102,6 +151,47 @@ function licenciaRow(l: Partial<Licencia>): Record<string, unknown> {
   return out;
 }
 
+interface OrdenRow {
+  id: string;
+  email: string;
+  nombre: string;
+  meses: number;
+  monto: number | string;
+  moneda: string;
+  estado: EstadoOrden;
+  preferencia_id: string | null;
+  pago_id: string | null;
+  estado_mp: string | null;
+  detalle_mp: string | null;
+  creada: string;
+  pagada: string | null;
+  vence_anterior: string | null;
+  vence_nueva: string | null;
+  nota: string | null;
+}
+const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,vence_anterior,vence_nueva,nota";
+
+function toOrden(r: OrdenRow): Orden {
+  return {
+    id: r.id,
+    email: r.email,
+    nombre: r.nombre,
+    meses: r.meses,
+    monto: Number(r.monto),
+    moneda: r.moneda,
+    estado: r.estado,
+    preferenciaId: r.preferencia_id,
+    pagoId: r.pago_id,
+    estadoMp: r.estado_mp,
+    detalleMp: r.detalle_mp,
+    creada: r.creada,
+    pagada: r.pagada,
+    venceAnterior: r.vence_anterior,
+    venceNueva: r.vence_nueva,
+    nota: r.nota,
+  };
+}
+
 interface CuentaRow {
   refresh_cifrado: string;
   access_cifrado: string | null;
@@ -131,6 +221,7 @@ function supabaseStore(): ManualesStore | null {
     });
     if (res.ok) return res;
     const body = await res.text().catch(() => "");
+    if (/manuales_venta|manuales_pagos|manuales_aplicar_pago/.test(body) && /PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(VENTAS_HINT);
     if (/licencia_meses|suspendido|\bvence\b|\binicio\b/.test(body) && /42703|PGRST204|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) throw new StoreError("Supabase rechazó la clave del servidor (SUPABASE_SERVICE_ROLE_KEY).");
@@ -244,6 +335,55 @@ function supabaseStore(): ManualesStore | null {
       });
       return rows.length > 0;
     },
+    async getVenta() {
+      const rows = await json<{ habilitada: boolean; planes: Plan[] | null; actualizado_por: string | null; actualizado_en: string }[]>(
+        "/manuales_venta?id=eq.1&select=habilitada,planes,actualizado_por,actualizado_en"
+      );
+      const r = rows[0];
+      return r ? { habilitada: r.habilitada, planes: r.planes ?? [], actualizadoPor: r.actualizado_por, actualizadoEn: r.actualizado_en } : { ...VENTA_CERRADA };
+    },
+    async guardarVenta(v, por) {
+      await call("/manuales_venta?on_conflict=id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ id: 1, habilitada: v.habilitada, planes: v.planes, actualizado_por: por, actualizado_en: now() }),
+      });
+    },
+    async crearOrden(o) {
+      await call("/manuales_pagos", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ id: o.id, email: o.email, nombre: o.nombre, meses: o.meses, monto: o.monto, moneda: o.moneda }),
+      });
+    },
+    async marcarPreferencia(id, preferenciaId) {
+      await call(`/manuales_pagos?id=${eq(id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ preferencia_id: preferenciaId, actualizada: now() }) });
+    },
+    async getOrden(id) {
+      const rows = await json<OrdenRow[]>(`/manuales_pagos?id=${eq(id)}&select=${COLUMNAS_ORDEN}`);
+      return rows.length ? toOrden(rows[0]) : null;
+    },
+    async listarOrdenes(f) {
+      let q = `/manuales_pagos?select=${COLUMNAS_ORDEN}&order=creada.desc&limit=${f.limite}`;
+      if (f.email) q += `&email=${eq(f.email)}`;
+      if (f.estado) q += `&estado=${eq(f.estado)}`;
+      if (f.desde) q += `&creada=gte.${encodeURIComponent(f.desde)}`;
+      return (await json<OrdenRow[]>(q)).map(toOrden);
+    },
+    async aplicarPago(p) {
+      return json<ResultadoAplicar>("/rpc/manuales_aplicar_pago", {
+        method: "POST",
+        body: JSON.stringify({
+          p_orden: p.orden,
+          p_pago_id: p.pagoId,
+          p_estado_mp: p.estadoMp,
+          p_detalle_mp: p.detalleMp,
+          p_monto: p.monto,
+          p_moneda: p.moneda,
+          p_hoy: p.hoy,
+        }),
+      });
+    },
   };
 }
 
@@ -251,6 +391,8 @@ export function memoryStore(): ManualesStore {
   let cuenta: (CuentaTecnica & { turnoHasta: number }) | null = null;
   const estados = new Map<string, EstadoOauth>();
   const autorizados = new Map<string, Autorizado>();
+  let venta: ConfigVenta = { ...VENTA_CERRADA };
+  const ordenes = new Map<string, Orden>();
   const now = () => new Date().toISOString();
   return {
     async getCuenta() {
@@ -302,6 +444,83 @@ export function memoryStore(): ManualesStore {
       const cambios = Object.fromEntries(Object.entries(licencia).filter(([, v]) => v !== undefined));
       autorizados.set(email, { ...a, ...cambios });
       return true;
+    },
+    async getVenta() {
+      return { ...venta, planes: venta.planes.map((p) => ({ ...p })) };
+    },
+    async guardarVenta(v, por) {
+      venta = { habilitada: v.habilitada, planes: v.planes.map((p) => ({ ...p })), actualizadoPor: por, actualizadoEn: now() };
+    },
+    async crearOrden(o) {
+      if (ordenes.has(o.id)) throw new StoreError("La compra ya existe.");
+      ordenes.set(o.id, {
+        ...o,
+        estado: "pendiente",
+        preferenciaId: null,
+        pagoId: null,
+        estadoMp: null,
+        detalleMp: null,
+        creada: now(),
+        pagada: null,
+        venceAnterior: null,
+        venceNueva: null,
+        nota: null,
+      });
+    },
+    async marcarPreferencia(id, preferenciaId) {
+      const o = ordenes.get(id);
+      if (o) ordenes.set(id, { ...o, preferenciaId });
+    },
+    async getOrden(id) {
+      const o = ordenes.get(id);
+      return o ? { ...o } : null;
+    },
+    async listarOrdenes(f) {
+      return [...ordenes.values()]
+        .filter((o) => (!f.email || o.email === f.email) && (!f.estado || o.estado === f.estado) && (!f.desde || o.creada >= f.desde))
+        .sort((a, b) => b.creada.localeCompare(a.creada))
+        .slice(0, f.limite)
+        .map((o) => ({ ...o }));
+    },
+    async aplicarPago(p) {
+      // Same rules as manuales_aplicar_pago in supabase/manuales.sql.
+      const o = ordenes.get(p.orden);
+      if (!o) return { resultado: "no-existe" };
+      const cambiar = (c: Partial<Orden>) => ordenes.set(o.id, { ...o, ...c });
+      if (p.estadoMp === "refunded" || p.estadoMp === "charged_back") {
+        if (o.estado !== "aprobada" || o.pagoId !== p.pagoId) return { resultado: "sin-cambios" };
+        cambiar({ estado: "reembolsada", estadoMp: p.estadoMp, detalleMp: p.detalleMp });
+        return { resultado: "reembolsada", email: o.email };
+      }
+      if (p.estadoMp !== "approved") {
+        if (o.estado !== "pendiente") return { resultado: "sin-cambios" };
+        cambiar({ estadoMp: p.estadoMp, detalleMp: p.detalleMp });
+        return { resultado: "pendiente", email: o.email };
+      }
+      if (o.pagoId === p.pagoId) return { resultado: "ya-aplicada", email: o.email, vence: o.venceNueva };
+      if (o.estado !== "pendiente") {
+        cambiar({ nota: [o.nota, `Otro pago aprobado (${p.pagoId}) para esta compra: revísalo en Mercado Pago.`].filter(Boolean).join(" ") });
+        return { resultado: "duplicado", email: o.email };
+      }
+      const pagado = { pagoId: p.pagoId, estadoMp: p.estadoMp, detalleMp: p.detalleMp, pagada: now() };
+      if (p.monto < o.monto || p.moneda.toUpperCase() !== o.moneda.toUpperCase()) {
+        cambiar({ ...pagado, estado: "revisar", nota: `Se pagaron ${p.monto} ${p.moneda} y la compra era de ${o.monto} ${o.moneda}: no se aplicó la licencia.` });
+        return { resultado: "revisar", email: o.email };
+      }
+      const a = autorizados.get(o.email);
+      const periodo = periodoComprado(a ? a.vence : undefined, o.meses, p.hoy);
+      if (!periodo) {
+        cambiar({ ...pagado, estado: "aprobada", nota: "La persona ya tenía acceso sin vencimiento: no se cambió su licencia." });
+        return { resultado: "aplicada", email: o.email, vence: null };
+      }
+      autorizados.set(
+        o.email,
+        a
+          ? { ...a, nombre: a.nombre || o.nombre, licenciaMeses: o.meses, inicio: periodo.inicio, vence: periodo.vence }
+          : { email: o.email, nombre: o.nombre, agregadoPor: POR_PAGO, agregadoEn: now(), licenciaMeses: o.meses, inicio: periodo.inicio, vence: periodo.vence, suspendido: false }
+      );
+      cambiar({ ...pagado, estado: "aprobada", venceAnterior: a?.vence ?? null, venceNueva: periodo.vence });
+      return { resultado: "aplicada", email: o.email, vence: periodo.vence };
     },
   };
 }

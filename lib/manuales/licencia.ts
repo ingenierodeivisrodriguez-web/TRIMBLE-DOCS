@@ -69,3 +69,14 @@ export function fechaVisible(iso: string | null): string {
   const m = iso ? ISO.exec(iso) : null;
   return m ? `${m[3]}-${m[2]}-${m[1]}` : "";
 }
+
+/**
+ * The period a purchase of `meses` gives: a license still in force is
+ * extended from its last day; an expired one (or a new person, `vence`
+ * undefined) starts today. null when the license doesn't expire.
+ */
+export function periodoComprado(vence: string | null | undefined, meses: number, hoy: string): { inicio: string; vence: string } | null {
+  if (vence === null) return null;
+  const inicio = vence !== undefined && vence >= hoy ? vence : hoy;
+  return { inicio, vence: sumarMeses(inicio, meses) };
+}
