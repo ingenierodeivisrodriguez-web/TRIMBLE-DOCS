@@ -2,6 +2,9 @@ import { ApiError, createRequester, TokenSource } from "../propiedades/client";
 import { expiresSoon } from "../propiedades/token";
 import type { ArchivoResponse, AutorizadoInfo, BusquedaResponse, CarpetaResponse, EstadoManuales } from "./types";
 
+/** A license as the administrator sets it: 1-12 months from a date, up to a date, or without expiry. */
+export type LicenciaPedido = { meses: number; inicio?: string } | { vence: string; inicio?: string } | { sinVencimiento: true };
+
 export interface ManualesApi {
   /** Who the user is and what they can do (and, for administrators, the technical account). */
   estado(): Promise<EstadoManuales>;
@@ -10,8 +13,10 @@ export interface ManualesApi {
   /** Administrators: finishes the connection with the address Trimble sent the browser to. */
   completar(enlace: string): Promise<{ ok: boolean; titulo: string; texto: string }>;
   desconectar(): Promise<void>;
-  autorizados(): Promise<AutorizadoInfo[]>;
-  autorizar(texto: string): Promise<{ agregados: number; invalidos: string[] }>;
+  /** The authorized people, and "today" as the server counts licenses. */
+  autorizados(): Promise<{ hoy: string; autorizados: AutorizadoInfo[] }>;
+  autorizar(texto: string, licencia: LicenciaPedido): Promise<{ agregados: number; invalidos: string[] }>;
+  actualizarAutorizado(email: string, cambios: { licencia?: LicenciaPedido; suspendido?: boolean }): Promise<void>;
   quitarAutorizado(email: string): Promise<void>;
   carpeta(folderId?: string | null): Promise<CarpetaResponse>;
   buscar(q: string): Promise<BusquedaResponse>;
@@ -69,8 +74,11 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
     async desconectar() {
       await request("/admin/cuenta", send("DELETE"));
     },
-    autorizados: () => request<{ autorizados: AutorizadoInfo[] }>("/admin/autorizados").then((r) => r.autorizados),
-    autorizar: (texto) => request("/admin/autorizados", send("POST", { texto })),
+    autorizados: () => request("/admin/autorizados"),
+    autorizar: (texto, licencia) => request("/admin/autorizados", send("POST", { texto, licencia })),
+    async actualizarAutorizado(email, cambios) {
+      await request("/admin/autorizados", send("PATCH", { email, ...cambios }));
+    },
     async quitarAutorizado(email) {
       await request(`/admin/autorizados${q({ email })}`, send("DELETE"));
     },

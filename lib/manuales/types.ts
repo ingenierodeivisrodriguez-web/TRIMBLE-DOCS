@@ -1,3 +1,5 @@
+import type { EstadoLicencia } from "./licencia";
+
 // Shared by the "Manuales" API and its screen.
 
 export interface ItemManual {
@@ -70,6 +72,10 @@ export interface EstadoManuales {
   /** Administrator of the manager project: manages the account and who reads. */
   esAdmin: boolean;
   autorizado: boolean;
+  /** Why the user can't read, when they can't (and aren't an administrator). */
+  motivo: "sin-autorizacion" | "vencida" | "suspendida" | null;
+  /** The user's own license, when they are on the list. */
+  licencia: { estado: EstadoLicencia; vence: string | null; diasRestantes: number | null } | null;
   /** The technical account is connected (the manuals can be read). */
   disponible: boolean;
   /** Only for administrators. */
@@ -90,4 +96,13 @@ export interface AutorizadoInfo {
   nombre: string;
   agregadoPor: string | null;
   agregadoEn: string;
+  /** 1 to 12, or null (up to a chosen date, or without expiry). */
+  licenciaMeses: number | null;
+  /** ISO dates; `vence` is the last day with access (null: no expiry). */
+  inicio: string | null;
+  vence: string | null;
+  suspendido: boolean;
+  estado: EstadoLicencia;
+  /** Days left until `vence` (negative once expired). */
+  diasRestantes: number | null;
 }

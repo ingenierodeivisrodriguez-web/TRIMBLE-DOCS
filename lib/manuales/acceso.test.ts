@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import { beforeEach, describe, it } from "node:test";
-import { agregar, CuentaDeps, leerEmails, mantenerSesion, olvidarToken, puedeLeer, quitar, tokenTecnico } from "./acceso";
+import { actualizar, agregar, CuentaDeps, infoAutorizado, leerEmails, mantenerSesion, mensajeSinAcceso, olvidarToken, puedeLeer, quitar, tokenTecnico } from "./acceso";
+import { estadoLicencia, hoyIso, sumarMeses } from "./licencia";
 import { authorizeUrl, cifrar, descifrar, nuevoPkce, OauthConfig, TokenError, Tokens } from "./oauth";
 import { ManualesError } from "./service";
 import { memoryStore, ManualesStore } from "./store";
@@ -124,16 +125,76 @@ describe("personas autorizadas", () => {
     assert.deepEqual(r.invalidos, ["no-es-correo"]);
   });
 
-  it("solo lee quien está autorizado o administra el proyecto de manuales", async () => {
+  const HOY = "2026-10-07";
+
+  it("solo lee quien está autorizado con licencia vigente, o administra el proyecto de manuales", async () => {
     const store = memoryStore();
-    await agregar(store, "luis@empresa.com", "Ana");
-    assert.deepEqual(await puedeLeer(store, "LUIS@empresa.com", async () => false), { autorizado: true, esAdmin: false });
-    assert.deepEqual(await puedeLeer(store, "marta@empresa.com", async () => false), { autorizado: false, esAdmin: false });
-    assert.deepEqual(await puedeLeer(store, "admin@empresa.com", async () => true), { autorizado: false, esAdmin: true });
+    await agregar(store, { texto: "luis@empresa.com" }, "Ana", HOY); // 12 months by default
+    const luis = await puedeLeer(store, "LUIS@empresa.com", async () => false, HOY);
+    assert.equal(luis.autorizado, true);
+    assert.deepEqual(luis.licencia, { estado: "activa", vence: "2027-10-07", diasRestantes: 365 });
+    const marta = await puedeLeer(store, "marta@empresa.com", async () => false, HOY);
+    assert.deepEqual([marta.autorizado, marta.motivo], [false, "sin-autorizacion"]);
+    const admin = await puedeLeer(store, "admin@empresa.com", async () => true, HOY);
+    assert.deepEqual([admin.autorizado, admin.esAdmin, admin.motivo], [false, true, null]);
     await quitar(store, "luis@empresa.com");
-    assert.equal((await puedeLeer(store, "luis@empresa.com", async () => false)).autorizado, false);
+    assert.equal((await puedeLeer(store, "luis@empresa.com", async () => false, HOY)).autorizado, false);
     await falla(quitar(store, "luis@empresa.com"), "no-existe");
-    await falla(agregar(store, "   ", "Ana"), "parametro");
+    await falla(agregar(store, { texto: "   " }, "Ana", HOY), "parametro");
+  });
+
+  it("la licencia vence al terminar su último día, y luego dice desde cuándo", async () => {
+    const store = memoryStore();
+    await agregar(store, { texto: "luis@empresa.com", licencia: { meses: 1, inicio: "2026-09-07" } }, "Ana", HOY);
+    assert.equal((await puedeLeer(store, "luis@empresa.com", async () => false, "2026-10-07")).autorizado, true); // last day
+    const despues = await puedeLeer(store, "luis@empresa.com", async () => false, "2026-10-08");
+    assert.deepEqual([despues.autorizado, despues.motivo], [false, "vencida"]);
+    assert.match(mensajeSinAcceso(despues), /venció el 07-10-2026/);
+    // Renewed for 3 months from today.
+    await actualizar(store, { email: "luis@empresa.com", licencia: { meses: 3 } }, "2026-10-08");
+    const renovada = await puedeLeer(store, "luis@empresa.com", async () => false, "2026-10-08");
+    assert.deepEqual([renovada.autorizado, renovada.licencia?.vence], [true, "2027-01-08"]);
+  });
+
+  it("suspender corta el acceso aunque la licencia esté vigente; reactivar lo devuelve", async () => {
+    const store = memoryStore();
+    await agregar(store, { texto: "luis@empresa.com", licencia: { sinVencimiento: true } }, "Ana", HOY);
+    assert.equal((await puedeLeer(store, "luis@empresa.com", async () => false, HOY)).licencia?.estado, "sin-vencimiento");
+    await actualizar(store, { email: "luis@empresa.com", suspendido: true }, HOY);
+    const s1 = await puedeLeer(store, "luis@empresa.com", async () => false, HOY);
+    assert.deepEqual([s1.autorizado, s1.motivo], [false, "suspendida"]);
+    assert.match(mensajeSinAcceso(s1), /suspendido/);
+    await actualizar(store, { email: "luis@empresa.com", suspendido: false }, HOY);
+    assert.equal((await puedeLeer(store, "luis@empresa.com", async () => false, HOY)).autorizado, true);
+  });
+
+  it("valida la licencia: 1 a 12 meses, o una fecha que no sea anterior al inicio", async () => {
+    const store = memoryStore();
+    await falla(agregar(store, { texto: "a@x.com", licencia: { meses: 13 } }, "Ana", HOY), "parametro");
+    await falla(agregar(store, { texto: "a@x.com", licencia: { meses: 0 } }, "Ana", HOY), "parametro");
+    await falla(agregar(store, { texto: "a@x.com", licencia: { vence: "2026-02-30" } }, "Ana", HOY), "parametro");
+    await falla(agregar(store, { texto: "a@x.com", licencia: { vence: "2026-10-01", inicio: "2026-10-05" } }, "Ana", HOY), "parametro");
+    await agregar(store, { texto: "a@x.com", licencia: { vence: "2026-12-31" } }, "Ana", HOY);
+    const a = (await store.getAutorizado("a@x.com"))!;
+    assert.deepEqual([a.licenciaMeses, a.inicio, a.vence], [null, HOY, "2026-12-31"]);
+    assert.equal(infoAutorizado(a, HOY).diasRestantes, 85);
+    await falla(actualizar(store, { email: "nadie@x.com", suspendido: true }, HOY), "no-existe");
+  });
+});
+
+describe("fechas de las licencias", () => {
+  it("suma meses ajustando al último día del mes", () => {
+    assert.equal(sumarMeses("2026-01-31", 1), "2026-02-28");
+    assert.equal(sumarMeses("2028-01-31", 1), "2028-02-29");
+    assert.equal(sumarMeses("2026-10-07", 12), "2027-10-07");
+    assert.equal(sumarMeses("2026-11-15", 3), "2027-02-15");
+  });
+
+  it("marca por vencer en los últimos 15 días y usa el día de Colombia", () => {
+    assert.equal(estadoLicencia({ vence: "2026-10-20", suspendido: false }, "2026-10-07").estado, "por-vencer");
+    assert.equal(estadoLicencia({ vence: "2026-10-30", suspendido: false }, "2026-10-07").estado, "activa");
+    // 03:00 UTC on Oct 8 is still Oct 7 in Bogotá (UTC-5).
+    assert.equal(hoyIso(new Date("2026-10-08T03:00:00Z")), "2026-10-07");
   });
 });
 

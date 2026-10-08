@@ -2,9 +2,11 @@
 // (by e-mail) read them through the technical account, a Trimble Connect
 // user that is a member of "MANAGER PROJECT". Readers never need access to
 // that project; administrators of it manage the account and the list.
+import { EstadoLicencia, esFecha, estadoLicencia, fechaVisible, MAX_MESES, sumarMeses, vigente } from "./licencia";
 import { cifrar, descifrar, OauthConfig, TokenError, Tokens } from "./oauth";
 import { ManualesError } from "./service";
-import type { Autorizado, ManualesStore } from "./store";
+import type { Autorizado, Licencia, ManualesStore } from "./store";
+import type { AutorizadoInfo } from "./types";
 
 export const NO_AUTORIZADO =
   "No tiene acceso. Pide al administrador de los manuales que te autorice con tu correo de Trimble Connect.";
@@ -122,30 +124,105 @@ export function leerEmails(text: string): { emails: { email: string; nombre: str
   return { emails: [...emails.values()], invalidos };
 }
 
-/** Whether the caller can read the manuals: authorized by e-mail, or an administrator of the manager project. */
-export async function puedeLeer(store: ManualesStore, email: string | null, esAdmin: () => Promise<boolean>): Promise<{ autorizado: boolean; esAdmin: boolean }> {
-  const autorizado = email ? await store.estaAutorizado(email.toLowerCase()) : false;
+export type Motivo = "sin-autorizacion" | "vencida" | "suspendida";
+
+export interface Lectura {
+  /** Authorized with a license in force. */
+  autorizado: boolean;
+  esAdmin: boolean;
+  /** Why an authorized-looking person can't read (null when they can, or are administrators). */
+  motivo: Motivo | null;
+  licencia: { estado: EstadoLicencia; vence: string | null; diasRestantes: number | null } | null;
+}
+
+/**
+ * Whether the caller can read the manuals: authorized by e-mail with a
+ * license in force (not expired, not suspended), or an administrator of the
+ * manager project.
+ */
+export async function puedeLeer(store: ManualesStore, email: string | null, esAdmin: () => Promise<boolean>, hoy: string): Promise<Lectura> {
+  const a = email ? await store.getAutorizado(email.toLowerCase()) : null;
   const admin = await esAdmin().catch(() => false);
-  return { autorizado, esAdmin: admin };
+  if (!a) return { autorizado: false, esAdmin: admin, motivo: admin ? null : "sin-autorizacion", licencia: null };
+  const { estado, diasRestantes } = estadoLicencia(a, hoy);
+  const ok = vigente(estado);
+  return {
+    autorizado: ok,
+    esAdmin: admin,
+    motivo: ok || admin ? null : estado === "suspendida" ? "suspendida" : "vencida",
+    licencia: { estado, vence: a.vence, diasRestantes },
+  };
+}
+
+/** What a blocked person reads. */
+export function mensajeSinAcceso(l: Lectura): string {
+  if (l.motivo === "vencida") return `No tiene acceso: su licencia para leer los manuales venció el ${fechaVisible(l.licencia?.vence ?? null)}. Pida al administrador que la renueve.`;
+  if (l.motivo === "suspendida") return "No tiene acceso: su acceso a los manuales está suspendido. Pida al administrador que lo reactive.";
+  return NO_AUTORIZADO;
 }
 
 export function requireAdmin(esAdmin: boolean) {
   if (!esAdmin) throw new ManualesError("Solo los administradores del proyecto de manuales administran el acceso.", 403, "no-admin");
 }
 
-export async function agregar(store: ManualesStore, texto: unknown, por: string): Promise<{ agregados: number; invalidos: string[] }> {
+/**
+ * The license an administrator chose: { meses: 1..12, inicio? } (from
+ * `inicio`, today by default), { vence } (up to a date), or { sinVencimiento: true }.
+ */
+export function leerLicencia(body: unknown, hoy: string): Omit<Licencia, "suspendido"> {
+  const o = (body ?? {}) as { meses?: unknown; inicio?: unknown; vence?: unknown; sinVencimiento?: unknown };
+  if (o.sinVencimiento === true) return { licenciaMeses: null, inicio: null, vence: null };
+  if (o.inicio !== undefined && o.inicio !== null && !esFecha(o.inicio)) throw new ManualesError("La fecha de inicio no es válida.", 400, "parametro");
+  const inicio = (o.inicio as string | undefined) || hoy;
+  if (o.meses !== undefined && o.meses !== null) {
+    if (!Number.isInteger(o.meses) || (o.meses as number) < 1 || (o.meses as number) > MAX_MESES) {
+      throw new ManualesError(`La licencia debe ser de 1 a ${MAX_MESES} meses.`, 400, "parametro");
+    }
+    return { licenciaMeses: o.meses as number, inicio, vence: sumarMeses(inicio, o.meses as number) };
+  }
+  if (o.vence !== undefined && o.vence !== null) {
+    if (!esFecha(o.vence)) throw new ManualesError("La fecha de vencimiento no es válida.", 400, "parametro");
+    if (o.vence < inicio) throw new ManualesError("El vencimiento no puede ser antes del inicio.", 400, "parametro");
+    return { licenciaMeses: null, inicio, vence: o.vence };
+  }
+  throw new ManualesError("Indica la licencia: de 1 a 12 meses, hasta una fecha o sin vencimiento.", 400, "parametro");
+}
+
+export async function agregar(store: ManualesStore, body: unknown, por: string, hoy: string): Promise<{ agregados: number; invalidos: string[] }> {
+  const texto = (body as { texto?: unknown } | null)?.texto;
   if (typeof texto !== "string" || !texto.trim()) throw new ManualesError("Escribe uno o varios correos.", 400, "parametro");
   if (texto.length > 50_000) throw new ManualesError("Son demasiados correos de una vez.", 400, "parametro");
+  const licencia = leerLicencia((body as { licencia?: unknown }).licencia ?? { meses: MAX_MESES }, hoy);
   const { emails, invalidos } = leerEmails(texto);
   if (emails.length > 1000) throw new ManualesError("Máximo 1.000 correos de una vez.", 400, "parametro");
-  await store.agregarAutorizados(emails, por);
+  await store.agregarAutorizados(emails, por, { ...licencia, suspendido: false });
   return { agregados: emails.length, invalidos };
+}
+
+/** Changes a person's license ({ email, licencia? } with the same forms as above) or suspends / reactivates them ({ email, suspendido }). */
+export async function actualizar(store: ManualesStore, body: unknown, hoy: string): Promise<void> {
+  const o = (body ?? {}) as { email?: unknown; licencia?: unknown; suspendido?: unknown };
+  const email = typeof o.email === "string" ? normalizarEmail(o.email) : null;
+  if (!email) throw new ManualesError("Correo no válido.", 400, "parametro");
+  const cambios: Partial<Licencia> = {};
+  if (o.licencia !== undefined) Object.assign(cambios, leerLicencia(o.licencia, hoy));
+  if (o.suspendido !== undefined) {
+    if (typeof o.suspendido !== "boolean") throw new ManualesError("Estado no válido.", 400, "parametro");
+    cambios.suspendido = o.suspendido;
+  }
+  if (!Object.keys(cambios).length) throw new ManualesError("No hay cambios.", 400, "parametro");
+  if (!(await store.actualizarLicencia(email, cambios))) throw new ManualesError("Ese correo no está autorizado.", 404, "no-existe");
 }
 
 export async function quitar(store: ManualesStore, email: unknown): Promise<void> {
   const e = typeof email === "string" ? normalizarEmail(email) : null;
   if (!e) throw new ManualesError("Correo no válido.", 400, "parametro");
   if (!(await store.quitarAutorizado(e))) throw new ManualesError("Ese correo no estaba autorizado.", 404, "no-existe");
+}
+
+/** A person as the administration screen shows them, with their license's status today. */
+export function infoAutorizado(a: Autorizado, hoy: string): AutorizadoInfo {
+  return { ...a, ...estadoLicencia(a, hoy) };
 }
 
 export type { Autorizado };

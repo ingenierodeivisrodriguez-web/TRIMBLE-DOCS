@@ -17,7 +17,16 @@ export interface CuentaTecnica {
   renovadaEn: string;
 }
 
-export interface Autorizado {
+export interface Licencia {
+  /** 1 to 12, or null (up to a chosen date, or without expiry). */
+  licenciaMeses: number | null;
+  /** ISO dates; `vence` is the last day with access (null: no expiry). */
+  inicio: string | null;
+  vence: string | null;
+  suspendido: boolean;
+}
+
+export interface Autorizado extends Licencia {
   email: string;
   nombre: string;
   agregadoPor: string | null;
@@ -46,13 +55,52 @@ export interface ManualesStore {
   /** Returns and deletes a pending connection, if it hasn't expired. */
   consumirEstado(state: string): Promise<EstadoOauth | null>;
   listarAutorizados(): Promise<Autorizado[]>;
-  agregarAutorizados(lista: { email: string; nombre: string }[], por: string): Promise<void>;
+  /** Adds people (or re-adds them: their license is replaced). */
+  agregarAutorizados(lista: { email: string; nombre: string }[], por: string, licencia: Licencia): Promise<void>;
   quitarAutorizado(email: string): Promise<boolean>;
-  estaAutorizado(email: string): Promise<boolean>;
+  getAutorizado(email: string): Promise<Autorizado | null>;
+  /** False when the e-mail isn't authorized. */
+  actualizarLicencia(email: string, licencia: Partial<Licencia>): Promise<boolean>;
 }
 
 const SETUP_HINT =
   "Faltan las tablas de Manuales en Supabase: abre Supabase → SQL Editor y ejecuta una vez el archivo supabase/manuales.sql del repositorio.";
+const UPGRADE_HINT =
+  "Falta actualizar las tablas de Manuales para las licencias: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/manuales.sql (es seguro repetirlo; no borra datos).";
+
+interface AutorizadoRow {
+  email: string;
+  nombre: string;
+  agregado_por: string | null;
+  agregado_en: string;
+  licencia_meses: number | null;
+  inicio: string | null;
+  vence: string | null;
+  suspendido: boolean | null;
+}
+const COLUMNAS_AUTORIZADO = "email,nombre,agregado_por,agregado_en,licencia_meses,inicio,vence,suspendido";
+
+function toAutorizado(r: AutorizadoRow): Autorizado {
+  return {
+    email: r.email,
+    nombre: r.nombre,
+    agregadoPor: r.agregado_por,
+    agregadoEn: r.agregado_en,
+    licenciaMeses: r.licencia_meses,
+    inicio: r.inicio,
+    vence: r.vence,
+    suspendido: !!r.suspendido,
+  };
+}
+
+function licenciaRow(l: Partial<Licencia>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  if (l.licenciaMeses !== undefined) out.licencia_meses = l.licenciaMeses;
+  if (l.inicio !== undefined) out.inicio = l.inicio;
+  if (l.vence !== undefined) out.vence = l.vence;
+  if (l.suspendido !== undefined) out.suspendido = l.suspendido;
+  return out;
+}
 
 interface CuentaRow {
   refresh_cifrado: string;
@@ -83,6 +131,7 @@ function supabaseStore(): ManualesStore | null {
     });
     if (res.ok) return res;
     const body = await res.text().catch(() => "");
+    if (/licencia_meses|suspendido|\bvence\b|\binicio\b/.test(body) && /42703|PGRST204|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) throw new StoreError("Supabase rechazó la clave del servidor (SUPABASE_SERVICE_ROLE_KEY).");
     let message = "";
@@ -168,25 +217,31 @@ function supabaseStore(): ManualesStore | null {
       return r ? { state: r.state, verifier: r.verifier, redirectUri: r.redirect_uri, creadoPor: r.creado_por ?? "", expira: r.expira } : null;
     },
     async listarAutorizados() {
-      const rows = await json<{ email: string; nombre: string; agregado_por: string | null; agregado_en: string }[]>(
-        "/manuales_autorizados?select=email,nombre,agregado_por,agregado_en&order=email.asc&limit=5000"
-      );
-      return rows.map((r) => ({ email: r.email, nombre: r.nombre, agregadoPor: r.agregado_por, agregadoEn: r.agregado_en }));
+      const rows = await json<AutorizadoRow[]>(`/manuales_autorizados?select=${COLUMNAS_AUTORIZADO}&order=email.asc&limit=5000`);
+      return rows.map(toAutorizado);
     },
-    async agregarAutorizados(lista, por) {
+    async agregarAutorizados(lista, por, licencia) {
       if (!lista.length) return;
       await call("/manuales_autorizados?on_conflict=email", {
         method: "POST",
         headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify(lista.map((a) => ({ email: a.email, nombre: a.nombre, agregado_por: por, agregado_en: now() }))),
+        body: JSON.stringify(lista.map((a) => ({ email: a.email, nombre: a.nombre, agregado_por: por, agregado_en: now(), ...licenciaRow(licencia) }))),
       });
     },
     async quitarAutorizado(email) {
       const rows = await json<unknown[]>(`/manuales_autorizados?email=${eq(email)}`, { method: "DELETE", headers: { Prefer: "return=representation" } });
       return rows.length > 0;
     },
-    async estaAutorizado(email) {
-      const rows = await json<unknown[]>(`/manuales_autorizados?email=${eq(email)}&select=email`);
+    async getAutorizado(email) {
+      const rows = await json<AutorizadoRow[]>(`/manuales_autorizados?email=${eq(email)}&select=${COLUMNAS_AUTORIZADO}`);
+      return rows.length ? toAutorizado(rows[0]) : null;
+    },
+    async actualizarLicencia(email, licencia) {
+      const rows = await json<unknown[]>(`/manuales_autorizados?email=${eq(email)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify(licenciaRow(licencia)),
+      });
       return rows.length > 0;
     },
   };
@@ -231,14 +286,22 @@ export function memoryStore(): ManualesStore {
     async listarAutorizados() {
       return [...autorizados.values()].sort((a, b) => a.email.localeCompare(b.email));
     },
-    async agregarAutorizados(lista, por) {
-      for (const a of lista) autorizados.set(a.email, { email: a.email, nombre: a.nombre, agregadoPor: por, agregadoEn: now() });
+    async agregarAutorizados(lista, por, licencia) {
+      for (const a of lista) autorizados.set(a.email, { email: a.email, nombre: a.nombre, agregadoPor: por, agregadoEn: now(), ...licencia });
     },
     async quitarAutorizado(email) {
       return autorizados.delete(email);
     },
-    async estaAutorizado(email) {
-      return autorizados.has(email);
+    async getAutorizado(email) {
+      const a = autorizados.get(email);
+      return a ? { ...a } : null;
+    },
+    async actualizarLicencia(email, licencia) {
+      const a = autorizados.get(email);
+      if (!a) return false;
+      const cambios = Object.fromEntries(Object.entries(licencia).filter(([, v]) => v !== undefined));
+      autorizados.set(email, { ...a, ...cambios });
+      return true;
     },
   };
 }

@@ -4,6 +4,7 @@ import { CSSProperties, ReactNode, useCallback, useEffect, useState } from "reac
 import { formatBytes } from "../../lib/format";
 import { ApiError } from "../../lib/propiedades/client";
 import type { ManualesApi } from "../../lib/manuales/client";
+import { fechaVisible } from "../../lib/manuales/licencia";
 import { etiquetaTipo } from "../../lib/manuales/tipos";
 import type { BusquedaResponse, CarpetaResponse, EstadoManuales, ItemManual, ResultadoBusqueda } from "../../lib/manuales/types";
 import AdminAcceso from "./AdminAcceso";
@@ -63,7 +64,12 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
       <Bloqueado
         bloqueo={{
           code: "sin-acceso",
-          texto: `Pide al administrador de los manuales que te autorice${estado.usuario.email ? ` con tu correo ${estado.usuario.email}` : ""}.`,
+          texto:
+            estado.motivo === "vencida"
+              ? `Tu licencia para leer los manuales venció el ${fechaVisible(estado.licencia?.vence ?? null)}. Pide al administrador que la renueve.`
+              : estado.motivo === "suspendida"
+                ? "Tu acceso a los manuales está suspendido. Pide al administrador que lo reactive."
+                : `Pide al administrador de los manuales que te autorice${estado.usuario.email ? ` con tu correo ${estado.usuario.email}` : ""}.`,
         }}
         onReintentar={cargar}
       />
@@ -112,7 +118,8 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
       </div>
     );
   }
-  return <Biblioteca api={api} esAdmin={estado.esAdmin} pestanas={pestanas} />;
+  const hasta = !estado.esAdmin && estado.licencia?.vence ? ` · acceso hasta el ${fechaVisible(estado.licencia.vence)}` : "";
+  return <Biblioteca api={api} esAdmin={estado.esAdmin} pestanas={pestanas} extra={hasta} />;
 }
 
 function Cabecera({ subtitulo, pestanas, children }: { subtitulo: string; pestanas: ReactNode; children?: ReactNode }) {
@@ -127,7 +134,7 @@ function Cabecera({ subtitulo, pestanas, children }: { subtitulo: string; pestan
 }
 
 /** The manuals (read through the technical account): browse folders, search, and read the documents inline. */
-function Biblioteca({ api, esAdmin, pestanas }: { api: ManualesApi; esAdmin: boolean; pestanas: ReactNode }) {
+function Biblioteca({ api, esAdmin, pestanas, extra = "" }: { api: ManualesApi; esAdmin: boolean; pestanas: ReactNode; extra?: string }) {
   const [carpeta, setCarpeta] = useState<CarpetaResponse | null>(null);
   const [cargando, setCargando] = useState(true);
   const [bloqueo, setBloqueo] = useState<Bloqueo | null>(null);
@@ -257,7 +264,7 @@ function Biblioteca({ api, esAdmin, pestanas }: { api: ManualesApi; esAdmin: boo
 
   return (
     <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
-      <Cabecera subtitulo={`${b.projectName} › ${b.carpetaNombre} · solo lectura`} pestanas={pestanas}>
+      <Cabecera subtitulo={`${b.projectName} › ${b.carpetaNombre} · solo lectura${extra}`} pestanas={pestanas}>
         <form
           role="search"
           onSubmit={(e) => {

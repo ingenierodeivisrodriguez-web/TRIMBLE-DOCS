@@ -1,8 +1,9 @@
 "use client";
 
-import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
+import { CSSProperties, useState } from "react";
 import type { ManualesApi } from "../../lib/manuales/client";
-import type { AutorizadoInfo, EstadoManuales } from "../../lib/manuales/types";
+import type { EstadoManuales } from "../../lib/manuales/types";
+import Autorizados from "./Autorizados";
 
 function fecha(iso: string | null | undefined): string {
   if (!iso) return "";
@@ -26,26 +27,10 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
   const [ocupado, setOcupado] = useState("");
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
-  const [lista, setLista] = useState<AutorizadoInfo[] | null>(null);
-  const [texto, setTexto] = useState("");
-  const [filtro, setFiltro] = useState("");
-  const [quitando, setQuitando] = useState<string | null>(null);
   const [confirmarDesconexion, setConfirmarDesconexion] = useState(false);
   /** The sign-in was started and its return address must be pasted here (Trimble only returns to http://localhost). */
   const [esperandoRetorno, setEsperandoRetorno] = useState(false);
   const [retorno, setRetorno] = useState("");
-
-  const cargarLista = useCallback(async () => {
-    try {
-      setLista(await api.autorizados());
-    } catch (err) {
-      setError(message(err));
-    }
-  }, [api]);
-
-  useEffect(() => {
-    cargarLista();
-  }, [cargarLista]);
 
   async function conectar() {
     setError("");
@@ -101,37 +86,6 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
     }
   }
 
-  async function autorizar() {
-    setOcupado("Autorizando...");
-    setError("");
-    setAviso("");
-    try {
-      const r = await api.autorizar(texto);
-      setAviso(`${r.agregados} persona(s) autorizada(s).${r.invalidos.length ? ` No son correos válidos: ${r.invalidos.join(", ")}.` : ""}`);
-      setTexto(r.invalidos.join("\n"));
-      await cargarLista();
-    } catch (err) {
-      setError(message(err));
-    } finally {
-      setOcupado("");
-    }
-  }
-
-  async function quitar(email: string) {
-    setQuitando(null);
-    setError("");
-    try {
-      await api.quitarAutorizado(email);
-      setLista((l) => (l ? l.filter((a) => a.email !== email) : l));
-    } catch (err) {
-      setError(message(err));
-    }
-  }
-
-  const visibles = useMemo(() => {
-    const f = filtro.trim().toLowerCase();
-    return (lista ?? []).filter((a) => !f || a.email.includes(f) || a.nombre.toLowerCase().includes(f));
-  }, [lista, filtro]);
   const cuenta = admin.cuenta;
 
   return (
@@ -168,7 +122,7 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
                 {confirmarDesconexion ? (
                   <>
                     <span style={{ fontSize: 13, alignSelf: "center" }}>Nadie podrá leer los manuales hasta que conectes otra. ¿Desconectar?</span>
-                    <button type="button" style={{ ...secundario, color: "#8a1c14", borderColor: "#e5a29c" }} onClick={desconectar} disabled={!!ocupado}>
+                    <button type="button" style={{ ...secundario, color: "#8a1c14", border: "1px solid #e5a29c" }} onClick={desconectar} disabled={!!ocupado}>
                       Sí, desconectar
                     </button>
                     <button type="button" style={secundario} onClick={() => setConfirmarDesconexion(false)}>
@@ -176,7 +130,7 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
                     </button>
                   </>
                 ) : (
-                  <button type="button" style={{ ...secundario, color: "#8a1c14", borderColor: "#e5a29c" }} onClick={() => setConfirmarDesconexion(true)} disabled={!!ocupado}>
+                  <button type="button" style={{ ...secundario, color: "#8a1c14", border: "1px solid #e5a29c" }} onClick={() => setConfirmarDesconexion(true)} disabled={!!ocupado}>
                     Desconectar
                   </button>
                 )}
@@ -229,72 +183,7 @@ export default function AdminAcceso({ api, estado, onCambio }: { api: ManualesAp
           )}
         </section>
 
-        <section style={tarjeta}>
-          <h2 style={h2}>Personas autorizadas</h2>
-          <p style={p}>
-            Pueden leer los manuales desde cualquier proyecto donde esté instalada la app, iniciando sesión en Trimble Connect con ese correo. Los
-            administradores de MANAGER PROJECT siempre pueden.
-          </p>
-          <label style={{ display: "block", fontSize: 13, color: "var(--tc-gray-500)", marginBottom: 4 }} htmlFor="manuales-correos">
-            Correos (separados por coma, punto y coma o en líneas; admite &quot;Nombre &lt;correo&gt;&quot;)
-          </label>
-          <textarea
-            id="manuales-correos"
-            value={texto}
-            onChange={(e) => setTexto(e.target.value)}
-            rows={3}
-            placeholder="ana@tuempresa.com, Luis Gómez <luis@contratista.com>"
-            style={{ width: "100%", boxSizing: "border-box", border: "1px solid var(--tc-gray-300)", borderRadius: 6, padding: 8, fontSize: 14, fontFamily: "inherit" }}
-          />
-          <div style={{ marginTop: 8 }}>
-            <button type="button" style={primario} onClick={autorizar} disabled={!!ocupado || !texto.trim()}>
-              Autorizar
-            </button>
-          </div>
-
-          <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18, marginBottom: 6 }}>
-            <strong style={{ flex: 1 }}>{lista ? `${lista.length} persona(s) autorizada(s)` : "Cargando..."}</strong>
-            <input
-              type="search"
-              value={filtro}
-              onChange={(e) => setFiltro(e.target.value)}
-              placeholder="Filtrar"
-              aria-label="Filtrar personas"
-              style={{ border: "1px solid var(--tc-gray-300)", borderRadius: 4, padding: "5px 8px", fontSize: 13, fontFamily: "inherit" }}
-            />
-          </div>
-          <div style={{ border: "1px solid #dfe4ea", borderRadius: 6, overflow: "hidden", background: "#fff" }}>
-            {visibles.map((a) => (
-              <div key={a.email} style={{ display: "flex", alignItems: "center", gap: 10, padding: "8px 10px", borderBottom: "1px solid #eef1f5", fontSize: 14 }}>
-                <span style={{ flex: 1, minWidth: 0 }}>
-                  <span style={{ display: "block", overflow: "hidden", textOverflow: "ellipsis" }}>
-                    {a.nombre ? `${a.nombre} · ` : ""}
-                    {a.email}
-                  </span>
-                  <span style={{ display: "block", fontSize: 12, color: "var(--tc-gray-500)" }}>
-                    Autorizado el {fecha(a.agregadoEn)}
-                    {a.agregadoPor ? ` por ${a.agregadoPor}` : ""}
-                  </span>
-                </span>
-                {quitando === a.email ? (
-                  <>
-                    <button type="button" style={{ ...secundario, color: "#8a1c14", borderColor: "#e5a29c" }} onClick={() => quitar(a.email)}>
-                      Quitar acceso
-                    </button>
-                    <button type="button" style={secundario} onClick={() => setQuitando(null)}>
-                      Cancelar
-                    </button>
-                  </>
-                ) : (
-                  <button type="button" style={secundario} onClick={() => setQuitando(a.email)}>
-                    Quitar
-                  </button>
-                )}
-              </div>
-            ))}
-            {lista && visibles.length === 0 && <p style={{ ...p, padding: 12, color: "var(--tc-gray-500)" }}>{lista.length ? "Nadie coincide con el filtro." : "Todavía no hay personas autorizadas."}</p>}
-          </div>
-        </section>
+        <Autorizados api={api} />
         {ocupado && <p style={{ ...p, color: "var(--tc-blue-700)" }}>{ocupado}</p>}
       </div>
     </div>

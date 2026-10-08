@@ -13,7 +13,8 @@ import {
   resolveProjectBaseUrl,
   TrimbleApiError,
 } from "../trimbleApi";
-import { CuentaDeps, NO_AUTORIZADO, puedeLeer, requireAdmin, tokenTecnico } from "./acceso";
+import { CuentaDeps, mensajeSinAcceso, puedeLeer, requireAdmin, tokenTecnico } from "./acceso";
+import { hoyIso } from "./licencia";
 import { ConfigManuales, configManuales } from "./config";
 import type { ConexionDeps } from "./conexion";
 import { canjearCodigo, oauthConfig, renovar, revocar } from "./oauth";
@@ -41,6 +42,11 @@ export function cuentaDeps(): CuentaDeps {
     esperar: (ms) => new Promise((r) => setTimeout(r, ms)),
     ahora: () => Date.now(),
   };
+}
+
+/** Today, in the company's time zone (licenses expire at the end of their last day there). */
+export function hoy(): string {
+  return hoyIso(new Date(), process.env.MANUALES_ZONA?.trim() || "America/Bogota");
 }
 
 function requireConfig(): ConfigManuales {
@@ -140,8 +146,8 @@ const abiertas = new Map<string, { abierta: Abierta; expiresAt: number }>();
  */
 export function handleLector(req: NextRequest, run: (ctx: Lectura) => Promise<Response>): Promise<Response> {
   return handle(req, async (ctx) => {
-    const { autorizado, esAdmin } = await puedeLeer(ctx.store, ctx.persona.email, async () => ctx.persona.esAdmin);
-    if (!autorizado && !esAdmin) throw new ManualesError(NO_AUTORIZADO, 403, "no-autorizado");
+    const lectura = await puedeLeer(ctx.store, ctx.persona.email, async () => ctx.persona.esAdmin, hoy());
+    if (!lectura.autorizado && !lectura.esAdmin) throw new ManualesError(mensajeSinAcceso(lectura), 403, "no-autorizado");
     const tc = tcCon(await tokenTecnico(ctx.store, cuentaDeps()));
     const key = `${ctx.cfg.projectId}:${ctx.cfg.folderId ?? ""}`;
     const hit = abiertas.get(key);

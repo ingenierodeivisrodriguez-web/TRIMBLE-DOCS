@@ -36,6 +36,13 @@ create table if not exists public.manuales_autorizados (
   agregado_en  timestamptz not null default now()
 );
 
+-- Licencia de cada persona: de `inicio` por `licencia_meses` (1 a 12) hasta `vence`
+-- (último día con acceso; null = sin vencimiento), y si está suspendida.
+alter table public.manuales_autorizados add column if not exists licencia_meses integer check (licencia_meses between 1 and 12);
+alter table public.manuales_autorizados add column if not exists inicio date;
+alter table public.manuales_autorizados add column if not exists vence date;
+alter table public.manuales_autorizados add column if not exists suspendido boolean not null default false;
+
 -- Toma el turno para renovar la sesión de la cuenta técnica (true si lo obtuvo).
 create or replace function public.manuales_tomar_turno(p_segundos integer)
 returns boolean

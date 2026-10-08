@@ -1273,7 +1273,27 @@ acceso"**, donde:
 - conectan la cuenta técnica: un inicio de sesión de Trimble en una pestaña
   nueva; la sesión se guarda **cifrada** y se renueva sola;
 - autorizan o quitan personas, pegando varios correos a la vez, incluso con
-  la forma `Nombre <correo>`.
+  la forma `Nombre <correo>`;
+- dan a cada persona una **licencia**: de 1 a 12 meses desde una fecha, hasta
+  una fecha elegida, o sin vencimiento.
+
+**Licencias.** La fecha de vencimiento es el último día con acceso, contado
+en hora de Colombia (`MANUALES_ZONA` cambia la zona).
+
+| Estado | Cuándo |
+|---|---|
+| Activa | La licencia está vigente |
+| Por vencer | Le quedan 15 días o menos |
+| Vencida | Pasó su último día |
+| Suspendida | El administrador la suspendió, aunque siga vigente |
+| Sin vencimiento | No tiene fecha de fin |
+
+En cada persona, el botón **Licencia** la cambia o renueva: si sigue
+vigente, la renovación empieza al terminar la actual, y si venció, empieza
+hoy. **Suspender** y **Reactivar** cortan y devuelven el acceso sin perder la
+licencia. Quien tiene la licencia vencida o suspendida ve "No tiene acceso"
+con el motivo y la fecha. La lista muestra cuántas personas hay en cada
+estado y se puede filtrar por estado.
 
 Los documentos se suben y actualizan en MANAGER PROJECT como siempre, y Manuales
 muestra siempre la versión actual.
@@ -1355,7 +1375,7 @@ carpeta o proyecto.
 | `POST /api/manuales/admin/conectar` | URL de inicio de sesión para conectar la cuenta técnica (administradores) |
 | `POST /api/manuales/admin/completar` | `{ enlace }`: la dirección de `http://localhost/?code=…&state=…` pegada por el administrador; completa la conexión |
 | `DELETE /api/manuales/admin/cuenta` | Desconectar la cuenta técnica (revoca su sesión) |
-| `GET` / `POST` / `DELETE /api/manuales/admin/autorizados` | Listar, autorizar (`{ texto }` con correos) o quitar (`?email=`) personas |
+| `GET` / `POST` / `PATCH` / `DELETE /api/manuales/admin/autorizados` | Listar (con el estado de cada licencia), autorizar (`{ texto, licencia }`), cambiar la licencia o suspender/reactivar (`{ email, licencia?, suspendido? }`) o quitar (`?email=`). La licencia es `{ meses: 1-12, inicio? }`, `{ vence, inicio? }` o `{ sinVencimiento: true }` |
 | `GET /api/manuales/oauth/callback` | Vuelta automática del inicio de sesión, si esa URL está registrada (`MANUALES_REDIRECT_URI`). Sin token: la valida el `state` de un solo uso |
 | `GET /api/manuales/mantener` | Tarea diaria que mantiene viva la sesión |
 
