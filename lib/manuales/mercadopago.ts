@@ -3,6 +3,7 @@
 // our order id as `external_reference`. Credentials only come from Vercel's
 // environment variables (MERCADOPAGO_ACCESS_TOKEN, MERCADOPAGO_WEBHOOK_SECRET).
 import { createHmac, timingSafeEqual } from "node:crypto";
+import type { Cobro, Pasarela, PagoPasarela } from "./pasarelas";
 import { ManualesError } from "./service";
 
 const API = "https://api.mercadopago.com";
@@ -30,39 +31,10 @@ export function mpConfig(): MpConfig | null {
   return { accessToken, webhookSecret: process.env.MERCADOPAGO_WEBHOOK_SECRET?.trim() || null, prueba: accessToken.startsWith("TEST-") };
 }
 
-/** A payment as Mercado Pago reports it. */
-export interface PagoMp {
-  id: string;
-  /** approved, pending, in_process, rejected, cancelled, refunded, charged_back... */
-  estado: string;
-  detalle: string;
-  /** Our order id. */
-  referencia: string | null;
-  monto: number;
-  moneda: string;
-  aprobado: string | null;
-}
-
-export interface NuevaPreferencia {
-  referencia: string;
-  titulo: string;
-  descripcion: string;
-  monto: number;
-  moneda: string;
-  /** Where the buyer lands after paying (https), and where Mercado Pago notifies (null on localhost). */
-  retorno: string;
-  notificacion: string | null;
-}
-
-export interface Mp {
+/** Mercado Pago's statuses are already the common vocabulary of PagoPasarela. */
+export interface Mp extends Pasarela {
   /** Whose credentials these are (and whether it is a test account). */
   cuenta(): Promise<CuentaMp>;
-  /** The checkout for an order; `url` is where the buyer pays. */
-  crearPreferencia(p: NuevaPreferencia): Promise<{ id: string; url: string }>;
-  /** null when Mercado Pago doesn't know that payment. */
-  pago(id: string): Promise<PagoMp | null>;
-  /** The payments made for an order (newest first). */
-  buscarPagos(referencia: string): Promise<PagoMp[]>;
 }
 
 interface PagoRaw {
@@ -72,10 +44,9 @@ interface PagoRaw {
   external_reference?: string | null;
   transaction_amount?: number;
   currency_id?: string;
-  date_approved?: string | null;
 }
 
-function toPago(r: PagoRaw): PagoMp {
+function toPago(r: PagoRaw): PagoPasarela {
   return {
     id: String(r.id),
     estado: r.status ?? "",
@@ -83,7 +54,6 @@ function toPago(r: PagoRaw): PagoMp {
     referencia: r.external_reference || null,
     monto: Number(r.transaction_amount ?? 0),
     moneda: r.currency_id ?? "",
-    aprobado: r.date_approved ?? null,
   };
 }
 
@@ -115,6 +85,8 @@ export function mercadoPago(cfg: MpConfig, fetchImpl: typeof fetch = fetch): Mp 
   }
 
   return {
+    id: "mercadopago",
+    prueba: cfg.prueba,
     async cuenta() {
       const res = await call("/users/me");
       if (res.status === 404) throw new ManualesError("Mercado Pago no reconoce la cuenta de las credenciales.", 502, "mercadopago-credenciales");
@@ -126,7 +98,7 @@ export function mercadoPago(cfg: MpConfig, fetchImpl: typeof fetch = fetch): Mp 
         prueba: cfg.prueba || (r.tags ?? []).includes("test_user"),
       };
     },
-    async crearPreferencia(p) {
+    async crearCobro(p) {
       const https = p.retorno.startsWith("https://");
       const body = {
         items: [{ id: p.referencia, title: p.titulo, description: p.descripcion, quantity: 1, currency_id: p.moneda, unit_price: p.monto }],

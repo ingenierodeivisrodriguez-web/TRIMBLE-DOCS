@@ -126,7 +126,7 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
   if (vista === "ventas" && estado.esAdmin) {
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
-        <Cabecera subtitulo="Venta de licencias con Mercado Pago" pestanas={pestanas} />
+        <Cabecera subtitulo="Venta de licencias en línea (Mercado Pago y Wompi)" pestanas={pestanas} />
         <Ventas api={api} />
       </div>
     );

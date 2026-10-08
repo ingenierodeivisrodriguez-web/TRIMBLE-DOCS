@@ -1,4 +1,5 @@
 import { ApiError, createRequester, TokenSource } from "../propiedades/client";
+import type { IdPasarela } from "./pasarelas";
 import { expiresSoon } from "../propiedades/token";
 import type {
   ArchivoResponse,
@@ -29,16 +30,16 @@ export interface ManualesApi {
   autorizar(texto: string, licencia: LicenciaPedido): Promise<{ agregados: number; invalidos: string[] }>;
   actualizarAutorizado(email: string, cambios: { licencia?: LicenciaPedido; suspendido?: boolean }): Promise<void>;
   quitarAutorizado(email: string): Promise<void>;
-  /** Starts the purchase of a license of `meses` for the user's own e-mail (pay it at the returned `url`). */
-  comprar(meses: number): Promise<CompraIniciada>;
-  /** How the user's purchase is going (also checked against Mercado Pago while pending). */
+  /** Starts the purchase of a license of `meses` for the user's own e-mail with a gateway (pay it at the returned `url`). */
+  comprar(meses: number, pasarela: IdPasarela): Promise<CompraIniciada>;
+  /** How the user's purchase is going (also checked against its gateway while pending). */
   compra(orden: string): Promise<EstadoCompra>;
-  /** Administrators: online sales and how Mercado Pago is set up. */
+  /** Administrators: online sales and how Mercado Pago and Wompi are set up. */
   venta(): Promise<ConfigVentaInfo>;
   guardarVenta(v: { habilitada: boolean; planes: Plan[] }): Promise<void>;
   /** Administrators: the purchases, newest first. */
   pagos(): Promise<{ hoy: string; ordenes: Orden[] }>;
-  /** Administrators: checks a pending purchase against Mercado Pago now. */
+  /** Administrators: checks a pending purchase against its gateway now. */
   verificarPago(orden: string): Promise<Orden>;
   carpeta(folderId?: string | null): Promise<CarpetaResponse>;
   buscar(q: string): Promise<BusquedaResponse>;
@@ -104,7 +105,7 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
     async quitarAutorizado(email) {
       await request(`/admin/autorizados${q({ email })}`, send("DELETE"));
     },
-    comprar: (meses) => request("/pagos", send("POST", { meses })),
+    comprar: (meses, pasarela) => request("/pagos", send("POST", { meses, pasarela })),
     compra: (orden) => request(`/pagos/orden${q({ id: orden })}`),
     venta: () => request("/admin/venta"),
     async guardarVenta(v) {

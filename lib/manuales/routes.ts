@@ -20,6 +20,8 @@ import type { ConexionDeps } from "./conexion";
 import { canjearCodigo, oauthConfig, renovar, revocar } from "./oauth";
 import { CuentaMp, mercadoPago, Mp, MpConfig, mpConfig } from "./mercadopago";
 import type { UrlsPago } from "./pagos";
+import type { IdPasarela, Pasarela, Pasarelas } from "./pasarelas";
+import { wompi, WompiConfig, wompiConfig } from "./wompi";
 import { Abierta, abrirBiblioteca, ManualesError, Tc } from "./service";
 import { ManualesStore, manualesStore } from "./store";
 
@@ -236,9 +238,14 @@ export function urlPublica(req: NextRequest): string {
   return process.env.MANUALES_URL_PUBLICA?.trim().replace(/\/+$/, "") || req.nextUrl.origin;
 }
 
-/** Where buyers come back from Mercado Pago, and where it notifies payments (only to a public https address). */
-export function urlsPago(req: NextRequest): UrlsPago {
+/**
+ * Where buyers come back from each gateway, and where it notifies payments:
+ * Mercado Pago is told in each checkout (only a public https address);
+ * Wompi's events URL is set in its dashboard.
+ */
+export function urlsPago(req: NextRequest, pasarela: IdPasarela): UrlsPago {
   const base = urlPublica(req);
+  if (pasarela === "wompi") return { retorno: `${base}/api/manuales/pagos/retorno/wompi`, notificacion: null };
   return {
     retorno: `${base}/api/manuales/pagos/retorno`,
     notificacion: base.startsWith("https://") ? `${base}/api/manuales/pagos/webhook?source_news=webhooks` : null,
@@ -259,4 +266,28 @@ export async function cuentaMercadoPago(mp: { cfg: MpConfig; mp: Mp }): Promise<
 export function mercadoPagoDe(): { cfg: MpConfig; mp: Mp } | null {
   const cfg = mpConfig();
   return cfg ? { cfg, mp: mercadoPago(cfg) } : null;
+}
+
+/** Wompi with Vercel's keys, or null when they aren't set. */
+export function wompiDe(): { cfg: WompiConfig; w: Pasarela } | null {
+  const cfg = wompiConfig();
+  return cfg ? { cfg, w: wompi(cfg) } : null;
+}
+
+/** The gateways configured in Vercel. */
+export function pasarelasDe(): Pasarelas {
+  return { mercadopago: mercadoPagoDe()?.mp, wompi: wompiDe()?.w };
+}
+
+/**
+ * The gateways configured and whether each takes test payments. Mercado
+ * Pago's test credentials look like the real ones, so its account is asked.
+ */
+export async function pasarelasConModo(): Promise<{ id: IdPasarela; prueba: boolean }[]> {
+  const out: { id: IdPasarela; prueba: boolean }[] = [];
+  const mp = mercadoPagoDe();
+  if (mp) out.push({ id: "mercadopago", prueba: mp.cfg.prueba || ((await cuentaMercadoPago(mp).catch(() => null))?.prueba ?? false) });
+  const w = wompiDe();
+  if (w) out.push({ id: "wompi", prueba: w.cfg.prueba });
+  return out;
 }

@@ -3,6 +3,7 @@
 import { CSSProperties, useCallback, useEffect, useRef, useState } from "react";
 import type { ManualesApi } from "../../lib/manuales/client";
 import { fechaVisible, hoyIso, periodoComprado } from "../../lib/manuales/licencia";
+import { IdPasarela, NOMBRE_PASARELA } from "../../lib/manuales/pasarelas";
 import { etiquetaMeses, pesos } from "../../lib/manuales/textos";
 import type { CompraIniciada, EstadoCompra, VentaPublica } from "../../lib/manuales/types";
 
@@ -14,10 +15,16 @@ function message(err: unknown): string {
 const CADA_MS = 5_000;
 const HASTA_MS = 30 * 60 * 1000;
 
+/** How each gateway's button looks, and what it takes. */
+const BOTONES: Record<IdPasarela, { fondo: string; borde: string; medios: string }> = {
+  mercadopago: { fondo: "#009ee3", borde: "#0089c7", medios: "Tarjetas, PSE, Efecty" },
+  wompi: { fondo: "#2c2a29", borde: "#000", medios: "Nequi, PSE, Bancolombia, tarjetas" },
+};
+
 /**
- * Buying (or renewing) the license to read the manuals: pick a plan, pay it
- * in Mercado Pago's tab, and this screen opens the manuals by itself once
- * Mercado Pago approves the payment.
+ * Buying (or renewing) the license to read the manuals: pick a plan and a
+ * gateway (Mercado Pago or Wompi), pay in the gateway's tab, and this screen
+ * opens the manuals by itself once the payment is approved.
  */
 export default function Comprar({
   api,
@@ -37,7 +44,7 @@ export default function Comprar({
   const [meses, setMeses] = useState(venta.planes[0]?.meses ?? 1);
   const [compra, setCompra] = useState<CompraIniciada | null>(null);
   const [seguimiento, setSeguimiento] = useState<EstadoCompra | null>(null);
-  const [ocupado, setOcupado] = useState(false);
+  const [ocupado, setOcupado] = useState<IdPasarela | null>(null);
   const [error, setError] = useState("");
   const [bloqueada, setBloqueada] = useState(false);
   const [vencido, setVencido] = useState(false);
@@ -46,15 +53,15 @@ export default function Comprar({
   const plan = venta.planes.find((p) => p.meses === meses) ?? venta.planes[0];
   const previsto = plan ? periodoComprado(vence, plan.meses, hoyIso())?.vence ?? null : null;
 
-  async function pagar() {
+  async function pagar(pasarela: IdPasarela) {
     if (!plan) return;
     setError("");
     setBloqueada(false);
     // Opened on the click itself so the browser doesn't block it; filled once the checkout exists.
     const ventana = window.open("", "_blank");
-    setOcupado(true);
+    setOcupado(pasarela);
     try {
-      const c = await api.comprar(plan.meses);
+      const c = await api.comprar(plan.meses, pasarela);
       setCompra(c);
       setSeguimiento(null);
       setVencido(false);
@@ -65,7 +72,7 @@ export default function Comprar({
       ventana?.close();
       setError(message(err));
     } finally {
-      setOcupado(false);
+      setOcupado(null);
     }
   }
 
@@ -89,7 +96,7 @@ export default function Comprar({
       }
       consultar();
     }, CADA_MS);
-    // Coming back from Mercado Pago's tab: ask right away.
+    // Coming back from the gateway's tab: ask right away.
     const alVolver = () => {
       if (document.visibilityState === "visible") consultar();
     };
@@ -130,25 +137,25 @@ export default function Comprar({
   }
 
   if (compra) {
-    const rechazado = seguimiento?.estadoMp === "rejected" || seguimiento?.estadoMp === "cancelled";
+    const rechazado = seguimiento?.estadoPago === "rejected" || seguimiento?.estadoPago === "cancelled";
     return (
       <div style={caja}>
-        <p style={titulo}>Completa el pago en Mercado Pago</p>
+        <p style={titulo}>Completa el pago en {NOMBRE_PASARELA[compra.pasarela]}</p>
         <p style={texto}>
-          {etiquetaMeses(compra.meses)} por <strong>{pesos(compra.monto, compra.moneda)}</strong>. Esta pantalla se actualiza sola cuando Mercado Pago
-          aprueba el pago{compra.vence ? `, y tendrás acceso hasta el ${fechaVisible(compra.vence)}` : ""}.
+          {etiquetaMeses(compra.meses)} por <strong>{pesos(compra.monto, compra.moneda)}</strong>. Esta pantalla se actualiza sola cuando{" "}
+          {NOMBRE_PASARELA[compra.pasarela]} aprueba el pago{compra.vence ? `, y tendrás acceso hasta el ${fechaVisible(compra.vence)}` : ""}.
         </p>
         {bloqueada && <p style={{ ...texto, color: "#8a5300" }}>El navegador no abrió la pestaña de pago: ábrela con el botón.</p>}
         <p style={{ ...texto, fontWeight: 600, color: rechazado ? "#8a1c14" : "var(--tc-blue-700)" }} aria-live="polite">
           {vencido
             ? "Dejamos de esperar el pago en esta pantalla. Si ya pagaste, tu acceso se activará solo: vuelve a abrir Manuales en unos minutos."
-            : seguimiento?.estadoMp
-              ? `${seguimiento.texto}${rechazado ? ". Puedes intentarlo de nuevo en la pestaña de Mercado Pago, con otro medio de pago." : "."}`
+            : seguimiento?.estadoPago
+              ? `${seguimiento.texto}${rechazado ? `. Puedes intentarlo de nuevo en la pestaña de ${NOMBRE_PASARELA[compra.pasarela]}, con otro medio de pago, o elegir otra forma de pago.` : "."}`
               : "Esperando el pago..."}
         </p>
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
           <a href={compra.url} target="_blank" rel="noreferrer" style={{ ...primario, textDecoration: "none" }}>
-            {bloqueada ? "Pagar con Mercado Pago" : "Abrir Mercado Pago de nuevo"}
+            {bloqueada ? `Pagar con ${NOMBRE_PASARELA[compra.pasarela]}` : `Abrir ${NOMBRE_PASARELA[compra.pasarela]} de nuevo`}
           </a>
           <button type="button" style={secundario} onClick={consultar}>
             Ya pagué
@@ -161,7 +168,7 @@ export default function Comprar({
               setSeguimiento(null);
             }}
           >
-            Elegir otro plan
+            Elegir otro plan o medio de pago
           </button>
         </div>
       </div>
@@ -198,12 +205,32 @@ export default function Comprar({
       </div>
       {previsto && <p style={{ ...texto, fontSize: 13 }}>Tendrás acceso hasta el {fechaVisible(previsto)}.</p>}
       {error && <p style={{ ...texto, color: "#8a1c14" }}>{error}</p>}
-      <button type="button" style={{ ...primario, background: "#009ee3", border: "1px solid #0089c7" }} onClick={pagar} disabled={ocupado}>
-        {ocupado ? "Preparando el pago..." : `Pagar ${plan ? pesos(plan.precio, venta.moneda) : ""} con Mercado Pago`}
-      </button>
+      {plan && <p style={{ ...texto, fontWeight: 600, marginBottom: 6 }}>Pagar {pesos(plan.precio, venta.moneda)} con:</p>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap", justifyContent: "center" }}>
+        {venta.pasarelas.map((p) => {
+          const b = BOTONES[p.id];
+          return (
+            <button
+              key={p.id}
+              type="button"
+              style={{ ...primario, background: b.fondo, border: `1px solid ${b.borde}`, flex: "1 1 170px", maxWidth: 240, opacity: ocupado && ocupado !== p.id ? 0.6 : 1 }}
+              onClick={() => pagar(p.id)}
+              disabled={!!ocupado}
+            >
+              <span style={{ display: "block", fontSize: 15 }}>{ocupado === p.id ? "Preparando el pago..." : p.nombre}</span>
+              <span style={{ display: "block", fontSize: 11.5, fontWeight: 400, opacity: 0.9 }}>{b.medios}</span>
+            </button>
+          );
+        })}
+      </div>
       <p style={{ ...texto, fontSize: 12, color: "var(--tc-gray-500)", marginTop: 8, marginBottom: 0 }}>
-        El pago se hace en Mercado Pago (tarjeta, PSE, efectivo...). Tu acceso se activa solo con tu correo de Trimble Connect al aprobarse.
-        {venta.prueba ? " Modo de prueba: usa las tarjetas de prueba de Mercado Pago." : ""}
+        El pago se hace en la página de la pasarela que elijas. Tu acceso se activa solo, con tu correo de Trimble Connect, al aprobarse el pago.
+        {venta.pasarelas.some((p) => p.prueba)
+          ? ` Modo de prueba (${venta.pasarelas
+              .filter((p) => p.prueba)
+              .map((p) => p.nombre)
+              .join(", ")}): los pagos son simulados.`
+          : ""}
       </p>
     </div>
   );

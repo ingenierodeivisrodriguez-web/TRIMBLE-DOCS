@@ -3,7 +3,8 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import type { ManualesApi } from "../../lib/manuales/client";
 import { fechaVisible, MAX_MESES } from "../../lib/manuales/licencia";
-import { ESTADO_ORDEN_LABELS, etiquetaMeses, pesos, textoEstadoMp } from "../../lib/manuales/textos";
+import { NOMBRE_PASARELA } from "../../lib/manuales/pasarelas";
+import { ESTADO_ORDEN_LABELS, etiquetaMeses, pesos, textoEstadoPago } from "../../lib/manuales/textos";
 import type { ConfigVentaInfo, EstadoOrden, Orden, Plan } from "../../lib/manuales/types";
 
 function message(err: unknown): string {
@@ -38,9 +39,9 @@ function precioDe(texto: string): number | null {
 }
 
 /**
- * For administrators: online sales of licenses with Mercado Pago (open or
- * closed, and the plans on sale) and the purchases, each applied by itself
- * to the buyer's license when Mercado Pago approves it.
+ * For administrators: online sales of licenses with Mercado Pago and Wompi
+ * (open or closed, and the plans on sale) and the purchases, each applied by
+ * itself to the buyer's license when the gateway approves it.
  */
 export default function Ventas({ api }: { api: ManualesApi }) {
   const [config, setConfig] = useState<ConfigVentaInfo | null>(null);
@@ -98,10 +99,12 @@ export default function Ventas({ api }: { api: ManualesApi }) {
   }
 
   function verificar(o: Orden) {
-    correr("Consultando Mercado Pago...", async () => {
+    correr(`Consultando ${NOMBRE_PASARELA[o.pasarela]}...`, async () => {
       const v = await api.verificarPago(o.id);
       setOrdenes((lista) => lista?.map((x) => (x.id === v.id ? v : x)) ?? null);
-      return v.estado === "aprobada" ? `Pago aprobado: ${v.email} tiene acceso hasta el ${fechaVisible(v.venceNueva)}.` : `${v.email}: ${textoEstadoMp(v.estadoMp, v.detalleMp)}.`;
+      return v.estado === "aprobada"
+        ? `Pago aprobado: ${v.email} tiene acceso hasta el ${fechaVisible(v.venceNueva)}.`
+        : `${v.email}: ${textoEstadoPago(v.estadoPago, v.detallePago)} (${NOMBRE_PASARELA[v.pasarela]}).`;
     });
   }
 
@@ -114,6 +117,7 @@ export default function Ventas({ api }: { api: ManualesApi }) {
   }, [ordenes]);
 
   const mp = config?.mercadoPago;
+  const w = config?.wompi;
   const libres = Array.from({ length: MAX_MESES }, (_, i) => i + 1).filter((m) => !planes.some((f) => f.meses === m));
 
   return (
@@ -128,8 +132,8 @@ export default function Ventas({ api }: { api: ManualesApi }) {
             <p style={p}>Cargando...</p>
           ) : !mp.configurado ? (
             <div style={{ ...nota, background: "#fff6e0", border: "1px solid #f0c36d", color: "#7a5300" }}>
-              Falta la variable <strong>MERCADOPAGO_ACCESS_TOKEN</strong> en Vercel (Settings → Environment Variables) con el Access Token de tu
-              aplicación de Mercado Pago (Tus integraciones → Credenciales de producción). Agrégala y vuelve a desplegar.
+              Falta la variable <strong>MERCADOPAGO_ACCESS_TOKEN</strong> en Vercel (Settings → Environments → Production → Environment Variables) con
+              el Access Token de tu aplicación de Mercado Pago (Tus integraciones → Credenciales). Agrégala y vuelve a desplegar.
             </div>
           ) : (
             <>
@@ -158,9 +162,44 @@ export default function Ventas({ api }: { api: ManualesApi }) {
         </section>
 
         <section style={tarjeta}>
+          <h2 style={h2}>Wompi</h2>
+          {!w ? (
+            <p style={p}>Cargando...</p>
+          ) : !w.configurado ? (
+            <div style={{ ...nota, background: "#fff6e0", border: "1px solid #f0c36d", color: "#7a5300" }}>
+              Faltan las variables <strong>WOMPI_PUBLIC_KEY</strong> (llave pública) y <strong>WOMPI_INTEGRITY_SECRET</strong> (secreto de integridad) en
+              Vercel (Settings → Environments → Production → Environment Variables). Están en el panel de comercios de Wompi, en la sección de
+              desarrolladores. Recomendadas también: <strong>WOMPI_PRIVATE_KEY</strong> y <strong>WOMPI_EVENTS_SECRET</strong>. Agrégalas y vuelve a
+              desplegar.
+            </div>
+          ) : (
+            <>
+              <p style={{ ...p, fontSize: 15 }}>
+                ✅ Llaves {w.prueba ? <strong>de prueba (Sandbox)</strong> : <strong>de producción</strong>} configuradas.
+                {w.prueba ? " Los pagos son simulados: usa los datos de prueba de Wompi." : " Los pagos son reales y llegan a tu cuenta de Wompi."}
+              </p>
+              {w.problemas.length > 0 && (
+                <div style={{ ...nota, background: "#fdecea", border: "1px solid #e5a29c", color: "#8a1c14", marginBottom: 10 }}>
+                  {w.problemas.map((x) => (
+                    <div key={x}>{x}</div>
+                  ))}
+                </div>
+              )}
+              <p style={{ ...p, fontSize: 13, color: "var(--tc-gray-500)" }}>
+                En el panel de Wompi, configura la <strong>URL de eventos</strong> <code style={codigo}>{w.eventos}</code> (en Sandbox y en Producción).{" "}
+                {w.firma ? "La firma de los eventos se verifica (WOMPI_EVENTS_SECRET)." : "Guarda el secreto de eventos en Vercel como WOMPI_EVENTS_SECRET para verificar su firma."}{" "}
+                {w.privada
+                  ? "Con la llave privada, la pantalla de quien paga y la revisión diaria consultan las compras pendientes."
+                  : "Agrega WOMPI_PRIVATE_KEY para que las compras pendientes se puedan consultar aunque un evento se pierda."}
+              </p>
+            </>
+          )}
+        </section>
+
+        <section style={tarjeta}>
           <h2 style={h2}>Venta de licencias</h2>
           <p style={p}>
-            Quien no tenga acceso (o quiera renovar) elige un plan y paga en Mercado Pago. Al aprobarse el pago, su correo de Trimble Connect queda
+            Quien no tenga acceso (o quiera renovar) elige un plan y paga con Mercado Pago o Wompi. Al aprobarse el pago, su correo de Trimble Connect queda
             autorizado por esos meses (si su licencia sigue vigente, se suman desde su vencimiento), sin que tengas que hacer nada.
           </p>
           <label style={{ display: "flex", alignItems: "center", gap: 8, fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
@@ -252,9 +291,9 @@ export default function Ventas({ api }: { api: ManualesApi }) {
                     </span>
                   </span>
                   <span style={{ display: "block", fontSize: 12.5, color: "var(--tc-gray-500)", marginTop: 2 }}>
-                    {fecha(o.creada)} · {etiquetaMeses(o.meses)} · {pesos(o.monto, o.moneda)}
+                    {fecha(o.creada)} · {etiquetaMeses(o.meses)} · {pesos(o.monto, o.moneda)} · {NOMBRE_PASARELA[o.pasarela]}
                     {o.estado === "aprobada" && o.venceNueva ? ` · acceso hasta el ${fechaVisible(o.venceNueva)}` : ""}
-                    {o.estado !== "aprobada" ? ` · ${textoEstadoMp(o.estadoMp, o.detalleMp)}` : ""}
+                    {o.estado !== "aprobada" ? ` · ${textoEstadoPago(o.estadoPago, o.detallePago)}` : ""}
                     {o.pagoId ? ` · pago ${o.pagoId}` : ""}
                   </span>
                   {o.nota && <span style={{ display: "block", fontSize: 12.5, color: "#8a5300" }}>{o.nota}</span>}
@@ -272,7 +311,7 @@ export default function Ventas({ api }: { api: ManualesApi }) {
             {!ordenes && !error && <p style={{ ...p, padding: 12, color: "var(--tc-gray-500)", margin: 0 }}>Cargando...</p>}
           </div>
           <p style={{ ...p, fontSize: 12.5, color: "var(--tc-gray-500)", marginTop: 8, marginBottom: 0 }}>
-            &quot;Pendiente&quot;: la persona fue a pagar y Mercado Pago aún no aprueba el pago (o no lo completó). &quot;Revisar&quot;: el pago fue por menos
+            &quot;Pendiente&quot;: la persona fue a pagar y la pasarela aún no aprueba el pago (o no lo completó). &quot;Revisar&quot;: el pago fue por menos
             del valor y no se aplicó. &quot;Reembolsada&quot;: el pago se devolvió; la licencia no se quita sola, suspéndela en &quot;Administrar acceso&quot; si
             corresponde.
           </p>

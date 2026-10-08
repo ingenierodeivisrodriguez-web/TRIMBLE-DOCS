@@ -1,5 +1,6 @@
 import { StoreError } from "../propiedades/store";
 import { periodoComprado } from "./licencia";
+import { IdPasarela, NOMBRE_PASARELA } from "./pasarelas";
 import type { EstadoOrden, Orden, Plan } from "./types";
 
 /**
@@ -52,12 +53,12 @@ export interface ConfigVenta {
 
 export const VENTA_CERRADA: ConfigVenta = { habilitada: false, planes: [], actualizadoPor: null, actualizadoEn: null };
 
-/** A payment reported by Mercado Pago, to apply to its order. */
+/** A payment reported by a gateway, to apply to its order. */
 export interface PagoAplicable {
   orden: string;
   pagoId: string;
-  estadoMp: string;
-  detalleMp: string;
+  estadoPago: string;
+  detallePago: string;
   monto: number;
   moneda: string;
   /** Today (ISO): a license in force is extended from its end, otherwise from today. */
@@ -72,7 +73,9 @@ export interface ResultadoAplicar {
 }
 
 /** Who the license of a person who bought it says added them. */
-export const POR_PAGO = "Compra en Mercado Pago";
+export function porPago(pasarela: IdPasarela): string {
+  return `Compra en ${NOMBRE_PASARELA[pasarela]}`;
+}
 
 export interface ManualesStore {
   getCuenta(): Promise<CuentaTecnica | null>;
@@ -97,7 +100,7 @@ export interface ManualesStore {
   /** Online sales: whether they are open and the plans on sale. */
   getVenta(): Promise<ConfigVenta>;
   guardarVenta(v: { habilitada: boolean; planes: Plan[] }, por: string): Promise<void>;
-  crearOrden(o: Pick<Orden, "id" | "email" | "nombre" | "meses" | "monto" | "moneda">): Promise<void>;
+  crearOrden(o: Pick<Orden, "id" | "email" | "nombre" | "meses" | "monto" | "moneda" | "pasarela">): Promise<void>;
   marcarPreferencia(id: string, preferenciaId: string): Promise<void>;
   getOrden(id: string): Promise<Orden | null>;
   /** Newest first. */
@@ -158,6 +161,7 @@ interface OrdenRow {
   meses: number;
   monto: number | string;
   moneda: string;
+  pasarela: IdPasarela | null;
   estado: EstadoOrden;
   preferencia_id: string | null;
   pago_id: string | null;
@@ -169,7 +173,7 @@ interface OrdenRow {
   vence_nueva: string | null;
   nota: string | null;
 }
-const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,vence_anterior,vence_nueva,nota";
+const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,pasarela,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,vence_anterior,vence_nueva,nota";
 
 function toOrden(r: OrdenRow): Orden {
   return {
@@ -179,11 +183,12 @@ function toOrden(r: OrdenRow): Orden {
     meses: r.meses,
     monto: Number(r.monto),
     moneda: r.moneda,
+    pasarela: r.pasarela ?? "mercadopago",
     estado: r.estado,
     preferenciaId: r.preferencia_id,
     pagoId: r.pago_id,
-    estadoMp: r.estado_mp,
-    detalleMp: r.detalle_mp,
+    estadoPago: r.estado_mp,
+    detallePago: r.detalle_mp,
     creada: r.creada,
     pagada: r.pagada,
     venceAnterior: r.vence_anterior,
@@ -221,7 +226,7 @@ function supabaseStore(): ManualesStore | null {
     });
     if (res.ok) return res;
     const body = await res.text().catch(() => "");
-    if (/manuales_venta|manuales_pagos|manuales_aplicar_pago/.test(body) && /PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(VENTAS_HINT);
+    if (/manuales_venta|manuales_pagos|manuales_aplicar_pago|pasarela/.test(body) && /PGRST20[245]|42P01|42703|42883|Could not find the|does not exist/i.test(body)) throw new StoreError(VENTAS_HINT);
     if (/licencia_meses|suspendido|\bvence\b|\binicio\b/.test(body) && /42703|PGRST204|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) throw new StoreError("Supabase rechazó la clave del servidor (SUPABASE_SERVICE_ROLE_KEY).");
@@ -353,7 +358,7 @@ function supabaseStore(): ManualesStore | null {
       await call("/manuales_pagos", {
         method: "POST",
         headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ id: o.id, email: o.email, nombre: o.nombre, meses: o.meses, monto: o.monto, moneda: o.moneda }),
+        body: JSON.stringify({ id: o.id, email: o.email, nombre: o.nombre, meses: o.meses, monto: o.monto, moneda: o.moneda, pasarela: o.pasarela }),
       });
     },
     async marcarPreferencia(id, preferenciaId) {
@@ -376,8 +381,8 @@ function supabaseStore(): ManualesStore | null {
         body: JSON.stringify({
           p_orden: p.orden,
           p_pago_id: p.pagoId,
-          p_estado_mp: p.estadoMp,
-          p_detalle_mp: p.detalleMp,
+          p_estado_mp: p.estadoPago,
+          p_detalle_mp: p.detallePago,
           p_monto: p.monto,
           p_moneda: p.moneda,
           p_hoy: p.hoy,
@@ -458,8 +463,8 @@ export function memoryStore(): ManualesStore {
         estado: "pendiente",
         preferenciaId: null,
         pagoId: null,
-        estadoMp: null,
-        detalleMp: null,
+        estadoPago: null,
+        detallePago: null,
         creada: now(),
         pagada: null,
         venceAnterior: null,
@@ -487,22 +492,22 @@ export function memoryStore(): ManualesStore {
       const o = ordenes.get(p.orden);
       if (!o) return { resultado: "no-existe" };
       const cambiar = (c: Partial<Orden>) => ordenes.set(o.id, { ...o, ...c });
-      if (p.estadoMp === "refunded" || p.estadoMp === "charged_back") {
+      if (p.estadoPago === "refunded" || p.estadoPago === "charged_back") {
         if (o.estado !== "aprobada" || o.pagoId !== p.pagoId) return { resultado: "sin-cambios" };
-        cambiar({ estado: "reembolsada", estadoMp: p.estadoMp, detalleMp: p.detalleMp });
+        cambiar({ estado: "reembolsada", estadoPago: p.estadoPago, detallePago: p.detallePago });
         return { resultado: "reembolsada", email: o.email };
       }
-      if (p.estadoMp !== "approved") {
+      if (p.estadoPago !== "approved") {
         if (o.estado !== "pendiente") return { resultado: "sin-cambios" };
-        cambiar({ estadoMp: p.estadoMp, detalleMp: p.detalleMp });
+        cambiar({ estadoPago: p.estadoPago, detallePago: p.detallePago });
         return { resultado: "pendiente", email: o.email };
       }
       if (o.pagoId === p.pagoId) return { resultado: "ya-aplicada", email: o.email, vence: o.venceNueva };
       if (o.estado !== "pendiente") {
-        cambiar({ nota: [o.nota, `Otro pago aprobado (${p.pagoId}) para esta compra: revísalo en Mercado Pago.`].filter(Boolean).join(" ") });
+        cambiar({ nota: [o.nota, `Otro pago aprobado (${p.pagoId}) para esta compra: revísalo en ${NOMBRE_PASARELA[o.pasarela]}.`].filter(Boolean).join(" ") });
         return { resultado: "duplicado", email: o.email };
       }
-      const pagado = { pagoId: p.pagoId, estadoMp: p.estadoMp, detalleMp: p.detalleMp, pagada: now() };
+      const pagado = { pagoId: p.pagoId, estadoPago: p.estadoPago, detallePago: p.detallePago, pagada: now() };
       if (p.monto < o.monto || p.moneda.toUpperCase() !== o.moneda.toUpperCase()) {
         cambiar({ ...pagado, estado: "revisar", nota: `Se pagaron ${p.monto} ${p.moneda} y la compra era de ${o.monto} ${o.moneda}: no se aplicó la licencia.` });
         return { resultado: "revisar", email: o.email };
@@ -517,7 +522,7 @@ export function memoryStore(): ManualesStore {
         o.email,
         a
           ? { ...a, nombre: a.nombre || o.nombre, licenciaMeses: o.meses, inicio: periodo.inicio, vence: periodo.vence }
-          : { email: o.email, nombre: o.nombre, agregadoPor: POR_PAGO, agregadoEn: now(), licenciaMeses: o.meses, inicio: periodo.inicio, vence: periodo.vence, suspendido: false }
+          : { email: o.email, nombre: o.nombre, agregadoPor: porPago(o.pasarela), agregadoEn: now(), licenciaMeses: o.meses, inicio: periodo.inicio, vence: periodo.vence, suspendido: false }
       );
       cambiar({ ...pagado, estado: "aprobada", venceAnterior: a?.vence ?? null, venceNueva: periodo.vence });
       return { resultado: "aplicada", email: o.email, vence: periodo.vence };

@@ -13,6 +13,14 @@ ambos lugares** para Trimble Connect:
 | **Presupuesto** — presupuesto con catálogos de insumos y partidas (APU) bajo OmniClass, asociado a los modelos por IFCGUID | Menú lateral del proyecto (presupuesto) **y** panel del visor 3D (asociar elementos) | `/presupuesto` | `/manifest-presupuesto.json` |
 | **Manuales** — los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT para las personas que autorice su administrador | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
 
+Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
+Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
+línea), cómo comprar, los medios de pago y el contacto, con sus
+[términos y condiciones](app/bim-apps/terminos/page.tsx) y su
+[política de tratamiento de datos (Ley 1581)](app/bim-apps/privacidad/page.tsx).
+Es la "Página web" que piden Wompi y Mercado Pago. Los datos del
+responsable están en [`lib/sitio/negocio.ts`](lib/sitio/negocio.ts).
+
 Las dos extensiones de proyecto comparten la conexión con Trimble Connect
 ([`components/ExtensionShell.tsx`](components/ExtensionShell.tsx)), el acceso a
 la API REST ([`lib/trimbleApi.ts`](lib/trimbleApi.ts)) y el recorrido
@@ -1295,14 +1303,16 @@ licencia. Quien tiene la licencia vencida o suspendida ve "No tiene acceso"
 con el motivo y la fecha. La lista muestra cuántas personas hay en cada
 estado y se puede filtrar por estado.
 
-**Venta en línea con Mercado Pago.** En la pestaña **"Ventas"**, el
-administrador abre la venta y define los planes: meses (1 a 12) y precio en
-pesos. Quien no tiene acceso, o tiene la licencia vencida, ve los planes en
-"No tiene acceso". Quien tiene la licencia vigente ve **Renovar** en la
-cabecera, resaltado cuando está por vencer. La persona elige un plan, paga
-en Mercado Pago (Checkout Pro, en una pestaña nueva) y, **al aprobarse el
-pago, su licencia se crea o se extiende sola**, sin que el administrador
-haga nada:
+**Venta en línea con Mercado Pago y Wompi.** En la pestaña **"Ventas"**,
+el administrador abre la venta y define los planes: meses (1 a 12) y precio
+en pesos. Quien no tiene acceso, o tiene la licencia vencida, ve los planes
+en "No tiene acceso". Quien tiene la licencia vigente ve **Renovar** en la
+cabecera, resaltado cuando está por vencer. La persona elige un plan y
+**con qué pagar**: Mercado Pago (Checkout Pro: tarjetas, PSE, Efecty) o
+Wompi (Web Checkout: Nequi, PSE, Bancolombia, tarjetas), según las que
+estén configuradas. Paga en una pestaña nueva y, **al aprobarse el pago,
+su licencia se crea o se extiende sola**, sin que el administrador haga
+nada:
 
 - La licencia va al correo de Trimble Connect de quien compra, y el precio
   sale del plan, nunca de la solicitud.
@@ -1310,10 +1320,13 @@ haga nada:
   venció (o es nueva), desde hoy.
 - Cada compra se aplica **una sola vez** (`manuales_aplicar_pago`, todo en
   una transacción), aunque el pago se notifique varias veces.
-- El pago siempre se lee de Mercado Pago con nuestras credenciales antes de
-  aplicarlo, así que un aviso falso no abre los manuales. Se confirma por
-  cuatro caminos:
-  1. el aviso de Mercado Pago (`notification_url` de cada compra);
+- El pago siempre se lee de la pasarela de esa compra antes de aplicarlo,
+  así que un aviso falso no abre los manuales; y un pago solo se aplica a
+  una compra hecha con esa misma pasarela. En Wompi, cada checkout va
+  firmado con el secreto de integridad, así que el monto y la referencia no
+  se pueden cambiar. El pago se confirma por cuatro caminos:
+  1. el aviso de la pasarela (`notification_url` de cada compra en Mercado
+     Pago; la URL de eventos del panel de Wompi);
   2. la página a la que vuelve quien paga;
   3. la pantalla de Manuales, que espera el pago y consulta cada 5 segundos;
   4. la tarea diaria, que revisa las compras pendientes de los últimos 3
@@ -1323,10 +1336,14 @@ haga nada:
   no se quita sola: el administrador decide si la suspende.
 - Las cuentas suspendidas o sin vencimiento no pueden comprar.
 
-La pestaña "Ventas" lista las compras con su estado (pendiente, aprobada,
-revisar, reembolsada), el pago de Mercado Pago y el nuevo vencimiento. Las
-compras pendientes tienen el botón **Verificar pago**, que consulta Mercado
-Pago al momento.
+Los estados de Wompi se traducen a los de Mercado Pago (APPROVED →
+aprobado, PENDING → pendiente, DECLINED/ERROR → rechazado, VOIDED →
+reembolsado), así que las dos pasarelas comparten las mismas reglas.
+
+La pestaña "Ventas" muestra cómo está configurada cada pasarela y lista las
+compras con su estado (pendiente, aprobada, revisar, reembolsada), la
+pasarela, el pago y el nuevo vencimiento. Las compras pendientes tienen el
+botón **Verificar pago**, que consulta la pasarela al momento.
 
 Los documentos se suben y actualizan en MANAGER PROJECT como siempre, y Manuales
 muestra siempre la versión actual.
@@ -1377,6 +1394,15 @@ la app.
      `https://trimble-docs.vercel.app/api/manuales/pagos/webhook` y el evento
      "Pagos": se verifica la firma de los avisos. Sin ella, igual funciona,
      porque cada pago se lee de Mercado Pago antes de aplicarlo;
+   - para cobrar con Wompi: `WOMPI_PUBLIC_KEY` (llave pública) y
+     `WOMPI_INTEGRITY_SECRET` (secreto de integridad), del panel de
+     comercios de Wompi. Las llaves `pub_test_`/`test_` usan el Sandbox y
+     las `pub_prod_`/`prod_`, producción; todas deben ser del mismo
+     ambiente (la pestaña "Ventas" avisa si no);
+   - recomendadas para Wompi: `WOMPI_PRIVATE_KEY` (para consultar las
+     compras pendientes por su referencia) y `WOMPI_EVENTS_SECRET` (para
+     verificar el checksum de los eventos). En el panel de Wompi, configura
+     la URL de eventos `https://trimble-docs.vercel.app/api/manuales/pagos/wompi`;
    - opcional: `MANUALES_URL_PUBLICA`, la dirección pública de la app, si no
      es la de las solicitudes.
 
@@ -1422,12 +1448,14 @@ carpeta o proyecto.
 | `POST /api/manuales/admin/completar` | `{ enlace }`: la dirección de `http://localhost/?code=…&state=…` pegada por el administrador; completa la conexión |
 | `DELETE /api/manuales/admin/cuenta` | Desconectar la cuenta técnica (revoca su sesión) |
 | `GET` / `POST` / `PATCH` / `DELETE /api/manuales/admin/autorizados` | Listar (con el estado de cada licencia), autorizar (`{ texto, licencia }`), cambiar la licencia o suspender/reactivar (`{ email, licencia?, suspendido? }`) o quitar (`?email=`). La licencia es `{ meses: 1-12, inicio? }`, `{ vence, inicio? }` o `{ sinVencimiento: true }` |
-| `GET` / `PUT /api/manuales/admin/venta` | La venta en línea y cómo está configurado Mercado Pago; guardar `{ habilitada, planes: [{ meses, precio }] }` (administradores) |
-| `GET` / `POST /api/manuales/admin/pagos` | Las compras, de la más nueva a la más vieja; `{ orden }` consulta Mercado Pago por una compra pendiente (administradores) |
-| `POST /api/manuales/pagos` | `{ meses }`: inicia la compra de una licencia para el correo de quien llama y devuelve el checkout de Mercado Pago (`url`) y la compra (`orden`) |
-| `GET /api/manuales/pagos/orden?id=` | Cómo va la compra de quien llama; mientras está pendiente, también consulta Mercado Pago |
+| `GET` / `PUT /api/manuales/admin/venta` | La venta en línea y cómo están configurados Mercado Pago y Wompi; guardar `{ habilitada, planes: [{ meses, precio }] }` (administradores) |
+| `GET` / `POST /api/manuales/admin/pagos` | Las compras, de la más nueva a la más vieja; `{ orden }` consulta la pasarela por una compra pendiente (administradores) |
+| `POST /api/manuales/pagos` | `{ meses, pasarela: "mercadopago" \| "wompi" }`: inicia la compra de una licencia para el correo de quien llama y devuelve el checkout de la pasarela (`url`) y la compra (`orden`) |
+| `GET /api/manuales/pagos/orden?id=` | Cómo va la compra de quien llama; mientras está pendiente, también consulta su pasarela |
 | `POST /api/manuales/pagos/webhook` | Avisos de pago de Mercado Pago (Webhooks e IPN). Sin token: el pago se lee de Mercado Pago, y con `MERCADOPAGO_WEBHOOK_SECRET` se exige la firma de los avisos firmados |
-| `GET /api/manuales/pagos/retorno` | Página a la que vuelve quien paga (`back_urls`); aplica el pago al momento. Sin token |
+| `GET /api/manuales/pagos/retorno` | Página a la que vuelve quien paga en Mercado Pago (`back_urls`); aplica el pago al momento. Sin token |
+| `POST /api/manuales/pagos/wompi` | Eventos de Wompi (`transaction.updated`). Sin token: la transacción se lee de Wompi, y con `WOMPI_EVENTS_SECRET` se exige un checksum válido |
+| `GET /api/manuales/pagos/retorno/wompi` | Página a la que vuelve quien paga en Wompi (`redirect-url`, `?id=`); aplica el pago al momento. Sin token |
 | `GET /api/manuales/oauth/callback` | Vuelta automática del inicio de sesión, si esa URL está registrada (`MANUALES_REDIRECT_URI`). Sin token: la valida el `state` de un solo uso |
 | `GET /api/manuales/mantener` | Tarea diaria que mantiene viva la sesión y revisa las compras pendientes |
 
@@ -1437,9 +1465,9 @@ Códigos de error:
 - `sin-cuenta`, `cuenta-vencida`, `cuenta-sin-acceso`, `sin-oauth` (503:
   el administrador debe revisar la cuenta técnica);
 - `trimble-session` (401: recargar Trimble Connect);
-- compras (409): `venta-cerrada`, `sin-mercadopago`, `suspendida`,
-  `sin-vencimiento`, `plan`; `demasiadas` (429: más de 10 compras en
-  una hora).
+- compras (409): `venta-cerrada`, `sin-pasarela`, `pasarela`,
+  `suspendida`, `sin-vencimiento`, `plan`; `demasiadas` (429: más de 10
+  compras en una hora).
 
 ---
 

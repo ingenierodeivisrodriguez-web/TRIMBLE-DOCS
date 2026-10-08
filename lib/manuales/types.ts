@@ -1,4 +1,5 @@
 import type { EstadoLicencia } from "./licencia";
+import type { IdPasarela } from "./pasarelas";
 
 // Shared by the "Manuales" API and its screen.
 
@@ -109,7 +110,7 @@ export interface AutorizadoInfo {
   diasRestantes: number | null;
 }
 
-// ---------------------------------------------------------------- online sales (Mercado Pago)
+// ---------------------------------------------------------------- online sales (Mercado Pago, Wompi)
 
 /** A license on sale: `meses` (1 to 12) for `precio` (whole pesos). */
 export interface Plan {
@@ -117,20 +118,25 @@ export interface Plan {
   precio: number;
 }
 
-/** What a person can buy, when online sales are open to them. */
+/** What a person can buy, when online sales are open to them, and the gateways they can pay with. */
 export interface VentaPublica {
   planes: Plan[];
   moneda: string;
-  /** Test credentials: the checkout is Mercado Pago's sandbox. */
-  prueba: boolean;
+  pasarelas: {
+    id: IdPasarela;
+    nombre: string;
+    /** Test credentials: payments are simulated. */
+    prueba: boolean;
+  }[];
 }
 
 export type EstadoOrden = "pendiente" | "aprobada" | "revisar" | "reembolsada";
 
-/** A purchase just started: pay it at `url` (Mercado Pago), then follow it by `orden`. */
+/** A purchase just started: pay it at `url` (the gateway's checkout), then follow it by `orden`. */
 export interface CompraIniciada {
   orden: string;
   url: string;
+  pasarela: IdPasarela;
   meses: number;
   monto: number;
   moneda: string;
@@ -142,8 +148,9 @@ export interface CompraIniciada {
 export interface EstadoCompra {
   orden: string;
   estado: EstadoOrden;
-  estadoMp: string | null;
-  detalleMp: string | null;
+  pasarela: IdPasarela;
+  estadoPago: string | null;
+  detallePago: string | null;
   meses: number;
   monto: number;
   moneda: string;
@@ -153,7 +160,7 @@ export interface EstadoCompra {
   texto: string;
 }
 
-/** A purchase of a license: created when the person goes to pay, applied when Mercado Pago approves the payment. */
+/** A purchase of a license: created when the person goes to pay, applied when the gateway approves the payment. */
 export interface Orden {
   id: string;
   email: string;
@@ -161,13 +168,16 @@ export interface Orden {
   meses: number;
   monto: number;
   moneda: string;
+  /** The gateway the person chose to pay with. */
+  pasarela: IdPasarela;
   estado: EstadoOrden;
+  /** The gateway's checkout id (Mercado Pago's preference), when it has one. */
   preferenciaId: string | null;
-  /** The approved payment in Mercado Pago. */
+  /** The approved payment in the gateway. */
   pagoId: string | null;
-  /** Mercado Pago's status of the last payment seen (approved, rejected, in_process...). */
-  estadoMp: string | null;
-  detalleMp: string | null;
+  /** Status of the last payment seen, in the common vocabulary (approved, rejected, pending...), and the gateway's own detail. */
+  estadoPago: string | null;
+  detallePago: string | null;
   creada: string;
   pagada: string | null;
   /** The license's expiry before and after the payment (ISO dates). */
@@ -194,6 +204,21 @@ export interface ConfigVentaInfo {
     firma: boolean;
     /** Where Mercado Pago notifies payments, and where buyers come back to. */
     webhook: string;
+    retorno: string;
+  };
+  wompi: {
+    /** WOMPI_PUBLIC_KEY and WOMPI_INTEGRITY_SECRET are set in Vercel. */
+    configurado: boolean;
+    /** Sandbox keys (pub_test_...): payments are simulated. */
+    prueba: boolean;
+    /** WOMPI_PRIVATE_KEY is set (pending purchases can be looked up by reference). */
+    privada: boolean;
+    /** WOMPI_EVENTS_SECRET is set (events are verified). */
+    firma: boolean;
+    /** Keys that don't match each other. */
+    problemas: string[];
+    /** The events URL to set in Wompi's dashboard, and where buyers come back to. */
+    eventos: string;
     retorno: string;
   };
 }

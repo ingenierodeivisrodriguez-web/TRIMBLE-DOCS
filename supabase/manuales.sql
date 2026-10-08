@@ -68,8 +68,8 @@ create table if not exists public.manuales_venta (
   actualizado_en  timestamptz not null default now()
 );
 
--- Compras de licencias: se crean al ir a pagar y se aplican cuando Mercado Pago
--- aprueba el pago (`id` es la referencia externa del pago).
+-- Compras de licencias: se crean al ir a pagar y se aplican cuando la pasarela
+-- (Mercado Pago o Wompi) aprueba el pago (`id` es la referencia del pago).
 create table if not exists public.manuales_pagos (
   id             text          primary key,
   email          text          not null check (email = lower(btrim(email))),
@@ -89,10 +89,13 @@ create table if not exists public.manuales_pagos (
   vence_nueva    date,
   nota           text
 );
+-- La pasarela con la que se pagó (Mercado Pago o Wompi).
+alter table public.manuales_pagos add column if not exists pasarela text not null default 'mercadopago' check (pasarela in ('mercadopago', 'wompi'));
 create index if not exists manuales_pagos_creada on public.manuales_pagos (creada desc);
 create index if not exists manuales_pagos_email on public.manuales_pagos (email, creada desc);
 
--- Aplica un pago de Mercado Pago a su compra, todo a la vez y una sola vez:
+-- Aplica un pago a su compra, todo a la vez y una sola vez (los estados vienen
+-- en el vocabulario de Mercado Pago, también los de Wompi):
 -- aprobado (por el valor de la compra) crea o extiende la licencia de la
 -- persona por los meses comprados (desde su vencimiento si sigue vigente, si
 -- no desde hoy); reembolsado o contracargado marca la compra para revisión
@@ -140,7 +143,7 @@ begin
   end if;
   if o.estado <> 'pendiente' then
     update public.manuales_pagos
-       set nota = concat_ws(' ', o.nota, 'Otro pago aprobado (' || p_pago_id || ') para esta compra: revísalo en Mercado Pago.'), actualizada = now()
+       set nota = concat_ws(' ', o.nota, 'Otro pago aprobado (' || p_pago_id || ') para esta compra: revísalo en ' || case o.pasarela when 'wompi' then 'Wompi' else 'Mercado Pago' end || '.'), actualizada = now()
      where id = p_orden;
     return jsonb_build_object('resultado', 'duplicado', 'email', o.email);
   end if;
@@ -170,7 +173,7 @@ begin
      where email = o.email;
   else
     insert into public.manuales_autorizados (email, nombre, agregado_por, agregado_en, licencia_meses, inicio, vence, suspendido)
-    values (o.email, o.nombre, 'Compra en Mercado Pago', now(), o.meses, v_inicio, v_vence, false);
+    values (o.email, o.nombre, 'Compra en ' || case o.pasarela when 'wompi' then 'Wompi' else 'Mercado Pago' end, now(), o.meses, v_inicio, v_vence, false);
   end if;
   update public.manuales_pagos
      set estado = 'aprobada', pago_id = p_pago_id, estado_mp = p_estado_mp, detalle_mp = p_detalle_mp, pagada = now(), actualizada = now(),

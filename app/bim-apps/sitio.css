@@ -1,0 +1,289 @@
+/* Public website of "BIM Apps para Trimble Connect" (/bim-apps). */
+.sitio {
+  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  color: #2b3440;
+  font-size: 16px;
+  line-height: 1.6;
+}
+.sitio a {
+  color: #0b5fa5;
+}
+.sitio-contenedor {
+  width: 100%;
+  max-width: 1080px;
+  margin: 0 auto;
+  padding: 0 20px;
+}
+.sitio-cabecera {
+  background: #0a3d62;
+  color: #fff;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+}
+.sitio-cabecera .sitio-contenedor {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  min-height: 60px;
+  flex-wrap: wrap;
+}
+.sitio-marca {
+  color: #fff !important;
+  text-decoration: none;
+  font-weight: 700;
+  font-size: 19px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-right: auto;
+}
+.sitio-marca small {
+  font-weight: 400;
+  font-size: 13px;
+  opacity: 0.8;
+}
+.sitio-logo {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #1e88d6;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  font-weight: 800;
+  letter-spacing: -0.5px;
+}
+.sitio-nav {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  font-size: 14.5px;
+}
+.sitio-nav a {
+  color: #dbe9f6 !important;
+  text-decoration: none;
+}
+.sitio-nav a:hover {
+  color: #fff !important;
+  text-decoration: underline;
+}
+.sitio-hero {
+  background: linear-gradient(135deg, #0a3d62 0%, #1373c2 100%);
+  color: #fff;
+  padding: 64px 0 72px;
+}
+.sitio-hero h1 {
+  font-size: clamp(30px, 5vw, 46px);
+  line-height: 1.15;
+  margin: 0 0 16px;
+  max-width: 760px;
+}
+.sitio-hero p {
+  font-size: 18px;
+  max-width: 680px;
+  margin: 0 0 28px;
+  color: #e3eef9;
+}
+.sitio-botones {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.sitio-boton {
+  display: inline-block;
+  padding: 12px 22px;
+  border-radius: 8px;
+  font-weight: 700;
+  text-decoration: none !important;
+  font-size: 15.5px;
+}
+.sitio-boton.primario {
+  background: #fff;
+  color: #0a3d62 !important;
+}
+.sitio-boton.secundario {
+  border: 1.5px solid rgba(255, 255, 255, 0.7);
+  color: #fff !important;
+}
+.sitio-boton.verde {
+  background: #1d8a4e;
+  color: #fff !important;
+}
+.sitio-seccion {
+  padding: 56px 0;
+  /* Anchors land below the sticky header. */
+  scroll-margin-top: 64px;
+}
+.sitio-seccion.gris {
+  background: #f4f7fa;
+}
+.sitio-seccion h2 {
+  font-size: clamp(24px, 3.5vw, 32px);
+  color: #0a3d62;
+  margin: 0 0 10px;
+  line-height: 1.2;
+}
+.sitio-seccion .sitio-intro {
+  max-width: 720px;
+  color: #56616e;
+  margin: 0 0 28px;
+  font-size: 17px;
+}
+.sitio-rejilla {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+}
+.sitio-tarjeta {
+  background: #fff;
+  border: 1px solid #e1e8ef;
+  border-radius: 12px;
+  padding: 20px 22px;
+}
+.sitio-seccion.gris .sitio-tarjeta {
+  box-shadow: 0 1px 3px rgba(10, 61, 98, 0.08);
+}
+.sitio-tarjeta h3 {
+  margin: 0 0 6px;
+  font-size: 18px;
+  color: #0a3d62;
+}
+.sitio-tarjeta p {
+  margin: 0;
+  color: #56616e;
+  font-size: 15px;
+}
+.sitio-plan {
+  text-align: center;
+}
+.sitio-plan .sitio-precio {
+  font-size: 30px;
+  font-weight: 800;
+  color: #0a3d62;
+  margin: 6px 0 2px;
+}
+.sitio-plan .sitio-mes {
+  font-size: 14px;
+  color: #6b7684;
+}
+.sitio-pasos {
+  counter-reset: paso;
+  list-style: none;
+  padding: 0;
+  margin: 0;
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 18px;
+}
+.sitio-pasos li {
+  counter-increment: paso;
+  background: #fff;
+  border: 1px solid #e1e8ef;
+  border-radius: 12px;
+  padding: 18px 20px 18px 62px;
+  position: relative;
+  font-size: 15px;
+  color: #3c4550;
+}
+.sitio-pasos li::before {
+  content: counter(paso);
+  position: absolute;
+  left: 18px;
+  top: 18px;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #1373c2;
+  color: #fff;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sitio-pasos strong {
+  display: block;
+  color: #0a3d62;
+}
+.sitio-lista {
+  margin: 0;
+  padding-left: 20px;
+}
+.sitio-lista li {
+  margin-bottom: 6px;
+}
+.sitio-codigo {
+  background: #eef2f6;
+  border-radius: 4px;
+  padding: 1px 6px;
+  font-size: 13.5px;
+  word-break: break-all;
+}
+.sitio-contacto {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 18px;
+  align-items: start;
+}
+.sitio-pie {
+  background: #0a3d62;
+  color: #c9d9ea;
+  padding: 28px 0;
+  font-size: 14px;
+  margin-top: auto;
+}
+.sitio-pie a {
+  color: #fff !important;
+}
+.sitio-pie .sitio-contenedor {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.sitio-pie-enlaces {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+}
+.sitio-legal {
+  max-width: 820px;
+  padding: 40px 20px 56px;
+  margin: 0 auto;
+}
+.sitio-legal h1 {
+  color: #0a3d62;
+  font-size: clamp(26px, 4vw, 34px);
+  line-height: 1.2;
+  margin: 0 0 6px;
+}
+.sitio-legal h2 {
+  color: #0a3d62;
+  font-size: 20px;
+  margin: 28px 0 8px;
+}
+.sitio-legal p,
+.sitio-legal li {
+  font-size: 15.5px;
+}
+.sitio-legal .sitio-fecha {
+  color: #6b7684;
+  font-size: 14px;
+  margin: 0 0 20px;
+}
+@media (max-width: 640px) {
+  .sitio-nav {
+    gap: 12px;
+    font-size: 13.5px;
+    padding-bottom: 8px;
+  }
+  .sitio-hero {
+    padding: 40px 0 48px;
+  }
+  .sitio-seccion {
+    padding: 40px 0;
+  }
+}

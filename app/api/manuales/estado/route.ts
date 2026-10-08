@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { puedeLeer } from "../../../../lib/manuales/acceso";
 import { oauthConfig } from "../../../../lib/manuales/oauth";
 import { ventaPublica } from "../../../../lib/manuales/pagos";
-import { callbackPropio, cuentaMercadoPago, handle, hoy, mercadoPagoDe, redirectUri } from "../../../../lib/manuales/routes";
+import { callbackPropio, handle, hoy, pasarelasConModo, redirectUri } from "../../../../lib/manuales/routes";
 import type { ManualesStore } from "../../../../lib/manuales/store";
 import type { EstadoManuales, VentaPublica } from "../../../../lib/manuales/types";
 
@@ -10,13 +10,11 @@ export const dynamic = "force-dynamic";
 
 /** What the person can buy online (never blocks the screen: without the sales tables, there is nothing on sale). */
 async function venta(store: ManualesStore, email: string): Promise<VentaPublica | null> {
-  const mp = mercadoPagoDe();
-  if (!mp) return null;
   try {
+    const pasarelas = await pasarelasConModo();
+    if (!pasarelas.length) return null;
     const [v, autorizado] = await Promise.all([store.getVenta(), email ? store.getAutorizado(email) : Promise.resolve(null)]);
-    const publica = ventaPublica(v, mp.cfg, email, autorizado);
-    if (publica && !publica.prueba) publica.prueba = (await cuentaMercadoPago(mp).catch(() => null))?.prueba ?? false;
-    return publica;
+    return ventaPublica(v, pasarelas, email, autorizado);
   } catch (err) {
     console.error("[manuales] venta en línea:", err);
     return null;
