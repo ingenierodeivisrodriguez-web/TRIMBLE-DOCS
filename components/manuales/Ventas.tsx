@@ -133,10 +133,19 @@ export default function Ventas({ api }: { api: ManualesApi }) {
             </div>
           ) : (
             <>
-              <p style={{ ...p, fontSize: 15 }}>
-                ✅ Credenciales {mp.prueba ? <strong>de prueba</strong> : "de producción"} configuradas.
-                {mp.prueba ? " Los pagos son simulados: usa las tarjetas de prueba de Mercado Pago." : " Los pagos llegan a tu cuenta de Mercado Pago."}
-              </p>
+              {mp.error ? (
+                <div style={{ ...nota, background: "#fdecea", border: "1px solid #e5a29c", color: "#8a1c14", marginBottom: 10 }}>
+                  {mp.error} Revisa que MERCADOPAGO_ACCESS_TOKEN en Vercel sea el Access Token completo (empieza por APP_USR-) y vuelve a desplegar.
+                </div>
+              ) : (
+                <p style={{ ...p, fontSize: 15 }}>
+                  ✅ Conectado a la cuenta de Mercado Pago <strong>{mp.cuenta?.nombre || mp.cuenta?.id}</strong>
+                  {mp.cuenta?.email ? ` (${mp.cuenta.email})` : ""}, con credenciales {mp.prueba ? <strong>de prueba</strong> : <strong>de producción</strong>}.
+                  {mp.prueba
+                    ? " Los pagos son simulados: paga con una cuenta compradora de prueba y las tarjetas de prueba de Mercado Pago."
+                    : " Los pagos son reales y llegan a esta cuenta."}
+                </p>
+              )}
               <p style={{ ...p, fontSize: 13, color: "var(--tc-gray-500)" }}>
                 Cada compra le pide a Mercado Pago que avise sus pagos a <code style={codigo}>{mp.webhook}</code>; además, la pantalla de quien paga y una
                 revisión diaria consultan los pagos pendientes, así que la licencia se activa aunque un aviso se pierda.{" "}

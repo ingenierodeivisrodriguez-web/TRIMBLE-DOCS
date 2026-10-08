@@ -1368,7 +1368,10 @@ la app.
    - opcional: `CRON_SECRET`, para que solo Vercel llame a la tarea diaria;
    - para vender licencias: `MERCADOPAGO_ACCESS_TOKEN`, el Access Token de
      tu aplicación de Mercado Pago (Tus integraciones → Credenciales de
-     producción; las de prueba abren el checkout de pruebas);
+     producción). Las de prueba también empiezan por `APP_USR-`: la pestaña
+     "Ventas" muestra la cuenta de Mercado Pago conectada y si es de prueba
+     (`/users/me`, etiqueta `test_user`), y entonces se paga con una cuenta
+     compradora de prueba y las tarjetas de prueba;
    - opcional: `MERCADOPAGO_WEBHOOK_SECRET`, la clave secreta de los
      Webhooks de Mercado Pago, configurados con la URL
      `https://trimble-docs.vercel.app/api/manuales/pagos/webhook` y el evento

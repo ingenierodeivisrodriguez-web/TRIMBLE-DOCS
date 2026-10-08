@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { leerVenta } from "../../../../../lib/manuales/pagos";
-import { handleAdmin, mercadoPagoDe, urlPublica, urlsPago } from "../../../../../lib/manuales/routes";
+import { cuentaMercadoPago, handleAdmin, mercadoPagoDe, urlPublica, urlsPago } from "../../../../../lib/manuales/routes";
 import { ManualesError } from "../../../../../lib/manuales/service";
 import type { ConfigVentaInfo } from "../../../../../lib/manuales/types";
 
@@ -11,11 +11,22 @@ export async function GET(req: NextRequest) {
   return handleAdmin(req, async ({ store }) => {
     const venta = await store.getVenta();
     const mp = mercadoPagoDe();
+    let cuenta: Awaited<ReturnType<typeof cuentaMercadoPago>> | null = null;
+    let error: string | null = null;
+    if (mp) {
+      try {
+        cuenta = await cuentaMercadoPago(mp);
+      } catch (err) {
+        error = err instanceof Error ? err.message : "No se pudo consultar Mercado Pago.";
+      }
+    }
     const body: ConfigVentaInfo = {
       ...venta,
       mercadoPago: {
         configurado: !!mp,
-        prueba: !!mp?.cfg.prueba,
+        cuenta: cuenta ? { id: cuenta.id, nombre: cuenta.nombre, email: cuenta.email } : null,
+        error,
+        prueba: !!(mp?.cfg.prueba || cuenta?.prueba),
         firma: !!mp?.cfg.webhookSecret,
         webhook: `${urlPublica(req)}/api/manuales/pagos/webhook`,
         retorno: urlsPago(req).retorno,

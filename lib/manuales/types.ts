@@ -184,6 +184,11 @@ export interface ConfigVentaInfo {
   mercadoPago: {
     /** MERCADOPAGO_ACCESS_TOKEN is set in Vercel. */
     configurado: boolean;
+    /** The Mercado Pago account the credentials belong to (null when they couldn't be checked). */
+    cuenta: { id: string; nombre: string; email: string } | null;
+    /** Why the credentials couldn't be checked (rejected, Mercado Pago unreachable...). */
+    error: string | null;
+    /** A test account: payments are simulated. */
     prueba: boolean;
     /** MERCADOPAGO_WEBHOOK_SECRET is set (notifications are verified). */
     firma: boolean;

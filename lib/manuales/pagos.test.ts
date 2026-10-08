@@ -17,6 +17,9 @@ function mpFalso() {
   const pagos = new Map<string, PagoMp>();
   let n = 0;
   const mp: Mp = {
+    async cuenta() {
+      return { id: "1", nombre: "TESTUSER1", email: "", prueba: true };
+    },
     async crearPreferencia(p) {
       preferencias.push(p);
       return { id: `pref-${++n}`, url: `https://mp/checkout/${n}` };
@@ -216,6 +219,14 @@ describe("Mercado Pago", () => {
     assert.equal((await prueba.crearPreferencia({ ...pref, retorno: "http://localhost:3000/r", notificacion: null })).url, "https://mp/sandbox");
     const local = JSON.parse(String(llamadas[1].init.body));
     assert.deepEqual([local.auto_return, local.notification_url], [undefined, undefined]);
+  });
+
+  it("reconoce las cuentas de prueba, cuyas credenciales empiezan por APP_USR como las reales", async () => {
+    const usuario = (tags: string[]) =>
+      (async () => new Response(JSON.stringify({ id: 99, nickname: "TESTUSER99", email: "test_user_99@testuser.com", tags }))) as unknown as typeof fetch;
+    const prueba = await mercadoPago({ accessToken: "APP_USR-1", webhookSecret: null, prueba: false }, usuario(["normal", "test_user"])).cuenta();
+    assert.deepEqual(prueba, { id: "99", nombre: "TESTUSER99", email: "test_user_99@testuser.com", prueba: true });
+    assert.equal((await mercadoPago({ accessToken: "APP_USR-1", webhookSecret: null, prueba: false }, usuario(["normal"])).cuenta()).prueba, false);
   });
 
   it("lee los pagos y avisa si rechaza las credenciales", async () => {

@@ -18,7 +18,7 @@ import { hoyIso } from "./licencia";
 import { ConfigManuales, configManuales } from "./config";
 import type { ConexionDeps } from "./conexion";
 import { canjearCodigo, oauthConfig, renovar, revocar } from "./oauth";
-import { mercadoPago, Mp, MpConfig, mpConfig } from "./mercadopago";
+import { CuentaMp, mercadoPago, Mp, MpConfig, mpConfig } from "./mercadopago";
 import type { UrlsPago } from "./pagos";
 import { Abierta, abrirBiblioteca, ManualesError, Tc } from "./service";
 import { ManualesStore, manualesStore } from "./store";
@@ -243,6 +243,16 @@ export function urlsPago(req: NextRequest): UrlsPago {
     retorno: `${base}/api/manuales/pagos/retorno`,
     notificacion: base.startsWith("https://") ? `${base}/api/manuales/pagos/webhook?source_news=webhooks` : null,
   };
+}
+
+let cuentaMp: { token: string; cuenta: CuentaMp; hasta: number } | null = null;
+
+/** The Mercado Pago account of the credentials, asked once every 10 minutes per instance. */
+export async function cuentaMercadoPago(mp: { cfg: MpConfig; mp: Mp }): Promise<CuentaMp> {
+  if (cuentaMp && cuentaMp.token === mp.cfg.accessToken && cuentaMp.hasta > Date.now()) return cuentaMp.cuenta;
+  const cuenta = await mp.mp.cuenta();
+  cuentaMp = { token: mp.cfg.accessToken, cuenta, hasta: Date.now() + 10 * 60_000 };
+  return cuenta;
 }
 
 /** Mercado Pago with Vercel's credentials, or null when they aren't set. */

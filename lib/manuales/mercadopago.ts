@@ -11,7 +11,16 @@ export interface MpConfig {
   accessToken: string;
   /** "Clave secreta" of the webhook in Mercado Pago's panel: when set, signed notifications are verified. */
   webhookSecret: string | null;
-  /** Test credentials ("TEST-..."): the checkout opens in Mercado Pago's sandbox. */
+  /** Old-style test credentials ("TEST-..."): the checkout opens in Mercado Pago's sandbox. */
+  prueba: boolean;
+}
+
+/** The Mercado Pago account the credentials belong to. */
+export interface CuentaMp {
+  id: string;
+  nombre: string;
+  email: string;
+  /** A test account: today's test credentials start with APP_USR- like the real ones, so this is how to tell them apart. */
   prueba: boolean;
 }
 
@@ -46,6 +55,8 @@ export interface NuevaPreferencia {
 }
 
 export interface Mp {
+  /** Whose credentials these are (and whether it is a test account). */
+  cuenta(): Promise<CuentaMp>;
   /** The checkout for an order; `url` is where the buyer pays. */
   crearPreferencia(p: NuevaPreferencia): Promise<{ id: string; url: string }>;
   /** null when Mercado Pago doesn't know that payment. */
@@ -104,6 +115,17 @@ export function mercadoPago(cfg: MpConfig, fetchImpl: typeof fetch = fetch): Mp 
   }
 
   return {
+    async cuenta() {
+      const res = await call("/users/me");
+      if (res.status === 404) throw new ManualesError("Mercado Pago no reconoce la cuenta de las credenciales.", 502, "mercadopago-credenciales");
+      const r = (await res.json()) as { id?: number | string; nickname?: string; email?: string; tags?: string[] };
+      return {
+        id: String(r.id ?? ""),
+        nombre: r.nickname ?? "",
+        email: r.email ?? "",
+        prueba: cfg.prueba || (r.tags ?? []).includes("test_user"),
+      };
+    },
     async crearPreferencia(p) {
       const https = p.retorno.startsWith("https://");
       const body = {
