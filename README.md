@@ -1361,6 +1361,18 @@ control financiero ([`lib/manuales/contabilidad.ts`](lib/manuales/contabilidad.t
   los pagos por revisar.
 - **Exportar a Excel**: hojas Resumen, Por mes, Movimientos y Por revisar.
 
+**Pagos manuales.** Al autorizar o renovar a alguien a mano ("Autorizar" y
+el botón "Licencia"), el administrador registra cómo pagó: **pago recibido**
+(valor, medio: transferencia, consignación, efectivo, Nequi o Daviplata
+directo, datáfono u otro; fecha, referencia y soporte), **cortesía** (queda
+en $ 0) o **registrar después**. Esos pagos quedan en `manuales_pagos` con
+pasarela `manual` y entran a los estados de cuenta como los de las
+pasarelas. En "Ventas" se pueden **anular** con un motivo: quedan como un
+reverso, nunca se borran. La alerta **"Licencias sin pago registrado"** de
+"Estados de cuenta" lista a quienes tienen acceso sin una compra, un pago
+manual o una cortesía que termine cuando termina su licencia, y permite
+registrar el pago ahí mismo.
+
 Los valores son brutos: las comisiones, retenciones e impuestos que
 descuentan las pasarelas están en sus extractos. No reemplaza la
 contabilidad formal ni la facturación electrónica.
@@ -1467,9 +1479,9 @@ carpeta o proyecto.
 | `POST /api/manuales/admin/conectar` | URL de inicio de sesión para conectar la cuenta técnica (administradores) |
 | `POST /api/manuales/admin/completar` | `{ enlace }`: la dirección de `http://localhost/?code=…&state=…` pegada por el administrador; completa la conexión |
 | `DELETE /api/manuales/admin/cuenta` | Desconectar la cuenta técnica (revoca su sesión) |
-| `GET` / `POST` / `PATCH` / `DELETE /api/manuales/admin/autorizados` | Listar (con el estado de cada licencia), autorizar (`{ texto, licencia }`), cambiar la licencia o suspender/reactivar (`{ email, licencia?, suspendido? }`) o quitar (`?email=`). La licencia es `{ meses: 1-12, inicio? }`, `{ vence, inicio? }` o `{ sinVencimiento: true }` |
+| `GET` / `POST` / `PATCH` / `DELETE /api/manuales/admin/autorizados` | Listar (con el estado de cada licencia), autorizar (`{ texto, licencia, pago? }`), cambiar la licencia, suspender/reactivar o registrar un pago (`{ email, licencia?, suspendido?, pago? }`) o quitar (`?email=`). El pago es `{ tipo: "pago", valor, medio, fecha, referencia?, soporte? }` o `{ tipo: "cortesia", fecha?, soporte? }`. La licencia es `{ meses: 1-12, inicio? }`, `{ vence, inicio? }` o `{ sinVencimiento: true }` |
 | `GET` / `PUT /api/manuales/admin/venta` | La venta en línea y cómo están configurados Mercado Pago y Wompi; guardar `{ habilitada, planes: [{ meses, precio }] }` (administradores) |
-| `GET` / `POST /api/manuales/admin/pagos` | Las compras, de la más nueva a la más vieja; `{ orden }` consulta la pasarela por una compra pendiente (administradores) |
+| `GET` / `POST /api/manuales/admin/pagos` | Las compras, de la más nueva a la más vieja; `{ orden }` consulta la pasarela por una compra pendiente; `{ orden, anular: true, motivo }` anula un pago manual (administradores) |
 | `GET /api/manuales/admin/contabilidad` | Todas las compras con pago (aprobadas, por revisar y reembolsadas), `hoy` y la zona horaria, para los estados de cuenta (administradores) |
 | `POST /api/manuales/pagos` | `{ meses, pasarela: "mercadopago" \| "wompi" }`: inicia la compra de una licencia para el correo de quien llama y devuelve el checkout de la pasarela (`url`) y la compra (`orden`) |
 | `GET /api/manuales/pagos/orden?id=` | Cómo va la compra de quien llama; mientras está pendiente, también consulta su pasarela |

@@ -1,6 +1,6 @@
 import { StoreError } from "../propiedades/store";
 import { periodoComprado } from "./licencia";
-import { IdPasarela, NOMBRE_PASARELA } from "./pasarelas";
+import { NOMBRE_PASARELA, OrigenPago } from "./pasarelas";
 import type { EstadoOrden, Orden, Plan } from "./types";
 
 /**
@@ -72,8 +72,26 @@ export interface ResultadoAplicar {
   vence?: string | null;
 }
 
+export interface PagoManual {
+  id: string;
+  email: string;
+  nombre: string;
+  meses: number;
+  monto: number;
+  moneda: string;
+  medio: string;
+  referencia: string | null;
+  soporte: string | null;
+  registradoPor: string;
+  /** When it was paid (ISO timestamp). */
+  pagada: string;
+  /** The license term it pays: from `venceAnterior` (its start) to `venceNueva` (null: no expiry). */
+  venceAnterior: string | null;
+  venceNueva: string | null;
+}
+
 /** Who the license of a person who bought it says added them. */
-export function porPago(pasarela: IdPasarela): string {
+export function porPago(pasarela: OrigenPago): string {
   return `Compra en ${NOMBRE_PASARELA[pasarela]}`;
 }
 
@@ -105,6 +123,10 @@ export interface ManualesStore {
   getOrden(id: string): Promise<Orden | null>;
   /** Newest first; `pagadas`: only those with a payment (approved, to review or refunded), skipping `offset`. */
   listarOrdenes(f: { email?: string; estado?: EstadoOrden; desde?: string; pagadas?: boolean; limite: number; offset?: number }): Promise<Orden[]>;
+  /** A payment an administrator registers by hand (already applied: the license is set by the administrator). */
+  registrarPagoManual(o: PagoManual): Promise<void>;
+  /** Annuls a manual payment (it stays, as "reembolsada", with the reason): false if it isn't an approved manual payment. */
+  anularPagoManual(id: string, nota: string): Promise<boolean>;
   /**
    * Applies a payment to its order, all at once: an approved one (for the
    * order's amount) creates or extends the person's license by the months
@@ -161,8 +183,12 @@ interface OrdenRow {
   meses: number;
   monto: number | string;
   moneda: string;
-  pasarela: IdPasarela | null;
+  pasarela: OrigenPago | null;
   estado: EstadoOrden;
+  medio: string | null;
+  referencia: string | null;
+  soporte: string | null;
+  registrado_por: string | null;
   preferencia_id: string | null;
   pago_id: string | null;
   estado_mp: string | null;
@@ -174,7 +200,7 @@ interface OrdenRow {
   vence_nueva: string | null;
   nota: string | null;
 }
-const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,pasarela,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,actualizada,vence_anterior,vence_nueva,nota";
+const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,pasarela,medio,referencia,soporte,registrado_por,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,actualizada,vence_anterior,vence_nueva,nota";
 
 function toOrden(r: OrdenRow): Orden {
   return {
@@ -185,6 +211,10 @@ function toOrden(r: OrdenRow): Orden {
     monto: Number(r.monto),
     moneda: r.moneda,
     pasarela: r.pasarela ?? "mercadopago",
+    medio: r.medio,
+    referencia: r.referencia,
+    soporte: r.soporte,
+    registradoPor: r.registrado_por,
     estado: r.estado,
     preferenciaId: r.preferencia_id,
     pagoId: r.pago_id,
@@ -379,6 +409,39 @@ function supabaseStore(): ManualesStore | null {
       if (f.offset) q += `&offset=${f.offset}`;
       return (await json<OrdenRow[]>(q)).map(toOrden);
     },
+    async registrarPagoManual(o) {
+      await call("/manuales_pagos", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({
+          id: o.id,
+          email: o.email,
+          nombre: o.nombre,
+          meses: o.meses,
+          monto: o.monto,
+          moneda: o.moneda,
+          pasarela: "manual",
+          estado: "aprobada",
+          medio: o.medio,
+          referencia: o.referencia,
+          soporte: o.soporte,
+          registrado_por: o.registradoPor,
+          pagada: o.pagada,
+          vence_anterior: o.venceAnterior,
+          vence_nueva: o.venceNueva,
+        }),
+      });
+    },
+    async anularPagoManual(id, nota) {
+      const actual = await json<{ nota: string | null }[]>(`/manuales_pagos?id=${eq(id)}&pasarela=eq.manual&estado=eq.aprobada&select=nota`);
+      if (!actual.length) return false;
+      const rows = await json<unknown[]>(`/manuales_pagos?id=${eq(id)}&pasarela=eq.manual&estado=eq.aprobada`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ estado: "reembolsada", nota: [actual[0].nota, nota].filter(Boolean).join(" "), actualizada: now() }),
+      });
+      return rows.length > 0;
+    },
     async aplicarPago(p) {
       return json<ResultadoAplicar>("/rpc/manuales_aplicar_pago", {
         method: "POST",
@@ -465,6 +528,10 @@ export function memoryStore(): ManualesStore {
       ordenes.set(o.id, {
         ...o,
         estado: "pendiente",
+        medio: null,
+        referencia: null,
+        soporte: null,
+        registradoPor: null,
         preferenciaId: null,
         pagoId: null,
         estadoPago: null,
@@ -491,6 +558,29 @@ export function memoryStore(): ManualesStore {
         .sort((a, b) => b.creada.localeCompare(a.creada))
         .slice(f.offset ?? 0, (f.offset ?? 0) + f.limite)
         .map((o) => ({ ...o }));
+    },
+    async registrarPagoManual(o) {
+      if (ordenes.has(o.id)) throw new StoreError("La compra ya existe.");
+      const { registradoPor, ...resto } = o;
+      ordenes.set(o.id, {
+        ...resto,
+        registradoPor,
+        pasarela: "manual",
+        estado: "aprobada",
+        preferenciaId: null,
+        pagoId: null,
+        estadoPago: null,
+        detallePago: null,
+        creada: now(),
+        actualizada: now(),
+        nota: null,
+      });
+    },
+    async anularPagoManual(id, nota) {
+      const o = ordenes.get(id);
+      if (!o || o.pasarela !== "manual" || o.estado !== "aprobada") return false;
+      ordenes.set(id, { ...o, estado: "reembolsada", nota: [o.nota, nota].filter(Boolean).join(" "), actualizada: now() });
+      return true;
     },
     async aplicarPago(p) {
       // Same rules as manuales_aplicar_pago in supabase/manuales.sql.

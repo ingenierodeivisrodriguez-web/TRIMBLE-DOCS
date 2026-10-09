@@ -1,14 +1,17 @@
 // Statements of the license sales for fiscal reviews and financial control:
 // cash collected (approved payments) and refunds by the date they happened,
 // and revenue recognized over each license's term (accrued in the period /
-// deferred at its close), plus the reconciliation between them. Amounts are
+// deferred at its close), plus the reconciliation between them. Payments
+// registered by hand (transfer, cash...) count like the gateways' ones;
+// courtesies (value 0) are listed but don't count as sales. Amounts are
 // gross: the gateways' fees and withholdings are in their own statements.
 // Dates are the company's days ("YYYY-MM-DD", Colombia by default).
 import { diasEntre, hoyIso, sumarMeses } from "./licencia";
-import type { IdPasarela } from "./pasarelas";
+import type { OrigenPago } from "./pasarelas";
 import type { Orden } from "./types";
 
-export type TipoMovimiento = "venta" | "reembolso";
+/** "reembolso" is also the annulment of a manual payment. */
+export type TipoMovimiento = "venta" | "cortesia" | "reembolso";
 
 export interface Movimiento {
   fecha: string;
@@ -17,8 +20,11 @@ export interface Movimiento {
   email: string;
   nombre: string;
   meses: number;
-  pasarela: IdPasarela;
+  pasarela: OrigenPago;
+  /** The gateway's payment id, or the reference of a manual payment. */
   pagoId: string | null;
+  /** Manual payments: how it was paid. */
+  medio: string | null;
   /** Positive for a sale, negative for a refund. */
   valor: number;
   /** The license term the sale pays (last day included); null when the license doesn't expire. */
@@ -51,12 +57,14 @@ export interface EstadoDeCuenta {
   reembolsos: number;
   neto: number;
   ticketPromedio: number;
+  /** Licenses given without charge in the period. */
+  cortesias: number;
   /** Revenue: deferred at the start, sales of the period that weren't refunded, accrued in the period, deferred at the close. */
   diferidoInicial: number;
   recaudoNoReembolsado: number;
   devengado: number;
   diferidoFinal: number;
-  porPasarela: (Fila & { pasarela: IdPasarela })[];
+  porPasarela: (Fila & { pasarela: OrigenPago })[];
   porPlan: (Fila & { meses: number })[];
   movimientos: Movimiento[];
   /** Payments that came in for less than the price: money received, no license (amount of the purchase). */
@@ -92,6 +100,13 @@ function termino(o: Orden, fechaPago: string): { inicio: string; vence: string }
   return { inicio, vence: o.venceNueva };
 }
 
+/** "Venta", "Cortesía", "Reembolso" (or "Anulación" for a manual payment). */
+export function etiquetaTipo(m: { tipo: TipoMovimiento; pasarela: OrigenPago }): string {
+  if (m.tipo === "venta") return "Venta";
+  if (m.tipo === "cortesia") return "Cortesía";
+  return m.pasarela === "manual" ? "Anulación" : "Reembolso";
+}
+
 /** Days of (inicio, vence] that fall in [desde, hasta]. */
 function diasEn(inicio: string, vence: string, desde: string, hasta: string): number {
   const a = inicio >= desde ? inicio : diaAnterior(desde);
@@ -122,9 +137,19 @@ export function movimientosDe(ordenes: Orden[], zona?: string): Movimiento[] {
     if (!o.pagada || (o.estado !== "aprobada" && o.estado !== "reembolsada")) continue;
     const fecha = fechaLocal(o.pagada, zona);
     const t = termino(o, fecha);
-    const base = { orden: o.id, email: o.email, nombre: o.nombre, meses: o.meses, pasarela: o.pasarela, pagoId: o.pagoId, desde: t ? t.inicio : null, hasta: t ? t.vence : null };
-    out.push({ ...base, fecha, tipo: "venta", valor: o.monto });
-    if (o.estado === "reembolsada") out.push({ ...base, fecha: fechaLocal(o.actualizada, zona), tipo: "reembolso", valor: -o.monto });
+    const base = {
+      orden: o.id,
+      email: o.email,
+      nombre: o.nombre,
+      meses: o.meses,
+      pasarela: o.pasarela,
+      pagoId: o.pagoId ?? o.referencia,
+      medio: o.medio,
+      desde: t ? t.inicio : null,
+      hasta: t ? t.vence : null,
+    };
+    out.push({ ...base, fecha, tipo: o.monto > 0 ? "venta" : "cortesia", valor: o.monto });
+    if (o.estado === "reembolsada" && o.monto > 0) out.push({ ...base, fecha: fechaLocal(o.actualizada, zona), tipo: "reembolso", valor: -o.monto });
   }
   return out.sort((a, b) => a.fecha.localeCompare(b.fecha) || (a.tipo === b.tipo ? 0 : a.tipo === "venta" ? -1 : 1));
 }
@@ -136,9 +161,14 @@ export function movimientosDe(ordenes: Orden[], zona?: string): Movimiento[] {
 export function estadoDeCuenta(ordenes: Orden[], desde: string, hasta: string, zona?: string): EstadoDeCuenta {
   const movimientos = movimientosDe(ordenes, zona).filter((m) => m.fecha >= desde && m.fecha <= hasta);
   const total = vacia();
-  const porPasarela = new Map<IdPasarela, Fila>();
+  const porPasarela = new Map<OrigenPago, Fila>();
   const porPlan = new Map<number, Fila>();
+  let cortesias = 0;
   for (const m of movimientos) {
+    if (m.tipo === "cortesia") {
+      cortesias++;
+      continue;
+    }
     const filas = [total, porPasarela.get(m.pasarela) ?? vacia(), porPlan.get(m.meses) ?? vacia()];
     porPasarela.set(m.pasarela, filas[1]);
     porPlan.set(m.meses, filas[2]);
@@ -180,6 +210,7 @@ export function estadoDeCuenta(ordenes: Orden[], desde: string, hasta: string, z
     reembolsos: total.reembolsos,
     neto: total.neto,
     ticketPromedio: total.ventas ? redondear(total.bruto / total.ventas) : 0,
+    cortesias,
     diferidoInicial: redondear(diferidoInicial),
     recaudoNoReembolsado: redondear(recaudoNoReembolsado),
     devengado: redondear(devengado),
@@ -202,4 +233,16 @@ export function porMes(ordenes: Orden[], anio: number, hoy: string, zona?: strin
     out.push({ mes, ventas: e.ventas, bruto: e.bruto, reembolsos: e.reembolsos, neto: e.neto, devengado: e.devengado, diferido: e.diferidoFinal });
   }
   return out;
+}
+
+/**
+ * People with access whose current license isn't backed by a payment: no
+ * approved purchase (online, manual or courtesy) ending when their license
+ * ends. Suspended and expired licenses are left out.
+ */
+export function sinPagoRegistrado<A extends { email: string; vence: string | null; estado: string }>(autorizados: A[], ordenes: Orden[]): A[] {
+  const respaldadas = new Set(ordenes.filter((o) => o.estado === "aprobada").map((o) => `${o.email}|${o.venceNueva ?? ""}`));
+  return autorizados.filter(
+    (a) => (a.estado === "activa" || a.estado === "por-vencer" || a.estado === "sin-vencimiento") && !respaldadas.has(`${a.email}|${a.vence ?? ""}`)
+  );
 }

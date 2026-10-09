@@ -6,6 +6,7 @@ import { DIAS_AVISO, ESTADO_LABELS, EstadoLicencia, fechaVisible, MAX_MESES, sum
 import type { AutorizadoInfo } from "../../lib/manuales/types";
 import { parseDisplayDate } from "../../lib/propiedades/values";
 import DateField from "../propiedades/DateField";
+import FormPago, { FormPagoValor, formPagoVacio, pedidoPago } from "./FormPago";
 
 type Modo = "meses" | "fecha" | "sin";
 
@@ -117,9 +118,10 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
   const [hoy, setHoy] = useState<string | null>(null);
   const [texto, setTexto] = useState("");
   const [nueva, setNueva] = useState<FormLicencia | null>(null);
+  const [pagoNuevo, setPagoNuevo] = useState<FormPagoValor | null>(null);
   const [filtro, setFiltro] = useState("");
   const [estadoFiltro, setEstadoFiltro] = useState<EstadoLicencia | "">("");
-  const [editando, setEditando] = useState<{ email: string; form: FormLicencia } | null>(null);
+  const [editando, setEditando] = useState<{ email: string; form: FormLicencia; pago: FormPagoValor } | null>(null);
   const [quitando, setQuitando] = useState<string | null>(null);
   const [ocupado, setOcupado] = useState("");
   const [error, setError] = useState("");
@@ -131,6 +133,7 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
       setLista(r.autorizados);
       setHoy(r.hoy);
       setNueva((n) => n ?? { modo: "meses", meses: MAX_MESES, desde: fechaVisible(r.hoy), hasta: "" });
+      setPagoNuevo((p) => p ?? formPagoVacio(fechaVisible(r.hoy)));
     } catch (err) {
       setError(message(err));
     }
@@ -156,13 +159,16 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
   }
 
   function autorizar() {
-    if (!nueva) return;
+    if (!nueva || !pagoNuevo) return;
     const lic = pedido(nueva);
     if (typeof lic === "string") return setError(lic);
+    const pago = pedidoPago(pagoNuevo);
+    if (typeof pago === "string") return setError(pago);
     correr("Autorizando...", async () => {
-      const r = await api.autorizar(texto, lic);
+      const r = await api.autorizar(texto, lic, pago ?? undefined);
       setTexto(r.invalidos.join("\n"));
-      return `${r.agregados} persona(s) autorizada(s).${r.invalidos.length ? ` No son correos válidos: ${r.invalidos.join(", ")}.` : ""}`;
+      if (pago) setPagoNuevo({ ...pagoNuevo, valor: "", referencia: "", soporte: "" });
+      return `${r.agregados} persona(s) autorizada(s).${r.pagos ? ` ${r.pagos} pago(s) registrado(s) en los estados de cuenta.` : ""}${r.invalidos.length ? ` No son correos válidos: ${r.invalidos.join(", ")}.` : ""}`;
     });
   }
 
@@ -172,6 +178,7 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
     const desde = fechaVisible(enCurso ? a.vence : hoy);
     setEditando({
       email: a.email,
+      pago: formPagoVacio(fechaVisible(hoy)),
       form: a.vence && !a.licenciaMeses ? { modo: "fecha", meses: MAX_MESES, desde: fechaVisible(a.inicio ?? hoy), hasta: fechaVisible(a.vence) } : { modo: "meses", meses: a.licenciaMeses ?? MAX_MESES, desde, hasta: "" },
     });
   }
@@ -180,11 +187,13 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
     if (!editando) return;
     const lic = pedido(editando.form);
     if (typeof lic === "string") return setError(lic);
+    const pago = pedidoPago(editando.pago);
+    if (typeof pago === "string") return setError(pago);
     const email = editando.email;
     correr("Guardando la licencia...", async () => {
-      await api.actualizarAutorizado(email, { licencia: lic });
+      await api.actualizarAutorizado(email, { licencia: lic, pago: pago ?? undefined });
       setEditando(null);
-      return `Licencia de ${email} actualizada.`;
+      return `Licencia de ${email} actualizada${pago ? (pago.tipo === "pago" ? " y pago registrado" : " como cortesía") : ""}.`;
     });
   }
 
@@ -225,11 +234,18 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
           <EditorLicencia id="nueva" valor={nueva} onChange={setNueva} />
         </div>
       )}
+      {pagoNuevo && (
+        <div style={{ marginTop: 8 }}>
+          <FormPago id="nueva" valor={pagoNuevo} onChange={setPagoNuevo} />
+        </div>
+      )}
       <div style={{ marginTop: 10 }}>
         <button type="button" style={primario} onClick={autorizar} disabled={!!ocupado || !texto.trim() || !nueva}>
           Autorizar
         </button>
-        <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", marginLeft: 10 }}>Si el correo ya estaba autorizado, se le asigna esta licencia nueva.</span>
+        <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", marginLeft: 10 }}>
+          Si el correo ya estaba autorizado, se le asigna esta licencia nueva. Con varios correos, el pago se registra para cada uno.
+        </span>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 8, marginTop: 18, marginBottom: 6, flexWrap: "wrap" }}>
@@ -321,7 +337,10 @@ export default function Autorizados({ api }: { api: ManualesApi }) {
               </div>
               {abierto && editando && (
                 <div style={{ marginTop: 10, paddingTop: 10, borderTop: "1px dashed #c9d6e6" }}>
-                  <EditorLicencia id={`lic-${a.email}`} valor={editando.form} onChange={(form) => setEditando({ email: a.email, form })} />
+                  <EditorLicencia id={`lic-${a.email}`} valor={editando.form} onChange={(form) => setEditando({ ...editando, form })} />
+                  <div style={{ marginTop: 8 }}>
+                    <FormPago id={`pago-${a.email}`} valor={editando.pago} onChange={(pago) => setEditando({ ...editando, pago })} />
+                  </div>
                   <div style={{ marginTop: 8, display: "flex", gap: 8 }}>
                     <button type="button" style={primario} onClick={guardarLicencia} disabled={!!ocupado}>
                       Guardar licencia

@@ -2,12 +2,13 @@
 
 import { CSSProperties, ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 import type { ManualesApi } from "../../lib/manuales/client";
-import { estadoDeCuenta, fechaLocal, porMes, rango } from "../../lib/manuales/contabilidad";
+import { estadoDeCuenta, etiquetaTipo, fechaLocal, porMes, rango, sinPagoRegistrado } from "../../lib/manuales/contabilidad";
 import { descargarEstado } from "../../lib/manuales/excelContable";
 import { fechaVisible } from "../../lib/manuales/licencia";
 import { NOMBRE_PASARELA } from "../../lib/manuales/pasarelas";
-import { etiquetaMeses, pesos } from "../../lib/manuales/textos";
-import type { Orden } from "../../lib/manuales/types";
+import { etiquetaMedio, etiquetaMeses, pesos } from "../../lib/manuales/textos";
+import type { AutorizadoInfo, Orden } from "../../lib/manuales/types";
+import FormPago, { FormPagoValor, formPagoVacio, pedidoPago } from "./FormPago";
 
 const MESES = ["Enero", "Febrero", "Marzo", "Abril", "Mayo", "Junio", "Julio", "Agosto", "Septiembre", "Octubre", "Noviembre", "Diciembre"];
 
@@ -30,12 +31,16 @@ export default function EstadosCuenta({ api }: { api: ManualesApi }) {
   const [filtro, setFiltro] = useState("");
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState("");
+  const [autorizados, setAutorizados] = useState<AutorizadoInfo[]>([]);
+  const [registrando, setRegistrando] = useState<{ email: string; pago: FormPagoValor } | null>(null);
+  const [aviso, setAviso] = useState("");
 
   const cargar = useCallback(async () => {
     setError("");
     try {
-      const d = await api.contabilidad();
+      const [d, a] = await Promise.all([api.contabilidad(), api.autorizados()]);
       setDatos(d);
+      setAutorizados(a.autorizados);
       setAnio((a) => a ?? Number(d.hoy.slice(0, 4)));
       setMes((m) => m || d.hoy.slice(5, 7));
     } catch (err) {
@@ -62,6 +67,26 @@ export default function EstadosCuenta({ api }: { api: ManualesApi }) {
   }, [datos, periodo]);
   const meses = useMemo(() => (datos && anio ? porMes(datos.ordenes, anio, datos.hoy, datos.zona) : []), [datos, anio]);
 
+  const sinPago = useMemo(() => (datos ? sinPagoRegistrado(autorizados, datos.ordenes) : []), [autorizados, datos]);
+
+  async function registrarPago() {
+    if (!registrando) return;
+    const pago = pedidoPago(registrando.pago);
+    if (typeof pago === "string" || !pago) return setError(pago || "Elige el tipo de pago.");
+    setOcupado("Registrando el pago...");
+    setError("");
+    try {
+      await api.actualizarAutorizado(registrando.email, { pago });
+      setAviso(`Pago de ${registrando.email} registrado.`);
+      setRegistrando(null);
+      await cargar();
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setOcupado("");
+    }
+  }
+
   const nombrePeriodo = anio ? (mes ? `${MESES[Number(mes) - 1]} de ${anio}` : `Año ${anio}`) : "";
   const movimientos = useMemo(() => {
     const f = filtro.trim().toLowerCase();
@@ -86,6 +111,57 @@ export default function EstadosCuenta({ api }: { api: ManualesApi }) {
     <div style={{ flex: 1, overflow: "auto", background: "#f4f6f9" }}>
       <div style={{ maxWidth: 1040, margin: "0 auto", padding: "18px 16px 40px", display: "flex", flexDirection: "column", gap: 16 }}>
         {error && <div style={{ ...nota, background: "#fdecea", border: "1px solid #e5a29c", color: "#8a1c14" }}>{error}</div>}
+        {aviso && <div style={{ ...nota, background: "var(--tc-blue-100)", border: "1px solid var(--tc-blue-500)", color: "var(--tc-blue-900)" }}>{aviso}</div>}
+
+        {datos && sinPago.length > 0 && (
+          <section style={{ ...tarjeta, border: "1px solid #f0c36d" }}>
+            <h3 style={h3}>Licencias sin pago registrado ({sinPago.length})</h3>
+            <p style={{ ...p, fontSize: 13 }}>
+              Tienen acceso hoy, pero su licencia no tiene una compra en línea, un pago manual ni una cortesía que la respalde. Registra cómo pagaron para
+              que entren a los estados de cuenta.
+            </p>
+            <div style={{ border: "1px solid #dfe4ea", borderRadius: 6, overflow: "hidden" }}>
+              {sinPago.map((a) => (
+                <div key={a.email} style={{ padding: "8px 10px", borderBottom: "1px solid #eef1f5", fontSize: 13.5 }}>
+                  <div style={{ display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" }}>
+                    <span style={{ flex: 1, minWidth: 220 }}>
+                      {a.nombre ? `${a.nombre} · ` : ""}
+                      {a.email}
+                      <span style={{ display: "block", fontSize: 12, color: "var(--tc-gray-500)" }}>
+                        {a.vence ? `Licencia ${a.inicio ? `del ${fechaVisible(a.inicio)} ` : ""}al ${fechaVisible(a.vence)}` : "Sin vencimiento"} · autorizado por{" "}
+                        {a.agregadoPor ?? "—"}
+                      </span>
+                    </span>
+                    {registrando?.email === a.email ? (
+                      <button type="button" style={secundario} onClick={() => setRegistrando(null)}>
+                        Cancelar
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        style={secundario}
+                        onClick={() => setRegistrando({ email: a.email, pago: formPagoVacio(fechaVisible(datos.hoy)) })}
+                        disabled={!!ocupado}
+                      >
+                        Registrar pago
+                      </button>
+                    )}
+                  </div>
+                  {registrando?.email === a.email && (
+                    <div style={{ marginTop: 8, paddingTop: 8, borderTop: "1px dashed #c9d6e6", display: "flex", flexDirection: "column", gap: 8 }}>
+                      <FormPago id={`sin-pago-${a.email}`} valor={registrando.pago} permitirDespues={false} onChange={(pago) => setRegistrando({ email: a.email, pago })} />
+                      <div>
+                        <button type="button" style={primario} onClick={registrarPago} disabled={!!ocupado}>
+                          {ocupado || "Guardar pago"}
+                        </button>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
+          </section>
+        )}
 
         <section style={{ ...tarjeta, display: "flex", gap: 10, alignItems: "flex-end", flexWrap: "wrap" }}>
           <div style={{ flex: 1, minWidth: 220 }}>
@@ -128,7 +204,11 @@ export default function EstadosCuenta({ api }: { api: ManualesApi }) {
         ) : (
           <>
             <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(170px, 1fr))", gap: 12 }}>
-              <Indicador titulo="Recaudo bruto" valor={pesos(estado.bruto)} detalle={`${estado.ventas} venta(s)`} />
+              <Indicador
+                titulo="Recaudo bruto"
+                valor={pesos(estado.bruto)}
+                detalle={`${estado.ventas} venta(s)${estado.cortesias ? ` · ${estado.cortesias} cortesía(s)` : ""}`}
+              />
               <Indicador titulo="Reembolsos" valor={pesos(neg(estado.reembolsos))} detalle={`${estado.reembolsosCantidad} reembolso(s)`} rojo={estado.reembolsos > 0} />
               <Indicador titulo="Recaudo neto" valor={pesos(estado.neto)} detalle={`Ticket promedio ${pesos(estado.ticketPromedio)}`} fuerte />
               <Indicador titulo="Ingreso devengado" valor={pesos(estado.devengado)} detalle="Servicio prestado en el período" />
@@ -190,17 +270,23 @@ export default function EstadosCuenta({ api }: { api: ManualesApi }) {
                 />
               </div>
               <Tabla
-                titulos={["Fecha", "Tipo", "Comprador", "Plan", "Pasarela", "Id del pago", "Valor", "Licencia"]}
+                titulos={["Fecha", "Tipo", "Comprador", "Plan", "Pasarela / medio", "Id o referencia", "Valor", "Licencia"]}
                 derecha={[6]}
                 filas={movimientos.map((m) => [
                   fechaVisible(m.fecha),
-                  m.tipo === "venta" ? "Venta" : <span key="r" style={{ color: "#8a1c14" }}>Reembolso</span>,
+                  m.tipo === "reembolso" ? (
+                    <span key="r" style={{ color: "#8a1c14" }}>
+                      {etiquetaTipo(m)}
+                    </span>
+                  ) : (
+                    etiquetaTipo(m)
+                  ),
                   <span key="c">
                     {m.nombre ? `${m.nombre} · ` : ""}
                     {m.email}
                   </span>,
                   etiquetaMeses(m.meses),
-                  NOMBRE_PASARELA[m.pasarela],
+                  m.pasarela === "manual" ? `Manual · ${etiquetaMedio(m.medio)}` : NOMBRE_PASARELA[m.pasarela],
                   <code key="p" style={{ fontSize: 12 }}>
                     {m.pagoId ?? ""}
                   </code>,

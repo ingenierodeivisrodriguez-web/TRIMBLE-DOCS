@@ -173,7 +173,7 @@ export async function procesarPago(
 
 /** A pending purchase checked against its gateway (in case its notification didn't arrive). Returns it updated. */
 export async function verificarOrden(store: ManualesStore, pasarelas: Pasarelas, orden: Orden, hoy: string): Promise<Orden> {
-  const pasarela = pasarelas[orden.pasarela];
+  const pasarela = orden.pasarela === "manual" ? undefined : pasarelas[orden.pasarela];
   if (orden.estado !== "pendiente" || !pasarela) return orden;
   const pagos = await pasarela.buscarPagos(orden.id);
   const aprobado = pagos.find((p) => p.estado === "approved");

@@ -4,7 +4,7 @@ import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react"
 import type { ManualesApi } from "../../lib/manuales/client";
 import { fechaVisible, MAX_MESES } from "../../lib/manuales/licencia";
 import { NOMBRE_PASARELA } from "../../lib/manuales/pasarelas";
-import { ESTADO_ORDEN_LABELS, etiquetaMeses, pesos, textoEstadoPago } from "../../lib/manuales/textos";
+import { ESTADO_ORDEN_LABELS, etiquetaMedio, etiquetaMeses, pesos, textoEstadoPago } from "../../lib/manuales/textos";
 import type { ConfigVentaInfo, EstadoOrden, Orden, Plan } from "../../lib/manuales/types";
 
 function message(err: unknown): string {
@@ -52,6 +52,7 @@ export default function Ventas({ api }: { api: ManualesApi }) {
   const [ocupado, setOcupado] = useState("");
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
+  const [anulando, setAnulando] = useState<{ id: string; motivo: string } | null>(null);
 
   const cargar = useCallback(async () => {
     try {
@@ -291,17 +292,59 @@ export default function Ventas({ api }: { api: ManualesApi }) {
                     </span>
                   </span>
                   <span style={{ display: "block", fontSize: 12.5, color: "var(--tc-gray-500)", marginTop: 2 }}>
-                    {fecha(o.creada)} · {etiquetaMeses(o.meses)} · {pesos(o.monto, o.moneda)} · {NOMBRE_PASARELA[o.pasarela]}
+                    {fecha(o.pagada ?? o.creada)} · {etiquetaMeses(o.meses)} · {pesos(o.monto, o.moneda)} ·{" "}
+                    {o.pasarela === "manual" ? `Manual · ${etiquetaMedio(o.medio)}` : NOMBRE_PASARELA[o.pasarela]}
                     {o.estado === "aprobada" && o.venceNueva ? ` · acceso hasta el ${fechaVisible(o.venceNueva)}` : ""}
-                    {o.estado !== "aprobada" ? ` · ${textoEstadoPago(o.estadoPago, o.detallePago)}` : ""}
+                    {o.estado !== "aprobada" && o.pasarela !== "manual" ? ` · ${textoEstadoPago(o.estadoPago, o.detallePago)}` : ""}
                     {o.pagoId ? ` · pago ${o.pagoId}` : ""}
+                    {o.referencia ? ` · ref. ${o.referencia}` : ""}
                   </span>
+                  {o.pasarela === "manual" && (
+                    <span style={{ display: "block", fontSize: 12, color: "var(--tc-gray-500)" }}>
+                      Registrado por {o.registradoPor ?? "—"}
+                      {o.soporte ? ` · ${o.soporte}` : ""}
+                    </span>
+                  )}
                   {o.nota && <span style={{ display: "block", fontSize: 12.5, color: "#8a5300" }}>{o.nota}</span>}
                 </span>
                 {o.estado === "pendiente" && (
                   <button type="button" style={secundario} onClick={() => verificar(o)} disabled={!!ocupado}>
                     Verificar pago
                   </button>
+                )}
+                {o.pasarela === "manual" && o.estado === "aprobada" && anulando?.id !== o.id && (
+                  <button type="button" style={{ ...secundario, color: "#8a1c14", border: "1px solid #e5a29c" }} onClick={() => setAnulando({ id: o.id, motivo: "" })} disabled={!!ocupado}>
+                    Anular
+                  </button>
+                )}
+                {anulando?.id === o.id && (
+                  <span style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", width: "100%" }}>
+                    <input
+                      value={anulando.motivo}
+                      onChange={(e) => setAnulando({ id: o.id, motivo: e.target.value })}
+                      placeholder="Motivo de la anulación (queda registrado)"
+                      aria-label="Motivo de la anulación"
+                      style={{ flex: "1 1 260px", border: "1px solid var(--tc-gray-300)", borderRadius: 5, padding: "6px 8px", fontSize: 13.5, fontFamily: "inherit" }}
+                    />
+                    <button
+                      type="button"
+                      style={{ ...secundario, color: "#8a1c14", border: "1px solid #e5a29c" }}
+                      disabled={!!ocupado || !anulando.motivo.trim()}
+                      onClick={() =>
+                        correr("Anulando...", async () => {
+                          await api.anularPago(o.id, anulando.motivo);
+                          setAnulando(null);
+                          await cargar();
+                          return "Pago anulado: queda en los estados de cuenta como un reverso.";
+                        })
+                      }
+                    >
+                      Confirmar anulación
+                    </button>
+                    <button type="button" style={secundario} onClick={() => setAnulando(null)}>
+                      Cancelar
+                    </button>
+                  </span>
                 )}
               </div>
             ))}
@@ -312,7 +355,7 @@ export default function Ventas({ api }: { api: ManualesApi }) {
           </div>
           <p style={{ ...p, fontSize: 12.5, color: "var(--tc-gray-500)", marginTop: 8, marginBottom: 0 }}>
             &quot;Pendiente&quot;: la persona fue a pagar y la pasarela aún no aprueba el pago (o no lo completó). &quot;Revisar&quot;: el pago fue por menos
-            del valor y no se aplicó. &quot;Reembolsada&quot;: el pago se devolvió; la licencia no se quita sola, suspéndela en &quot;Administrar acceso&quot; si
+            del valor y no se aplicó. Los pagos &quot;Manual&quot; los registra el administrador y se pueden anular (quedan como reverso, nunca se borran). &quot;Reembolsada&quot;: el pago se devolvió; la licencia no se quita sola, suspéndela en &quot;Administrar acceso&quot; si
             corresponde.
           </p>
         </section>

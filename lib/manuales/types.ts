@@ -1,5 +1,5 @@
 import type { EstadoLicencia } from "./licencia";
-import type { IdPasarela } from "./pasarelas";
+import type { IdPasarela, OrigenPago } from "./pasarelas";
 
 // Shared by the "Manuales" API and its screen.
 
@@ -148,7 +148,7 @@ export interface CompraIniciada {
 export interface EstadoCompra {
   orden: string;
   estado: EstadoOrden;
-  pasarela: IdPasarela;
+  pasarela: OrigenPago;
   estadoPago: string | null;
   detallePago: string | null;
   meses: number;
@@ -168,9 +168,14 @@ export interface Orden {
   meses: number;
   monto: number;
   moneda: string;
-  /** The gateway the person chose to pay with. */
-  pasarela: IdPasarela;
+  /** The gateway the person chose to pay with, or "manual" (registered by an administrator). */
+  pasarela: OrigenPago;
   estado: EstadoOrden;
+  /** Manual payments: how it was paid (transferencia, efectivo...), its reference (transfer or invoice number), a note, and who registered it. */
+  medio: string | null;
+  referencia: string | null;
+  soporte: string | null;
+  registradoPor: string | null;
   /** The gateway's checkout id (Mercado Pago's preference), when it has one. */
   preferenciaId: string | null;
   /** The approved payment in the gateway. */

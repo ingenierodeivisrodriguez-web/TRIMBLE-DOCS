@@ -6,7 +6,10 @@ export type IdPasarela = "mercadopago" | "wompi";
 
 export const PASARELAS: IdPasarela[] = ["mercadopago", "wompi"];
 
-export const NOMBRE_PASARELA: Record<IdPasarela, string> = { mercadopago: "Mercado Pago", wompi: "Wompi" };
+/** Where a purchase's payment came from: a gateway, or registered by hand by an administrator (transfer, cash...). */
+export type OrigenPago = IdPasarela | "manual";
+
+export const NOMBRE_PASARELA: Record<OrigenPago, string> = { mercadopago: "Mercado Pago", wompi: "Wompi", manual: "Manual" };
 
 export function esPasarela(id: unknown): id is IdPasarela {
   return id === "mercadopago" || id === "wompi";

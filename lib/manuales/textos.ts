@@ -46,3 +46,22 @@ export function textoEstadoPago(estado: string | null, detalle: string | null): 
       return "Aún no hay pago";
   }
 }
+
+/** How a manual payment was received. */
+export const MEDIOS_PAGO = {
+  transferencia: "Transferencia bancaria",
+  consignacion: "Consignación",
+  efectivo: "Efectivo",
+  nequi: "Nequi (directo)",
+  daviplata: "Daviplata (directo)",
+  tarjeta: "Tarjeta (datáfono)",
+  otro: "Otro",
+} as const;
+
+export type MedioPago = keyof typeof MEDIOS_PAGO;
+
+export function etiquetaMedio(medio: string | null): string {
+  if (!medio) return "";
+  if (medio === "cortesia") return "Cortesía";
+  return (MEDIOS_PAGO as Record<string, string>)[medio] ?? medio;
+}

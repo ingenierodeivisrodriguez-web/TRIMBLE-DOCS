@@ -91,6 +91,17 @@ create table if not exists public.manuales_pagos (
 );
 -- La pasarela con la que se pagó (Mercado Pago o Wompi).
 alter table public.manuales_pagos add column if not exists pasarela text not null default 'mercadopago' check (pasarela in ('mercadopago', 'wompi'));
+-- Pagos registrados a mano por el administrador (pasarela 'manual'): cómo se
+-- pagó, su referencia (transferencia, factura...), un soporte y quién lo
+-- registró. Las cortesías quedan con valor 0.
+alter table public.manuales_pagos add column if not exists medio text;
+alter table public.manuales_pagos add column if not exists referencia text;
+alter table public.manuales_pagos add column if not exists soporte text;
+alter table public.manuales_pagos add column if not exists registrado_por text;
+alter table public.manuales_pagos drop constraint if exists manuales_pagos_monto_check;
+alter table public.manuales_pagos add constraint manuales_pagos_monto_check check (monto >= 0);
+alter table public.manuales_pagos drop constraint if exists manuales_pagos_pasarela_check;
+alter table public.manuales_pagos add constraint manuales_pagos_pasarela_check check (pasarela in ('mercadopago', 'wompi', 'manual'));
 create index if not exists manuales_pagos_creada on public.manuales_pagos (creada desc);
 create index if not exists manuales_pagos_email on public.manuales_pagos (email, creada desc);
 

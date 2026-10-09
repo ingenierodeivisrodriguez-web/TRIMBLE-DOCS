@@ -15,6 +15,11 @@ import type {
 } from "./types";
 
 /** A license as the administrator sets it: 1-12 months from a date, up to a date, or without expiry. */
+/** A payment the administrator registers by hand: received (value, method, date, reference) or a courtesy. */
+export type PagoPedido =
+  | { tipo: "pago"; valor: number; medio: string; fecha: string; referencia?: string; soporte?: string }
+  | { tipo: "cortesia"; fecha?: string; soporte?: string };
+
 export type LicenciaPedido = { meses: number; inicio?: string } | { vence: string; inicio?: string } | { sinVencimiento: true };
 
 export interface ManualesApi {
@@ -27,8 +32,10 @@ export interface ManualesApi {
   desconectar(): Promise<void>;
   /** The authorized people, and "today" as the server counts licenses. */
   autorizados(): Promise<{ hoy: string; autorizados: AutorizadoInfo[] }>;
-  autorizar(texto: string, licencia: LicenciaPedido): Promise<{ agregados: number; invalidos: string[] }>;
-  actualizarAutorizado(email: string, cambios: { licencia?: LicenciaPedido; suspendido?: boolean }): Promise<void>;
+  autorizar(texto: string, licencia: LicenciaPedido, pago?: PagoPedido): Promise<{ agregados: number; invalidos: string[]; pagos: number }>;
+  actualizarAutorizado(email: string, cambios: { licencia?: LicenciaPedido; suspendido?: boolean; pago?: PagoPedido }): Promise<void>;
+  /** Administrators: annuls a manual payment (it stays as a reversal). */
+  anularPago(orden: string, motivo: string): Promise<void>;
   quitarAutorizado(email: string): Promise<void>;
   /** Starts the purchase of a license of `meses` for the user's own e-mail with a gateway (pay it at the returned `url`). */
   comprar(meses: number, pasarela: IdPasarela): Promise<CompraIniciada>;
@@ -100,7 +107,10 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
       await request("/admin/cuenta", send("DELETE"));
     },
     autorizados: () => request("/admin/autorizados"),
-    autorizar: (texto, licencia) => request("/admin/autorizados", send("POST", { texto, licencia })),
+    autorizar: (texto, licencia, pago) => request("/admin/autorizados", send("POST", { texto, licencia, pago })),
+    async anularPago(orden, motivo) {
+      await request("/admin/pagos", send("POST", { orden, anular: true, motivo }));
+    },
     async actualizarAutorizado(email, cambios) {
       await request("/admin/autorizados", send("PATCH", { email, ...cambios }));
     },

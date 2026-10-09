@@ -2,10 +2,10 @@
 // demand in the browser): summary, month by month, the ledger of movements
 // and the payments to review. Dates are real dates shown as DD-MM-AAAA.
 import type { Worksheet } from "exceljs";
-import type { EstadoDeCuenta, FilaMes } from "./contabilidad";
+import { EstadoDeCuenta, etiquetaTipo, FilaMes } from "./contabilidad";
 import { fechaVisible } from "./licencia";
 import { NOMBRE_PASARELA } from "./pasarelas";
-import { etiquetaMeses } from "./textos";
+import { etiquetaMedio, etiquetaMeses } from "./textos";
 
 const PESOS = '"$" #,##0;[Red]-"$" #,##0';
 const FECHA = "dd-mm-yyyy";
@@ -37,7 +37,7 @@ export async function descargarEstado(e: EstadoDeCuenta, meses: FilaMes[], titul
   r.addRow([]);
   const filas: [string, number, boolean?][] = [
     ["RECAUDO (caja)", NaN, true],
-    [`Ventas aprobadas (${e.ventas})`, e.bruto],
+    [`Ventas aprobadas (${e.ventas})${e.cortesias ? ` · ${e.cortesias} cortesía(s) en $ 0` : ""}`, e.bruto],
     [`Reembolsos (${e.reembolsosCantidad})`, -e.reembolsos],
     ["Recaudo neto", e.neto, true],
     ["Ticket promedio", e.ticketPromedio],
@@ -78,11 +78,11 @@ export async function descargarEstado(e: EstadoDeCuenta, meses: FilaMes[], titul
   for (const x of e.movimientos) {
     const row = mv.addRow([
       fecha(x.fecha),
-      x.tipo === "venta" ? "Venta" : "Reembolso",
+      etiquetaTipo(x),
       x.nombre,
       x.email,
       etiquetaMeses(x.meses),
-      NOMBRE_PASARELA[x.pasarela],
+      x.pasarela === "manual" ? `Manual · ${etiquetaMedio(x.medio)}` : NOMBRE_PASARELA[x.pasarela],
       x.pagoId ?? "",
       x.orden,
       x.valor,
