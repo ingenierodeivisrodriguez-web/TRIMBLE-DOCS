@@ -87,6 +87,10 @@ create table if not exists public.presupuesto_elementos (
 );
 create index if not exists presupuesto_elementos_guid_idx on public.presupuesto_elementos (project_id, ifc_guid);
 
+-- Memoria de cantidades: dónde está el elemento (bloque, conjunto, zona, nombre de zona, espacio),
+-- leído de las propiedades del modelo al asociarlo.
+alter table public.presupuesto_elementos add column if not exists memoria jsonb;
+
 -- Cómo mide cada partida sus elementos: una propiedad, el conteo ('@count') o nada (campo null).
 create table if not exists public.presupuesto_mediciones (
   project_id  text        not null,

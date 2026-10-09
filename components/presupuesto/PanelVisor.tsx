@@ -5,9 +5,10 @@ import { buildDataset, ModelDataset, ObjectRecord, RawObject } from "../../lib/g
 import { readSelection, SelectedElement } from "../../lib/propiedades/selection";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { coincide, fmt } from "../../lib/presupuesto/format";
+import { memoriaDe } from "../../lib/presupuesto/memoria";
 import { CampoMedible, camposMedibles, etiquetaCampo, sugerirCampo, valorDe } from "../../lib/presupuesto/medicion";
 import { numerar } from "../../lib/presupuesto/tree";
-import { CONTEO, EstadoResponse, ItemPartida, Medicion, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
+import { CONTEO, EstadoResponse, ItemPartida, Medicion, Memoria, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
 import { leerDataset, MapaGuids, selector, Visor } from "../../lib/presupuesto/viewerMap";
 import type { ViewerEventListener } from "../trimble/ExtensionShell";
 import { ConfirmDialog } from "./SimpleDialogs";
@@ -26,6 +27,8 @@ interface Leida {
   /** Properties of the selected elements, per model, to measure them. */
   datasets: ModelDataset[];
   records: Map<string, ObjectRecord>; // guid -> record
+  /** Where each element is (bloque, conjunto, zona...), by guid. */
+  memorias: Map<string, Memoria | null>;
   sinGuid: number;
   omitidos: number;
 }
@@ -97,6 +100,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         if (!current()) return;
         const porModelo = new Map<string, { nombre: string; raws: RawObject[]; guids: (string | null)[] }>();
         const records = new Map<string, ObjectRecord>();
+        const memorias = new Map<string, Memoria | null>();
         let sinGuid = 0;
         for (const e of r.elements) {
           const g = e.resolution.guid;
@@ -114,11 +118,14 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
           const ds = buildDataset(fileId, m.nombre, m.raws);
           ds.records.forEach((rec, i) => {
             const g = m.guids[i];
-            if (g) records.set(g, rec);
+            if (g) {
+              records.set(g, rec);
+              memorias.set(g, memoriaDe(ds, rec));
+            }
           });
           datasets.push(ds);
         }
-        setLeida({ elementos: r.elements, datasets, records, sinGuid, omitidos: r.skipped });
+        setLeida({ elementos: r.elements, datasets, records, memorias, sinGuid, omitidos: r.skipped });
         setLeyendo("");
         const guids = [...records.keys(), ...r.elements.map((e) => e.resolution.guid).filter((g): g is string => !!g && !records.has(g))];
         if (guids.length) {
@@ -183,7 +190,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     setBusy("Agregando...");
     setNota(null);
     try {
-      const upsert = conGuid.map((e) => ({ ifcGuid: e.resolution.guid!, modelId: e.fileId, cantidad: valorDe(leida.records.get(e.resolution.guid!), campo) }));
+      const upsert = conGuid.map((e) => ({ ifcGuid: e.resolution.guid!, modelId: e.fileId, cantidad: valorDe(leida.records.get(e.resolution.guid!), campo), memoria: leida.memorias.get(e.resolution.guid!) ?? null }));
       const unicos = [...new Map(upsert.map((u) => [u.ifcGuid, u])).values()];
       await api.guardarElementos(sel.item.id, unicos, []);
       await guardarMedicionSiCambia(campo);
@@ -259,14 +266,17 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         } else {
           const u = await mapa.current.ubicar(viewer, elementos, setBusy);
           const porGuid = new Map<string, number | null>();
+          const memoriaPorGuid = new Map<string, Memoria | null>();
           for (const [viewerModelId, ids] of u.porModelo) {
             const ds = await leerDataset(viewer, viewerModelId, "", ids);
             const porRt = new Map(ds.records.map((r) => [r.runtimeId, r]));
             for (const [guid, where] of u.ubicacion) {
-              if (where.viewerModelId === viewerModelId) porGuid.set(guid, valorDe(porRt.get(where.runtimeId), c));
+              if (where.viewerModelId !== viewerModelId) continue;
+              porGuid.set(guid, valorDe(porRt.get(where.runtimeId), c));
+              memoriaPorGuid.set(guid, memoriaDe(ds, porRt.get(where.runtimeId)));
             }
           }
-          const upsert = elementos.filter((e) => porGuid.has(e.ifcGuid)).map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: porGuid.get(e.ifcGuid) ?? null }));
+          const upsert = elementos.filter((e) => porGuid.has(e.ifcGuid)).map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: porGuid.get(e.ifcGuid) ?? null, memoria: memoriaPorGuid.get(e.ifcGuid) ?? e.memoria }));
           medidos = upsert.length;
           faltan = elementos.length - upsert.length;
           if (upsert.length) await api.guardarElementos(sel.item.id, upsert, []);
@@ -415,7 +425,8 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
               </div>
               <div style={{ color: "var(--tc-gray-500)", fontSize: 12.5 }}>
                 {sel.sp} · {sel.item.unidad || "sin unidad"} · {cuenta?.elementos ?? 0} elemento(s) asociado(s) · metrado{" "}
-                {metradoModelo !== null ? `del modelo: ${fmt(metradoModelo)}` : `manual: ${fmt(sel.item.metrado)}`}
+                {metradoModelo !== null && sel.item.modo !== "manual" ? `del modelo (3D): ${fmt(metradoModelo)}` : `manual: ${fmt(sel.item.metrado)}`}
+                {sel.item.modo === "manual" && metradoModelo !== null ? " · la partida está en modo manual" : ""}
               </div>
             </div>
             <label style={{ fontSize: 12.5, color: "var(--tc-gray-500)" }}>

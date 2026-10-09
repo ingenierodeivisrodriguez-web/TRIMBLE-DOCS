@@ -5,6 +5,7 @@ import type {
   Insumo,
   InsumoData,
   Medicion,
+  Memoria,
   OmniclassEntry,
   PartidaCatalogo,
   PartidaData,
@@ -58,7 +59,7 @@ export interface PresupuestoStore {
   saveElementos(
     projectId: string,
     itemId: string,
-    upsert: { ifcGuid: string; modelId: string; cantidad: number | null }[],
+    upsert: { ifcGuid: string; modelId: string; cantidad: number | null; memoria: Memoria | null }[],
     remove: string[],
     user: string
   ): Promise<void>;
@@ -72,6 +73,9 @@ const IN_CHUNK = 150;
 
 const SETUP_HINT =
   "Faltan las tablas de Presupuesto en Supabase: abre Supabase → SQL Editor y ejecuta una vez el archivo supabase/presupuesto.sql del repositorio.";
+
+const UPGRADE_HINT =
+  "Falta actualizar las tablas de Presupuesto: abre Supabase → SQL Editor y ejecuta de nuevo el archivo supabase/presupuesto.sql del repositorio (es seguro repetirlo; no borra datos).";
 
 interface InsumoRow {
   id: string;
@@ -161,6 +165,7 @@ function supabaseStore(): PresupuestoStore | null {
       // not JSON
     }
     if (/version-conflict/.test(body)) throw new StoreError("version-conflict", 409);
+    if (/memoria/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (detail.code === "23505") throw new StoreError("duplicate-code", 409);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) {
@@ -327,9 +332,9 @@ function supabaseStore(): PresupuestoStore | null {
     },
 
     async getElementos(projectId, filter) {
-      type Row = { item_id: string; ifc_guid: string; model_id: string; cantidad: number | null };
-      const select = "&select=item_id,ifc_guid,model_id,cantidad&order=id.asc";
-      const toEl = (r: Row): ElementoVinculado => ({ itemId: r.item_id, ifcGuid: r.ifc_guid, modelId: r.model_id, cantidad: r.cantidad });
+      type Row = { item_id: string; ifc_guid: string; model_id: string; cantidad: number | null; memoria: Memoria | null };
+      const select = "&select=item_id,ifc_guid,model_id,cantidad,memoria&order=id.asc";
+      const toEl = (r: Row): ElementoVinculado => ({ itemId: r.item_id, ifcGuid: r.ifc_guid, modelId: r.model_id, cantidad: r.cantidad, memoria: r.memoria ?? null });
       const out: ElementoVinculado[] = [];
       for (const ids of chunks(filter.itemIds ?? [], IN_CHUNK)) {
         out.push(...(await all<Row>(`/presupuesto_elementos?project_id=${eq(projectId)}&item_id=${inList(ids)}${select}`)).map(toEl));
@@ -352,6 +357,7 @@ function supabaseStore(): PresupuestoStore | null {
               ifc_guid: e.ifcGuid,
               model_id: e.modelId,
               cantidad: e.cantidad,
+              memoria: e.memoria,
               updated_at: new Date().toISOString(),
               updated_by: user,
             }))

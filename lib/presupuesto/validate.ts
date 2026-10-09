@@ -6,6 +6,7 @@ import { VARIABLE_RE } from "./formula";
 import { validarEsquema } from "./tree";
 import {
   Componente,
+  Edt,
   FilaPie,
   FormatoGasto,
   GastosGenerales,
@@ -126,7 +127,23 @@ function validarItem(value: unknown, n: number): Item {
     ...validarPartida(o, `Fila ${n}`),
     metrado: num(o.metrado, `Fila ${n} · metrado`),
     origenId: o.origenId ? id(o.origenId, `Fila ${n} · origen`) : null,
+    ...(o.modo === "manual" || o.modo === "3d" ? { modo: o.modo } : {}),
+    ...validarEdt(o.edt, n),
   };
+}
+
+const MAX_EDT = 2000;
+
+/** The EDT dictionary, only when something was written. */
+function validarEdt(value: unknown, n: number): { edt?: Edt } {
+  if (value === undefined || value === null) return {};
+  const o = obj(value, `Fila ${n} · EDT`);
+  const edt = {
+    descripcion: text(o.descripcion, `Fila ${n} · descripción del trabajo`, MAX_EDT),
+    criterios: text(o.criterios, `Fila ${n} · criterios de aceptación`, MAX_EDT),
+    responsable: text(o.responsable, `Fila ${n} · responsable`, 120),
+  };
+  return edt.descripcion || edt.criterios || edt.responsable ? { edt } : {};
 }
 
 function validarPie(value: unknown, sp: string): FilaPie[] {

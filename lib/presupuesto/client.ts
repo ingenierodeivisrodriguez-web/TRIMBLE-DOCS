@@ -8,6 +8,7 @@ import {
   InsumoData,
   MAX_ELEMENTS_PER_REQUEST,
   MAX_IMPORT_ROWS,
+  Memoria,
   Medicion,
   OmniclassEntry,
   PartidaData,
@@ -33,7 +34,7 @@ export interface PresupuestoApi {
   elementosDe(filter: { itemIds?: string[]; ifcGuids?: string[] }): Promise<ElementoVinculado[]>;
   guardarElementos(
     itemId: string,
-    upsert: { ifcGuid: string; modelId: string; cantidad: number | null }[],
+    upsert: { ifcGuid: string; modelId: string; cantidad: number | null; memoria: Memoria | null }[],
     remove: string[]
   ): Promise<void>;
   guardarMedicion(medicion: Medicion): Promise<void>;

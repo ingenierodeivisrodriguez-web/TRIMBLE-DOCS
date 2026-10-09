@@ -117,6 +117,29 @@ export interface ItemPartida extends PartidaData {
   /** Typed quantity; replaced by the model's when the partida measures its elements. */
   metrado: number;
   origenId: string | null;
+  /**
+   * Where the quantity comes from: typed ("manual") or from the linked model
+   * elements ("3d"). Not set: from the model when the partida measures them.
+   */
+  modo?: ModoMetrado;
+  /** Work breakdown dictionary data. */
+  edt?: Edt;
+}
+
+/** The quantity the model's elements give a partida. */
+export interface MetradoModeloInfo {
+  valor: number;
+  elementos: number;
+  campoLabel: string;
+}
+
+export type ModoMetrado = "manual" | "3d";
+
+/** EDT dictionary of a partida: what the work is, how it is accepted, and who answers for it. */
+export interface Edt {
+  descripcion: string;
+  criterios: string;
+  responsable: string;
 }
 
 export type Item = ItemTitulo | ItemPartida;
@@ -220,6 +243,17 @@ export interface ElementoVinculado {
   modelId: string;
   /** The element's quantity for the partida's measure (null: not measured). */
   cantidad: number | null;
+  /** Where the element is, read from its model properties when it was linked. */
+  memoria: Memoria | null;
+}
+
+/** Location of an element in the project: block, set, zone, zone name and space. */
+export interface Memoria {
+  bloque: string;
+  conjunto: string;
+  zona: string;
+  nombreZona: string;
+  espacio: string;
 }
 
 /** How a partida takes its quantity from its elements: a property, a count, or not at all (campo null). */

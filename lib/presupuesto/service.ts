@@ -4,6 +4,7 @@ import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import type { Responsable } from "../propiedades/types";
 import { documentoVacio } from "./doc";
+import { memoriaLimpia } from "./memoria";
 import type { PresupuestoStore, StoredConfig } from "./store";
 import {
   CatalogoResponse,
@@ -343,12 +344,12 @@ export async function guardarElementos(ctx: Ctx, body: unknown): Promise<{ ok: t
   if (!Array.isArray(upsertRaw)) bad("Elementos: se esperaba una lista.");
   if (upsertRaw.length > MAX_ELEMENTS_PER_REQUEST) bad(`Máximo ${MAX_ELEMENTS_PER_REQUEST} elementos por envío.`);
   const upsert = upsertRaw.map((v) => {
-    const e = (v ?? {}) as { ifcGuid?: unknown; modelId?: unknown; cantidad?: unknown };
+    const e = (v ?? {}) as { ifcGuid?: unknown; modelId?: unknown; cantidad?: unknown; memoria?: unknown };
     if (typeof e.ifcGuid !== "string" || !isIfcGuid(e.ifcGuid)) bad("Elemento sin IFCGUID válido.");
     if (typeof e.modelId !== "string" || !e.modelId || e.modelId.length > 100) bad("Elemento sin modelo.");
     const cantidad = e.cantidad === null || e.cantidad === undefined ? null : Number(e.cantidad);
     if (cantidad !== null && !Number.isFinite(cantidad)) bad("Cantidad de elemento no válida.");
-    return { ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad };
+    return { ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad, memoria: memoriaLimpia(e.memoria) };
   });
   const remove = stringList(o.remove, "Quitar", isIfcGuid);
   await ctx.store.saveElementos(ctx.projectId, itemId, upsert, remove, ctx.caller.name);

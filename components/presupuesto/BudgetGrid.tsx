@@ -4,6 +4,8 @@ import { CSSProperties, KeyboardEvent, useEffect, useMemo, useState } from "reac
 import { FilaPieCalculada, FilaPresupuesto, SubpresupuestoCalculado } from "../../lib/presupuesto/calc";
 import { fmt } from "../../lib/presupuesto/format";
 import { Rubro, RUBRO_NOMBRES } from "../../lib/presupuesto/types";
+import MemoriaCantidad from "./MemoriaCantidad";
+import type { ElementoVinculado } from "../../lib/presupuesto/types";
 import { C, NumInput, TextCommit, useVirtual } from "./ui";
 
 const ROW = 34;
@@ -44,6 +46,7 @@ export default function BudgetGrid({
   onEdit,
   onOpen,
   elementos,
+  loadMemoria,
 }: {
   calculado: SubpresupuestoCalculado;
   pie: FilaPieCalculada[];
@@ -57,10 +60,14 @@ export default function BudgetGrid({
   onOpen: (itemId: string) => void;
   /** Model elements linked to each partida. */
   elementos: Map<string, number>;
+  /** The linked elements of a partida (for its memoria de cantidades). */
+  loadMemoria: (itemId: string) => Promise<ElementoVinculado[]>;
 }) {
   const visibles = useMemo(() => filasVisibles(calculado.filas, collapsed), [calculado.filas, collapsed]);
   const { ref, start, end, padTop, padBottom, reveal } = useVirtual(visibles.length, ROW);
   const [editing, setEditing] = useState<{ id: string; field: CampoEditable } | null>(null);
+  const [memoriaId, setMemoriaId] = useState<string | null>(null);
+  const memoriaIndex = memoriaId ? visibles.findIndex((f) => f.item.id === memoriaId) : -1;
   const selectedIndex = visibles.findIndex((f) => f.item.id === selectedId);
 
   useEffect(() => {
@@ -102,7 +109,7 @@ export default function BudgetGrid({
       style={{ flex: 1, minHeight: 0, overflow: "auto", background: "#fff", outline: "none", position: "relative" }}
       aria-label="Partidas del subpresupuesto"
     >
-      <div style={{ minWidth: MIN_WIDTH }}>
+      <div style={{ minWidth: MIN_WIDTH, position: "relative" }}>
         <div style={{ ...rowGrid, height: HEADER, position: "sticky", top: 0, zIndex: 2, background: "#f3f4f6", borderBottom: `1px solid ${C.border}`, fontWeight: 600, fontSize: 14 }}>
           <div style={headCell}>Item</div>
           <div style={headCell}>Partida</div>
@@ -164,6 +171,23 @@ export default function BudgetGrid({
                     {f.item.descripcion}
                   </span>
                 )}
+                {!titulo && n > 0 && !isEditing(f, "descripcion") && (
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      onSelect(f.item.id);
+                      setMemoriaId(memoriaId === f.item.id ? null : f.item.id);
+                    }}
+                    onMouseDown={(e) => e.stopPropagation()}
+                    aria-label={memoriaId === f.item.id ? "Cerrar la memoria de cantidades" : "Ver la memoria de cantidades"}
+                    aria-expanded={memoriaId === f.item.id}
+                    title={`Memoria de cantidades: ${n} elemento(s) del modelo`}
+                    style={memoriaBtn}
+                  >
+                    {memoriaId === f.item.id ? "▲" : "▼"} {n}
+                  </button>
+                )}
               </div>
               <div style={{ ...cell, justifyContent: "center" }} onDoubleClick={() => startEdit(f, "unidad")}>
                 {f.item.tipo === "partida" &&
@@ -183,11 +207,14 @@ export default function BudgetGrid({
                         <span title={`Metrado del modelo: ${f.metradoModelo.elementos} elemento(s) · ${f.metradoModelo.campoLabel}`} style={badge3d}>
                           3D
                         </span>
-                      ) : n > 0 ? (
-                        <span title={`${n} elemento(s) del modelo asociados (metrado manual)`} style={{ ...badge3d, background: "#e9edf2", color: "var(--tc-gray-500)" }}>
-                          {n}
+                      ) : (
+                        <span
+                          title={n > 0 ? `Metrado manual (la partida tiene ${n} elemento(s) del modelo asociados)` : "Metrado manual"}
+                          style={{ ...badge3d, background: "#e9edf2", color: "var(--tc-gray-500)" }}
+                        >
+                          Manual
                         </span>
-                      ) : null}
+                      )}
                       {fmt(f.metrado)}
                     </>
                   ))}
@@ -203,6 +230,18 @@ export default function BudgetGrid({
           );
         })}
         <div style={{ height: padBottom }} />
+
+        {memoriaId && memoriaIndex >= 0 && visibles[memoriaIndex].item.tipo === "partida" && (
+          <div style={{ position: "absolute", top: HEADER + (memoriaIndex + 1) * ROW, left: 70, zIndex: 3 }}>
+            <MemoriaCantidad
+              itemId={memoriaId}
+              titulo={`${visibles[memoriaIndex].numero} ${visibles[memoriaIndex].item.descripcion}`}
+              unidad={visibles[memoriaIndex].item.tipo === "partida" ? (visibles[memoriaIndex].item as { unidad: string }).unidad : ""}
+              load={loadMemoria}
+              onClose={() => setMemoriaId(null)}
+            />
+          </div>
+        )}
 
         {visibles.length === 0 && (
           <div style={{ padding: 24, color: "var(--tc-gray-500)", fontSize: 14 }}>
@@ -253,4 +292,5 @@ const headCell: CSSProperties = { ...cell, justifyContent: "center", textAlign: 
 const numCellStyle: CSSProperties = { ...cell, justifyContent: "flex-end", fontVariantNumeric: "tabular-nums", gap: 6 };
 const ellipsis: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const toggleBtn: CSSProperties = { border: "none", background: "transparent", cursor: "pointer", fontSize: 11, color: "var(--tc-gray-500)", padding: "0 2px", fontFamily: "inherit" };
+const memoriaBtn: CSSProperties = { border: "1px solid #b9c6dc", background: "#f3f7fd", color: "var(--tc-blue-800)", borderRadius: 4, padding: "0 6px", fontSize: 11, cursor: "pointer", fontFamily: "inherit", flexShrink: 0, lineHeight: "18px" };
 const badge3d: CSSProperties = { fontSize: 10, fontWeight: 700, background: "#dbe8fb", color: "var(--tc-blue-800)", borderRadius: 3, padding: "1px 4px" };

@@ -78,7 +78,14 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
   );
 
   const resolver = useMemo(() => (doc ? resolverPresupuesto(doc) : null), [doc]);
-  const metrado = useCallback((id: string) => s.metradoModelo.get(id) ?? null, [s.metradoModelo]);
+  // The quantity from the model counts unless the partida was set to manual.
+  const metradoEfectivo = useMemo(() => {
+    const out = new Map(s.metradoModelo);
+    for (const x of doc?.subpresupuestos ?? []) for (const i of x.items) if (i.tipo === "partida" && i.modo === "manual") out.delete(i.id);
+    return out;
+  }, [s.metradoModelo, doc]);
+  const metrado = useCallback((id: string) => metradoEfectivo.get(id) ?? null, [metradoEfectivo]);
+  const loadMemoria = useCallback((itemId: string) => api.elementosDe({ itemIds: [itemId] }), [api]);
   const calculados = useMemo(() => {
     const out = new Map<string, SubpresupuestoCalculado>();
     if (!doc || !resolver) return out;
@@ -421,6 +428,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
           else if (canEdit) setDialogo({ tipo: "titulo", editar: id });
         }}
         elementos={s.elementosPorItem}
+        loadMemoria={loadMemoria}
       />
 
       {/* APU of the selected partida */}
@@ -432,13 +440,32 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
             </strong>
             <span style={{ color: "var(--tc-gray-500)" }}>
               {partidaSel.unidad} · metrado {fmt(filaSel.metrado ?? 0)}
-              {filaSel.metradoModelo ? ` del modelo (${filaSel.metradoModelo.elementos} elementos · ${filaSel.metradoModelo.campoLabel})` : ""}
+              {filaSel.metradoModelo ? ` · automático 3D (${filaSel.metradoModelo.elementos} elementos · ${filaSel.metradoModelo.campoLabel})` : " · manual"}
               {partidaSel.omniclass ? ` · OmniClass ${partidaSel.omniclass}` : ""}
             </span>
             <button type="button" style={{ ...linkBtn, marginLeft: "auto" }} onClick={() => setApuVisible((v) => !v)}>
               {apuVisible ? "Ocultar análisis" : "Ver análisis de precios unitarios"}
             </button>
           </div>
+          {apuVisible && partidaSel.edt && (partidaSel.edt.responsable || partidaSel.edt.descripcion || partidaSel.edt.criterios) && (
+            <div style={{ display: "flex", gap: 18, flexWrap: "wrap", padding: "4px 10px", fontSize: 12.5, background: "#f7f9fc", borderBottom: `1px solid ${C.grid}` }}>
+              {partidaSel.edt.responsable && (
+                <span>
+                  <strong>Responsable:</strong> {partidaSel.edt.responsable}
+                </span>
+              )}
+              {partidaSel.edt.descripcion && (
+                <span style={edtClamp} title={partidaSel.edt.descripcion}>
+                  <strong>Trabajo:</strong> {partidaSel.edt.descripcion}
+                </span>
+              )}
+              {partidaSel.edt.criterios && (
+                <span style={edtClamp} title={partidaSel.edt.criterios}>
+                  <strong>Aceptación:</strong> {partidaSel.edt.criterios}
+                </span>
+              )}
+            </div>
+          )}
           {apuVisible && (
             <ApuEditor
               apu={partidaSel}
@@ -486,7 +513,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
         if (!catalogo) return null;
         const actual = dialogo.editar ? (items.find((i) => i.id === dialogo.editar) as ItemPartida | undefined) : undefined;
         const inicial: DatosPartida = actual
-          ? { codigo: actual.codigo, descripcion: actual.descripcion, unidad: actual.unidad, omniclass: actual.omniclass, rendimiento: actual.rendimiento, jornada: actual.jornada, componentes: actual.componentes, metrado: actual.metrado }
+          ? { codigo: actual.codigo, descripcion: actual.descripcion, unidad: actual.unidad, omniclass: actual.omniclass, rendimiento: actual.rendimiento, jornada: actual.jornada, componentes: actual.componentes, metrado: actual.metrado, modo: actual.modo, edt: actual.edt }
           : partidaVacia();
         return (
           <ApuDialog
@@ -496,6 +523,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
             mapas={{ insumos: doc.insumos, subpartidas: doc.subpartidas }}
             catalogo={catalogo}
             conMetrado
+            metradoModelo={actual ? s.metradoModelo.get(actual.id) ?? null : null}
             readOnly={!canEdit}
             onClose={close}
             onAccept={(data, mapas, origenId) => {
@@ -628,7 +656,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
           />
         ) : null;
       case "lista":
-        return <ListaInsumos doc={doc} setDoc={setDoc} spId={sp.id} catalogo={catalogo} metradoModelo={s.metradoModelo} canEdit={canEdit} proyecto={projectName} onClose={close} />;
+        return <ListaInsumos doc={doc} setDoc={setDoc} spId={sp.id} catalogo={catalogo} metradoModelo={metradoEfectivo} canEdit={canEdit} proyecto={projectName} onClose={close} />;
       case "gastos":
         return <GastosGenerales doc={doc} setDoc={setDoc} cdTotal={cdTotal} canEdit={canEdit} onSave={() => s.save()} saving={s.saving} proyecto={projectName} onClose={close} />;
       case "pie":
@@ -731,4 +759,5 @@ const spSelect: CSSProperties = {
   minWidth: 220,
   fontFamily: "inherit",
 };
+const edtClamp: CSSProperties = { maxWidth: "38%", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };
 const linkBtn: CSSProperties = { border: "none", background: "transparent", color: "var(--tc-blue-700)", textDecoration: "underline", cursor: "pointer", padding: 0, font: "inherit" };

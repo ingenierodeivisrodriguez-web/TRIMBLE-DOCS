@@ -1181,6 +1181,28 @@ en el modelo" los busca así:
 El panel muestra el presupuesto **guardado**. Al guardar, se borran los
 elementos de las partidas que ya no existen.
 
+### Origen del metrado, memoria de cantidades y EDT
+
+- **Origen del metrado.** En el diálogo de cada partida, "Origen del metrado"
+  elige **Manual** (el metrado que escribes) o **Asociado al modelo 3D** (la
+  suma de sus elementos). En la grilla, cada partida muestra una marca:
+  **3D** (automático desde el modelo) o **Manual**; el panel de análisis
+  también lo dice. Una partida en modo manual conserva sus elementos
+  asociados, pero no toma el metrado de ellos. Si no se elige, la partida usa
+  el modelo cuando mide sus elementos.
+- **Memoria de cantidades.** Las partidas con elementos asociados muestran
+  junto a su nombre un botón ▼ con el número de elementos. Despliega la lista:
+  **Bloque, Conjunto, Zona, Nombre de zona, Espacio y Cantidad**, ordenada por
+  ubicación, con el total. Esos cinco datos se leen de las **propiedades del
+  modelo** con esos nombres (sin importar mayúsculas ni tildes) al asociar los
+  elementos en el visor, y se guardan con cada elemento
+  (`presupuesto_elementos.memoria`); al cambiar la medición se vuelven a leer.
+  Los elementos sin esas propiedades aparecen con "—".
+- **Diccionario de la EDT.** Cada partida guarda **Descripción del trabajo**,
+  **Criterios de aceptación** y **Responsable** (texto libre). Se editan en el
+  diálogo de la partida y el panel de análisis muestra el responsable y un
+  resumen de los otros dos.
+
 ### Importar desde Excel
 
 "Importar Excel" descarga una plantilla con instrucciones y estas hojas:

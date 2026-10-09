@@ -5,6 +5,7 @@ import { calcularApu, Resolver } from "../../lib/presupuesto/calc";
 import { creaCiclo, creaCicloCatalogo, importarApu, JORNADA, nuevoId, resolverCatalogo, resolverPresupuesto, snapshotInsumo } from "../../lib/presupuesto/doc";
 import { fmt } from "../../lib/presupuesto/format";
 import { tablaDe } from "../../lib/presupuesto/omniclass";
+import type { Edt, ModoMetrado, MetradoModeloInfo } from "../../lib/presupuesto/types";
 import { Apu, Insumo, InsumoPresupuesto, PartidaCatalogo, PartidaData, Subpartida } from "../../lib/presupuesto/types";
 import ApuEditor, { insumoLabel, OpcionSubpartida } from "./ApuEditor";
 import Picker from "./Picker";
@@ -16,7 +17,7 @@ export interface Mapas {
   subpartidas: Record<string, Subpartida>;
 }
 
-export type DatosPartida = PartidaData & { metrado: number };
+export type DatosPartida = PartidaData & { metrado: number; modo?: ModoMetrado; edt?: Edt };
 
 export function partidaVacia(): DatosPartida {
   return { codigo: "", descripcion: "", unidad: "", omniclass: "", rendimiento: 1, jornada: JORNADA, componentes: [], metrado: 0 };
@@ -36,6 +37,7 @@ export default function ApuDialog({
   catalogo,
   propioId,
   conMetrado,
+  metradoModelo,
   readOnly,
   onAccept,
   onClose,
@@ -49,6 +51,8 @@ export default function ApuDialog({
   /** The id of what is being edited, to keep it from containing itself. */
   propioId?: string;
   conMetrado?: boolean;
+  /** The quantity the model's linked elements give this partida, if it measures them. */
+  metradoModelo?: MetradoModeloInfo | null;
   readOnly?: boolean;
   onAccept: (data: DatosPartida, mapas: Mapas, origenId: string | null) => void;
   onClose: () => void;
@@ -60,6 +64,9 @@ export default function ApuDialog({
   const [sub, setSub] = useState<{ id: string | null; data: DatosPartida } | null>(null);
   const [copiando, setCopiando] = useState(false);
   const enPresupuesto = modo === "presupuesto";
+  /** Where the metrado comes from: typed, or from the elements linked in the 3D viewer. */
+  const modoMetrado: ModoMetrado = data.modo ?? (metradoModelo ? "3d" : "manual");
+  const edt: Edt = data.edt ?? { descripcion: "", criterios: "", responsable: "" };
   const fuente = useMemo(() => ({ insumos: catalogo.insumoMap, partidas: catalogo.partidaMap }), [catalogo]);
 
   const resolver: Resolver = useMemo(
@@ -124,7 +131,8 @@ export default function ApuDialog({
       setError("El rendimiento debe ser mayor que 0.");
       return;
     }
-    onAccept({ ...data, descripcion: data.descripcion.trim(), unidad: data.unidad.trim(), codigo: data.codigo.trim(), omniclass: data.omniclass.trim() }, mapas, origenId);
+    const edt = data.edt && (data.edt.descripcion.trim() || data.edt.criterios.trim() || data.edt.responsable.trim()) ? data.edt : undefined;
+    onAccept({ ...data, ...(conMetrado ? { modo: modoMetrado } : {}), edt, descripcion: data.descripcion.trim(), unidad: data.unidad.trim(), codigo: data.codigo.trim(), omniclass: data.omniclass.trim() }, mapas, origenId);
   }
 
   const codigos22 = useMemo(() => catalogo.codigos.filter((c) => tablaDe(c.codigo) === "22"), [catalogo.codigos]);
@@ -198,9 +206,28 @@ export default function ApuDialog({
             <input value={data.unidad} readOnly={readOnly} onChange={(e) => setData({ ...data, unidad: e.target.value })} maxLength={20} style={field} />
           </label>
           {conMetrado && (
+            <label style={{ flex: "0 0 190px" }}>
+              <span style={labelStyle}>Origen del metrado</span>
+              <select
+                value={modoMetrado}
+                disabled={readOnly}
+                onChange={(e) => setData({ ...data, modo: e.target.value as ModoMetrado })}
+                style={field}
+                aria-label="Origen del metrado"
+              >
+                <option value="manual">Manual</option>
+                <option value="3d">Asociado al modelo 3D</option>
+              </select>
+            </label>
+          )}
+          {conMetrado && (
             <label style={{ flex: "0 0 150px" }}>
-              <span style={labelStyle}>Metrado</span>
-              <NumInput value={data.metrado} decimals={2} onCommit={readOnly ? undefined : (v) => v !== null && setData({ ...data, metrado: v })} style={{ ...field, textAlign: "right" }} ariaLabel="Metrado" />
+              <span style={labelStyle}>Metrado{modoMetrado === "3d" ? " (modelo 3D)" : ""}</span>
+              {modoMetrado === "3d" && metradoModelo ? (
+                <NumInput value={metradoModelo.valor} decimals={2} style={{ ...field, textAlign: "right" }} ariaLabel="Metrado del modelo" readOnly />
+              ) : (
+                <NumInput value={data.metrado} decimals={2} onCommit={readOnly ? undefined : (v) => v !== null && setData({ ...data, metrado: v })} style={{ ...field, textAlign: "right" }} ariaLabel="Metrado" />
+              )}
             </label>
           )}
         </div>
@@ -224,6 +251,32 @@ export default function ApuDialog({
           </datalist>
           {data.omniclass && <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", marginLeft: 8 }}>{catalogo.titulos.get(data.omniclass) ?? ""}</span>}
         </label>
+        {conMetrado && modoMetrado === "3d" && (
+          <p style={{ margin: 0, fontSize: 12.5, color: "var(--tc-gray-500)" }}>
+            {metradoModelo
+              ? `El metrado es la suma de ${metradoModelo.elementos} elemento(s) del modelo (${metradoModelo.campoLabel}).`
+              : "Todavía no hay elementos del modelo asociados: asócialos desde el panel Presupuesto del visor 3D. Mientras tanto se usa el metrado manual."}
+          </p>
+        )}
+        {conMetrado && (
+          <fieldset style={{ border: "1px solid #dfe4ea", borderRadius: 4, padding: "8px 12px 10px", margin: 0 }}>
+            <legend style={{ fontSize: 12.5, color: "var(--tc-gray-500)", padding: "0 6px" }}>Diccionario de la EDT</legend>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+              <label style={{ gridColumn: "1 / -1" }}>
+                <span style={labelStyle}>Descripción del trabajo</span>
+                <textarea value={edt.descripcion} readOnly={readOnly} rows={2} maxLength={2000} onChange={(e) => setData({ ...data, edt: { ...edt, descripcion: e.target.value } })} style={{ ...field, fontSize: 14, resize: "vertical" }} />
+              </label>
+              <label>
+                <span style={labelStyle}>Criterios de aceptación</span>
+                <textarea value={edt.criterios} readOnly={readOnly} rows={2} maxLength={2000} onChange={(e) => setData({ ...data, edt: { ...edt, criterios: e.target.value } })} style={{ ...field, fontSize: 14, resize: "vertical" }} />
+              </label>
+              <label>
+                <span style={labelStyle}>Responsable</span>
+                <input value={edt.responsable} readOnly={readOnly} maxLength={120} onChange={(e) => setData({ ...data, edt: { ...edt, responsable: e.target.value } })} style={{ ...field, fontSize: 14 }} placeholder="Nombre o cargo" />
+              </label>
+            </div>
+          </fieldset>
+        )}
         {readOnly && <Notice kind="info">Solo lectura: no tienes permiso para modificar esto.</Notice>}
       </div>
 
