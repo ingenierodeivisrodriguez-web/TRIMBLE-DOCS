@@ -9,6 +9,7 @@ import { etiquetaTipo } from "../../lib/manuales/tipos";
 import type { BusquedaResponse, CarpetaResponse, EstadoManuales, ItemManual, ResultadoBusqueda } from "../../lib/manuales/types";
 import AdminAcceso from "./AdminAcceso";
 import Comprar from "./Comprar";
+import EstadosCuenta from "./EstadosCuenta";
 import Ventas from "./Ventas";
 import Visor from "./Visor";
 
@@ -31,12 +32,13 @@ function bloqueoDe(err: unknown): Bloqueo {
   return { code: "error", texto: err instanceof Error ? err.message : String(err) };
 }
 
-type Vista = "manuales" | "acceso" | "ventas";
+type Vista = "manuales" | "acceso" | "ventas" | "cuentas";
 
 const VISTAS: { id: Vista; label: string }[] = [
   { id: "manuales", label: "Manuales" },
   { id: "acceso", label: "Administrar acceso" },
   { id: "ventas", label: "Ventas" },
+  { id: "cuentas", label: "Estados de cuenta" },
 ];
 
 /**
@@ -123,6 +125,14 @@ export default function ManualesApp({ api }: { api: ManualesApi }) {
     </div>
   ) : null;
 
+  if (vista === "cuentas" && estado.esAdmin) {
+    return (
+      <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>
+        <Cabecera subtitulo="Estados de cuenta para revisión fiscal y control financiero" pestanas={pestanas} />
+        <EstadosCuenta api={api} />
+      </div>
+    );
+  }
   if (vista === "ventas" && estado.esAdmin) {
     return (
       <div style={{ height: "100vh", display: "flex", flexDirection: "column", fontSize: 14 }}>

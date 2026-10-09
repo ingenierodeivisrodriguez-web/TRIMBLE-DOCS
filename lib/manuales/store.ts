@@ -103,8 +103,8 @@ export interface ManualesStore {
   crearOrden(o: Pick<Orden, "id" | "email" | "nombre" | "meses" | "monto" | "moneda" | "pasarela">): Promise<void>;
   marcarPreferencia(id: string, preferenciaId: string): Promise<void>;
   getOrden(id: string): Promise<Orden | null>;
-  /** Newest first. */
-  listarOrdenes(f: { email?: string; estado?: EstadoOrden; desde?: string; limite: number }): Promise<Orden[]>;
+  /** Newest first; `pagadas`: only those with a payment (approved, to review or refunded), skipping `offset`. */
+  listarOrdenes(f: { email?: string; estado?: EstadoOrden; desde?: string; pagadas?: boolean; limite: number; offset?: number }): Promise<Orden[]>;
   /**
    * Applies a payment to its order, all at once: an approved one (for the
    * order's amount) creates or extends the person's license by the months
@@ -169,11 +169,12 @@ interface OrdenRow {
   detalle_mp: string | null;
   creada: string;
   pagada: string | null;
+  actualizada: string | null;
   vence_anterior: string | null;
   vence_nueva: string | null;
   nota: string | null;
 }
-const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,pasarela,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,vence_anterior,vence_nueva,nota";
+const COLUMNAS_ORDEN = "id,email,nombre,meses,monto,moneda,pasarela,estado,preferencia_id,pago_id,estado_mp,detalle_mp,creada,pagada,actualizada,vence_anterior,vence_nueva,nota";
 
 function toOrden(r: OrdenRow): Orden {
   return {
@@ -191,6 +192,7 @@ function toOrden(r: OrdenRow): Orden {
     detallePago: r.detalle_mp,
     creada: r.creada,
     pagada: r.pagada,
+    actualizada: r.actualizada ?? r.creada,
     venceAnterior: r.vence_anterior,
     venceNueva: r.vence_nueva,
     nota: r.nota,
@@ -373,6 +375,8 @@ function supabaseStore(): ManualesStore | null {
       if (f.email) q += `&email=${eq(f.email)}`;
       if (f.estado) q += `&estado=${eq(f.estado)}`;
       if (f.desde) q += `&creada=gte.${encodeURIComponent(f.desde)}`;
+      if (f.pagadas) q += "&pagada=not.is.null";
+      if (f.offset) q += `&offset=${f.offset}`;
       return (await json<OrdenRow[]>(q)).map(toOrden);
     },
     async aplicarPago(p) {
@@ -467,6 +471,7 @@ export function memoryStore(): ManualesStore {
         detallePago: null,
         creada: now(),
         pagada: null,
+        actualizada: now(),
         venceAnterior: null,
         venceNueva: null,
         nota: null,
@@ -482,16 +487,16 @@ export function memoryStore(): ManualesStore {
     },
     async listarOrdenes(f) {
       return [...ordenes.values()]
-        .filter((o) => (!f.email || o.email === f.email) && (!f.estado || o.estado === f.estado) && (!f.desde || o.creada >= f.desde))
+        .filter((o) => (!f.email || o.email === f.email) && (!f.estado || o.estado === f.estado) && (!f.desde || o.creada >= f.desde) && (!f.pagadas || !!o.pagada))
         .sort((a, b) => b.creada.localeCompare(a.creada))
-        .slice(0, f.limite)
+        .slice(f.offset ?? 0, (f.offset ?? 0) + f.limite)
         .map((o) => ({ ...o }));
     },
     async aplicarPago(p) {
       // Same rules as manuales_aplicar_pago in supabase/manuales.sql.
       const o = ordenes.get(p.orden);
       if (!o) return { resultado: "no-existe" };
-      const cambiar = (c: Partial<Orden>) => ordenes.set(o.id, { ...o, ...c });
+      const cambiar = (c: Partial<Orden>) => ordenes.set(o.id, { ...o, ...c, actualizada: now() });
       if (p.estadoPago === "refunded" || p.estadoPago === "charged_back") {
         if (o.estado !== "aprobada" || o.pagoId !== p.pagoId) return { resultado: "sin-cambios" };
         cambiar({ estado: "reembolsada", estadoPago: p.estadoPago, detallePago: p.detallePago });

@@ -1345,6 +1345,26 @@ compras con su estado (pendiente, aprobada, revisar, reembolsada), la
 pasarela, el pago y el nuevo vencimiento. Las compras pendientes tienen el
 botón **Verificar pago**, que consulta la pasarela al momento.
 
+**Estados de cuenta.** La pestaña **"Estados de cuenta"** (administradores) arma,
+para un mes o un año, el estado de las ventas para revisiones fiscales y
+control financiero ([`lib/manuales/contabilidad.ts`](lib/manuales/contabilidad.ts)):
+
+- **Recaudo** (caja): ventas aprobadas y reembolsos en el día en que
+  ocurrieron (hora de Colombia), recaudo neto y ticket promedio.
+- **Ingresos**: cada licencia se reconoce día a día durante su término
+  (desde el pago, o desde el vencimiento anterior si se renovó antes de
+  vencer). Se muestra el ingreso devengado del período y el diferido al
+  cierre, con su conciliación: diferido inicial + ventas no reembolsadas −
+  devengado = diferido final. Las compras reembolsadas no generan ingreso.
+- Desglose por pasarela, por plan y mes a mes; libro de movimientos con el
+  id del pago para conciliar con los extractos de Mercado Pago y Wompi; y
+  los pagos por revisar.
+- **Exportar a Excel**: hojas Resumen, Por mes, Movimientos y Por revisar.
+
+Los valores son brutos: las comisiones, retenciones e impuestos que
+descuentan las pasarelas están en sus extractos. No reemplaza la
+contabilidad formal ni la facturación electrónica.
+
 Los documentos se suben y actualizan en MANAGER PROJECT como siempre, y Manuales
 muestra siempre la versión actual.
 
@@ -1450,6 +1470,7 @@ carpeta o proyecto.
 | `GET` / `POST` / `PATCH` / `DELETE /api/manuales/admin/autorizados` | Listar (con el estado de cada licencia), autorizar (`{ texto, licencia }`), cambiar la licencia o suspender/reactivar (`{ email, licencia?, suspendido? }`) o quitar (`?email=`). La licencia es `{ meses: 1-12, inicio? }`, `{ vence, inicio? }` o `{ sinVencimiento: true }` |
 | `GET` / `PUT /api/manuales/admin/venta` | La venta en línea y cómo están configurados Mercado Pago y Wompi; guardar `{ habilitada, planes: [{ meses, precio }] }` (administradores) |
 | `GET` / `POST /api/manuales/admin/pagos` | Las compras, de la más nueva a la más vieja; `{ orden }` consulta la pasarela por una compra pendiente (administradores) |
+| `GET /api/manuales/admin/contabilidad` | Todas las compras con pago (aprobadas, por revisar y reembolsadas), `hoy` y la zona horaria, para los estados de cuenta (administradores) |
 | `POST /api/manuales/pagos` | `{ meses, pasarela: "mercadopago" \| "wompi" }`: inicia la compra de una licencia para el correo de quien llama y devuelve el checkout de la pasarela (`url`) y la compra (`orden`) |
 | `GET /api/manuales/pagos/orden?id=` | Cómo va la compra de quien llama; mientras está pendiente, también consulta su pasarela |
 | `POST /api/manuales/pagos/webhook` | Avisos de pago de Mercado Pago (Webhooks e IPN). Sin token: el pago se lee de Mercado Pago, y con `MERCADOPAGO_WEBHOOK_SECRET` se exige la firma de los avisos firmados |

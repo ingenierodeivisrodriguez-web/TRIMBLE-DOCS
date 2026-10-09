@@ -39,6 +39,8 @@ export interface ManualesApi {
   guardarVenta(v: { habilitada: boolean; planes: Plan[] }): Promise<void>;
   /** Administrators: the purchases, newest first. */
   pagos(): Promise<{ hoy: string; ordenes: Orden[] }>;
+  /** Administrators: every purchase with a payment, for the statements (and today / the time zone days are counted in). */
+  contabilidad(): Promise<{ hoy: string; zona: string; ordenes: Orden[] }>;
   /** Administrators: checks a pending purchase against its gateway now. */
   verificarPago(orden: string): Promise<Orden>;
   carpeta(folderId?: string | null): Promise<CarpetaResponse>;
@@ -112,6 +114,7 @@ export function manualesApi(projectId: string, auth: TokenSource): ManualesApi {
       await request("/admin/venta", send("PUT", v));
     },
     pagos: () => request("/admin/pagos"),
+    contabilidad: () => request("/admin/contabilidad"),
     async verificarPago(orden) {
       return (await request<{ orden: Orden }>("/admin/pagos", send("POST", { orden }))).orden;
     },

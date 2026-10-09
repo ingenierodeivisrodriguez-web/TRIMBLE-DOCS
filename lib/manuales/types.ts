@@ -180,6 +180,8 @@ export interface Orden {
   detallePago: string | null;
   creada: string;
   pagada: string | null;
+  /** Last change (for a refunded purchase, when the refund arrived). */
+  actualizada: string;
   /** The license's expiry before and after the payment (ISO dates). */
   venceAnterior: string | null;
   venceNueva: string | null;
