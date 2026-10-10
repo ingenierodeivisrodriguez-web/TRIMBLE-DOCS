@@ -77,6 +77,7 @@ export default function CatalogoPartidas({
           rendimiento: base.rendimiento,
           jornada: base.jornada,
           componentes: base.componentes.map((c) => ({ ...c })),
+          edt: base.edt ? { ...base.edt } : undefined,
           metrado: 0,
         }
       : { codigo: "", descripcion: "", unidad: "", omniclass: "", rendimiento: 1, jornada: 8, componentes: [], metrado: 0 };
