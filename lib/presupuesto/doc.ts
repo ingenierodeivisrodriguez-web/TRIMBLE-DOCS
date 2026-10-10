@@ -109,6 +109,7 @@ function copiaPartida(p: PartidaCatalogo) {
     omniclass: p.omniclass,
     rendimiento: p.rendimiento,
     jornada: p.jornada,
+    ...(p.edt ? { edt: { ...p.edt } } : {}),
   };
 }
 

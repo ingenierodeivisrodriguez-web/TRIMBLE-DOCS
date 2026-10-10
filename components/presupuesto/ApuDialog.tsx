@@ -116,6 +116,7 @@ export default function ApuDialog({
       omniclass: p.omniclass,
       rendimiento: p.rendimiento,
       jornada: p.jornada,
+      edt: p.edt ? { ...p.edt } : undefined,
       componentes: r.componentes,
     }));
     setOrigenId(p.id);
@@ -258,7 +259,7 @@ export default function ApuDialog({
               : "Todavía no hay elementos del modelo asociados: asócialos desde el panel Presupuesto del visor 3D. Mientras tanto se usa el metrado manual."}
           </p>
         )}
-        {conMetrado && (
+        {(conMetrado || modo === "catalogo") && (
           <fieldset style={{ border: "1px solid #dfe4ea", borderRadius: 4, padding: "8px 12px 10px", margin: 0 }}>
             <legend style={{ fontSize: 12.5, color: "var(--tc-gray-500)", padding: "0 6px" }}>Diccionario de la EDT</legend>
             <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>

@@ -148,3 +148,23 @@ describe("partidas del catálogo en el presupuesto", () => {
     assert.ok(resolverPresupuesto(limpio).subpartida(Object.keys(limpio.subpartidas)[0]));
   });
 });
+
+describe("diccionario EDT en la plantilla", () => {
+  const catalogo = { insumos: [PEON], partidas: [] as PartidaCatalogo[] };
+  const cab = ["Código", "Descripción", "Unidad", "Rendimiento", "Jornada (h)", "OmniClass", "Descripción del trabajo", "Criterios de aceptación", "Responsable"];
+
+  it("lee la descripción del trabajo, los criterios y el responsable de cada partida", () => {
+    const plan = planificarImportacion({ partidas: [cab, ["P1", "ZAPATAS", "M3", 10, 8, "", "Zapatas de concreto", "f'c 210", "Ing. Pérez"], ["P2", "SOLADO", "M2", 10, 8, "", "", "", ""]] }, catalogo);
+    assert.deepEqual(plan.partidas.find((p) => p.codigo === "P1")!.edt, { descripcion: "Zapatas de concreto", criterios: "f'c 210", responsable: "Ing. Pérez" });
+    assert.equal(plan.partidas.find((p) => p.codigo === "P2")!.edt, undefined);
+  });
+
+  it("si la hoja no trae esas columnas conserva la EDT guardada; si las trae, en blanco la borra", () => {
+    const guardada: PartidaCatalogo = { id: "c1", codigo: "P1", descripcion: "ZAPATAS", unidad: "M3", omniclass: "", rendimiento: 10, jornada: 8, componentes: [], edt: { descripcion: "D", criterios: "C", responsable: "R" }, updatedAt: null, updatedBy: null };
+    const sin = planificarImportacion({ partidas: [["Código", "Descripción", "Unidad", "Rendimiento", "Jornada (h)"], ["P1", "ZAPATAS", "M3", 10, 8]] }, { insumos: [], partidas: [guardada] });
+    assert.equal(sin.resumen.partidasSinCambios, 1);
+    const con = planificarImportacion({ partidas: [cab, ["P1", "ZAPATAS", "M3", 10, 8, "", "", "", ""]] }, { insumos: [], partidas: [guardada] });
+    assert.equal(con.resumen.partidasActualizadas, 1);
+    assert.equal(con.partidas[0].edt, undefined);
+  });
+});

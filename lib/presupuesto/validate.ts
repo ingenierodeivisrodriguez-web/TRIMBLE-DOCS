@@ -107,6 +107,7 @@ export function validarPartida(value: unknown, what = "Partida"): PartidaData {
     omniclass: text(o.omniclass, `${what} · OmniClass`, 60),
     rendimiento: num(o.rendimiento, `${what} "${descripcion}" · rendimiento`, { positive: true }),
     jornada: num(o.jornada, `${what} "${descripcion}" · jornada`, { positive: true }),
+    ...validarEdt(o.edt, what),
     componentes: list(o.componentes, `${what} · insumos`, MAX_COMPONENTES).map((c, i) =>
       validarComponente(c, `${what} "${descripcion}" · línea ${i + 1}`)
     ),
@@ -128,20 +129,19 @@ function validarItem(value: unknown, n: number): Item {
     metrado: num(o.metrado, `Fila ${n} · metrado`),
     origenId: o.origenId ? id(o.origenId, `Fila ${n} · origen`) : null,
     ...(o.modo === "manual" || o.modo === "3d" ? { modo: o.modo } : {}),
-    ...validarEdt(o.edt, n),
   };
 }
 
 const MAX_EDT = 2000;
 
 /** The EDT dictionary, only when something was written. */
-function validarEdt(value: unknown, n: number): { edt?: Edt } {
+function validarEdt(value: unknown, what: string): { edt?: Edt } {
   if (value === undefined || value === null) return {};
-  const o = obj(value, `Fila ${n} · EDT`);
+  const o = obj(value, `${what} · EDT`);
   const edt = {
-    descripcion: text(o.descripcion, `Fila ${n} · descripción del trabajo`, MAX_EDT),
-    criterios: text(o.criterios, `Fila ${n} · criterios de aceptación`, MAX_EDT),
-    responsable: text(o.responsable, `Fila ${n} · responsable`, 120),
+    descripcion: text(o.descripcion, `${what} · descripción del trabajo`, MAX_EDT),
+    criterios: text(o.criterios, `${what} · criterios de aceptación`, MAX_EDT),
+    responsable: text(o.responsable, `${what} · responsable`, 120),
   };
   return edt.descripcion || edt.criterios || edt.responsable ? { edt } : {};
 }

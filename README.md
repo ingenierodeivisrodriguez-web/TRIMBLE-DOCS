@@ -1208,9 +1208,12 @@ elementos de las partidas que ya no existen.
 "Importar Excel" descarga una plantilla con instrucciones y estas hojas:
 
 - **Insumos**
-- **Partidas**
-- **APU**: una fila por insumo o subpartida de cada partida, con su cuadrilla
-  o cantidad.
+- **Partidas**, con las columnas del diccionario EDT: Descripción del trabajo,
+  Criterios de aceptación y Responsable (en blanco, borran el dato guardado; sin
+  las columnas, se conserva).
+- **Insumos de partida** (antes APU): una fila por insumo o subpartida de cada
+  partida, con su cuadrilla o cantidad. Es lo que arma el análisis de precios
+  de la partida; la hoja Partidas solo trae sus datos generales.
 - **OmniClass**
 
 También descarga el **catálogo actual** en el mismo formato, para editarlo en

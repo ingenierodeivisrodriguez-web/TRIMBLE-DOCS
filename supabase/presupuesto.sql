@@ -52,6 +52,9 @@ create table if not exists public.presupuesto_partidas (
   updated_by  text
 );
 create index if not exists presupuesto_partidas_base_idx on public.presupuesto_partidas (base_id);
+
+-- Diccionario de la EDT de la partida: {"descripcion": "...", "criterios": "...", "responsable": "..."}.
+alter table public.presupuesto_partidas add column if not exists edt jsonb;
 create unique index if not exists presupuesto_partidas_codigo_unico
   on public.presupuesto_partidas (base_id, lower(btrim(codigo))) where btrim(codigo) <> '';
 
@@ -142,17 +145,17 @@ as $$
   with input as (
     select * from jsonb_to_recordset(p_rows)
       as x(id uuid, codigo text, descripcion text, unidad text, rendimiento numeric, jornada numeric,
-           omniclass text, componentes jsonb)
+           omniclass text, componentes jsonb, edt jsonb)
   ), saved as (
     insert into public.presupuesto_partidas as t
-      (id, base_id, codigo, descripcion, unidad, rendimiento, jornada, omniclass, componentes, created_by, updated_by)
+      (id, base_id, codigo, descripcion, unidad, rendimiento, jornada, omniclass, componentes, edt, created_by, updated_by)
     select id, p_base_id, coalesce(codigo, ''), descripcion, coalesce(unidad, ''), rendimiento, jornada,
-           coalesce(omniclass, ''), coalesce(componentes, '[]'::jsonb), p_user, p_user
+           coalesce(omniclass, ''), coalesce(componentes, '[]'::jsonb), edt, p_user, p_user
     from input
     on conflict (id) do update set
       codigo = excluded.codigo, descripcion = excluded.descripcion, unidad = excluded.unidad,
       rendimiento = excluded.rendimiento, jornada = excluded.jornada, omniclass = excluded.omniclass,
-      componentes = excluded.componentes, updated_at = now(), updated_by = excluded.updated_by
+      componentes = excluded.componentes, edt = excluded.edt, updated_at = now(), updated_by = excluded.updated_by
       where t.base_id = excluded.base_id
     returning 1
   )

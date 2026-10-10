@@ -52,8 +52,11 @@ const INSTRUCCIONES = [
   "Hoja Insumos: un insumo por fila. Tipo: MO (mano de obra), MT (materiales), EQ (equipos y herramientas) o SC (subcontratos).",
   "  Los insumos se reconocen por su Código; sin código, por Descripción + Unidad. Si ya existen se actualizan, si no se crean.",
   "  Herramientas que se cobran como % de la mano de obra: unidad %MO (en el APU, su cantidad es el porcentaje).",
-  "Hoja Partidas: una partida por fila, con su Rendimiento (unidades por día) y Jornada (horas). Necesitan Código para tener APU.",
-  "Hoja APU: una fila por insumo de cada partida. Código partida = el código de la hoja Partidas (o de una partida que ya está en el catálogo).",
+  "Hoja Partidas: una partida por fila, con su Rendimiento (unidades por día) y Jornada (horas), y los datos de su diccionario EDT:",
+  "  Descripción del trabajo, Criterios de aceptación y Responsable (opcionales; si las columnas están, lo que dejes en blanco borra el dato guardado).",
+  "  Las partidas necesitan Código para poder llevar insumos.",
+  "Hoja Insumos de partida (antes APU): una fila por cada insumo o subpartida de una partida; es lo que arma su análisis de precios unitarios.",
+  "  Código partida = el código de la hoja Partidas (o de una partida que ya está en el catálogo).",
   "  Tipo: INSUMO o SUBPARTIDA. Código = código del insumo (o de la partida usada como subpartida). Sin código, Descripción + Unidad del insumo.",
   "  Cuadrilla: para mano de obra y equipos por hora (cantidad = cuadrilla × jornada ÷ rendimiento). Sin cuadrilla, se usa la Cantidad.",
   "  Las filas del APU de una partida reemplazan todo su análisis anterior.",
@@ -88,14 +91,18 @@ export async function plantillaCatalogo(catalogo: { insumos: Insumo[]; partidas:
   ins.getColumn(4).numFmt = "#,##0.00";
 
   const par = wb.addWorksheet("Partidas");
-  encabezado(par, ["Código", "Descripción", "Unidad", "Rendimiento", "Jornada (h)", "OmniClass"], [14, 60, 10, 14, 12, 18]);
-  const apu = wb.addWorksheet("APU");
+  encabezado(
+    par,
+    ["Código", "Descripción", "Unidad", "Rendimiento", "Jornada (h)", "OmniClass", "Descripción del trabajo", "Criterios de aceptación", "Responsable"],
+    [14, 60, 10, 14, 12, 18, 50, 50, 26]
+  );
+  const apu = wb.addWorksheet("Insumos de partida");
   encabezado(apu, ["Código partida", "Tipo", "Código insumo o subpartida", "Descripción", "Unidad", "Cuadrilla", "Cantidad"], [16, 12, 24, 50, 10, 12, 12]);
   if (catalogo) {
     const insMap = new Map(insumos.map((i) => [i.id, i]));
     const parMap = new Map(catalogo.partidas.map((p) => [p.id, p]));
     for (const p of catalogo.partidas) {
-      par.addRow([p.codigo, p.descripcion, p.unidad, p.rendimiento, p.jornada, p.omniclass]);
+      par.addRow([p.codigo, p.descripcion, p.unidad, p.rendimiento, p.jornada, p.omniclass, p.edt?.descripcion ?? "", p.edt?.criterios ?? "", p.edt?.responsable ?? ""]);
       if (!p.codigo) continue;
       for (const c of p.componentes) {
         const ref = c.tipo === "insumo" ? insMap.get(c.id) : parMap.get(c.id);
@@ -104,7 +111,7 @@ export async function plantillaCatalogo(catalogo: { insumos: Insumo[]; partidas:
       }
     }
   } else {
-    par.addRow(["P-001", "TRAZO Y REPLANTEO", "M2", 50, 8, "22-01 00 00"]);
+    par.addRow(["P-001", "TRAZO Y REPLANTEO", "M2", 50, 8, "22-01 00 00", "Trazo de ejes y niveles con equipo topográfico", "Tolerancia ±5 mm; planos de replanteo firmados", "Ing. Topógrafo"]);
     apu.addRow(["P-001", "INSUMO", "MO-001", "PEON", "HH", 4, null]);
     apu.addRow(["P-001", "INSUMO", "EQ-001", "HERRAMIENTAS MANUALES", "%MO", null, 5]);
   }
@@ -141,7 +148,7 @@ function leerHoja(ws: Worksheet): Hoja {
 const HOJAS: Record<keyof Libro, string[]> = {
   insumos: ["insumos", "catalogo de insumos"],
   partidas: ["partidas", "catalogo de partidas"],
-  apu: ["apu", "analisis", "analisis de precios unitarios"],
+  apu: ["insumos de partida", "apu", "analisis", "analisis de precios unitarios"],
   omniclass: ["omniclass", "codigos omniclass"],
 };
 

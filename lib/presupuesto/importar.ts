@@ -62,6 +62,9 @@ const COLUMNAS = {
     rendimiento: ["rendimiento", "rend"],
     jornada: ["jornada", "jornada h", "horas", "horas jornada"],
     omniclass: ["omniclass", "clasificacion omniclass", "clasificacion"],
+    edtDescripcion: ["descripcion del trabajo", "descripcion trabajo"],
+    edtCriterios: ["criterios de aceptacion", "criterios aceptacion", "criterios"],
+    edtResponsable: ["responsable"],
   },
   apu: {
     partida: ["codigo partida", "partida", "cod partida"],
@@ -166,6 +169,7 @@ function igualPartida(a: PartidaData, b: PartidaData): boolean {
     a.rendimiento === b.rendimiento &&
     a.jornada === b.jornada &&
     a.omniclass === b.omniclass &&
+    JSON.stringify(a.edt ?? null) === JSON.stringify(b.edt ?? null) &&
     JSON.stringify(a.componentes) === JSON.stringify(b.componentes)
   );
 }
@@ -278,6 +282,18 @@ export function planificarImportacion(libro: Libro, catalogo: { insumos: Insumo[
         }
         vistos.set(k, n);
         const existente = codigo ? parPorCodigo.get(claveCodigo(codigo)) : parPorClave.get(clave(descripcion, unidad));
+        // The EDT columns, when the sheet has them, replace the stored dictionary (blank cells clear it).
+        const tieneEdt = col.edtDescripcion !== undefined || col.edtCriterios !== undefined || col.edtResponsable !== undefined;
+        const leido = {
+          descripcion: texto(get("edtDescripcion")),
+          criterios: texto(get("edtCriterios")),
+          responsable: texto(get("edtResponsable")),
+        };
+        if (leido.descripcion.length > 2000 || leido.criterios.length > 2000 || leido.responsable.length > 120) {
+          errores.push(`${where}: algún texto de la EDT es demasiado largo (máximo 2000 caracteres; el responsable, 120).`);
+          continue;
+        }
+        const edt = tieneEdt ? (leido.descripcion || leido.criterios || leido.responsable ? leido : undefined) : existente?.edt;
         const row = {
           id: existente?.id ?? nuevoId(),
           codigo,
@@ -286,6 +302,7 @@ export function planificarImportacion(libro: Libro, catalogo: { insumos: Insumo[
           rendimiento,
           jornada,
           omniclass: texto(get("omniclass")),
+          ...(edt ? { edt } : {}),
           componentes: existente ? existente.componentes.map((c) => ({ ...c })) : [],
           fila: n,
         };
@@ -300,12 +317,12 @@ export function planificarImportacion(libro: Libro, catalogo: { insumos: Insumo[
   const hojaApu = filasDe(libro.apu);
   if (hojaApu.rows.length) {
     const col = columnas(hojaApu.header, COLUMNAS.apu);
-    if (col.partida === undefined) errores.push('Hoja "APU": falta la columna "Código partida".');
+    if (col.partida === undefined) errores.push('Hoja "Insumos de partida": falta la columna "Código partida".');
     else {
       const nuevas = new Map<string, Componente[]>();
       for (const { n, cells } of hojaApu.rows) {
         const get = (k: keyof typeof col) => (col[k] === undefined ? null : cells[col[k]!]);
-        const where = `APU, fila ${n}`;
+        const where = `Insumos de partida, fila ${n}`;
         const codPartida = texto(get("partida"));
         const partida = parPorCodigo.get(claveCodigo(codPartida));
         if (!partida) {
@@ -349,7 +366,7 @@ export function planificarImportacion(libro: Libro, catalogo: { insumos: Insumo[
       for (const [id, componentes] of nuevas) {
         const p = planeadas.get(id) ?? (() => {
           const base = catalogo.partidas.find((x) => x.id === id)!;
-          const copia = { id: base.id, codigo: base.codigo, descripcion: base.descripcion, unidad: base.unidad, rendimiento: base.rendimiento, jornada: base.jornada, omniclass: base.omniclass, componentes: base.componentes, fila: 0 };
+          const copia = { id: base.id, codigo: base.codigo, descripcion: base.descripcion, unidad: base.unidad, rendimiento: base.rendimiento, jornada: base.jornada, omniclass: base.omniclass, ...(base.edt ? { edt: base.edt } : {}), componentes: base.componentes, fila: 0 };
           planeadas.set(id, copia);
           return copia;
         })();

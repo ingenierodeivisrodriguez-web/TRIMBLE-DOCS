@@ -77,6 +77,8 @@ export interface PartidaData extends Apu {
   unidad: string;
   /** OmniClass Table 22 (Work Results) code, e.g. "22-03 30 00". */
   omniclass: string;
+  /** Work breakdown dictionary data. */
+  edt?: Edt;
 }
 
 /** A partida of the catalog (base de datos de partidas). */
@@ -122,8 +124,6 @@ export interface ItemPartida extends PartidaData {
    * elements ("3d"). Not set: from the model when the partida measures them.
    */
   modo?: ModoMetrado;
-  /** Work breakdown dictionary data. */
-  edt?: Edt;
 }
 
 /** The quantity the model's elements give a partida. */

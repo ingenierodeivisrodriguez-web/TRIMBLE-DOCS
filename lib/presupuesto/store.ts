@@ -99,6 +99,7 @@ interface PartidaRow {
   jornada: number | string;
   omniclass: string;
   componentes: PartidaCatalogo["componentes"] | null;
+  edt?: PartidaCatalogo["edt"] | null;
   updated_at: string;
   updated_by: string | null;
 }
@@ -128,6 +129,7 @@ function toPartida(r: PartidaRow): PartidaCatalogo {
     jornada: Number(r.jornada),
     omniclass: r.omniclass,
     componentes: Array.isArray(r.componentes) ? r.componentes : [],
+    ...(r.edt ? { edt: r.edt } : {}),
     updatedAt: r.updated_at,
     updatedBy: r.updated_by,
   };
@@ -165,7 +167,7 @@ function supabaseStore(): PresupuestoStore | null {
       // not JSON
     }
     if (/version-conflict/.test(body)) throw new StoreError("version-conflict", 409);
-    if (/memoria/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
+    if (/(memoria|edt)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (detail.code === "23505") throw new StoreError("duplicate-code", 409);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) {
@@ -241,7 +243,7 @@ function supabaseStore(): PresupuestoStore | null {
 
     async listPartidas(baseId) {
       const rows = await all<PartidaRow>(
-        `/presupuesto_partidas?base_id=${eq(baseId)}&select=id,codigo,descripcion,unidad,rendimiento,jornada,omniclass,componentes,updated_at,updated_by&order=descripcion.asc,id.asc`
+        `/presupuesto_partidas?base_id=${eq(baseId)}&select=id,codigo,descripcion,unidad,rendimiento,jornada,omniclass,componentes,edt,updated_at,updated_by&order=descripcion.asc,id.asc`
       );
       return rows.map(toPartida);
     },
@@ -263,7 +265,7 @@ function supabaseStore(): PresupuestoStore | null {
     async partidasQueUsan(baseId, componentId) {
       const filter = encodeURIComponent(JSON.stringify([{ id: componentId }]));
       const rows = await json<PartidaRow[]>(
-        `/presupuesto_partidas?base_id=${eq(baseId)}&componentes=cs.${filter}&select=id,codigo,descripcion,unidad,rendimiento,jornada,omniclass,componentes,updated_at,updated_by&limit=20`
+        `/presupuesto_partidas?base_id=${eq(baseId)}&componentes=cs.${filter}&select=id,codigo,descripcion,unidad,rendimiento,jornada,omniclass,componentes,edt,updated_at,updated_by&limit=20`
       );
       return rows.map(toPartida);
     },

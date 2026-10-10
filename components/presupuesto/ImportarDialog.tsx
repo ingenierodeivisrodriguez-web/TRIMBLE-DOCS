@@ -53,7 +53,7 @@ export default function ImportarDialog({
     try {
       const libro = await leerLibro(await file.arrayBuffer());
       if (!libro.insumos && !libro.partidas && !libro.apu && !libro.omniclass) {
-        throw new Error('El archivo no tiene las hojas de la plantilla ("Insumos", "Partidas", "APU" u "OmniClass").');
+        throw new Error('El archivo no tiene las hojas de la plantilla ("Insumos", "Partidas", "Insumos de partida" u "OmniClass").');
       }
       setPlan(planificarImportacion(libro, catalogo));
     } catch (err) {
