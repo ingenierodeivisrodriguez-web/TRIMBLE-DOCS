@@ -177,6 +177,35 @@ export default function CatalogoInsumos({
   );
 }
 
+/** Creates an insumo in the catalog from where it is needed (e.g. a partida's analysis), starting from the typed name. */
+export function InsumoNuevoDialog({
+  api,
+  catalogo,
+  descripcion,
+  onCreated,
+  onClose,
+}: {
+  api: PresupuestoApi;
+  catalogo: Catalogo;
+  descripcion: string;
+  onCreated: (insumo: Insumo) => void;
+  onClose: () => void;
+}) {
+  return (
+    <InsumoForm
+      titulo="Nuevo insumo"
+      inicial={{ codigo: "", descripcion, unidad: "", precio: 0, tipo: "MT", iu: "", omniclass: "" }}
+      catalogo={catalogo}
+      onClose={onClose}
+      onAccept={async (data) => {
+        const id = nuevoId();
+        await api.guardarInsumos([{ id, ...data }]);
+        onCreated({ id, ...data, updatedAt: new Date().toISOString(), updatedBy: null });
+      }}
+    />
+  );
+}
+
 function InsumoForm({
   titulo,
   inicial,

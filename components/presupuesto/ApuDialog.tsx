@@ -7,7 +7,7 @@ import { fmt } from "../../lib/presupuesto/format";
 import { tablaDe } from "../../lib/presupuesto/omniclass";
 import type { Edt, ModoMetrado, MetradoModeloInfo } from "../../lib/presupuesto/types";
 import { Apu, Insumo, InsumoPresupuesto, PartidaCatalogo, PartidaData, Subpartida } from "../../lib/presupuesto/types";
-import ApuEditor, { insumoLabel, OpcionSubpartida } from "./ApuEditor";
+import ApuEditor, { CrearInsumoCfg, insumoLabel, OpcionSubpartida } from "./ApuEditor";
 import Picker from "./Picker";
 import { acceptButton, baseInput, labelStyle, Modal, NumInput, Notice } from "./ui";
 import type { Catalogo } from "./usePresupuesto";
@@ -37,6 +37,7 @@ export default function ApuDialog({
   catalogo,
   propioId,
   conMetrado,
+  crear,
   metradoModelo,
   readOnly,
   onAccept,
@@ -51,6 +52,8 @@ export default function ApuDialog({
   /** The id of what is being edited, to keep it from containing itself. */
   propioId?: string;
   conMetrado?: boolean;
+  /** Lets the analysis create an insumo that isn't in the catalog. */
+  crear?: CrearInsumoCfg;
   /** The quantity the model's linked elements give this partida, if it measures them. */
   metradoModelo?: MetradoModeloInfo | null;
   readOnly?: boolean;
@@ -283,6 +286,7 @@ export default function ApuDialog({
 
       <div style={{ flex: 1, minHeight: 280, display: "flex", flexDirection: "column", margin: "0 14px", border: "1px solid #dfe4ea", background: "#fff" }}>
         <ApuEditor
+          crear={crear}
           apu={data}
           resolver={resolver}
           unidad={data.unidad}
@@ -313,6 +317,7 @@ export default function ApuDialog({
           inicial={sub.data}
           mapas={mapas}
           catalogo={catalogo}
+          crear={crear}
           propioId={sub.id ?? undefined}
           readOnly={readOnly}
           onClose={() => setSub(null)}

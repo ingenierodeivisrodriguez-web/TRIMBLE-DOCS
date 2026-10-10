@@ -4,8 +4,21 @@ import { CSSProperties, useCallback, useMemo, useState } from "react";
 import { ApuCalculado, calcularApu, cuadrillaPara, LineaApu, Resolver } from "../../lib/presupuesto/calc";
 import { fmt } from "../../lib/presupuesto/format";
 import { Apu, Componente, Insumo, Rubro, RUBRO_COLORS, RUBROS } from "../../lib/presupuesto/types";
+import type { PresupuestoApi } from "../../lib/presupuesto/client";
+import { InsumoNuevoDialog } from "./CatalogoInsumos";
 import Picker from "./Picker";
+import type { Catalogo } from "./usePresupuesto";
 import { C, NumInput, RubroChip, Square } from "./ui";
+
+/** What an analysis needs to offer "Crear insumo" for an insumo that isn't in the catalog yet. */
+export interface CrearInsumoCfg {
+  api: PresupuestoApi;
+  catalogo: Catalogo;
+  /** Whether the user can change the catalog. */
+  canEdit: boolean;
+  /** The insumo was saved in the catalog. */
+  onCreated: (insumo: Insumo) => void;
+}
 
 export interface OpcionSubpartida {
   id: string;
@@ -46,6 +59,7 @@ export default function ApuEditor({
   unidad,
   maxHeight,
   calculada,
+  crear,
 }: {
   apu: Apu;
   resolver: Resolver;
@@ -65,10 +79,12 @@ export default function ApuEditor({
   maxHeight?: number | string;
   /** Already computed (saves a pass when the caller has it). */
   calculada?: ApuCalculado;
+  crear?: CrearInsumoCfg;
 }) {
   const result = useMemo(() => calculada ?? calcularApu(apu, resolver), [calculada, apu, resolver]);
   const [adding, setAdding] = useState<"insumo" | "subpartida" | null>(null);
   const [aviso, setAviso] = useState("");
+  const [creando, setCreando] = useState<string | null>(null);
   const editable = !!onChange;
 
   const lineas = useMemo(
@@ -256,6 +272,30 @@ export default function ApuEditor({
                       )}
                       onPick={agregarInsumo}
                       onCancel={() => setAdding(null)}
+                      noMatch={
+                        crear
+                          ? {
+                              onEnter: (q) => crear.canEdit && setCreando(q),
+                              render: (q) => (
+                                <div style={floating}>
+                                  <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)" }}>«{q}» no existe en la base de datos.</span>
+                                  <button
+                                    type="button"
+                                    disabled={!crear.canEdit}
+                                    title={crear.canEdit ? "Crear este insumo en el catálogo" : "No tienes permiso para modificar el catálogo de insumos"}
+                                    onMouseDown={(e) => {
+                                      e.preventDefault();
+                                      if (crear.canEdit) setCreando(q);
+                                    }}
+                                    style={floatingBtn}
+                                  >
+                                    {crear.canEdit ? "Crear Insumo" : "Sin permiso para crear insumos"}
+                                  </button>
+                                </div>
+                              ),
+                            }
+                          : undefined
+                      }
                       placeholder="Escribe parte del nombre o el código del insumo..."
                       style={{ maxWidth: 520 }}
                     />
@@ -282,6 +322,19 @@ export default function ApuEditor({
         </table>
       </div>
 
+      {creando !== null && crear && (
+        <InsumoNuevoDialog
+          api={crear.api}
+          catalogo={crear.catalogo}
+          descripcion={creando}
+          onClose={() => setCreando(null)}
+          onCreated={(ins) => {
+            crear.onCreated(ins);
+            setCreando(null);
+            agregarInsumo(ins);
+          }}
+        />
+      )}
       {editable && (
         <>
           {aviso && <div style={{ padding: "4px 10px", fontSize: 12.5, color: "#7a5300", background: "#fff6e0" }}>{aviso}</div>}
@@ -308,6 +361,8 @@ export function insumoSearchText(i: Insumo): string {
   return `${i.codigo} ${i.descripcion} ${i.unidad}`;
 }
 
+const floating: CSSProperties = { display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #8899b3", boxShadow: "0 6px 18px rgba(0,0,0,0.2)", padding: "6px 8px", whiteSpace: "nowrap" };
+const floatingBtn: CSSProperties = { border: "1px solid #444", background: "#f0f0f0", borderRadius: 3, padding: "4px 10px", fontSize: 14, cursor: "pointer", fontFamily: "inherit" };
 const th: CSSProperties = {
   padding: "8px 6px",
   fontWeight: 600,

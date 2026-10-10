@@ -6,7 +6,7 @@ import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { nuevoId, resolverCatalogo } from "../../lib/presupuesto/doc";
 import { coincide, fmt } from "../../lib/presupuesto/format";
 import { divisionDe } from "../../lib/presupuesto/omniclass";
-import { PartidaCatalogo } from "../../lib/presupuesto/types";
+import { Insumo, PartidaCatalogo } from "../../lib/presupuesto/types";
 import ApuDialog, { DatosPartida } from "./ApuDialog";
 import ApuEditor from "./ApuEditor";
 import { ConfirmDialog } from "./SimpleDialogs";
@@ -24,6 +24,7 @@ export default function CatalogoPartidas({
   readOnlyNote,
   onSaved,
   onAgregar,
+  onInsumoCreado,
   onClose,
 }: {
   api: PresupuestoApi;
@@ -33,6 +34,8 @@ export default function CatalogoPartidas({
   onSaved: (cambios: { partidas?: PartidaCatalogo[]; sinPartida?: string }) => void;
   /** Copies the partida into the open subpresupuesto (only for budget editors). */
   onAgregar?: (p: PartidaCatalogo) => void;
+  /** An insumo was created from a partida's analysis. */
+  onInsumoCreado: (insumo: Insumo) => void;
   onClose: () => void;
 }) {
   const [query, setQuery] = useState("");
@@ -195,6 +198,7 @@ export default function CatalogoPartidas({
           modo="catalogo"
           inicial={form.data}
           catalogo={catalogo}
+          crear={{ api, catalogo, canEdit, onCreated: (ins) => onInsumoCreado(ins) }}
           propioId={form.id}
           onClose={() => setForm(null)}
           onAccept={async (data) => {

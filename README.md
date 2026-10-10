@@ -1127,7 +1127,9 @@ La conexión con Trimble Connect (token, menú, visor) es común a las dos:
   - CD (costo directo) es la suma del subpresupuesto.
 - Al seleccionar una partida se abre abajo su **análisis de precios
   unitarios**, editable: rendimiento, jornada, cuadrillas, cantidades, PU,
-  agregar insumo (buscador por nombre o código), agregar subpartida (del
+  agregar insumo (buscador por nombre o código; si lo que escribes no existe,
+  aparece un botón flotante **Crear Insumo** que abre el diálogo de nuevo insumo
+  con el nombre ya escrito y, al aceptar, lo agrega a la partida), agregar subpartida (del
   presupuesto o del catálogo) o crear una nueva. Se impide una subpartida que
   se contenga a sí misma.
 - **Guardar** guarda el presupuesto entero (también con Ctrl+S). Si otra

@@ -85,6 +85,10 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
     return out;
   }, [s.metradoModelo, doc]);
   const metrado = useCallback((id: string) => metradoEfectivo.get(id) ?? null, [metradoEfectivo]);
+  const crearInsumo = useMemo(
+    () => (catalogo && estado ? { api, catalogo, canEdit: estado.canEditBase, onCreated: (ins: Insumo) => s.catalogoGuardado({ insumos: [ins] }) } : undefined),
+    [api, catalogo, estado, s.catalogoGuardado]
+  );
   const loadMemoria = useCallback((itemId: string) => api.elementosDe({ itemIds: [itemId] }), [api]);
   const calculados = useMemo(() => {
     const out = new Map<string, SubpresupuestoCalculado>();
@@ -468,6 +472,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
           )}
           {apuVisible && (
             <ApuEditor
+              crear={crearInsumo}
               apu={partidaSel}
               calculada={filaSel.apu ?? undefined}
               resolver={resolver}
@@ -523,6 +528,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
             mapas={{ insumos: doc.insumos, subpartidas: doc.subpartidas }}
             catalogo={catalogo}
             conMetrado
+            crear={crearInsumo}
             metradoModelo={actual ? s.metradoModelo.get(actual.id) ?? null : null}
             readOnly={!canEdit}
             onClose={close}
@@ -550,6 +556,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
             inicial={actual ? { ...actual, metrado: 0 } : partidaVacia()}
             mapas={{ insumos: doc.insumos, subpartidas: doc.subpartidas }}
             catalogo={catalogo}
+            crear={crearInsumo}
             propioId={dialogo.id ?? undefined}
             readOnly={!canEdit}
             onClose={close}
@@ -652,6 +659,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
             readOnlyNote={readOnlyBase}
             onSaved={s.catalogoGuardado}
             onAgregar={canEdit ? agregarDesdeCatalogo : undefined}
+            onInsumoCreado={(ins) => s.catalogoGuardado({ insumos: [ins] })}
             onClose={close}
           />
         ) : null;

@@ -21,6 +21,7 @@ export default function Picker<T>({
   style,
   initial = "",
   keepOpen,
+  noMatch,
 }: {
   options: T[];
   /** What the search looks in. */
@@ -34,6 +35,8 @@ export default function Picker<T>({
   initial?: string;
   /** Show the list even before typing. */
   keepOpen?: boolean;
+  /** What to offer when the typed text matches nothing (e.g. "Crear insumo"); Enter triggers it. */
+  noMatch?: { render: (query: string) => ReactNode; onEnter: (query: string) => void };
 }) {
   const [query, setQuery] = useState(initial);
   const [active, setActive] = useState(0);
@@ -79,6 +82,7 @@ export default function Picker<T>({
           } else if (e.key === "Enter") {
             e.preventDefault();
             if (matches[active]) onPick(matches[active]);
+            else if (noMatch && query.trim()) noMatch.onEnter(query.trim());
           } else if (e.key === "Escape") {
             e.stopPropagation();
             onCancel?.();
@@ -87,6 +91,11 @@ export default function Picker<T>({
         style={{ ...baseInput, width: "100%", background: "#fffbd6" }}
         aria-autocomplete="list"
       />
+      {open && noMatch && matches.length === 0 && query.trim() && (
+        <div role="alert" style={{ position: "absolute", top: "100%", left: 0, zIndex: 20, marginTop: 4 }}>
+          {noMatch.render(query.trim())}
+        </div>
+      )}
       {open && matches.length > 0 && (
         <div
           ref={listRef}
