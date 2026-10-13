@@ -1216,6 +1216,14 @@ elementos de las partidas que ya no existen.
 
   Las de fábrica son Bloque, Conjunto, Zona, Nombre de zona y Espacio.
 
+  **Los datos del modelo no aparecen solos.** Se leen del modelo cuando los
+  elementos se asocian. Los elementos asociados antes de elegir las columnas no
+  los tienen: en el visor, ⚙ Columnas o el botón **"Actualizar la memoria de
+  todas las partidas"** los lee de una vez (y el de cada partida, solo esa). El
+  panel del visor siempre usa las columnas vigentes del proyecto, aunque las
+  hayas cambiado después de abrirlo. Si todas las filas salen sin datos, el
+  pie de la memoria lo avisa.
+
   **De dónde sale la lista de propiedades.** El menú del proyecto no ve el
   visor, así que la lista se lee **desde el panel Presupuesto del visor 3D**
   (botón ⚙ Columnas → "Leer las propiedades de los modelos cargados") y se guarda
@@ -1224,6 +1232,16 @@ elementos de las partidas que ya no existen.
   usa una muestra al azar de 2.000 elementos por modelo; una propiedad que casi
   ningún elemento tiene puede no aparecer, y para eso está la opción "Leer todos
   los elementos". Si cambian los modelos, se vuelve a leer.
+- **Ver en 3D.** Cada fila de la memoria tiene **Ver 3D** y el encabezado
+  **Ver todos en 3D**. Trimble no deja abrir el visor ya con elementos
+  seleccionados desde el menú del proyecto (solo permite abrirlo con un modelo
+  cargado), así que se hace en dos pasos: la app deja los elementos pedidos
+  guardados para esa persona (`presupuesto_vistas`, duran 30 minutos y se
+  usan una sola vez) y abre el visor con el modelo. Al abrir el panel
+  **Presupuesto** del visor, este espera a que el modelo termine de cargar,
+  selecciona esos elementos y acerca la cámara. Antes de salir hay que haber
+  guardado el presupuesto (si no, la app avisa). "Seleccionar sus elementos en el
+  modelo" también acerca la cámara.
 - **Diccionario de la EDT.** Cada partida guarda **Descripción del trabajo**,
   **Criterios de aceptación** y **Responsable** (texto libre). Se editan en el
   diálogo de la partida y el panel de análisis muestra el responsable y un
@@ -1295,6 +1313,7 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `PUT /api/presupuesto/config` | `{ baseProjectId?, editores?, memoriaColumnas? }` (base y editores: administradores; columnas de la memoria: editores) |
 | `GET /api/presupuesto/contactos` | Personas y grupos para elegir editores (administradores) |
 | `GET /api/presupuesto/atributos` | Atributos de la app Propiedades y propiedades de los modelos (última lectura del visor) para elegir columnas de la memoria de cantidades |
+| `PUT` / `GET /api/presupuesto/vista` | Pedir ver elementos en 3D `{ itemId, elementos: [{ ifcGuid, modelId }] }` / recogerlos una vez (cualquier miembro, solo los suyos) |
 | `PUT /api/presupuesto/campos-modelo` | `{ modelos, campos: [{ key, label, group, kind, count }] }`: guarda las propiedades leídas de los modelos cargados (editores) |
 | `GET /api/presupuesto/catalogo` | Insumos, partidas y códigos OmniClass de la base |
 | `POST /api/presupuesto/catalogo/insumos` · `.../partidas` · `.../omniclass` | Crear o actualizar en lote (hasta 1.000 por envío) |

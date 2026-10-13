@@ -5,6 +5,8 @@ import {
   CampoModelo,
   CamposModelo,
   CatalogoResponse,
+  ElementoRef,
+  VistaPendiente,
   ColumnaMemoria,
   DocumentoResponse,
   ElementoVinculado,
@@ -26,6 +28,10 @@ export interface PresupuestoApi {
   updateConfig(patch: { baseProjectId?: string | null; editores?: Responsable[]; memoriaColumnas?: ColumnaMemoria[] }): Promise<EstadoResponse>;
   /** Attributes of the Propiedades app, to choose as columns of the memoria de cantidades. */
   getAtributos(): Promise<{ atributos: AtributoPropiedad[]; modelo: CamposModelo | null }>;
+  /** Leaves the elements to see in 3D for this user's viewer panel. */
+  pedirVista(itemId: string, elementos: ElementoRef[]): Promise<void>;
+  /** The elements this user asked to see in 3D (once), or null. */
+  tomarVista(): Promise<VistaPendiente | null>;
   /** Saves the properties of the models loaded in the viewer. */
   guardarCamposModelo(data: { modelos: string[]; campos: CampoModelo[] }): Promise<number>;
   getContacts(): Promise<ProjectContacts>;
@@ -66,6 +72,10 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     updateConfig: (patch) => request("/config", send("PUT", patch)),
     getContacts: () => request("/contactos"),
     getAtributos: () => request("/atributos"),
+    async pedirVista(itemId, elementos) {
+      await request("/vista", send("PUT", { itemId, elementos }));
+    },
+    tomarVista: () => request<{ vista: VistaPendiente | null }>("/vista").then((r) => r.vista),
     guardarCamposModelo: (data) => request<{ guardadas: number }>("/campos-modelo", send("PUT", data)).then((r) => r.guardadas),
     getCatalogo: () => request("/catalogo"),
     guardarInsumos: (rows, onProgress) =>

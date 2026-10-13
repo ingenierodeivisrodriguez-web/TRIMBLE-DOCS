@@ -32,6 +32,7 @@ export default function MemoriaCantidad({
   metrado,
   metradoModelo,
   load,
+  onVer,
   onClose,
 }: {
   itemId: string;
@@ -45,6 +46,8 @@ export default function MemoriaCantidad({
   /** Whether that quantity comes from these elements (3D) or was typed. */
   metradoModelo: boolean;
   load: (itemId: string) => Promise<ElementoVinculado[]>;
+  /** Shows these elements in the 3D viewer. */
+  onVer?: (elementos: ElementoVinculado[]) => void;
   onClose: () => void;
 }) {
   const [elementos, setElementos] = useState<ElementoVinculado[] | null>(null);
@@ -71,11 +74,14 @@ export default function MemoriaCantidad({
   const columnasConDatos = columnas.length;
   const vacias = Math.max(0, columnasConDatos);
 
+  const hayColumnasDelModelo = columnas.some((c) => c.fuente === "modelo");
   const nota = difiere
     ? `La suma de los elementos (${fmt(cantidadTotal)}) difiere del metrado de la partida (${fmt(metrado)}${metradoModelo ? "" : ", manual"}).`
-    : sinDatos > 0
-      ? `${sinDatos} elemento(s) sin datos en estas columnas.`
-      : "";
+    : hayColumnasDelModelo && filas.length > 0 && sinDatos === filas.length
+      ? "Sin datos del modelo en estas columnas: en el visor 3D (panel Presupuesto → ⚙ Columnas) usa «Actualizar la memoria de todas las partidas»."
+      : sinDatos > 0
+        ? `${sinDatos} elemento(s) sin datos en estas columnas.`
+        : "";
 
   return (
     <div style={{ height: alturaMemoria(Math.max(elementos?.length ?? 0, 0)), padding: "4px 8px 6px 70px", boxSizing: "border-box", background: "#f2f5fa" }}>
@@ -86,6 +92,11 @@ export default function MemoriaCantidad({
             {titulo} · PU {fmt(cu)}
             {unidad ? ` / ${unidad}` : ""}
           </span>
+          {onVer && filas.length > 0 && (
+            <button type="button" onClick={() => onVer(filas)} style={verBtn} title="Abre el visor 3D con todos estos elementos seleccionados">
+              Ver todos en 3D
+            </button>
+          )}
           <button type="button" onClick={onClose} aria-label="Cerrar la memoria" style={{ border: "none", background: "transparent", cursor: "pointer", fontSize: 16, fontFamily: "inherit" }}>
             ✕
           </button>
@@ -100,6 +111,7 @@ export default function MemoriaCantidad({
               <col style={{ width: 118 }} />
               <col style={{ width: 118 }} />
               <col style={{ width: 138 }} />
+              {onVer && <col style={{ width: 78 }} />}
             </colgroup>
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f3f4f6", height: THEAD }}>
@@ -112,6 +124,7 @@ export default function MemoriaCantidad({
                 <th style={th}>Cantidad{unidad ? ` (${unidad})` : ""}</th>
                 <th style={th}>PU</th>
                 <th style={th}>Valor</th>
+                {onVer && <th style={th}>3D</th>}
               </tr>
             </thead>
             <tbody>
@@ -129,25 +142,32 @@ export default function MemoriaCantidad({
                   <td style={tdNum}>{e.cantidad === null ? "—" : fmt(e.cantidad)}</td>
                   <td style={tdNum}>{fmt(cu)}</td>
                   <td style={{ ...tdNum, fontWeight: 600 }}>{e.cantidad === null ? "—" : fmt(redondear(e.cantidad * cu, 2))}</td>
+                  {onVer && (
+                    <td style={{ ...td, textAlign: "center" }}>
+                      <button type="button" onClick={() => onVer([e])} style={verBtn} title="Ver este elemento en el modelo 3D" aria-label={`Ver el elemento ${i + 1} en 3D`}>
+                        Ver 3D
+                      </button>
+                    </td>
+                  )}
                 </tr>
               ))}
               {elementos === null && !error && (
                 <tr>
-                  <td colSpan={vacias + 4} style={{ ...td, color: "var(--tc-gray-500)", padding: 12 }}>
+                  <td colSpan={vacias + 4 + (onVer ? 1 : 0)} style={{ ...td, color: "var(--tc-gray-500)", padding: 12 }}>
                     Cargando...
                   </td>
                 </tr>
               )}
               {error && (
                 <tr>
-                  <td colSpan={vacias + 4} style={{ ...td, color: "#8a1c14", padding: 12 }}>
+                  <td colSpan={vacias + 4 + (onVer ? 1 : 0)} style={{ ...td, color: "#8a1c14", padding: 12 }}>
                     {error}
                   </td>
                 </tr>
               )}
               {elementos && filas.length === 0 && (
                 <tr>
-                  <td colSpan={vacias + 4} style={{ ...td, color: "var(--tc-gray-500)", padding: 12 }}>
+                  <td colSpan={vacias + 4 + (onVer ? 1 : 0)} style={{ ...td, color: "var(--tc-gray-500)", padding: 12 }}>
                     Esta partida no tiene elementos asociados.
                   </td>
                 </tr>
@@ -183,4 +203,5 @@ const box: CSSProperties = {
 const th: CSSProperties = { padding: "5px 8px", fontWeight: 600, borderBottom: `1px solid ${C.border}`, borderRight: `1px solid ${C.grid}`, textAlign: "center", background: "#f3f4f6" };
 const td: CSSProperties = { padding: "3px 8px", borderBottom: `1px solid ${C.grid}`, borderRight: `1px solid ${C.grid}` };
 const tdNum: CSSProperties = { ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" };
+const verBtn: CSSProperties = { border: "1px solid var(--tc-blue-500)", background: "#fff", color: "var(--tc-blue-700)", borderRadius: 4, padding: "1px 8px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };
 const ellipsis: CSSProperties = { overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" };

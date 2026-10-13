@@ -2,6 +2,7 @@ import type { Responsable } from "../propiedades/types";
 import { StoreError } from "../propiedades/store";
 import type {
   CamposModelo,
+  VistaPendiente,
   ColumnaMemoria,
   ElementoVinculado,
   Insumo,
@@ -50,6 +51,11 @@ export interface PresupuestoStore {
   partidasQueUsan(baseId: string, componentId: string): Promise<PartidaCatalogo[]>;
   listOmniclass(baseId: string): Promise<OmniclassEntry[]>;
   saveOmniclass(baseId: string, rows: OmniclassEntry[]): Promise<number>;
+
+  /** Remembers what this user asked to see in 3D (replacing the previous request). */
+  saveVista(projectId: string, userId: string, vista: VistaPendiente): Promise<void>;
+  /** The pending request of this user, removed when read; null when none (or older than `maxMinutos`). */
+  takeVista(projectId: string, userId: string, maxMinutos: number): Promise<VistaPendiente | null>;
 
   getCamposModelo(projectId: string): Promise<CamposModelo | null>;
   saveCamposModelo(projectId: string, data: Pick<CamposModelo, "modelos" | "campos">, user: string): Promise<void>;
@@ -305,6 +311,25 @@ function supabaseStore(): PresupuestoStore | null {
       return rows.length;
     },
 
+    async saveVista(projectId, userId, vista) {
+      await call("/presupuesto_vistas?on_conflict=project_id,user_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ project_id: projectId, user_id: userId, item_id: vista.itemId, elementos: vista.elementos, creado: new Date().toISOString() }),
+      });
+    },
+
+    async takeVista(projectId, userId, maxMinutos) {
+      const rows = await json<{ item_id: string; elementos: VistaPendiente["elementos"] | null; creado: string }[]>(
+        `/presupuesto_vistas?project_id=${eq(projectId)}&user_id=${eq(userId)}&select=item_id,elementos,creado`
+      );
+      if (!rows.length) return null;
+      await call(`/presupuesto_vistas?project_id=${eq(projectId)}&user_id=${eq(userId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+      const r = rows[0];
+      if (Date.now() - new Date(r.creado).getTime() > maxMinutos * 60_000) return null;
+      return { itemId: r.item_id, elementos: Array.isArray(r.elementos) ? r.elementos : [] };
+    },
+
     async getCamposModelo(projectId) {
       const rows = await json<{ leido: string; leido_por: string | null; modelos: string[] | null; campos: CamposModelo["campos"] | null }[]>(
         `/presupuesto_campos_modelo?project_id=${eq(projectId)}&select=leido,leido_por,modelos,campos`
@@ -422,6 +447,7 @@ export function memoryStore(): PresupuestoStore {
   const omniclass = new Map<string, OmniclassEntry & { baseId: string }>();
   const documentos = new Map<string, StoredDocumento>();
   const campos = new Map<string, CamposModelo>();
+  const vistas = new Map<string, { vista: VistaPendiente; creado: number }>();
   const mediciones = new Map<string, Medicion & { projectId: string }>();
   const elementos = new Map<string, ElementoVinculado & { projectId: string }>();
 
@@ -504,6 +530,15 @@ export function memoryStore(): PresupuestoStore {
     async saveOmniclass(baseId, rows) {
       for (const r of rows) omniclass.set(`${baseId}|${r.codigo}`, { ...r, baseId });
       return rows.length;
+    },
+    async saveVista(projectId, userId, vista) {
+      vistas.set(`${projectId}|${userId}`, { vista, creado: Date.now() });
+    },
+    async takeVista(projectId, userId, maxMinutos) {
+      const k = `${projectId}|${userId}`;
+      const v = vistas.get(k);
+      vistas.delete(k);
+      return v && Date.now() - v.creado <= maxMinutos * 60_000 ? v.vista : null;
     },
     async getCamposModelo(projectId) {
       return campos.get(projectId) ?? null;

@@ -10,7 +10,7 @@ import { fecha, fmt } from "../../lib/presupuesto/format";
 import { exportarPdf } from "../../lib/presupuesto/pdf";
 import { tablaGastos, tablaListaInsumos, tablaPresupuesto } from "../../lib/presupuesto/reportes";
 import { bajar, bloqueDe, desangrar, insertar, quitar, sangrar, subir } from "../../lib/presupuesto/tree";
-import { Insumo, Item, ItemPartida, PartidaCatalogo } from "../../lib/presupuesto/types";
+import { ElementoVinculado, Insumo, Item, ItemPartida, PartidaCatalogo } from "../../lib/presupuesto/types";
 import ApuDialog, { DatosPartida, partidaVacia } from "./ApuDialog";
 import ApuEditor from "./ApuEditor";
 import BudgetGrid, { CampoEditable } from "./BudgetGrid";
@@ -43,7 +43,18 @@ type Dialogo =
   | { tipo: "descartar" };
 
 /** The budget in the project's menu: subpresupuestos, titles and partidas with their APU, and the tools around them. */
-export default function PresupuestoApp({ api, projectId, projectName }: { api: PresupuestoApi; projectId: string; projectName: string }) {
+export default function PresupuestoApp({
+  api,
+  projectId,
+  projectName,
+  abrirVisor,
+}: {
+  api: PresupuestoApi;
+  projectId: string;
+  projectName: string;
+  /** Opens Trimble Connect's 3D viewer (not available outside Trimble Connect). */
+  abrirVisor?: (params: { modelId?: string; versionId?: string }) => Promise<boolean>;
+}) {
   const s = usePresupuesto(api);
   const { doc, setDoc, estado, catalogo } = s;
   const canEdit = !!estado?.canEdit;
@@ -89,6 +100,24 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
     () => (catalogo && estado ? { api, catalogo, canEdit: estado.canEditBase, onCreated: (ins: Insumo) => s.catalogoGuardado({ insumos: [ins] }) } : undefined),
     [api, catalogo, estado, s.catalogoGuardado]
   );
+  /** Opens the 3D viewer for the elements; the viewer's Presupuesto panel selects them when it is opened. */
+  async function verEn3D(itemId: string, elementos: ElementoVinculado[]) {
+    if (!abrirVisor || elementos.length === 0) return;
+    if (s.dirty) {
+      setAviso("Guarda los cambios antes de abrir el visor 3D: al salir de esta pantalla se perderían.");
+      return;
+    }
+    try {
+      await api.pedirVista(itemId, elementos.map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId })));
+      const otros = new Set(elementos.map((e) => e.modelId)).size - 1;
+      setAviso(`Abriendo el visor 3D...${otros > 0 ? " Los elementos son de varios modelos: se abre el primero." : ""}`);
+      const ok = await abrirVisor({ modelId: elementos[0].modelId });
+      if (!ok) setAviso("No se pudo abrir el visor 3D desde aquí. Ábrelo en Trimble Connect y entra al panel Presupuesto: los elementos se seleccionan solos.");
+    } catch (err) {
+      setAviso(`No se pudo preparar la vista 3D: ${message(err)}`);
+    }
+  }
+
   const loadMemoria = useCallback((itemId: string) => api.elementosDe({ itemIds: [itemId] }), [api]);
   const calculados = useMemo(() => {
     const out = new Map<string, SubpresupuestoCalculado>();
@@ -434,6 +463,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
         elementos={s.elementosPorItem}
         loadMemoria={loadMemoria}
         columnasMemoria={estado.config.memoriaColumnas}
+        onVer3D={abrirVisor ? verEn3D : undefined}
       />
 
       {/* APU of the selected partida */}

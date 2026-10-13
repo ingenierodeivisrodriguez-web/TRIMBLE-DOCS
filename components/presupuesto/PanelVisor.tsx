@@ -28,8 +28,8 @@ interface Leida {
   /** Properties of the selected elements, per model, to measure them. */
   datasets: ModelDataset[];
   records: Map<string, ObjectRecord>; // guid -> record
-  /** Where each element is (bloque, conjunto, zona...), by guid. */
-  memorias: Map<string, Memoria | null>;
+  /** The dataset each element was read in, by guid (its memoria is read with the columns in force when it is linked). */
+  datasetDe: Map<string, ModelDataset>;
   sinGuid: number;
   omitidos: number;
 }
@@ -60,9 +60,18 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   const mapa = useRef(new MapaGuids());
   // The columns of the memoria de cantidades (read when elements are linked).
   const columnas = columnasMemoria(estado?.config.memoriaColumnas);
-  const columnasRef = useRef(columnas);
-  columnasRef.current = columnas;
   const seq = useRef(0);
+
+  /** The columns in force now: the settings may have changed (in the project's menu) since this panel opened. */
+  async function columnasActuales() {
+    try {
+      const e = await api.getEstado();
+      setEstado(e);
+      return columnasMemoria(e.config.memoriaColumnas);
+    } catch {
+      return columnas;
+    }
+  }
 
   const cargar = useCallback(async () => {
     setLoadError("");
@@ -79,6 +88,51 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   useEffect(() => {
     cargar();
   }, [cargar]);
+
+  // Elements somebody asked to see from the project's menu: select them and fly the camera there.
+  useEffect(() => {
+    let cancelado = false;
+    const espera = (ms: number) => new Promise((r) => setTimeout(r, ms));
+    (async () => {
+      let vista;
+      try {
+        vista = await api.tomarVista();
+      } catch {
+        return;
+      }
+      if (!vista || vista.elementos.length === 0 || cancelado) return;
+      setItemId(vista.itemId);
+      setNota({ kind: "info", text: `Buscando en el modelo los ${vista.elementos.length.toLocaleString("es")} elemento(s) que pediste ver...` });
+      // The model may still be loading after the viewer opened: wait for it, then look the elements up.
+      let u: Awaited<ReturnType<MapaGuids["ubicar"]>> | null = null;
+      for (let intento = 0; intento < 40 && !cancelado; intento++) {
+        u = await new MapaGuids().ubicar(viewer, vista.elementos, () => {}).catch(() => null);
+        if (u && u.encontrados > 0 && u.sinModelo === 0) break;
+        if (u && u.sinModelo === 0 && intento >= 3) break; // loaded, but these elements aren't in it
+        await espera(1500);
+      }
+      if (cancelado) return;
+      if (!u || u.encontrados === 0) {
+        setNota({ kind: "warning", text: "No se encontraron esos elementos en los modelos cargados. Abre el modelo al que pertenecen y vuelve a pedir la vista." });
+        return;
+      }
+      try {
+        await viewer.setSelection(selector(u.porModelo), "set");
+        await viewer.setCamera(selector(u.porModelo));
+      } catch (err) {
+        setNota({ kind: "error", text: `No se pudo mostrar la selección: ${message(err)}` });
+        return;
+      }
+      const faltan = u.noEncontrados + u.sinModelo;
+      setNota({
+        kind: faltan ? "warning" : "info",
+        text: `${u.encontrados.toLocaleString("es")} elemento(s) seleccionados en el modelo.${faltan ? ` ${faltan.toLocaleString("es")} no están en los modelos cargados.` : ""}`,
+      });
+    })();
+    return () => {
+      cancelado = true;
+    };
+  }, [api, viewer]);
 
   const recargarResumen = useCallback(async () => setResumen(await api.getResumen()), [api]);
 
@@ -107,7 +161,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         if (!current()) return;
         const porModelo = new Map<string, { nombre: string; raws: RawObject[]; guids: (string | null)[] }>();
         const records = new Map<string, ObjectRecord>();
-        const memorias = new Map<string, Memoria | null>();
+        const datasetDe = new Map<string, ModelDataset>();
         let sinGuid = 0;
         for (const e of r.elements) {
           const g = e.resolution.guid;
@@ -127,12 +181,12 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
             const g = m.guids[i];
             if (g) {
               records.set(g, rec);
-              memorias.set(g, memoriaDe(ds, rec, columnasRef.current));
+              datasetDe.set(g, ds);
             }
           });
           datasets.push(ds);
         }
-        setLeida({ elementos: r.elements, datasets, records, memorias, sinGuid, omitidos: r.skipped });
+        setLeida({ elementos: r.elements, datasets, records, datasetDe, sinGuid, omitidos: r.skipped });
         setLeyendo("");
         const guids = [...records.keys(), ...r.elements.map((e) => e.resolution.guid).filter((g): g is string => !!g && !records.has(g))];
         if (guids.length) {
@@ -170,6 +224,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     return sp.items.map((item, i) => ({ item, numero: numeros[i] })).filter((f) => f.item.tipo === "partida" && coincide(`${f.numero} ${f.item.descripcion}`, query));
   }, [sp, numeros, query]);
 
+  const partidasConElementos = useMemo(() => (resumen?.resumen ?? []).filter((r) => r.elementos > 0 && itemsPorId.has(r.itemId)).map((r) => r.itemId), [resumen, itemsPorId]);
   const sel = itemId ? itemsPorId.get(itemId) ?? null : null;
   const medicion: Medicion | null = itemId ? mediciones.get(itemId) ?? null : null;
   const cuenta = itemId ? cuentas.get(itemId) : undefined;
@@ -197,7 +252,12 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     setBusy("Agregando...");
     setNota(null);
     try {
-      const upsert = conGuid.map((e) => ({ ifcGuid: e.resolution.guid!, modelId: e.fileId, cantidad: valorDe(leida.records.get(e.resolution.guid!), campo), memoria: leida.memorias.get(e.resolution.guid!) ?? null }));
+      const cols = await columnasActuales();
+      const upsert = conGuid.map((e) => {
+        const g = e.resolution.guid!;
+        const ds = leida.datasetDe.get(g);
+        return { ifcGuid: g, modelId: e.fileId, cantidad: valorDe(leida.records.get(g), campo), memoria: ds ? memoriaDe(ds, leida.records.get(g), cols) : null };
+      });
       const unicos = [...new Map(upsert.map((u) => [u.ifcGuid, u])).values()];
       await api.guardarElementos(sel.item.id, unicos, []);
       await guardarMedicionSiCambia(campo);
@@ -247,7 +307,10 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         return;
       }
       const u = await mapa.current.ubicar(viewer, elementos, setBusy);
-      if (u.encontrados) await viewer.setSelection(selector(u.porModelo), "set");
+      if (u.encontrados) {
+        await viewer.setSelection(selector(u.porModelo), "set");
+        await viewer.setCamera(selector(u.porModelo)).catch(() => {}); // fly to them
+      }
       const faltan = [u.noEncontrados && `${u.noEncontrados} no están en los modelos cargados`, u.sinModelo && `${u.sinModelo} son de modelos que no están abiertos`].filter(Boolean);
       setNota({ kind: faltan.length ? "warning" : "info", text: `${u.encontrados} de ${elementos.length} elemento(s) seleccionados en el modelo.${faltan.length ? ` ${faltan.join("; ")}.` : ""}` });
     } catch (err) {
@@ -257,28 +320,50 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     }
   }
 
-  /** Reads again, from the model, the data of the memoria de cantidades of every element of the partida (after changing the columns). */
-  async function actualizarMemoria() {
-    if (!sel) return;
+  /**
+   * Reads again, from the model, the data of the memoria de cantidades of the
+   * elements of these partidas (after changing the columns, or for elements
+   * linked before the columns were chosen).
+   */
+  async function refrescarMemoria(itemIds: string[]) {
+    if (itemIds.length === 0) return;
     setBusy("Leyendo el modelo...");
     setNota(null);
     try {
-      const elementos = await api.elementosDe({ itemIds: [sel.item.id] });
-      const u = await mapa.current.ubicar(viewer, elementos, setBusy);
+      const cols = await columnasActuales();
+      const elementos = await api.elementosDe({ itemIds });
+      if (elementos.length === 0) {
+        setNota({ kind: "info", text: "Esas partidas no tienen elementos asociados." });
+        return;
+      }
+      const unicos = [...new Map(elementos.map((e) => [e.ifcGuid, { ifcGuid: e.ifcGuid, modelId: e.modelId }])).values()];
+      const u = await mapa.current.ubicar(viewer, unicos, setBusy);
       const nuevas = new Map<string, Memoria | null>();
       for (const [viewerModelId, ids] of u.porModelo) {
+        setBusy(`Leyendo ${ids.length.toLocaleString("es")} elementos del modelo...`);
         const ds = await leerDataset(viewer, viewerModelId, "", ids);
         const porRt = new Map(ds.records.map((r) => [r.runtimeId, r]));
-        for (const [guid, where] of u.ubicacion) if (where.viewerModelId === viewerModelId) nuevas.set(guid, memoriaDe(ds, porRt.get(where.runtimeId), columnas));
+        for (const [guid, where] of u.ubicacion) if (where.viewerModelId === viewerModelId) nuevas.set(guid, memoriaDe(ds, porRt.get(where.runtimeId), cols));
       }
-      const upsert = elementos
-        .filter((e) => nuevas.has(e.ifcGuid))
-        .map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: e.cantidad, memoria: memoriaParaGuardar(columnas, e.memoria, nuevas.get(e.ifcGuid)) }));
-      if (upsert.length) await api.guardarElementos(sel.item.id, upsert, []);
-      const faltan = elementos.length - upsert.length;
+      let guardados = 0;
+      for (const itemId of itemIds) {
+        const upsert = elementos
+          .filter((e) => e.itemId === itemId && nuevas.has(e.ifcGuid))
+          .map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: e.cantidad, memoria: memoriaParaGuardar(cols, e.memoria, nuevas.get(e.ifcGuid)) }));
+        if (upsert.length) {
+          setBusy("Guardando la memoria...");
+          await api.guardarElementos(itemId, upsert, []);
+          guardados += upsert.length;
+        }
+      }
+      const conDatos = [...nuevas.values()].filter(Boolean).length;
+      const faltan = elementos.length - elementos.filter((e) => nuevas.has(e.ifcGuid)).length;
       setNota({
-        kind: faltan ? "warning" : "info",
-        text: `Memoria actualizada en ${upsert.length} elemento(s).${faltan ? ` ${faltan} no están en los modelos cargados y conservan sus datos.` : ""}`,
+        kind: faltan || conDatos === 0 ? "warning" : "info",
+        text:
+          `Memoria actualizada en ${guardados.toLocaleString("es")} elemento(s) de ${itemIds.length} partida(s).` +
+          (conDatos === 0 && nuevas.size > 0 ? " Ningún elemento tiene datos en las columnas elegidas: revisa que sean propiedades que el modelo sí trae (la lista de ⚙ Columnas las muestra)." : "") +
+          (faltan ? ` ${faltan.toLocaleString("es")} no están en los modelos cargados y conservan sus datos.` : ""),
       });
     } catch (err) {
       setNota({ kind: "error", text: message(err) });
@@ -294,6 +379,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     setBusy("Midiendo...");
     setNota(null);
     try {
+      const cols = await columnasActuales();
       const elementos = await api.elementosDe({ itemIds: [sel.item.id] });
       let medidos = 0;
       let faltan = 0;
@@ -310,10 +396,10 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
             for (const [guid, where] of u.ubicacion) {
               if (where.viewerModelId !== viewerModelId) continue;
               porGuid.set(guid, valorDe(porRt.get(where.runtimeId), c));
-              memoriaPorGuid.set(guid, memoriaDe(ds, porRt.get(where.runtimeId), columnas));
+              memoriaPorGuid.set(guid, memoriaDe(ds, porRt.get(where.runtimeId), cols));
             }
           }
-          const upsert = elementos.filter((e) => porGuid.has(e.ifcGuid)).map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: porGuid.get(e.ifcGuid) ?? null, memoria: memoriaParaGuardar(columnas, e.memoria, memoriaPorGuid.get(e.ifcGuid)) }));
+          const upsert = elementos.filter((e) => porGuid.has(e.ifcGuid)).map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: porGuid.get(e.ifcGuid) ?? null, memoria: memoriaParaGuardar(cols, e.memoria, memoriaPorGuid.get(e.ifcGuid)) }));
           medidos = upsert.length;
           faltan = elementos.length - upsert.length;
           if (upsert.length) await api.guardarElementos(sel.item.id, upsert, []);
@@ -504,13 +590,24 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
               <button type="button" style={{ ...btn, gridColumn: "1 / -1" }} disabled={!!busy || !(cuenta?.elementos)} onClick={seleccionarEnModelo}>
                 Seleccionar sus elementos en el modelo
               </button>
-              <button type="button" style={{ ...btn, gridColumn: "1 / -1" }} disabled={!canEdit || !!busy || !(cuenta?.elementos)} onClick={actualizarMemoria} title="Vuelve a leer del modelo los datos de las columnas de la memoria de cantidades">
+              <button type="button" style={{ ...btn, gridColumn: "1 / -1" }} disabled={!canEdit || !!busy || !(cuenta?.elementos)} onClick={() => refrescarMemoria([sel.item.id])} title="Vuelve a leer del modelo los datos de las columnas de la memoria de cantidades">
                 Actualizar los datos de la memoria desde el modelo
               </button>
             </div>
           </>
         ) : (
           <p style={{ margin: 0, color: "var(--tc-gray-500)" }}>Elige una partida de la lista.</p>
+        )}
+        {canEdit && partidasConElementos.length > 0 && (
+          <button
+            type="button"
+            style={btn}
+            disabled={!!busy}
+            onClick={() => refrescarMemoria(partidasConElementos)}
+            title="Lee del modelo los datos de las columnas de la memoria en todas las partidas que ya tienen elementos asociados"
+          >
+            Actualizar la memoria de todas las partidas ({partidasConElementos.length})
+          </button>
         )}
         {busy && <div style={{ fontSize: 12.5, color: "var(--tc-blue-700)" }}>{busy}</div>}
         {nota && <Notice kind={nota.kind}>{nota.text}</Notice>}

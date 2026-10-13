@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Caller, ServiceError } from "../propiedades/service";
 import { documentoVacio } from "./doc";
-import { Ctx, getAtributos, guardarCamposModelo, guardarDocumento, updateConfig } from "./service";
+import { Ctx, getAtributos, guardarCamposModelo, guardarDocumento, pedirVista, tomarVista, updateConfig } from "./service";
 import { memoryStore } from "./store";
 import { leerCamposModelos, Visor } from "./viewerMap";
 
@@ -99,5 +99,41 @@ describe("guardar y consultar las propiedades leídas", () => {
     const store = memoryStore();
     const estado = await updateConfig(ctx(store), { memoriaColumnas: [{ id: "n", label: "Nivel", fuente: "modelo", clave: "Ubicación · Nivel" }] });
     assert.equal(estado.config.memoriaColumnas[0].clave, "Ubicación · Nivel");
+  });
+});
+
+describe("ver en 3D: traspaso del menú al visor", () => {
+  const G1 = "3CqVfw$t15ihB2vPgB1wri";
+  const G2 = "0000000000000000000000";
+  const invalid = (e: unknown) => e instanceof ServiceError && e.status === 400;
+
+  it("deja los elementos pedidos para el panel del visor de esa persona, una sola vez", async () => {
+    const store = memoryStore();
+    const yo = ctx(store);
+    const otro = ctx(store, lector);
+    assert.deepEqual(await pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: G1, modelId: "m" }, { ifcGuid: G2, modelId: "m" }] }), { elementos: 2 });
+    assert.deepEqual((await tomarVista(otro)).vista, null); // each person has their own
+    const vista = (await tomarVista(yo)).vista!;
+    assert.equal(vista.itemId, "p1");
+    assert.deepEqual(vista.elementos.map((e) => e.ifcGuid), [G1, G2]);
+    assert.equal((await tomarVista(yo)).vista, null); // taken
+  });
+
+  it("la última petición reemplaza a la anterior y las viejas se descartan", async () => {
+    const store = memoryStore();
+    const yo = ctx(store);
+    await pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: G1, modelId: "m" }] });
+    await pedirVista(yo, { itemId: "p2", elementos: [{ ifcGuid: G2, modelId: "m" }] });
+    assert.equal((await tomarVista(yo)).vista?.itemId, "p2");
+    await store.saveVista("obra1", "u1", { itemId: "p3", elementos: [{ ifcGuid: G1, modelId: "m" }] });
+    assert.equal(await store.takeVista("obra1", "u1", -1), null); // older than the limit
+  });
+
+  it("rechaza peticiones mal formadas", async () => {
+    const yo = ctx();
+    await assert.rejects(pedirVista(yo, { itemId: "p1", elementos: [] }), invalid);
+    await assert.rejects(pedirVista(yo, { itemId: "no valido!", elementos: [{ ifcGuid: G1, modelId: "m" }] }), invalid);
+    await assert.rejects(pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: "nope", modelId: "m" }] }), invalid);
+    await assert.rejects(pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: G1, modelId: "" }] }), invalid);
   });
 });

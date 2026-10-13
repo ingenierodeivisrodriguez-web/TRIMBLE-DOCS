@@ -278,6 +278,21 @@ export const DEFAULT_COLUMNAS_MEMORIA: ColumnaMemoria[] = [
   { id: "espacio", label: "Espacio", fuente: "modelo", clave: "Espacio" },
 ];
 
+/** An element to show in the 3D viewer. */
+export interface ElementoRef {
+  ifcGuid: string;
+  modelId: string;
+}
+
+/** Elements somebody asked to see in 3D, waiting for the viewer panel to pick them up. */
+export interface VistaPendiente {
+  itemId: string;
+  elementos: ElementoRef[];
+}
+
+export const MAX_ELEMENTOS_VISTA = 2000;
+export const VISTA_MINUTOS = 30;
+
 /** A property found in the models loaded in the viewer. */
 export interface CampoModelo {
   /** "Set · Property" (or "@name"...), what a column of the memoria uses to find it. */

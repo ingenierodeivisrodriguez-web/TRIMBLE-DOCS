@@ -19,6 +19,8 @@ export interface ShellContext {
   subscribe: (listener: ViewerEventListener) => () => void;
   /** The user's Trimble token; `fresh` asks Trimble Connect for it again. */
   getAccessToken: (fresh?: boolean) => Promise<string>;
+  /** Leaves the page for Trimble Connect's 3D viewer with a model loaded (project menu only). */
+  abrirVisor: (params: { modelId?: string; versionId?: string }) => Promise<boolean>;
   /** The token for this app's API clients (refreshed and described for diagnostics). */
   tokenSource: TokenSource;
 }
@@ -173,6 +175,15 @@ export default function ExtensionShell({
     [requestToken]
   );
 
+  const abrirVisor = useCallback(
+    async (params: { modelId?: string; versionId?: string }): Promise<boolean> => {
+      const api = workspace.current;
+      if (!api) return false;
+      return api.extension.goTo("3dviewer", { projectId: project.id, ...params });
+    },
+    [project.id]
+  );
+
   const [checking, setChecking] = useState(false);
   async function continueAfterConsent() {
     setChecking(true);
@@ -184,7 +195,7 @@ export default function ExtensionShell({
   }
 
   if (status === "ready") {
-    return <>{children({ host, projectId: project.id, projectName: project.name, viewer, subscribe, getAccessToken, tokenSource })}</>;
+    return <>{children({ host, projectId: project.id, projectName: project.name, viewer, subscribe, getAccessToken, tokenSource, abrirVisor })}</>;
   }
 
   const screens: Record<Exclude<Status, "ready">, { title: string; body: string }> = {

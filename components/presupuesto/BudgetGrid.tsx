@@ -48,6 +48,7 @@ export default function BudgetGrid({
   elementos,
   loadMemoria,
   columnasMemoria,
+  onVer3D,
 }: {
   calculado: SubpresupuestoCalculado;
   pie: FilaPieCalculada[];
@@ -65,6 +66,8 @@ export default function BudgetGrid({
   loadMemoria: (itemId: string) => Promise<ElementoVinculado[]>;
   /** Columns of the memoria de cantidades. */
   columnasMemoria: ColumnaMemoria[];
+  /** Shows linked elements of a partida in the 3D viewer. */
+  onVer3D?: (itemId: string, elementos: ElementoVinculado[]) => void;
 }) {
   const visibles = useMemo(() => filasVisibles(calculado.filas, collapsed), [calculado.filas, collapsed]);
   const [memoriaId, setMemoriaId] = useState<string | null>(null);
@@ -157,6 +160,7 @@ export default function BudgetGrid({
                 metrado={f.metrado ?? 0}
                 metradoModelo={!!f.metradoModelo}
                 load={loadMemoria}
+                onVer={onVer3D ? (els) => onVer3D(f.item.id, els) : undefined}
                 onClose={() => setMemoriaId(null)}
               />
             ) : null;

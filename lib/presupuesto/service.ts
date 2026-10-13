@@ -11,6 +11,9 @@ import type { PresupuestoStore, StoredConfig } from "./store";
 import {
   AtributoPropiedad,
   CamposModelo,
+  VistaPendiente,
+  VISTA_MINUTOS,
+  MAX_ELEMENTOS_VISTA,
   CatalogoResponse,
   DocumentoResponse,
   ElementoVinculado,
@@ -337,6 +340,31 @@ export async function consultarElementos(ctx: Ctx, body: unknown): Promise<{ ele
     ...(ifcGuids.length ? await ctx.store.getElementos(ctx.projectId, { ifcGuids }) : []),
   ];
   return { elementos: await conValoresDePropiedades(ctx, elementos) };
+}
+
+/** Leaves, for this user's viewer panel, the elements they asked to see in 3D (any member of the project may). */
+export async function pedirVista(ctx: Ctx, body: unknown): Promise<{ elementos: number }> {
+  const o = (body ?? {}) as { itemId?: unknown; elementos?: unknown };
+  if (typeof o.itemId !== "string" || !ITEM_ID(o.itemId)) bad("Falta la partida.");
+  if (!Array.isArray(o.elementos) || o.elementos.length === 0) bad("No hay elementos que mostrar.");
+  if (o.elementos.length > MAX_ELEMENTOS_VISTA) bad(`Máximo ${MAX_ELEMENTOS_VISTA} elementos a la vez.`);
+  const elementos = o.elementos.map((v) => {
+    const e = (v ?? {}) as { ifcGuid?: unknown; modelId?: unknown };
+    if (typeof e.ifcGuid !== "string" || !isIfcGuid(e.ifcGuid)) bad("Elemento sin IFCGUID válido.");
+    if (typeof e.modelId !== "string" || !e.modelId || e.modelId.length > 100) bad("Elemento sin modelo.");
+    return { ifcGuid: e.ifcGuid, modelId: e.modelId };
+  });
+  await ctx.store.saveVista(ctx.projectId, ctx.caller.id, { itemId: o.itemId, elementos });
+  return { elementos: elementos.length };
+}
+
+/** What this user asked to see in 3D, once (it is removed when read), if it is recent. */
+export async function tomarVista(ctx: Ctx): Promise<{ vista: VistaPendiente | null }> {
+  try {
+    return { vista: await ctx.store.takeVista(ctx.projectId, ctx.caller.id, VISTA_MINUTOS) };
+  } catch {
+    return { vista: null }; // nothing pending, or the table isn't there until supabase/presupuesto.sql is run again
+  }
 }
 
 /** The attributes of the Propiedades app that can be columns of the memoria de cantidades. */

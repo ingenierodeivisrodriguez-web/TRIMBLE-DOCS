@@ -8,11 +8,11 @@ import type { Host } from "../../components/trimble/ExtensionShell";
 export default function PresupuestoPage({ forceHost }: { forceHost?: Host }) {
   return (
     <PresupuestoShell forceHost={forceHost}>
-      {({ host, projectId, projectName, api, viewer, subscribe }) =>
+      {({ host, projectId, projectName, api, viewer, subscribe, abrirVisor }) =>
         host === "3dviewer" && viewer ? (
           <PanelVisor api={api} viewer={viewer} subscribe={subscribe} />
         ) : (
-          <PresupuestoApp api={api} projectId={projectId} projectName={projectName} />
+          <PresupuestoApp api={api} projectId={projectId} projectName={projectName} abrirVisor={abrirVisor} />
         )
       }
     </PresupuestoShell>

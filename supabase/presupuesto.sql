@@ -28,6 +28,17 @@ create table if not exists public.presupuesto_campos_modelo (
   campos     jsonb       not null default '[]'::jsonb check (jsonb_typeof(campos) = 'array')
 );
 
+-- "Ver en 3D": los elementos que una persona pidió ver desde el menú del proyecto, para que el
+-- panel Presupuesto del visor 3D los seleccione al abrirse (una fila por persona; dura minutos).
+create table if not exists public.presupuesto_vistas (
+  project_id text        not null,
+  user_id    text        not null,
+  item_id    text        not null,
+  elementos  jsonb       not null check (jsonb_typeof(elementos) = 'array'),
+  creado     timestamptz not null default now(),
+  primary key (project_id, user_id)
+);
+
 -- Catálogo de insumos. base_id = proyecto de Trimble Connect dueño del catálogo.
 create table if not exists public.presupuesto_insumos (
   id          uuid        primary key,
@@ -224,6 +235,7 @@ $$;
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. Las funciones se ejecutan con los permisos de quien las llama.
 alter table public.presupuesto_config enable row level security;
+alter table public.presupuesto_vistas enable row level security;
 alter table public.presupuesto_campos_modelo enable row level security;
 alter table public.presupuesto_insumos enable row level security;
 alter table public.presupuesto_partidas enable row level security;
