@@ -10,6 +10,7 @@ import { columnasMemoria, memoriaLimpia } from "./memoria";
 import type { PresupuestoStore, StoredConfig } from "./store";
 import {
   AtributoPropiedad,
+  CamposModelo,
   CatalogoResponse,
   DocumentoResponse,
   ElementoVinculado,
@@ -21,7 +22,7 @@ import {
   PresupuestoDoc,
   ResumenElementos,
 } from "./types";
-import { idsDePartidas, UUID_RE, validarColumnasMemoria, validarDocumento, validarInsumo, validarPartida } from "./validate";
+import { idsDePartidas, UUID_RE, validarCamposModelo, validarColumnasMemoria, validarDocumento, validarInsumo, validarPartida } from "./validate";
 
 /** What the service needs from Trimble Connect besides the caller of the current project. */
 export interface Deps {
@@ -339,13 +340,30 @@ export async function consultarElementos(ctx: Ctx, body: unknown): Promise<{ ele
 }
 
 /** The attributes of the Propiedades app that can be columns of the memoria de cantidades. */
-export async function getAtributos(ctx: Ctx): Promise<{ atributos: AtributoPropiedad[] }> {
+export async function getAtributos(ctx: Ctx): Promise<{ atributos: AtributoPropiedad[]; modelo: CamposModelo | null }> {
+  let atributos: AtributoPropiedad[] = [];
   try {
     const defs = await ctx.deps.propiedades?.().listDefinitions(ctx.projectId);
-    return { atributos: (defs ?? []).filter((d) => d.active).map((d) => ({ id: d.id, title: d.title, dataType: d.dataType })) };
+    atributos = (defs ?? []).filter((d) => d.active).map((d) => ({ id: d.id, title: d.title, dataType: d.dataType }));
   } catch {
-    return { atributos: [] };
+    // Propiedades is optional
   }
+  let modelo: CamposModelo | null = null;
+  try {
+    modelo = await ctx.store.getCamposModelo(ctx.projectId);
+  } catch {
+    // Not read yet, or the table isn't there until supabase/presupuesto.sql is run again
+  }
+  return { atributos, modelo };
+}
+
+/** Saves the properties of the models loaded in the viewer (read there), to pick columns from the project's menu. */
+export async function guardarCamposModelo(ctx: Ctx, body: unknown): Promise<{ guardadas: number }> {
+  await requireEdit(ctx);
+  const data = validarCamposModelo(body);
+  if (data.campos.length === 0) bad("No se encontraron propiedades en los modelos.");
+  await ctx.store.saveCamposModelo(ctx.projectId, data, ctx.caller.name);
+  return { guardadas: data.campos.length };
 }
 
 /** Adds, to each element, the current values of the Propiedades attributes chosen as columns. */

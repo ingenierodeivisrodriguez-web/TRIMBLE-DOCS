@@ -1,6 +1,7 @@
 import type { Responsable } from "../propiedades/types";
 import { StoreError } from "../propiedades/store";
 import type {
+  CamposModelo,
   ColumnaMemoria,
   ElementoVinculado,
   Insumo,
@@ -49,6 +50,9 @@ export interface PresupuestoStore {
   partidasQueUsan(baseId: string, componentId: string): Promise<PartidaCatalogo[]>;
   listOmniclass(baseId: string): Promise<OmniclassEntry[]>;
   saveOmniclass(baseId: string, rows: OmniclassEntry[]): Promise<number>;
+
+  getCamposModelo(projectId: string): Promise<CamposModelo | null>;
+  saveCamposModelo(projectId: string, data: Pick<CamposModelo, "modelos" | "campos">, user: string): Promise<void>;
 
   getDocumento(projectId: string): Promise<StoredDocumento | null>;
   /** Saves if the stored version is still `version` (0: none yet); returns the new version. */
@@ -301,6 +305,23 @@ function supabaseStore(): PresupuestoStore | null {
       return rows.length;
     },
 
+    async getCamposModelo(projectId) {
+      const rows = await json<{ leido: string; leido_por: string | null; modelos: string[] | null; campos: CamposModelo["campos"] | null }[]>(
+        `/presupuesto_campos_modelo?project_id=${eq(projectId)}&select=leido,leido_por,modelos,campos`
+      );
+      if (!rows.length) return null;
+      const r = rows[0];
+      return { leido: r.leido, leidoPor: r.leido_por, modelos: Array.isArray(r.modelos) ? r.modelos : [], campos: Array.isArray(r.campos) ? r.campos : [] };
+    },
+
+    async saveCamposModelo(projectId, data, user) {
+      await call("/presupuesto_campos_modelo?on_conflict=project_id", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ project_id: projectId, leido: new Date().toISOString(), leido_por: user, modelos: data.modelos, campos: data.campos }),
+      });
+    },
+
     async getDocumento(projectId) {
       const rows = await json<{ data: unknown; version: number; updated_at: string; updated_by: string | null }[]>(
         `/presupuesto_documentos?project_id=${eq(projectId)}&select=data,version,updated_at,updated_by`
@@ -400,6 +421,7 @@ export function memoryStore(): PresupuestoStore {
   const partidas = new Map<string, PartidaCatalogo & { baseId: string }>();
   const omniclass = new Map<string, OmniclassEntry & { baseId: string }>();
   const documentos = new Map<string, StoredDocumento>();
+  const campos = new Map<string, CamposModelo>();
   const mediciones = new Map<string, Medicion & { projectId: string }>();
   const elementos = new Map<string, ElementoVinculado & { projectId: string }>();
 
@@ -482,6 +504,12 @@ export function memoryStore(): PresupuestoStore {
     async saveOmniclass(baseId, rows) {
       for (const r of rows) omniclass.set(`${baseId}|${r.codigo}`, { ...r, baseId });
       return rows.length;
+    },
+    async getCamposModelo(projectId) {
+      return campos.get(projectId) ?? null;
+    },
+    async saveCamposModelo(projectId, data, user) {
+      campos.set(projectId, { leido: new Date().toISOString(), leidoPor: user, ...data });
     },
     async getDocumento(projectId) {
       const d = documentos.get(projectId);

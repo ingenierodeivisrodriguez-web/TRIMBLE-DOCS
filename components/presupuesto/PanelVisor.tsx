@@ -11,8 +11,9 @@ import { numerar } from "../../lib/presupuesto/tree";
 import { CONTEO, EstadoResponse, ItemPartida, Medicion, Memoria, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
 import { leerDataset, MapaGuids, selector, Visor } from "../../lib/presupuesto/viewerMap";
 import type { ViewerEventListener } from "../trimble/ExtensionShell";
+import ColumnasMemoria from "./ColumnasMemoria";
 import { ConfirmDialog } from "./SimpleDialogs";
-import { baseInput, C, message, Notice } from "./ui";
+import { baseInput, C, message, Modal, Notice } from "./ui";
 
 type ViewerSelection = { modelId: string; objectRuntimeIds?: number[] }[];
 
@@ -54,6 +55,8 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   const [busy, setBusy] = useState("");
   const [nota, setNota] = useState<{ kind: "info" | "warning" | "error"; text: string } | null>(null);
   const [remedir, setRemedir] = useState<{ campo: string | null } | null>(null);
+  const [verColumnas, setVerColumnas] = useState(false);
+  const [errorColumnas, setErrorColumnas] = useState("");
   const mapa = useRef(new MapaGuids());
   // The columns of the memoria de cantidades (read when elements are linked).
   const columnas = columnasMemoria(estado?.config.memoriaColumnas);
@@ -355,6 +358,9 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
       <div style={{ background: C.header, color: "#fff", padding: "8px 12px", display: "flex", alignItems: "center", gap: 8 }}>
         <strong style={{ fontSize: 15 }}>Presupuesto</strong>
         <span style={{ fontSize: 12, opacity: 0.85, flex: 1 }}>{canEdit ? "asociar elementos" : "solo consulta"}</span>
+        <button type="button" onClick={() => setVerColumnas(true)} style={{ ...btnHeader }} title="Columnas de la memoria de cantidades">
+          ⚙ Columnas
+        </button>
         <button type="button" onClick={cargar} style={{ ...btnHeader }} title="Volver a cargar el presupuesto guardado">
           ↻ Recargar
         </button>
@@ -514,6 +520,25 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         </p>
       </div>
 
+      {verColumnas && (
+        <Modal title="Columnas de la memoria de cantidades" onClose={() => setVerColumnas(false)} width={760}>
+          <div style={{ padding: "12px 16px 16px" }}>
+            {errorColumnas && <Notice kind="error" style={{ marginBottom: 10 }}>{errorColumnas}</Notice>}
+            <ColumnasMemoria
+              columnas={columnas}
+              puedeEditar={canEdit}
+              api={api}
+              visor={viewer}
+              onError={setErrorColumnas}
+              onSaved={(next) => {
+                setEstado(next);
+                setNota({ kind: "info", text: "Columnas guardadas. Usa «Actualizar los datos de la memoria desde el modelo» en las partidas que ya tienen elementos." });
+                setVerColumnas(false);
+              }}
+            />
+          </div>
+        </Modal>
+      )}
       {remedir && sel && (
         <ConfirmDialog title="Cambiar la medición" onClose={() => setRemedir(null)} onConfirm={() => aplicarMedicion(remedir.campo)}>
           {remedir.campo

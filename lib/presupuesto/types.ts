@@ -278,6 +278,27 @@ export const DEFAULT_COLUMNAS_MEMORIA: ColumnaMemoria[] = [
   { id: "espacio", label: "Espacio", fuente: "modelo", clave: "Espacio" },
 ];
 
+/** A property found in the models loaded in the viewer. */
+export interface CampoModelo {
+  /** "Set · Property" (or "@name"...), what a column of the memoria uses to find it. */
+  key: string;
+  label: string;
+  group: string;
+  kind: "number" | "text" | "date";
+  /** Elements that carry it, among those read. */
+  count: number;
+}
+
+/** The properties of the models, as last read in the viewer. */
+export interface CamposModelo {
+  leido: string;
+  leidoPor: string | null;
+  modelos: string[];
+  campos: CampoModelo[];
+}
+
+export const MAX_CAMPOS_MODELO = 2000;
+
 /** An attribute of the Propiedades app that can be a column. */
 export interface AtributoPropiedad {
   id: string;

@@ -2,6 +2,8 @@
 // runtime ids in the models that are loaded now.
 import type { ModelSpec, ViewerAPI } from "trimble-connect-workspace-api";
 import { buildDataset, ModelDataset, RawObject } from "../graficos/modelData";
+import type { CampoModelo } from "./types";
+import { MAX_CAMPOS_MODELO } from "./types";
 import { listModelObjects, readAllProperties, readObjectGuids } from "../graficos/viewerReader";
 import { ifcGuidToUuid, normalizeGuid, resolveIfcGuid } from "../propiedades/ifcGuid";
 
@@ -142,4 +144,67 @@ export async function leerDataset(viewer: Visor, viewerModelId: string, nombre: 
 
 export function selector(porModelo: Map<string, number[]>) {
   return { modelObjectIds: [...porModelo].filter(([, ids]) => ids.length).map(([modelId, objectRuntimeIds]) => ({ modelId, objectRuntimeIds })) };
+}
+
+const MUESTRA = 2000;
+const LOTE = 250;
+
+/**
+ * n ids picked at random (always the same ones for the same list): a regular
+ * stride could line up with a repeating pattern of the model and skip a whole
+ * class of elements.
+ */
+function repartidos(ids: number[], n: number): number[] {
+  if (ids.length <= n) return ids;
+  let semilla = 0x2f6e2b1;
+  const azar = () => {
+    semilla = (semilla + 0x6d2b79f5) | 0;
+    let t = Math.imul(semilla ^ (semilla >>> 15), 1 | semilla);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+  const copia = [...ids];
+  for (let i = 0; i < n; i++) {
+    const j = i + Math.floor(azar() * (copia.length - i));
+    [copia[i], copia[j]] = [copia[j], copia[i]];
+  }
+  return copia.slice(0, n).sort((x, y) => x - y);
+}
+
+/**
+ * The properties found in the models loaded in the viewer, with how many of
+ * the elements read carry each. Quick mode reads an evenly spread sample of
+ * each model; complete mode reads every element. Returns null if cancelled.
+ */
+export async function leerCamposModelos(
+  viewer: Visor,
+  opciones: { completo: boolean; onProgress?: (texto: string) => void; cancelado?: () => boolean }
+): Promise<{ modelos: string[]; campos: CampoModelo[] } | null> {
+  const modelos: ModelSpec[] = ((await viewer.getModels("loaded").catch(() => [])) ?? []) as ModelSpec[];
+  if (modelos.length === 0) throw new Error("No hay modelos cargados en el visor.");
+  const acumulado = new Map<string, CampoModelo>();
+  const nombres: string[] = [];
+  for (const spec of modelos) {
+    const nombre = spec.name ?? spec.id;
+    nombres.push(nombre);
+    opciones.onProgress?.(`Buscando los elementos de ${nombre}...`);
+    const lista = await listModelObjects(viewer, spec);
+    const ids = opciones.completo ? lista.runtimeIds : repartidos(lista.runtimeIds, MUESTRA);
+    for (let i = 0; i < ids.length; i += LOTE) {
+      if (opciones.cancelado?.()) return null;
+      const raws = ((await viewer.getObjectProperties(lista.queryModelId, ids.slice(i, i + LOTE))) ?? []) as RawObject[];
+      const ds = buildDataset(spec.id, nombre, raws);
+      for (const [key, f] of ds.fields) {
+        const previo = acumulado.get(key);
+        const cuenta = ds.coverage.get(key) ?? 0;
+        if (!previo) acumulado.set(key, { key, label: f.label, group: f.group, kind: f.kind, count: cuenta });
+        else acumulado.set(key, { ...previo, kind: previo.kind === f.kind ? previo.kind : "text", count: previo.count + cuenta });
+      }
+      opciones.onProgress?.(`${nombre}: ${Math.min(i + LOTE, ids.length).toLocaleString("es")} de ${ids.length.toLocaleString("es")} elementos`);
+    }
+  }
+  const campos = [...acumulado.values()]
+    .sort((a, b) => b.count - a.count || a.label.localeCompare(b.label, "es"))
+    .slice(0, MAX_CAMPOS_MODELO);
+  return { modelos: nombres, campos };
 }

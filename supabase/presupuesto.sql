@@ -18,6 +18,16 @@ create table if not exists public.presupuesto_config (
 -- {"id", "label", "fuente": "modelo" | "propiedad" | "ifcguid", "clave"}. Vacía = las de fábrica.
 alter table public.presupuesto_config add column if not exists memoria_columnas jsonb;
 
+-- Propiedades de los modelos cargados en el visor, tal como se leyeron la última vez
+-- (para elegir las columnas de la memoria de cantidades desde el menú del proyecto).
+create table if not exists public.presupuesto_campos_modelo (
+  project_id text        primary key,
+  leido      timestamptz not null default now(),
+  leido_por  text,
+  modelos    jsonb       not null default '[]'::jsonb check (jsonb_typeof(modelos) = 'array'),
+  campos     jsonb       not null default '[]'::jsonb check (jsonb_typeof(campos) = 'array')
+);
+
 -- Catálogo de insumos. base_id = proyecto de Trimble Connect dueño del catálogo.
 create table if not exists public.presupuesto_insumos (
   id          uuid        primary key,
@@ -214,6 +224,7 @@ $$;
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. Las funciones se ejecutan con los permisos de quien las llama.
 alter table public.presupuesto_config enable row level security;
+alter table public.presupuesto_campos_modelo enable row level security;
 alter table public.presupuesto_insumos enable row level security;
 alter table public.presupuesto_partidas enable row level security;
 alter table public.presupuesto_omniclass enable row level security;

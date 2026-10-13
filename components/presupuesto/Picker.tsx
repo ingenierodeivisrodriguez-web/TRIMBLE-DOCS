@@ -40,7 +40,7 @@ export default function Picker<T>({
 }) {
   const [query, setQuery] = useState(initial);
   const [active, setActive] = useState(0);
-  const [open, setOpen] = useState(true);
+  const [open, setOpen] = useState(autoFocus);
   const listRef = useRef<HTMLDivElement | null>(null);
   const folded = useMemo(() => options.map((o) => plegar(textOf(o))), [options, textOf]);
 

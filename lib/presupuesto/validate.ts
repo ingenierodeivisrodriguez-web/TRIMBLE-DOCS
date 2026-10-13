@@ -5,6 +5,7 @@ import { ServiceError } from "../propiedades/service";
 import { VARIABLE_RE } from "./formula";
 import { validarEsquema } from "./tree";
 import {
+  CampoModelo,
   ColumnaMemoria,
   Componente,
   Edt,
@@ -14,6 +15,7 @@ import {
   InsumoData,
   Item,
   ItemGasto,
+  MAX_CAMPOS_MODELO,
   MAX_COLUMNAS_MEMORIA,
   MAX_COMPONENTES,
   MAX_ITEMS,
@@ -265,6 +267,24 @@ export function validarColumnasMemoria(value: unknown): ColumnaMemoria[] {
     if (fuente === "propiedad") clave = clave.toLowerCase();
     return { id: colId, label, fuente, clave };
   });
+}
+
+/** The properties of the models as read in the viewer. */
+export function validarCamposModelo(value: unknown): { modelos: string[]; campos: CampoModelo[] } {
+  const o = obj(value, "Propiedades de los modelos");
+  const modelos = list(o.modelos ?? [], "Modelos", 50).map((m) => text(m, "Modelo", 200));
+  const vistos = new Set<string>();
+  const campos: CampoModelo[] = [];
+  for (const v of list(o.campos, "Propiedades", MAX_CAMPOS_MODELO)) {
+    const c = obj(v, "Propiedad");
+    const key = text(c.key, "Propiedad", 200, true);
+    if (vistos.has(key)) continue;
+    vistos.add(key);
+    const kind = c.kind === "number" || c.kind === "date" ? c.kind : "text";
+    const count = typeof c.count === "number" && Number.isFinite(c.count) ? Math.max(0, Math.floor(c.count)) : 0;
+    campos.push({ key, label: text(c.label, "Propiedad", 120, true), group: text(c.group, "Propiedad", 120), kind, count });
+  }
+  return { modelos, campos };
 }
 
 /** Item ids of the budget's partidas. */

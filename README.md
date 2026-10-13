@@ -1204,10 +1204,10 @@ elementos de las partidas que ya no existen.
 - **Columnas de la memoria (⚙ Configuración).** Administradores y editores
   eligen hasta 6 columnas, en el orden que quieran y con el título que
   quieran. Cada una puede ser:
-  - una **propiedad del modelo** por su nombre (Bloque, Conjunto, Zona, Nombre
-    de zona, Espacio, Nivel, Nombre, Clase, Tipo... sin importar mayúsculas ni
-    tildes; también acepta "Set · Propiedad" para distinguir dos con el mismo
-    nombre). Se lee al asociar los elementos en el visor y se guarda con ellos;
+  - una **propiedad del modelo**, elegida de la **lista de propiedades de los
+    modelos cargados** en el visor (con su grupo, tipo y cuántos elementos la
+    tienen), o escrita por su nombre si no aparece (sin importar mayúsculas ni
+    tildes). Se lee al asociar los elementos en el visor y se guarda con ellos;
     tras cambiar las columnas, el botón **Actualizar los datos de la memoria
     desde el modelo** del panel del visor la vuelve a leer;
   - un **atributo de la app Propiedades** (se ve siempre el valor actual,
@@ -1215,6 +1215,15 @@ elementos de las partidas que ya no existen.
   - el **IFCGUID** del elemento.
 
   Las de fábrica son Bloque, Conjunto, Zona, Nombre de zona y Espacio.
+
+  **De dónde sale la lista de propiedades.** El menú del proyecto no ve el
+  visor, así que la lista se lee **desde el panel Presupuesto del visor 3D**
+  (botón ⚙ Columnas → "Leer las propiedades de los modelos cargados") y se guarda
+  en el proyecto (`presupuesto_campos_modelo`). Desde ahí aparece en
+  Configuración del menú del proyecto, para todo el equipo. La lectura rápida
+  usa una muestra al azar de 2.000 elementos por modelo; una propiedad que casi
+  ningún elemento tiene puede no aparecer, y para eso está la opción "Leer todos
+  los elementos". Si cambian los modelos, se vuelve a leer.
 - **Diccionario de la EDT.** Cada partida guarda **Descripción del trabajo**,
   **Criterios de aceptación** y **Responsable** (texto libre). Se editan en el
   diálogo de la partida y el panel de análisis muestra el responsable y un
@@ -1285,7 +1294,8 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `GET /api/presupuesto/estado` | Configuración y qué puede hacer el usuario (`canEdit`, `canEditBase`) |
 | `PUT /api/presupuesto/config` | `{ baseProjectId?, editores?, memoriaColumnas? }` (base y editores: administradores; columnas de la memoria: editores) |
 | `GET /api/presupuesto/contactos` | Personas y grupos para elegir editores (administradores) |
-| `GET /api/presupuesto/atributos` | Atributos de la app Propiedades que se pueden usar como columnas de la memoria de cantidades |
+| `GET /api/presupuesto/atributos` | Atributos de la app Propiedades y propiedades de los modelos (última lectura del visor) para elegir columnas de la memoria de cantidades |
+| `PUT /api/presupuesto/campos-modelo` | `{ modelos, campos: [{ key, label, group, kind, count }] }`: guarda las propiedades leídas de los modelos cargados (editores) |
 | `GET /api/presupuesto/catalogo` | Insumos, partidas y códigos OmniClass de la base |
 | `POST /api/presupuesto/catalogo/insumos` · `.../partidas` · `.../omniclass` | Crear o actualizar en lote (hasta 1.000 por envío) |
 | `DELETE /api/presupuesto/catalogo/insumos/{id}` · `.../partidas/{id}` | Eliminar (409 `in-use` si se usa) |
