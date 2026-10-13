@@ -5,6 +5,7 @@ import { ServiceError } from "../propiedades/service";
 import { VARIABLE_RE } from "./formula";
 import { validarEsquema } from "./tree";
 import {
+  ColumnaMemoria,
   Componente,
   Edt,
   FilaPie,
@@ -13,6 +14,7 @@ import {
   InsumoData,
   Item,
   ItemGasto,
+  MAX_COLUMNAS_MEMORIA,
   MAX_COMPONENTES,
   MAX_ITEMS,
   MAX_PIE,
@@ -243,6 +245,26 @@ export function validarDocumento(value: unknown): PresupuestoDoc {
   }
 
   return { subpresupuestos, insumos, subpartidas, gastos: validarGastos(o.gastos ?? { fijos: [], variables: [] }) };
+}
+
+/** The columns of the memoria de cantidades chosen by the user. */
+export function validarColumnasMemoria(value: unknown): ColumnaMemoria[] {
+  const lista = list(value, "Columnas de la memoria", MAX_COLUMNAS_MEMORIA);
+  const ids = new Set<string>();
+  return lista.map((v, i) => {
+    const o = obj(v, `Columna ${i + 1}`);
+    const colId = id(o.id, `Columna ${i + 1}`);
+    if (colId.length > 40) fail(`Columna ${i + 1}: id demasiado largo.`);
+    if (ids.has(colId)) fail("Hay columnas repetidas.");
+    ids.add(colId);
+    const fuente = o.fuente;
+    if (fuente !== "modelo" && fuente !== "propiedad" && fuente !== "ifcguid") fail(`Columna ${i + 1}: origen no válido.`);
+    const label = text(o.label, `Columna ${i + 1} · título`, 40, true);
+    let clave = fuente === "ifcguid" ? "" : text(o.clave, `Columna ${i + 1} · propiedad`, 100, true);
+    if (fuente === "propiedad" && !UUID_RE.test(clave)) fail(`Columna ${i + 1}: atributo no válido.`);
+    if (fuente === "propiedad") clave = clave.toLowerCase();
+    return { id: colId, label, fuente, clave };
+  });
 }
 
 /** Item ids of the budget's partidas. */

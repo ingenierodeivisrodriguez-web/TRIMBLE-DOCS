@@ -14,6 +14,10 @@ create table if not exists public.presupuesto_config (
   updated_by        text
 );
 
+-- Columnas de la memoria de cantidades que eligió el proyecto: lista de
+-- {"id", "label", "fuente": "modelo" | "propiedad" | "ifcguid", "clave"}. Vacía = las de fábrica.
+alter table public.presupuesto_config add column if not exists memoria_columnas jsonb;
+
 -- Catálogo de insumos. base_id = proyecto de Trimble Connect dueño del catálogo.
 create table if not exists public.presupuesto_insumos (
   id          uuid        primary key,

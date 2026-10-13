@@ -1,16 +1,12 @@
-// "Memoria de cantidades": where each linked element is (block, set, zone,
-// zone name, space), read from the model properties with those names.
+// "Memoria de cantidades": for each linked element, the data the user chose to
+// see (block, zone, level, id...), read from the properties of the model when
+// the element is linked, or live from the Propiedades app.
 import type { Field, ModelDataset, ObjectRecord } from "../graficos/modelData";
 import { plegar } from "./format";
-import type { Memoria } from "./types";
+import { ColumnaMemoria, DEFAULT_COLUMNAS_MEMORIA, Memoria } from "./types";
 
-export const MEMORIA_CAMPOS: { key: keyof Memoria; label: string; nombres: string[] }[] = [
-  { key: "bloque", label: "Bloque", nombres: ["bloque"] },
-  { key: "conjunto", label: "Conjunto", nombres: ["conjunto"] },
-  { key: "zona", label: "Zona", nombres: ["zona"] },
-  { key: "nombreZona", label: "Nombre de zona", nombres: ["nombre de zona", "nombre zona", "nombrezona"] },
-  { key: "espacio", label: "Espacio", nombres: ["espacio"] },
-];
+/** Other names the default columns are known by in models. */
+const ALIAS: Record<string, string[]> = { nombreZona: ["nombre de zona", "nombre zona", "nombrezona"] };
 
 const MAX = 100;
 
@@ -18,48 +14,82 @@ function limpio(value: unknown): string {
   return typeof value === "string" || typeof value === "number" ? String(value).trim().slice(0, MAX) : "";
 }
 
-/** The element's location from the properties of its model, or null when it has none of them. */
-export function memoriaDe(dataset: Pick<ModelDataset, "fields">, record: ObjectRecord | undefined): Memoria | null {
+const nombre = (text: string) => plegar(text).replace(/\s+/g, " ").trim();
+
+/** The columns in use: the saved ones, or the defaults. */
+export function columnasMemoria(guardadas: ColumnaMemoria[] | null | undefined): ColumnaMemoria[] {
+  return guardadas && guardadas.length > 0 ? guardadas : DEFAULT_COLUMNAS_MEMORIA;
+}
+
+/**
+ * The element's data for the columns that come from the model (the others are
+ * not read here), or null when it has none of them.
+ */
+export function memoriaDe(
+  dataset: Pick<ModelDataset, "fields">,
+  record: ObjectRecord | undefined,
+  columnas: ColumnaMemoria[] = DEFAULT_COLUMNAS_MEMORIA
+): Memoria | null {
   if (!record) return null;
   const porNombre = new Map<string, Field[]>();
   for (const f of dataset.fields.values()) {
-    const k = plegar(f.label).replace(/\s+/g, " ").trim();
+    const k = nombre(f.label);
     porNombre.set(k, [...(porNombre.get(k) ?? []), f]);
   }
-  const out: Memoria = { bloque: "", conjunto: "", zona: "", nombreZona: "", espacio: "" };
+  const out: Memoria = {};
   let any = false;
-  for (const c of MEMORIA_CAMPOS) {
-    for (const nombre of c.nombres) {
-      const value = (porNombre.get(nombre) ?? []).map((f) => limpio(record.values[f.key])).find(Boolean);
-      if (value) {
-        out[c.key] = value;
-        any = true;
-        break;
+  for (const c of columnas) {
+    if (c.fuente !== "modelo") continue;
+    let value = "";
+    const exacto = dataset.fields.get(c.clave); // "Set · Property"
+    if (exacto) value = limpio(record.values[exacto.key]);
+    if (!value) {
+      for (const n of [nombre(c.clave), ...(ALIAS[c.id] ?? [])]) {
+        value = (porNombre.get(n) ?? []).map((f) => limpio(record.values[f.key])).find(Boolean) ?? "";
+        if (value) break;
       }
     }
+    out[c.id] = value;
+    if (value) any = true;
   }
   return any ? out : null;
 }
 
-/** A memoria as received from a client: known fields only, short text, null when empty. */
+const ID_COLUMNA = /^[A-Za-z0-9_-]{1,40}$/;
+const MAX_CLAVES = 12;
+
+/** A memoria as received from a client: short text values under valid column ids, null when empty. */
 export function memoriaLimpia(value: unknown): Memoria | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
-  const o = value as Record<string, unknown>;
-  const out: Memoria = { bloque: limpio(o.bloque), conjunto: limpio(o.conjunto), zona: limpio(o.zona), nombreZona: limpio(o.nombreZona), espacio: limpio(o.espacio) };
+  const out: Memoria = {};
+  for (const [k, v] of Object.entries(value as Record<string, unknown>).slice(0, MAX_CLAVES)) {
+    if (ID_COLUMNA.test(k)) out[k] = limpio(v);
+  }
   return Object.values(out).some(Boolean) ? out : null;
 }
 
-/** Orders the elements by block, set, zone and space, numbers in their natural order ("2" before "10"). */
-export function porUbicacion<T extends { memoria: Memoria | null }>(list: T[]): T[] {
+/** Orders the elements by the columns' data, numbers in their natural order ("2" before "10"). */
+export function porUbicacion<T extends { memoria: Memoria | null }>(list: T[], columnas: ColumnaMemoria[] = DEFAULT_COLUMNAS_MEMORIA): T[] {
   const collator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
-  const clave = (e: T) => MEMORIA_CAMPOS.map((c) => e.memoria?.[c.key] ?? "");
+  const ids = columnas.filter((c) => c.fuente !== "ifcguid").map((c) => c.id);
   return [...list].sort((a, b) => {
-    const ka = clave(a);
-    const kb = clave(b);
-    for (let i = 0; i < ka.length; i++) {
-      const d = collator.compare(ka[i], kb[i]);
+    for (const id of ids) {
+      const d = collator.compare(a.memoria?.[id] ?? "", b.memoria?.[id] ?? "");
       if (d) return d;
     }
     return 0;
   });
+}
+
+/**
+ * What gets stored for an element: the model columns only (Propiedades values
+ * are read live), the new reading over the previous one where it found data.
+ */
+export function memoriaParaGuardar(columnas: ColumnaMemoria[], previa: Memoria | null | undefined, nueva: Memoria | null | undefined): Memoria | null {
+  const out: Memoria = {};
+  for (const c of columnas) {
+    if (c.fuente !== "modelo") continue;
+    out[c.id] = nueva?.[c.id] || previa?.[c.id] || "";
+  }
+  return Object.values(out).some(Boolean) ? out : null;
 }

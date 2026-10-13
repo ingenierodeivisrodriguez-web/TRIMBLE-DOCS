@@ -433,6 +433,7 @@ export default function PresupuestoApp({ api, projectId, projectName }: { api: P
         }}
         elementos={s.elementosPorItem}
         loadMemoria={loadMemoria}
+        columnasMemoria={estado.config.memoriaColumnas}
       />
 
       {/* APU of the selected partida */}

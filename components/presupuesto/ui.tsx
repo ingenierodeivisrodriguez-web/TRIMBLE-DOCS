@@ -266,7 +266,7 @@ export function Modal({
 }
 
 /** Tracks a scroll container to render only the rows in view (fixed row height). */
-export function useVirtual(count: number, rowHeight: number) {
+export function useVirtual(count: number, rowHeight: number, extra: { after: number; height: number } | null = null) {
   const ref = useRef<HTMLDivElement | null>(null);
   const [view, setView] = useState({ top: 0, height: 600 });
   const update = useCallback(() => {
@@ -286,22 +286,43 @@ export function useVirtual(count: number, rowHeight: number) {
     };
   }, [update]);
   const overscan = 10;
-  const start = Math.max(0, Math.floor(view.top / rowHeight) - overscan);
-  const end = Math.min(count, Math.ceil((view.top + view.height) / rowHeight) + overscan);
+  const bloque = extra && extra.after >= 0 && extra.after < count ? extra : null;
+  // Primitives, so `reveal` keeps its identity while the block doesn't change.
+  const bloqueAfter = bloque?.after ?? -1;
+  const bloqueAlto = bloque?.height ?? 0;
+  /** The row at a scroll position, with the block (if any) taking its height after row `after`. */
+  const rowAt = (y: number) => {
+    if (!bloque) return y / rowHeight;
+    const corte = (bloque.after + 1) * rowHeight;
+    if (y <= corte) return y / rowHeight;
+    if (y <= corte + bloque.height) return bloque.after + 1;
+    return (y - bloque.height) / rowHeight;
+  };
+  const start = Math.max(0, Math.floor(rowAt(view.top)) - overscan);
+  const end = Math.min(count, Math.ceil(rowAt(view.top + view.height)) + overscan);
   /** Scrolls so that row `index` is visible. */
   const reveal = useCallback(
     (index: number, headerHeight = 0) => {
       const el = ref.current;
       if (!el || index < 0) return;
-      const top = index * rowHeight;
+      const top = index * rowHeight + (bloqueAfter >= 0 && index > bloqueAfter ? bloqueAlto : 0);
       const visibleTop = el.scrollTop;
       const visibleBottom = el.scrollTop + el.clientHeight - headerHeight - rowHeight;
       if (top < visibleTop) el.scrollTop = top;
       else if (top > visibleBottom) el.scrollTop = top - el.clientHeight + headerHeight + rowHeight * 2;
     },
-    [rowHeight]
+    [rowHeight, bloqueAfter, bloqueAlto]
   );
-  return { ref, start, end, padTop: start * rowHeight, padBottom: Math.max(0, (count - end) * rowHeight), reveal };
+  return {
+    ref,
+    start,
+    end,
+    padTop: start * rowHeight + (bloque && bloque.after < start ? bloque.height : 0),
+    padBottom: Math.max(0, (count - end) * rowHeight) + (bloque && bloque.after >= end ? bloque.height : 0),
+    reveal,
+    /** The block goes between rows when it falls in the rendered window. */
+    bloqueVisible: !!bloque && bloque.after >= start && bloque.after < end,
+  };
 }
 
 export function message(err: unknown): string {

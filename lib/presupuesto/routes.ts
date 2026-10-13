@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, isValidProjectId } from "../access";
 import { resolveCaller } from "../propiedades/caller";
 import { ServiceError } from "../propiedades/service";
-import { StoreError } from "../propiedades/store";
+import { propertiesStore, StoreError } from "../propiedades/store";
 import { getProjectDetails, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
 import type { Ctx } from "./service";
 import { presupuestoStore } from "./store";
@@ -34,6 +34,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       store: presupuestoStore(),
       accessToken,
       deps: {
+        propiedades: () => propertiesStore(),
         callerIn: (otherId) => resolveCaller(accessToken, otherId),
         projectName: async (otherId) => {
           const baseUrl = await resolveProjectBaseUrl(accessToken, otherId);

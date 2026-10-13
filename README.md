@@ -1193,13 +1193,28 @@ elementos de las partidas que ya no existen.
   asociados, pero no toma el metrado de ellos. Si no se elige, la partida usa
   el modelo cuando mide sus elementos.
 - **Memoria de cantidades.** Las partidas con elementos asociados muestran
-  junto a su nombre un botón ▼ con el número de elementos. Despliega la lista:
-  **Bloque, Conjunto, Zona, Nombre de zona, Espacio y Cantidad**, ordenada por
-  ubicación, con el total. Esos cinco datos se leen de las **propiedades del
-  modelo** con esos nombres (sin importar mayúsculas ni tildes) al asociar los
-  elementos en el visor, y se guardan con cada elemento
-  (`presupuesto_elementos.memoria`); al cambiar la medición se vuelven a leer.
-  Los elementos sin esas propiedades aparecen con "—".
+  junto a su nombre un botón ▼ con el número de elementos. Al pulsarlo, el
+  listado **se despliega dentro del presupuesto**, entre sus filas: las
+  partidas de abajo se corren y la barra lateral se ajusta. Cada elemento
+  muestra las columnas elegidas, su **cantidad**, el **PU** de la partida y el
+  **valor** (cantidad × PU), con los totales abajo. Ejemplo: una partida de
+  5 m² con tres elementos de 2, 2 y 1 m² da valores de 2×PU, 2×PU y 1×PU. Si
+  la suma de los elementos no coincide con el metrado de la partida, lo avisa.
+  Con muchos elementos el listado muestra 12 filas y se desplaza por dentro.
+- **Columnas de la memoria (⚙ Configuración).** Administradores y editores
+  eligen hasta 6 columnas, en el orden que quieran y con el título que
+  quieran. Cada una puede ser:
+  - una **propiedad del modelo** por su nombre (Bloque, Conjunto, Zona, Nombre
+    de zona, Espacio, Nivel, Nombre, Clase, Tipo... sin importar mayúsculas ni
+    tildes; también acepta "Set · Propiedad" para distinguir dos con el mismo
+    nombre). Se lee al asociar los elementos en el visor y se guarda con ellos;
+    tras cambiar las columnas, el botón **Actualizar los datos de la memoria
+    desde el modelo** del panel del visor la vuelve a leer;
+  - un **atributo de la app Propiedades** (se ve siempre el valor actual,
+    con las fechas como DD-MM-AAAA);
+  - el **IFCGUID** del elemento.
+
+  Las de fábrica son Bloque, Conjunto, Zona, Nombre de zona y Espacio.
 - **Diccionario de la EDT.** Cada partida guarda **Descripción del trabajo**,
   **Criterios de aceptación** y **Responsable** (texto libre). Se editan en el
   diálogo de la partida y el panel de análisis muestra el responsable y un
@@ -1268,8 +1283,9 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | Método y ruta | Uso |
 |---|---|
 | `GET /api/presupuesto/estado` | Configuración y qué puede hacer el usuario (`canEdit`, `canEditBase`) |
-| `PUT /api/presupuesto/config` | `{ baseProjectId?, editores? }` (administradores) |
+| `PUT /api/presupuesto/config` | `{ baseProjectId?, editores?, memoriaColumnas? }` (base y editores: administradores; columnas de la memoria: editores) |
 | `GET /api/presupuesto/contactos` | Personas y grupos para elegir editores (administradores) |
+| `GET /api/presupuesto/atributos` | Atributos de la app Propiedades que se pueden usar como columnas de la memoria de cantidades |
 | `GET /api/presupuesto/catalogo` | Insumos, partidas y códigos OmniClass de la base |
 | `POST /api/presupuesto/catalogo/insumos` · `.../partidas` · `.../omniclass` | Crear o actualizar en lote (hasta 1.000 por envío) |
 | `DELETE /api/presupuesto/catalogo/insumos/{id}` · `.../partidas/{id}` | Eliminar (409 `in-use` si se usa) |

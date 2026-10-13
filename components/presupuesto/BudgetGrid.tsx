@@ -1,11 +1,11 @@
 "use client";
 
-import { CSSProperties, KeyboardEvent, useEffect, useMemo, useState } from "react";
+import { CSSProperties, Fragment, KeyboardEvent, useEffect, useMemo, useState } from "react";
 import { FilaPieCalculada, FilaPresupuesto, SubpresupuestoCalculado } from "../../lib/presupuesto/calc";
 import { fmt } from "../../lib/presupuesto/format";
 import { Rubro, RUBRO_NOMBRES } from "../../lib/presupuesto/types";
-import MemoriaCantidad from "./MemoriaCantidad";
-import type { ElementoVinculado } from "../../lib/presupuesto/types";
+import MemoriaCantidad, { alturaMemoria } from "./MemoriaCantidad";
+import type { ColumnaMemoria, ElementoVinculado } from "../../lib/presupuesto/types";
 import { C, NumInput, TextCommit, useVirtual } from "./ui";
 
 const ROW = 34;
@@ -47,6 +47,7 @@ export default function BudgetGrid({
   onOpen,
   elementos,
   loadMemoria,
+  columnasMemoria,
 }: {
   calculado: SubpresupuestoCalculado;
   pie: FilaPieCalculada[];
@@ -62,17 +63,35 @@ export default function BudgetGrid({
   elementos: Map<string, number>;
   /** The linked elements of a partida (for its memoria de cantidades). */
   loadMemoria: (itemId: string) => Promise<ElementoVinculado[]>;
+  /** Columns of the memoria de cantidades. */
+  columnasMemoria: ColumnaMemoria[];
 }) {
   const visibles = useMemo(() => filasVisibles(calculado.filas, collapsed), [calculado.filas, collapsed]);
-  const { ref, start, end, padTop, padBottom, reveal } = useVirtual(visibles.length, ROW);
-  const [editing, setEditing] = useState<{ id: string; field: CampoEditable } | null>(null);
   const [memoriaId, setMemoriaId] = useState<string | null>(null);
   const memoriaIndex = memoriaId ? visibles.findIndex((f) => f.item.id === memoriaId) : -1;
+  const alto = memoriaIndex >= 0 ? alturaMemoria(elementos.get(memoriaId!) ?? 0) : 0;
+  const { ref, start, end, padTop, padBottom, reveal, bloqueVisible } = useVirtual(
+    visibles.length,
+    ROW,
+    memoriaIndex >= 0 ? { after: memoriaIndex, height: alto } : null
+  );
+  const [editing, setEditing] = useState<{ id: string; field: CampoEditable } | null>(null);
   const selectedIndex = visibles.findIndex((f) => f.item.id === selectedId);
 
   useEffect(() => {
     if (selectedIndex >= 0) reveal(selectedIndex, HEADER);
   }, [selectedIndex, reveal]);
+
+  // Opening a list scrolls just enough to see all of it (without losing its partida).
+  useEffect(() => {
+    const el = ref.current;
+    if (!memoriaId || memoriaIndex < 0 || !el) return;
+    const filaTop = HEADER + memoriaIndex * ROW;
+    const fondo = filaTop + ROW + alto;
+    const destino = Math.min(fondo - el.clientHeight + 12, filaTop - HEADER);
+    if (destino > el.scrollTop) el.scrollTop = destino;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [memoriaId]);
 
   function onKeyDown(e: KeyboardEvent<HTMLDivElement>) {
     if (editing || (e.target as HTMLElement).tagName === "INPUT") return;
@@ -127,9 +146,23 @@ export default function BudgetGrid({
           const selected = f.item.id === selectedId;
           const titulo = f.item.tipo === "titulo";
           const n = elementos.get(f.item.id) ?? 0;
+          const panel =
+            bloqueVisible && f.item.id === memoriaId && f.item.tipo === "partida" ? (
+              <MemoriaCantidad
+                itemId={f.item.id}
+                titulo={`${f.numero} ${f.item.descripcion}`}
+                unidad={f.item.unidad}
+                columnas={columnasMemoria}
+                cu={f.cu ?? 0}
+                metrado={f.metrado ?? 0}
+                metradoModelo={!!f.metradoModelo}
+                load={loadMemoria}
+                onClose={() => setMemoriaId(null)}
+              />
+            ) : null;
           return (
+            <Fragment key={f.item.id}>
             <div
-              key={f.item.id}
               onMouseDown={() => onSelect(f.item.id)}
               style={{
                 ...rowGrid,
@@ -227,21 +260,11 @@ export default function BudgetGrid({
                 </div>
               ))}
             </div>
+            {panel}
+            </Fragment>
           );
         })}
         <div style={{ height: padBottom }} />
-
-        {memoriaId && memoriaIndex >= 0 && visibles[memoriaIndex].item.tipo === "partida" && (
-          <div style={{ position: "absolute", top: HEADER + (memoriaIndex + 1) * ROW, left: 70, zIndex: 3 }}>
-            <MemoriaCantidad
-              itemId={memoriaId}
-              titulo={`${visibles[memoriaIndex].numero} ${visibles[memoriaIndex].item.descripcion}`}
-              unidad={visibles[memoriaIndex].item.tipo === "partida" ? (visibles[memoriaIndex].item as { unidad: string }).unidad : ""}
-              load={loadMemoria}
-              onClose={() => setMemoriaId(null)}
-            />
-          </div>
-        )}
 
         {visibles.length === 0 && (
           <div style={{ padding: 24, color: "var(--tc-gray-500)", fontSize: 14 }}>

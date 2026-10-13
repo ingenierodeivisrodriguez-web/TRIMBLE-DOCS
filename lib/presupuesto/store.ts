@@ -1,6 +1,7 @@
 import type { Responsable } from "../propiedades/types";
 import { StoreError } from "../propiedades/store";
 import type {
+  ColumnaMemoria,
   ElementoVinculado,
   Insumo,
   InsumoData,
@@ -22,6 +23,8 @@ export interface StoredConfig {
   baseProjectId: string;
   baseProjectName: string;
   editores: Responsable[];
+  /** Not set: the default columns. */
+  memoriaColumnas?: ColumnaMemoria[];
 }
 
 export interface StoredDocumento {
@@ -197,12 +200,24 @@ function supabaseStore(): PresupuestoStore | null {
 
   return {
     async getConfig(projectId) {
-      const rows = await json<{ base_project_id: string; base_project_name: string; editores: Responsable[] | null }[]>(
-        `/presupuesto_config?project_id=${eq(projectId)}&select=base_project_id,base_project_name,editores`
-      );
+      type Row = { base_project_id: string; base_project_name: string; editores: Responsable[] | null; memoria_columnas?: ColumnaMemoria[] | null };
+      const base = `/presupuesto_config?project_id=${eq(projectId)}&select=base_project_id,base_project_name,editores`;
+      let rows: Row[];
+      try {
+        rows = await json<Row[]>(`${base},memoria_columnas`);
+      } catch (err) {
+        // Before supabase/presupuesto.sql is run again, the column doesn't exist: the rest keeps working.
+        if (!(err instanceof StoreError) || err.message !== UPGRADE_HINT) throw err;
+        rows = await json<Row[]>(base);
+      }
       if (!rows.length) return null;
       const r = rows[0];
-      return { baseProjectId: r.base_project_id, baseProjectName: r.base_project_name, editores: Array.isArray(r.editores) ? r.editores : [] };
+      return {
+        baseProjectId: r.base_project_id,
+        baseProjectName: r.base_project_name,
+        editores: Array.isArray(r.editores) ? r.editores : [],
+        ...(Array.isArray(r.memoria_columnas) && r.memoria_columnas.length ? { memoriaColumnas: r.memoria_columnas } : {}),
+      };
     },
 
     async saveConfig(projectId, config, user) {
@@ -214,6 +229,7 @@ function supabaseStore(): PresupuestoStore | null {
           base_project_id: config.baseProjectId,
           base_project_name: config.baseProjectName,
           editores: config.editores,
+          ...(config.memoriaColumnas !== undefined ? { memoria_columnas: config.memoriaColumnas } : {}),
           updated_at: new Date().toISOString(),
           updated_by: user,
         }),

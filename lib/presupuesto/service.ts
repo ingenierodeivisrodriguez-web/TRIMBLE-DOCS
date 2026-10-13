@@ -3,10 +3,13 @@ import { isIfcGuid } from "../propiedades/ifcGuid";
 import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import type { Responsable } from "../propiedades/types";
+import type { PropertiesStore } from "../propiedades/store";
+import { formatValue } from "../propiedades/values";
 import { documentoVacio } from "./doc";
-import { memoriaLimpia } from "./memoria";
+import { columnasMemoria, memoriaLimpia } from "./memoria";
 import type { PresupuestoStore, StoredConfig } from "./store";
 import {
+  AtributoPropiedad,
   CatalogoResponse,
   DocumentoResponse,
   ElementoVinculado,
@@ -18,10 +21,12 @@ import {
   PresupuestoDoc,
   ResumenElementos,
 } from "./types";
-import { idsDePartidas, UUID_RE, validarDocumento, validarInsumo, validarPartida } from "./validate";
+import { idsDePartidas, UUID_RE, validarColumnasMemoria, validarDocumento, validarInsumo, validarPartida } from "./validate";
 
 /** What the service needs from Trimble Connect besides the caller of the current project. */
 export interface Deps {
+  /** The Propiedades app's store, to read attribute values for the memoria de cantidades. */
+  propiedades?: () => PropertiesStore;
   /** The caller as a member of another project; throws when they aren't one. */
   callerIn(projectId: string): Promise<Caller>;
   projectName(projectId: string): Promise<string>;
@@ -101,7 +106,7 @@ export async function getEstado(ctx: Ctx): Promise<EstadoResponse> {
   const [canEdit, base] = await Promise.all([esEditor(ctx.caller, config.editores), permisoBase(ctx, config)]);
   return {
     projectId: ctx.projectId,
-    config,
+    config: { ...config, memoriaColumnas: columnasMemoria(config.memoriaColumnas) },
     esBasePropia: config.baseProjectId === ctx.projectId,
     isAdmin: ctx.caller.isAdmin,
     canEdit,
@@ -131,11 +136,17 @@ function readEditores(value: unknown): Responsable[] {
 
 /** Administrators choose the editors and the base project (they must belong to it). */
 export async function updateConfig(ctx: Ctx, body: unknown): Promise<EstadoResponse> {
-  if (!ctx.caller.isAdmin) throw new ServiceError("Solo los administradores del proyecto cambian esta configuración.", 403, "not-admin");
-  const o = (body ?? {}) as { baseProjectId?: unknown; editores?: unknown };
+  const o = (body ?? {}) as { baseProjectId?: unknown; editores?: unknown; memoriaColumnas?: unknown };
   const config = await configDe(ctx.store, ctx.projectId);
+  if ((o.baseProjectId !== undefined || o.editores !== undefined) && !ctx.caller.isAdmin) {
+    throw new ServiceError("Solo los administradores del proyecto cambian esta configuración.", 403, "not-admin");
+  }
+  if (o.memoriaColumnas !== undefined && !(await esEditor(ctx.caller, config.editores))) {
+    throw new ServiceError("Solo los administradores y editores del presupuesto cambian las columnas de la memoria.", 403, "not-editor");
+  }
   const next: StoredConfig = { ...config };
   if (o.editores !== undefined) next.editores = readEditores(o.editores);
+  if (o.memoriaColumnas !== undefined) next.memoriaColumnas = validarColumnasMemoria(o.memoriaColumnas);
   if (o.baseProjectId !== undefined) {
     const raw = typeof o.baseProjectId === "string" ? o.baseProjectId.trim() : "";
     const base = raw || ctx.projectId;
@@ -324,7 +335,40 @@ export async function consultarElementos(ctx: Ctx, body: unknown): Promise<{ ele
     ...(itemIds.length ? await ctx.store.getElementos(ctx.projectId, { itemIds }) : []),
     ...(ifcGuids.length ? await ctx.store.getElementos(ctx.projectId, { ifcGuids }) : []),
   ];
-  return { elementos };
+  return { elementos: await conValoresDePropiedades(ctx, elementos) };
+}
+
+/** The attributes of the Propiedades app that can be columns of the memoria de cantidades. */
+export async function getAtributos(ctx: Ctx): Promise<{ atributos: AtributoPropiedad[] }> {
+  try {
+    const defs = await ctx.deps.propiedades?.().listDefinitions(ctx.projectId);
+    return { atributos: (defs ?? []).filter((d) => d.active).map((d) => ({ id: d.id, title: d.title, dataType: d.dataType })) };
+  } catch {
+    return { atributos: [] };
+  }
+}
+
+/** Adds, to each element, the current values of the Propiedades attributes chosen as columns. */
+async function conValoresDePropiedades(ctx: Ctx, elementos: ElementoVinculado[]): Promise<ElementoVinculado[]> {
+  const columnas = columnasMemoria((await configDe(ctx.store, ctx.projectId)).memoriaColumnas).filter((c) => c.fuente === "propiedad");
+  if (!columnas.length || !elementos.length || !ctx.deps.propiedades) return elementos;
+  try {
+    const store = ctx.deps.propiedades();
+    const defs = new Map((await store.listDefinitions(ctx.projectId)).map((d) => [d.id, d]));
+    const valores = await store.getValues(ctx.projectId, [...new Set(elementos.map((e) => e.ifcGuid))]);
+    const porClave = new Map(valores.map((v) => [`${v.ifcGuid}|${v.attributeId}`, v.value]));
+    return elementos.map((e) => {
+      const memoria = { ...(e.memoria ?? {}) };
+      for (const c of columnas) {
+        const def = defs.get(c.clave);
+        const v = porClave.get(`${e.ifcGuid}|${c.clave}`);
+        memoria[c.id] = def && v !== undefined ? formatValue(def.dataType, v) : "";
+      }
+      return { ...e, memoria };
+    });
+  } catch {
+    return elementos; // the Propiedades data is optional: without it those columns stay empty
+  }
 }
 
 async function requirePartidaGuardada(ctx: Ctx, itemId: unknown): Promise<string> {

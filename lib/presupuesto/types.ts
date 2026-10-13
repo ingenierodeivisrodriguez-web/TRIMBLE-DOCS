@@ -215,6 +215,8 @@ export interface PresupuestoConfig {
   baseProjectName: string;
   /** Who can edit besides the project administrators. */
   editores: Responsable[];
+  /** Columns of the memoria de cantidades. */
+  memoriaColumnas: ColumnaMemoria[];
 }
 
 export interface EstadoResponse {
@@ -247,13 +249,40 @@ export interface ElementoVinculado {
   memoria: Memoria | null;
 }
 
-/** Location of an element in the project: block, set, zone, zone name and space. */
-export interface Memoria {
-  bloque: string;
-  conjunto: string;
-  zona: string;
-  nombreZona: string;
-  espacio: string;
+/** Data of a linked element for the columns of the memoria de cantidades, by column id. */
+export type Memoria = Record<string, string>;
+
+/** A column the user chose for the memoria de cantidades. */
+export interface ColumnaMemoria {
+  /** Stable id (the key of the value in `Memoria`). */
+  id: string;
+  label: string;
+  /**
+   * Where the value comes from: a property of the model (read when the element
+   * is linked), an attribute of the Propiedades app (read live, by IFCGUID), or
+   * the element's own IFCGUID.
+   */
+  fuente: "modelo" | "propiedad" | "ifcguid";
+  /** Property name (or "Set · Property") for "modelo", attribute id for "propiedad". */
+  clave: string;
+}
+
+export const MAX_COLUMNAS_MEMORIA = 6;
+
+/** The columns the memoria de cantidades starts with. */
+export const DEFAULT_COLUMNAS_MEMORIA: ColumnaMemoria[] = [
+  { id: "bloque", label: "Bloque", fuente: "modelo", clave: "Bloque" },
+  { id: "conjunto", label: "Conjunto", fuente: "modelo", clave: "Conjunto" },
+  { id: "zona", label: "Zona", fuente: "modelo", clave: "Zona" },
+  { id: "nombreZona", label: "Nombre de zona", fuente: "modelo", clave: "Nombre de zona" },
+  { id: "espacio", label: "Espacio", fuente: "modelo", clave: "Espacio" },
+];
+
+/** An attribute of the Propiedades app that can be a column. */
+export interface AtributoPropiedad {
+  id: string;
+  title: string;
+  dataType: string;
 }
 
 /** How a partida takes its quantity from its elements: a property, a count, or not at all (campo null). */

@@ -1,7 +1,9 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
 import {
+  AtributoPropiedad,
   CatalogoResponse,
+  ColumnaMemoria,
   DocumentoResponse,
   ElementoVinculado,
   EstadoResponse,
@@ -19,7 +21,9 @@ import {
 /** What the budget screen and the 3D viewer panel need from the data service. */
 export interface PresupuestoApi {
   getEstado(): Promise<EstadoResponse>;
-  updateConfig(patch: { baseProjectId?: string | null; editores?: Responsable[] }): Promise<EstadoResponse>;
+  updateConfig(patch: { baseProjectId?: string | null; editores?: Responsable[]; memoriaColumnas?: ColumnaMemoria[] }): Promise<EstadoResponse>;
+  /** Attributes of the Propiedades app, to choose as columns of the memoria de cantidades. */
+  getAtributos(): Promise<AtributoPropiedad[]>;
   getContacts(): Promise<ProjectContacts>;
   getCatalogo(): Promise<CatalogoResponse>;
   /** Creates or updates; several requests when there are many (`onProgress` after each). */
@@ -57,6 +61,7 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     getEstado: () => request("/estado"),
     updateConfig: (patch) => request("/config", send("PUT", patch)),
     getContacts: () => request("/contactos"),
+    getAtributos: () => request<{ atributos: AtributoPropiedad[] }>("/atributos").then((r) => r.atributos),
     getCatalogo: () => request("/catalogo"),
     guardarInsumos: (rows, onProgress) =>
       inBatches(

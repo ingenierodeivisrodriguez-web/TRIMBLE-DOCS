@@ -5,7 +5,7 @@ import { buildDataset, ModelDataset, ObjectRecord, RawObject } from "../../lib/g
 import { readSelection, SelectedElement } from "../../lib/propiedades/selection";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { coincide, fmt } from "../../lib/presupuesto/format";
-import { memoriaDe } from "../../lib/presupuesto/memoria";
+import { columnasMemoria, memoriaDe, memoriaParaGuardar } from "../../lib/presupuesto/memoria";
 import { CampoMedible, camposMedibles, etiquetaCampo, sugerirCampo, valorDe } from "../../lib/presupuesto/medicion";
 import { numerar } from "../../lib/presupuesto/tree";
 import { CONTEO, EstadoResponse, ItemPartida, Medicion, Memoria, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
@@ -55,6 +55,10 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   const [nota, setNota] = useState<{ kind: "info" | "warning" | "error"; text: string } | null>(null);
   const [remedir, setRemedir] = useState<{ campo: string | null } | null>(null);
   const mapa = useRef(new MapaGuids());
+  // The columns of the memoria de cantidades (read when elements are linked).
+  const columnas = columnasMemoria(estado?.config.memoriaColumnas);
+  const columnasRef = useRef(columnas);
+  columnasRef.current = columnas;
   const seq = useRef(0);
 
   const cargar = useCallback(async () => {
@@ -120,7 +124,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
             const g = m.guids[i];
             if (g) {
               records.set(g, rec);
-              memorias.set(g, memoriaDe(ds, rec));
+              memorias.set(g, memoriaDe(ds, rec, columnasRef.current));
             }
           });
           datasets.push(ds);
@@ -250,6 +254,36 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     }
   }
 
+  /** Reads again, from the model, the data of the memoria de cantidades of every element of the partida (after changing the columns). */
+  async function actualizarMemoria() {
+    if (!sel) return;
+    setBusy("Leyendo el modelo...");
+    setNota(null);
+    try {
+      const elementos = await api.elementosDe({ itemIds: [sel.item.id] });
+      const u = await mapa.current.ubicar(viewer, elementos, setBusy);
+      const nuevas = new Map<string, Memoria | null>();
+      for (const [viewerModelId, ids] of u.porModelo) {
+        const ds = await leerDataset(viewer, viewerModelId, "", ids);
+        const porRt = new Map(ds.records.map((r) => [r.runtimeId, r]));
+        for (const [guid, where] of u.ubicacion) if (where.viewerModelId === viewerModelId) nuevas.set(guid, memoriaDe(ds, porRt.get(where.runtimeId), columnas));
+      }
+      const upsert = elementos
+        .filter((e) => nuevas.has(e.ifcGuid))
+        .map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: e.cantidad, memoria: memoriaParaGuardar(columnas, e.memoria, nuevas.get(e.ifcGuid)) }));
+      if (upsert.length) await api.guardarElementos(sel.item.id, upsert, []);
+      const faltan = elementos.length - upsert.length;
+      setNota({
+        kind: faltan ? "warning" : "info",
+        text: `Memoria actualizada en ${upsert.length} elemento(s).${faltan ? ` ${faltan} no están en los modelos cargados y conservan sus datos.` : ""}`,
+      });
+    } catch (err) {
+      setNota({ kind: "error", text: message(err) });
+    } finally {
+      setBusy("");
+    }
+  }
+
   /** Measures again every element of the partida with another property. */
   async function aplicarMedicion(c: string | null) {
     if (!sel) return;
@@ -273,10 +307,10 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
             for (const [guid, where] of u.ubicacion) {
               if (where.viewerModelId !== viewerModelId) continue;
               porGuid.set(guid, valorDe(porRt.get(where.runtimeId), c));
-              memoriaPorGuid.set(guid, memoriaDe(ds, porRt.get(where.runtimeId)));
+              memoriaPorGuid.set(guid, memoriaDe(ds, porRt.get(where.runtimeId), columnas));
             }
           }
-          const upsert = elementos.filter((e) => porGuid.has(e.ifcGuid)).map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: porGuid.get(e.ifcGuid) ?? null, memoria: memoriaPorGuid.get(e.ifcGuid) ?? e.memoria }));
+          const upsert = elementos.filter((e) => porGuid.has(e.ifcGuid)).map((e) => ({ ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: porGuid.get(e.ifcGuid) ?? null, memoria: memoriaParaGuardar(columnas, e.memoria, memoriaPorGuid.get(e.ifcGuid)) }));
           medidos = upsert.length;
           faltan = elementos.length - upsert.length;
           if (upsert.length) await api.guardarElementos(sel.item.id, upsert, []);
@@ -463,6 +497,9 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
               </button>
               <button type="button" style={{ ...btn, gridColumn: "1 / -1" }} disabled={!!busy || !(cuenta?.elementos)} onClick={seleccionarEnModelo}>
                 Seleccionar sus elementos en el modelo
+              </button>
+              <button type="button" style={{ ...btn, gridColumn: "1 / -1" }} disabled={!canEdit || !!busy || !(cuenta?.elementos)} onClick={actualizarMemoria} title="Vuelve a leer del modelo los datos de las columnas de la memoria de cantidades">
+                Actualizar los datos de la memoria desde el modelo
               </button>
             </div>
           </>

@@ -1,12 +1,13 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buildDataset } from "../graficos/modelData";
-import { Caller } from "../propiedades/service";
+import { Caller, ServiceError } from "../propiedades/service";
+import { memoryStore as propiedadesStore } from "../propiedades/store";
 import { documentoVacio } from "./doc";
-import { memoriaDe, memoriaLimpia, porUbicacion } from "./memoria";
-import { consultarElementos, Ctx, getDocumento, guardarDocumento, guardarElementos } from "./service";
+import { memoriaDe, memoriaLimpia, memoriaParaGuardar, porUbicacion } from "./memoria";
+import { consultarElementos, Ctx, getAtributos, getDocumento, getEstado, guardarDocumento, guardarElementos, updateConfig } from "./service";
 import { memoryStore } from "./store";
-import type { Memoria } from "./types";
+import type { ColumnaMemoria, Memoria } from "./types";
 
 const ventana = (id: number, props: Record<string, string | number>) => ({
   id,
@@ -30,8 +31,40 @@ describe("memoria de cantidades", () => {
   it("ordena por ubicación con los números en su orden natural", () => {
     const m = (espacio: string): { memoria: Memoria } => ({ memoria: { bloque: "B", conjunto: "", zona: "", nombreZona: "", espacio } });
     assert.deepEqual(porUbicacion([m("10"), m("2"), m("1")]).map((e) => e.memoria.espacio), ["1", "2", "10"]);
-    assert.deepEqual(memoriaLimpia({ bloque: " A ", extra: 1 }), { bloque: "A", conjunto: "", zona: "", nombreZona: "", espacio: "" });
+    assert.deepEqual(memoriaLimpia({ bloque: " A ", extra: 1, "mal id!": "x" }), { bloque: "A", extra: "1" });
     assert.equal(memoriaLimpia({}), null);
+  });
+
+  it("lee las columnas que elige el usuario: nombre, nivel, propiedad con su set; las de Propiedades e ID no se leen del modelo", () => {
+    const ds2 = buildDataset("m", "Arq", [
+      {
+        id: 1,
+        class: "IfcWall",
+        product: { name: "Muro M-1" },
+        properties: [
+          { name: "Ubicación", properties: [{ name: "Nivel", value: "Piso 3", type: 5 }, { name: "Torre", value: "T1", type: 5 }] },
+          { name: "Otro", properties: [{ name: "Torre", value: "OTRA", type: 5 }] },
+        ],
+      },
+    ]);
+    const cols: ColumnaMemoria[] = [
+      { id: "n", label: "Nombre", fuente: "modelo", clave: "Nombre" },
+      { id: "l", label: "Nivel", fuente: "modelo", clave: "nivel" },
+      { id: "t", label: "Torre", fuente: "modelo", clave: "Otro · Torre" },
+      { id: "p", label: "Estado", fuente: "propiedad", clave: "11111111-1111-4111-8111-111111111111" },
+      { id: "g", label: "ID", fuente: "ifcguid", clave: "" },
+    ];
+    assert.deepEqual(memoriaDe(ds2, ds2.records[0], cols), { n: "Muro M-1", l: "Piso 3", t: "OTRA" });
+  });
+
+  it("guarda solo las columnas del modelo y conserva lo anterior donde la lectura nueva no encontró dato", () => {
+    const cols: ColumnaMemoria[] = [
+      { id: "a", label: "A", fuente: "modelo", clave: "A" },
+      { id: "b", label: "B", fuente: "modelo", clave: "B" },
+      { id: "p", label: "P", fuente: "propiedad", clave: "11111111-1111-4111-8111-111111111111" },
+    ];
+    assert.deepEqual(memoriaParaGuardar(cols, { a: "viejo", b: "B1", p: "Aprobado" }, { a: "nuevo", b: "" }), { a: "nuevo", b: "B1" });
+    assert.equal(memoriaParaGuardar(cols, null, null), null);
   });
 });
 
@@ -66,5 +99,78 @@ describe("modo del metrado y diccionario EDT", () => {
     const it = (await getDocumento(c)).doc.subpresupuestos[0].items[0] as { modo?: string; edt?: unknown };
     assert.equal(it.modo, undefined);
     assert.equal(it.edt, undefined);
+  });
+});
+
+describe("columnas configurables de la memoria", () => {
+  const admin: Caller = { id: "u1", name: "Ana", isAdmin: true };
+  const editor: Caller = { id: "u2", name: "Luis", isAdmin: false, memberOfGroups: async () => new Set() };
+  const lector: Caller = { id: "u3", name: "Marta", isAdmin: false, memberOfGroups: async () => new Set() };
+  const G1 = "3CqVfw$t15ihB2vPgB1wri";
+  const G2 = "0000000000000000000000";
+  const forbidden = (e: unknown) => e instanceof ServiceError && e.status === 403;
+  const invalid = (e: unknown) => e instanceof ServiceError && e.status === 400;
+
+  async function entorno() {
+    const store = memoryStore();
+    const props = propiedadesStore();
+    const def = await props.insertDefinition("obra1", { title: "Estado", dataType: "text", group: "General", sortOrder: 0 }, "x");
+    const fecha = await props.insertDefinition("obra1", { title: "Fecha de instalación", dataType: "date", group: "General", sortOrder: 1 }, "x");
+    await props.saveValues("obra1", [{ ifcGuid: G1, modelId: "m" }], [{ attributeId: def.id, value: "Aprobado" }, { attributeId: fecha.id, value: "2026-03-09" }], "x");
+    const ctx = (caller: Caller): Ctx => ({ projectId: "obra1", caller, store, deps: { propiedades: () => props, callerIn: async () => caller, projectName: async () => "" } });
+    const doc = documentoVacio();
+    doc.subpresupuestos[0].items = [
+      { id: "p1", tipo: "partida", nivel: 0, codigo: "", descripcion: "MURO", unidad: "M2", omniclass: "", rendimiento: 1, jornada: 8, componentes: [], metrado: 1, origenId: null },
+    ];
+    await guardarDocumento(ctx(admin), { doc, version: 0 });
+    return { ctx, def, fecha };
+  }
+
+  it("empieza con las columnas de fábrica y los editores (no solo los administradores) las cambian", async () => {
+    const { ctx, def } = await entorno();
+    assert.deepEqual((await getEstado(ctx(lector))).config.memoriaColumnas.map((c) => c.id), ["bloque", "conjunto", "zona", "nombreZona", "espacio"]);
+    const columnas = [
+      { id: "nivel", label: "Nivel", fuente: "modelo", clave: "Nivel" },
+      { id: "estado", label: "Estado", fuente: "propiedad", clave: def.id },
+      { id: "guid", label: "ID", fuente: "ifcguid", clave: "" },
+    ];
+    await assert.rejects(updateConfig(ctx(lector), { memoriaColumnas: columnas }), forbidden);
+    await updateConfig(ctx(admin), { editores: [{ type: "user", id: "u2", name: "Luis" }] });
+    const estado = await updateConfig(ctx(editor), { memoriaColumnas: columnas });
+    assert.deepEqual(estado.config.memoriaColumnas.map((c) => c.id), ["nivel", "estado", "guid"]);
+    // but only an administrator changes the editors
+    await assert.rejects(updateConfig(ctx(editor), { editores: [] }), forbidden);
+  });
+
+  it("rechaza columnas mal formadas o de más", async () => {
+    const { ctx } = await entorno();
+    const mala = (c: unknown) => assert.rejects(updateConfig(ctx(admin), { memoriaColumnas: c }), invalid);
+    await mala([{ id: "a", label: "A", fuente: "otra", clave: "x" }]);
+    await mala([{ id: "a", label: "A", fuente: "propiedad", clave: "no-es-uuid" }]);
+    await mala([{ id: "a", label: "A", fuente: "modelo", clave: "X" }, { id: "a", label: "B", fuente: "modelo", clave: "Y" }]);
+    await mala(Array.from({ length: 7 }, (_, i) => ({ id: "c" + i, label: "C", fuente: "modelo", clave: "X" })));
+  });
+
+  it("une al listado los valores actuales de la app Propiedades, ya formateados", async () => {
+    const { ctx, def, fecha } = await entorno();
+    await updateConfig(ctx(admin), {
+      memoriaColumnas: [
+        { id: "estado", label: "Estado", fuente: "propiedad", clave: def.id },
+        { id: "fecha", label: "Fecha", fuente: "propiedad", clave: fecha.id },
+        { id: "nivel", label: "Nivel", fuente: "modelo", clave: "Nivel" },
+      ],
+    });
+    await guardarElementos(ctx(admin), {
+      itemId: "p1",
+      upsert: [
+        { ifcGuid: G1, modelId: "m", cantidad: 2, memoria: { nivel: "Piso 2" } },
+        { ifcGuid: G2, modelId: "m", cantidad: 3, memoria: { nivel: "Piso 3" } },
+      ],
+    });
+    const { elementos } = await consultarElementos(ctx(lector), { itemIds: ["p1"] });
+    const por = new Map(elementos.map((e) => [e.ifcGuid, e.memoria]));
+    assert.deepEqual(por.get(G1), { nivel: "Piso 2", estado: "Aprobado", fecha: "09-03-2026" });
+    assert.deepEqual(por.get(G2), { nivel: "Piso 3", estado: "", fecha: "" });
+    assert.deepEqual((await getAtributos(ctx(lector))).atributos.map((a) => a.title), ["Estado", "Fecha de instalación"]);
   });
 });
