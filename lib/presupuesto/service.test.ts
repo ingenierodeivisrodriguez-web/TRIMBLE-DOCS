@@ -15,6 +15,8 @@ import {
   guardarInsumos,
   guardarMedicion,
   guardarPartidas,
+  pedirActualizacionMemoria,
+  tomarVista,
   updateConfig,
 } from "./service";
 import { memoryStore, PresupuestoStore } from "./store";
@@ -200,5 +202,37 @@ describe("elementos del modelo", () => {
     await guardarDocumento(ctx(store, admin), { doc: sinPartida, version: 1 });
     resumen = await getResumen(ctx(store, lector));
     assert.deepEqual(resumen, { mediciones: [], resumen: [] });
+  });
+});
+
+describe("actualizar la memoria de todas las partidas", () => {
+  it("avisa que no hay elementos asociados y no deja nada pendiente", async () => {
+    const store = memoryStore();
+    await guardarDocumento(ctx(store, admin), { doc: docConPartida(), version: 0 });
+    await rejects(pedirActualizacionMemoria(ctx(store, admin)), 400);
+    assert.equal((await tomarVista(ctx(store, admin))).vista, null);
+  });
+
+  it("deja la tarea para el panel del visor y responde con el modelo que tiene más elementos", async () => {
+    const store = memoryStore();
+    await guardarDocumento(ctx(store, admin), { doc: docConPartida(), version: 0 });
+    await guardarElementos(ctx(store, admin), {
+      itemId: "p1",
+      upsert: [
+        { ifcGuid: G1, modelId: "arq", cantidad: 1 },
+        { ifcGuid: G2, modelId: "est", cantidad: 1 },
+        { ifcGuid: "1111111111111111111111", modelId: "est", cantidad: 1 },
+      ],
+    });
+    await rejects(pedirActualizacionMemoria(ctx(store, lector)), 403); // only who can edit
+    assert.deepEqual(await pedirActualizacionMemoria(ctx(store, admin)), { modelId: "est", modelos: 2, elementos: 3 });
+    assert.deepEqual(await store.modelosUsados(OBRA), [
+      { modelId: "arq", elementos: 1 },
+      { modelId: "est", elementos: 2 },
+    ]);
+    const vista = (await tomarVista(ctx(store, admin))).vista!;
+    assert.equal(vista.tarea, "memoria");
+    assert.deepEqual(vista.elementos, []);
+    assert.equal((await tomarVista(ctx(store, admin))).vista, null); // taken once
   });
 });

@@ -24,11 +24,14 @@ export default function ConfigDialog({
   api,
   estado,
   onChanged,
+  onActualizarMemoria,
   onClose,
 }: {
   api: PresupuestoApi;
   estado: EstadoResponse;
   onChanged: (estado: EstadoResponse, baseCambiada: boolean) => void;
+  /** Updates the memoria de cantidades of every partida (it needs the 3D viewer). */
+  onActualizarMemoria?: () => Promise<void>;
   onClose: () => void;
 }) {
   const [editores, setEditores] = useState<Responsable[]>(estado.config.editores);
@@ -144,6 +147,7 @@ export default function ConfigDialog({
           <ColumnasMemoria
             columnas={cfg.memoriaColumnas}
             puedeEditar={estado.canEdit}
+            onActualizarMemoria={onActualizarMemoria}
             api={api}
             onSaved={(next) => {
               onChanged(next, false);

@@ -1224,6 +1224,24 @@ elementos de las partidas que ya no existen.
   hayas cambiado después de abrirlo. Si todas las filas salen sin datos, el
   pie de la memoria lo avisa.
 
+  **Actualizar todas las partidas desde Configuración.** En el menú del
+  proyecto, ⚙ Configuración → *Columnas de la memoria de cantidades* tiene el
+  botón **"Actualizar la memoria de todas las partidas"**. El menú no puede leer
+  los modelos (Trimble solo da el visor 3D en su propio panel), así que el botón
+  lo hace en dos pasos, como "Ver 3D": deja la tarea guardada para esa persona
+  (`presupuesto_vistas.tarea = 'memoria'`, 30 minutos, una sola vez) y abre el
+  visor con el modelo que tiene más elementos asociados. Al abrirse, el panel
+  **Presupuesto** del visor ve la tarea y por sí solo: busca los modelos de todos
+  los elementos asociados, **carga los que no estén cargados** (y espera a que
+  terminen), lee las columnas elegidas de cada elemento, guarda la memoria en
+  cada partida y **descarga los modelos que cargó** para dejar el visor como
+  estaba. El botón del panel (con el número de partidas) hace lo mismo sin pasar
+  por el menú. Guarda el presupuesto antes de pulsarlo: abrir el visor cierra el
+  menú y los cambios sin guardar se perderían (la app lo avisa y no continúa).
+  Los elementos que no se encuentran conservan sus datos; el resultado aparece
+  en el panel (cuántos elementos, cuántos modelos se cargaron y cuáles no
+  existen en el proyecto o no terminaron de cargar).
+
   **De dónde sale la lista de propiedades.** El menú del proyecto no ve el
   visor, así que la lista se lee **desde el panel Presupuesto del visor 3D**
   (botón ⚙ Columnas → "Leer las propiedades de los modelos cargados") y se guarda
@@ -1296,6 +1314,7 @@ ejecutar sin perder datos):
 | `presupuesto_elementos` | IFCGUID + modelo + cantidad por partida (`item_id`) |
 | `presupuesto_mediciones` | Qué mide cada partida (propiedad, conteo o nada) |
 | `presupuesto_resumen_elementos` | Vista: elementos y suma de cantidades por partida |
+| `presupuesto_modelos_usados` | Vista: modelos (archivos) de los elementos asociados y cuántos elementos tiene cada uno |
 | `presupuesto_guardar_insumos` / `_partidas` | Guardan lotes; una fila con el id de otro catálogo no se toca |
 | `presupuesto_guardar` | Guarda el presupuesto si la versión coincide y limpia los elementos de partidas borradas |
 
@@ -1313,6 +1332,7 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `PUT /api/presupuesto/config` | `{ baseProjectId?, editores?, memoriaColumnas? }` (base y editores: administradores; columnas de la memoria: editores) |
 | `GET /api/presupuesto/contactos` | Personas y grupos para elegir editores (administradores) |
 | `GET /api/presupuesto/atributos` | Atributos de la app Propiedades y propiedades de los modelos (última lectura del visor) para elegir columnas de la memoria de cantidades |
+| `POST /api/presupuesto/memoria` | Pedir al panel del visor que actualice la memoria de todas las partidas; responde `{ modelId, modelos, elementos }` (el modelo con que abrir el visor). Solo administradores y editores; 400 si no hay elementos asociados |
 | `PUT` / `GET /api/presupuesto/vista` | Pedir ver elementos en 3D `{ itemId, elementos: [{ ifcGuid, modelId }] }` / recogerlos una vez (cualquier miembro, solo los suyos) |
 | `PUT /api/presupuesto/campos-modelo` | `{ modelos, campos: [{ key, label, group, kind, count }] }`: guarda las propiedades leídas de los modelos cargados (editores) |
 | `GET /api/presupuesto/catalogo` | Insumos, partidas y códigos OmniClass de la base |

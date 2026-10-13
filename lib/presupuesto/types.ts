@@ -286,8 +286,16 @@ export interface ElementoRef {
 
 /** Elements somebody asked to see in 3D, waiting for the viewer panel to pick them up. */
 export interface VistaPendiente {
+  /** "ver": select `elementos` in 3D. "memoria": update the memoria de cantidades of every partida. */
+  tarea: "ver" | "memoria";
   itemId: string;
   elementos: ElementoRef[];
+}
+
+/** A model that has elements linked to partidas. */
+export interface ModeloUsado {
+  modelId: string;
+  elementos: number;
 }
 
 export const MAX_ELEMENTOS_VISTA = 2000;

@@ -208,3 +208,54 @@ export async function leerCamposModelos(
     .slice(0, MAX_CAMPOS_MODELO);
   return { modelos: nombres, campos };
 }
+
+const esModelo = (m: { id: string; versionId?: string }, id: string) => m.id === id || m.versionId === id;
+
+/**
+ * Makes sure the models of these files are loaded in the viewer, loading (and
+ * waiting for) the ones that aren't. Returns what it loaded (to unload
+ * afterwards) and the files it couldn't find in the viewer's file tree.
+ */
+export async function prepararModelos(
+  viewer: Visor,
+  fileIds: string[],
+  opciones: { onProgress?: (texto: string) => void; esperaMs?: number; intentos?: number } = {}
+): Promise<{ cargados: string[]; noEncontrados: string[] }> {
+  const espera = opciones.esperaMs ?? 1500;
+  const intentos = opciones.intentos ?? 40;
+  const cargados = ((await viewer.getModels("loaded").catch(() => [])) ?? []) as ModelSpec[];
+  const faltan = [...new Set(fileIds)].filter((id) => !cargados.some((m) => esModelo(m, id)));
+  if (faltan.length === 0) return { cargados: [], noEncontrados: [] };
+  const descargados = ((await viewer.getModels("unloaded").catch(() => [])) ?? []) as ModelSpec[];
+  const nuevos: ModelSpec[] = [];
+  const noEncontrados: string[] = [];
+  for (const id of faltan) {
+    const spec = descargados.find((m) => esModelo(m, id));
+    if (spec) nuevos.push(spec);
+    else noEncontrados.push(id);
+  }
+  if (nuevos.length) {
+    opciones.onProgress?.(`Cargando ${nuevos.map((m) => m.name ?? m.id).join(", ")}...`);
+    await viewer.toggleModel(nuevos.map((m) => m.id), true, false);
+  }
+  const listos: string[] = [];
+  for (const spec of nuevos) {
+    let listo = false;
+    for (let i = 0; i < intentos && !listo; i++) {
+      const ahora = ((await viewer.getModels("loaded").catch(() => [])) ?? []) as ModelSpec[];
+      const cargado = ahora.find((m) => esModelo(m, spec.id));
+      if (cargado) listo = (await listModelObjects(viewer, cargado)).runtimeIds.length > 0;
+      if (!listo && espera > 0) await new Promise((r) => setTimeout(r, espera));
+    }
+    if (listo) listos.push(spec.id);
+    else noEncontrados.push(spec.id);
+    opciones.onProgress?.(`${spec.name ?? spec.id}: ${listo ? "cargado" : "no terminó de cargar"}`);
+  }
+  // What was loaded but never became usable is unloaded again by the caller too.
+  return { cargados: nuevos.map((m) => m.id), noEncontrados };
+}
+
+/** Unloads models that were loaded only to be read. */
+export async function soltarModelos(viewer: Visor, ids: string[]): Promise<void> {
+  if (ids.length) await viewer.toggleModel(ids, false).catch(() => {});
+}

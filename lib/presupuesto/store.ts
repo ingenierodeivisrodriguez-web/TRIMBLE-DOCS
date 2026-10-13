@@ -2,6 +2,7 @@ import type { Responsable } from "../propiedades/types";
 import { StoreError } from "../propiedades/store";
 import type {
   CamposModelo,
+  ModeloUsado,
   VistaPendiente,
   ColumnaMemoria,
   ElementoVinculado,
@@ -52,6 +53,8 @@ export interface PresupuestoStore {
   listOmniclass(baseId: string): Promise<OmniclassEntry[]>;
   saveOmniclass(baseId: string, rows: OmniclassEntry[]): Promise<number>;
 
+  /** The models the linked elements belong to, with how many elements each has. */
+  modelosUsados(projectId: string): Promise<ModeloUsado[]>;
   /** Remembers what this user asked to see in 3D (replacing the previous request). */
   saveVista(projectId: string, userId: string, vista: VistaPendiente): Promise<void>;
   /** The pending request of this user, removed when read; null when none (or older than `maxMinutos`). */
@@ -180,7 +183,7 @@ function supabaseStore(): PresupuestoStore | null {
       // not JSON
     }
     if (/version-conflict/.test(body)) throw new StoreError("version-conflict", 409);
-    if (/(memoria|edt)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
+    if (/(memoria|edt|tarea)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (detail.code === "23505") throw new StoreError("duplicate-code", 409);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) {
@@ -311,23 +314,50 @@ function supabaseStore(): PresupuestoStore | null {
       return rows.length;
     },
 
+    async modelosUsados(projectId) {
+      let rows: { model_id: string; elementos: number | string }[];
+      try {
+        rows = await all(`/presupuesto_modelos_usados?project_id=${eq(projectId)}&select=model_id,elementos&order=model_id.asc`);
+      } catch (err) {
+        // The tables exist; it's this view (added later) that is missing.
+        if (err instanceof StoreError && err.message === SETUP_HINT) throw new StoreError(UPGRADE_HINT);
+        throw err;
+      }
+      return rows.map((r) => ({ modelId: r.model_id, elementos: Number(r.elementos) }));
+    },
+
     async saveVista(projectId, userId, vista) {
-      await call("/presupuesto_vistas?on_conflict=project_id,user_id", {
-        method: "POST",
-        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
-        body: JSON.stringify({ project_id: projectId, user_id: userId, item_id: vista.itemId, elementos: vista.elementos, creado: new Date().toISOString() }),
-      });
+      const fila = { project_id: projectId, user_id: userId, item_id: vista.itemId, elementos: vista.elementos, creado: new Date().toISOString() };
+      const guardar = (body: object) =>
+        call("/presupuesto_vistas?on_conflict=project_id,user_id", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify(body),
+        });
+      try {
+        await guardar({ ...fila, tarea: vista.tarea });
+      } catch (err) {
+        // Before the SQL is updated there is no "tarea" column: seeing elements in 3D keeps working without it.
+        if (vista.tarea !== "ver" || !(err instanceof StoreError) || err.message !== UPGRADE_HINT) throw err;
+        await guardar(fila);
+      }
     },
 
     async takeVista(projectId, userId, maxMinutos) {
-      const rows = await json<{ item_id: string; elementos: VistaPendiente["elementos"] | null; creado: string }[]>(
-        `/presupuesto_vistas?project_id=${eq(projectId)}&user_id=${eq(userId)}&select=item_id,elementos,creado`
-      );
+      type Row = { item_id: string; elementos: VistaPendiente["elementos"] | null; creado: string; tarea?: string };
+      const base = `/presupuesto_vistas?project_id=${eq(projectId)}&user_id=${eq(userId)}&select=item_id,elementos,creado`;
+      let rows: Row[];
+      try {
+        rows = await json<Row[]>(`${base},tarea`);
+      } catch (err) {
+        if (!(err instanceof StoreError) || err.message !== UPGRADE_HINT) throw err;
+        rows = await json<Row[]>(base);
+      }
       if (!rows.length) return null;
       await call(`/presupuesto_vistas?project_id=${eq(projectId)}&user_id=${eq(userId)}`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
       const r = rows[0];
       if (Date.now() - new Date(r.creado).getTime() > maxMinutos * 60_000) return null;
-      return { itemId: r.item_id, elementos: Array.isArray(r.elementos) ? r.elementos : [] };
+      return { tarea: r.tarea === "memoria" ? "memoria" : "ver", itemId: r.item_id, elementos: Array.isArray(r.elementos) ? r.elementos : [] };
     },
 
     async getCamposModelo(projectId) {
@@ -530,6 +560,11 @@ export function memoryStore(): PresupuestoStore {
     async saveOmniclass(baseId, rows) {
       for (const r of rows) omniclass.set(`${baseId}|${r.codigo}`, { ...r, baseId });
       return rows.length;
+    },
+    async modelosUsados(projectId) {
+      const por = new Map<string, number>();
+      for (const e of elementos.values()) if (e.projectId === projectId) por.set(e.modelId, (por.get(e.modelId) ?? 0) + 1);
+      return [...por].map(([modelId, n]) => ({ modelId, elementos: n }));
     },
     async saveVista(projectId, userId, vista) {
       vistas.set(`${projectId}|${userId}`, { vista, creado: Date.now() });

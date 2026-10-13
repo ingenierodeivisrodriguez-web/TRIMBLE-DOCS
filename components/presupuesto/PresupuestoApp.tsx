@@ -118,6 +118,15 @@ export default function PresupuestoApp({
     }
   }
 
+  /** From Configuración: the models can only be read in the viewer, so open it; its panel does the update by itself. */
+  async function actualizarMemoriaEnVisor() {
+    if (!abrirVisor) throw new Error("Esto solo funciona dentro de Trimble Connect.");
+    if (s.dirty) throw new Error("Guarda los cambios antes: al abrir el visor 3D esta pantalla se cierra y se perderían.");
+    const r = await api.pedirActualizacionMemoria();
+    const ok = await abrirVisor({ modelId: r.modelId });
+    if (!ok) throw new Error("No se pudo abrir el visor 3D. Ábrelo en Trimble Connect y entra al panel Presupuesto: la actualización empieza sola.");
+  }
+
   const loadMemoria = useCallback((itemId: string) => api.elementosDe({ itemIds: [itemId] }), [api]);
   const calculados = useMemo(() => {
     const out = new Map<string, SubpresupuestoCalculado>();
@@ -705,6 +714,7 @@ export default function PresupuestoApp({
           <ConfigDialog
             api={api}
             estado={estado}
+            onActualizarMemoria={abrirVisor ? actualizarMemoriaEnVisor : undefined}
             onClose={close}
             onChanged={(next, baseCambiada) => {
               s.setEstado(next);

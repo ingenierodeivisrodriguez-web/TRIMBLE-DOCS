@@ -9,7 +9,7 @@ import { columnasMemoria, memoriaDe, memoriaParaGuardar } from "../../lib/presup
 import { CampoMedible, camposMedibles, etiquetaCampo, sugerirCampo, valorDe } from "../../lib/presupuesto/medicion";
 import { numerar } from "../../lib/presupuesto/tree";
 import { CONTEO, EstadoResponse, ItemPartida, Medicion, Memoria, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
-import { leerDataset, MapaGuids, selector, Visor } from "../../lib/presupuesto/viewerMap";
+import { leerDataset, MapaGuids, prepararModelos, selector, soltarModelos, Visor } from "../../lib/presupuesto/viewerMap";
 import type { ViewerEventListener } from "../trimble/ExtensionShell";
 import ColumnasMemoria from "./ColumnasMemoria";
 import { ConfirmDialog } from "./SimpleDialogs";
@@ -61,6 +61,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   // The columns of the memoria de cantidades (read when elements are linked).
   const columnas = columnasMemoria(estado?.config.memoriaColumnas);
   const seq = useRef(0);
+  const refrescarRef = useRef<(itemIds: string[]) => Promise<void>>(async () => {});
 
   /** The columns in force now: the settings may have changed (in the project's menu) since this panel opened. */
   async function columnasActuales() {
@@ -100,7 +101,21 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
       } catch {
         return;
       }
-      if (!vista || vista.elementos.length === 0 || cancelado) return;
+      if (!vista || cancelado) return;
+      if (vista.tarea === "memoria") {
+        // Asked from Configuración: read every model that has elements linked and refresh all the partidas.
+        setNota({ kind: "info", text: "Actualizando la memoria de todas las partidas..." });
+        try {
+          const r = await api.getResumen();
+          const ids = r.resumen.filter((x) => x.elementos > 0).map((x) => x.itemId);
+          if (ids.length === 0) setNota({ kind: "info", text: "Todavía no hay partidas con elementos asociados." });
+          else if (!cancelado) await refrescarRef.current(ids);
+        } catch (err) {
+          setNota({ kind: "error", text: message(err) });
+        }
+        return;
+      }
+      if (vista.elementos.length === 0) return;
       setItemId(vista.itemId);
       setNota({ kind: "info", text: `Buscando en el modelo los ${vista.elementos.length.toLocaleString("es")} elemento(s) que pediste ver...` });
       // The model may still be loading after the viewer opened: wait for it, then look the elements up.
@@ -329,6 +344,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     if (itemIds.length === 0) return;
     setBusy("Leyendo el modelo...");
     setNota(null);
+    let cargadosAqui: string[] = [];
     try {
       const cols = await columnasActuales();
       const elementos = await api.elementosDe({ itemIds });
@@ -337,7 +353,12 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         return;
       }
       const unicos = [...new Map(elementos.map((e) => [e.ifcGuid, { ifcGuid: e.ifcGuid, modelId: e.modelId }])).values()];
-      const u = await mapa.current.ubicar(viewer, unicos, setBusy);
+      // The models these elements belong to: load the ones that aren't loaded (and unload them when done).
+      const prep = await prepararModelos(viewer, unicos.map((e) => e.modelId), { onProgress: setBusy });
+      cargadosAqui = prep.cargados;
+      // A model loaded again may number its objects differently: don't trust what was learned before.
+      const ubicador = cargadosAqui.length ? new MapaGuids() : mapa.current;
+      const u = await ubicador.ubicar(viewer, unicos, setBusy);
       const nuevas = new Map<string, Memoria | null>();
       for (const [viewerModelId, ids] of u.porModelo) {
         setBusy(`Leyendo ${ids.length.toLocaleString("es")} elementos del modelo...`);
@@ -363,14 +384,21 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         text:
           `Memoria actualizada en ${guardados.toLocaleString("es")} elemento(s) de ${itemIds.length} partida(s).` +
           (conDatos === 0 && nuevas.size > 0 ? " Ningún elemento tiene datos en las columnas elegidas: revisa que sean propiedades que el modelo sí trae (la lista de ⚙ Columnas las muestra)." : "") +
-          (faltan ? ` ${faltan.toLocaleString("es")} no están en los modelos cargados y conservan sus datos.` : ""),
+          (prep.cargados.length ? ` Se cargaron ${prep.cargados.length} modelo(s) para leerlos y se descargaron al terminar.` : "") +
+          (prep.noEncontrados.length ? ` ${prep.noEncontrados.length} modelo(s) no están en el proyecto o no terminaron de cargar.` : "") +
+          (faltan ? ` ${faltan.toLocaleString("es")} elemento(s) no se encontraron en los modelos y conservan sus datos.` : ""),
       });
     } catch (err) {
       setNota({ kind: "error", text: message(err) });
     } finally {
+      if (cargadosAqui.length) {
+        await soltarModelos(viewer, cargadosAqui);
+        mapa.current = new MapaGuids();
+      }
       setBusy("");
     }
   }
+  refrescarRef.current = refrescarMemoria;
 
   /** Measures again every element of the partida with another property. */
   async function aplicarMedicion(c: string | null) {
@@ -604,7 +632,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
             style={btn}
             disabled={!!busy}
             onClick={() => refrescarMemoria(partidasConElementos)}
-            title="Lee del modelo los datos de las columnas de la memoria en todas las partidas que ya tienen elementos asociados"
+            title="Lee todos los modelos asociados al presupuesto (carga los que falten y los descarga al terminar) y guarda los datos de las columnas en cada elemento"
           >
             Actualizar la memoria de todas las partidas ({partidasConElementos.length})
           </button>

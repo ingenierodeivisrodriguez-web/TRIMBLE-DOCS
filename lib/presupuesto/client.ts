@@ -30,6 +30,8 @@ export interface PresupuestoApi {
   getAtributos(): Promise<{ atributos: AtributoPropiedad[]; modelo: CamposModelo | null }>;
   /** Leaves the elements to see in 3D for this user's viewer panel. */
   pedirVista(itemId: string, elementos: ElementoRef[]): Promise<void>;
+  /** Asks the viewer panel to update the memoria of every partida; answers the model to open the viewer with. */
+  pedirActualizacionMemoria(): Promise<{ modelId: string; modelos: number; elementos: number }>;
   /** The elements this user asked to see in 3D (once), or null. */
   tomarVista(): Promise<VistaPendiente | null>;
   /** Saves the properties of the models loaded in the viewer. */
@@ -75,6 +77,7 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     async pedirVista(itemId, elementos) {
       await request("/vista", send("PUT", { itemId, elementos }));
     },
+    pedirActualizacionMemoria: () => request("/memoria", send("POST", {})),
     tomarVista: () => request<{ vista: VistaPendiente | null }>("/vista").then((r) => r.vista),
     guardarCamposModelo: (data) => request<{ guardadas: number }>("/campos-modelo", send("PUT", data)).then((r) => r.guardadas),
     getCatalogo: () => request("/catalogo"),

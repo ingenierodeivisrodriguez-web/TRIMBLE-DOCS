@@ -4,7 +4,7 @@ import { Caller, ServiceError } from "../propiedades/service";
 import { documentoVacio } from "./doc";
 import { Ctx, getAtributos, guardarCamposModelo, guardarDocumento, pedirVista, tomarVista, updateConfig } from "./service";
 import { memoryStore } from "./store";
-import { leerCamposModelos, Visor } from "./viewerMap";
+import { leerCamposModelos, prepararModelos, soltarModelos, Visor } from "./viewerMap";
 
 const admin: Caller = { id: "u1", name: "Ana", isAdmin: true };
 const lector: Caller = { id: "u3", name: "Marta", isAdmin: false, memberOfGroups: async () => new Set() };
@@ -125,7 +125,7 @@ describe("ver en 3D: traspaso del menú al visor", () => {
     await pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: G1, modelId: "m" }] });
     await pedirVista(yo, { itemId: "p2", elementos: [{ ifcGuid: G2, modelId: "m" }] });
     assert.equal((await tomarVista(yo)).vista?.itemId, "p2");
-    await store.saveVista("obra1", "u1", { itemId: "p3", elementos: [{ ifcGuid: G1, modelId: "m" }] });
+    await store.saveVista("obra1", "u1", { tarea: "ver", itemId: "p3", elementos: [{ ifcGuid: G1, modelId: "m" }] });
     assert.equal(await store.takeVista("obra1", "u1", -1), null); // older than the limit
   });
 
@@ -135,5 +135,65 @@ describe("ver en 3D: traspaso del menú al visor", () => {
     await assert.rejects(pedirVista(yo, { itemId: "no valido!", elementos: [{ ifcGuid: G1, modelId: "m" }] }), invalid);
     await assert.rejects(pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: "nope", modelId: "m" }] }), invalid);
     await assert.rejects(pedirVista(yo, { itemId: "p1", elementos: [{ ifcGuid: G1, modelId: "" }] }), invalid);
+  });
+});
+
+describe("cargar los modelos asociados al presupuesto", () => {
+  /** A viewer with some models loaded and some not; loading one takes `pasos` polls to show up. */
+  function visorConCarga(opts: { cargados: string[]; descargados: string[]; pasos?: number; sinObjetos?: string[] }) {
+    const cargados = new Set(opts.cargados);
+    const pendientes = new Map<string, number>();
+    const llamadas: string[] = [];
+    const spec = (id: string) => ({ id, name: id + ".ifc", versionId: id + "v" });
+    const visor = {
+      getModels: async (estado?: string) => {
+        if (estado === "unloaded") return opts.descargados.filter((id) => !cargados.has(id) && !pendientes.has(id)).map(spec);
+        for (const [id, n] of pendientes) {
+          if (n <= 0) {
+            pendientes.delete(id);
+            cargados.add(id);
+          } else pendientes.set(id, n - 1);
+        }
+        return [...cargados].map(spec);
+      },
+      toggleModel: async (ids: string | string[], cargar?: boolean) => {
+        for (const id of [ids].flat()) {
+          llamadas.push((cargar === false ? "-" : "+") + id);
+          if (cargar === false) cargados.delete(id);
+          else pendientes.set(id, opts.pasos ?? 0);
+        }
+      },
+      getObjects: async (sel?: { modelObjectIds?: { modelId: string }[] }) => {
+        const pedido = sel?.modelObjectIds?.[0]?.modelId;
+        const ids = pedido ? [pedido] : [...cargados];
+        return ids.map((modelId) => ({ modelId, objects: (opts.sinObjetos ?? []).includes(modelId.replace(/v$/, "")) ? [] : [{ id: 1 }, { id: 2 }] }));
+      },
+    } as unknown as Visor;
+    return { visor, llamadas, cargados };
+  }
+
+  it("no toca nada si los modelos ya están cargados", async () => {
+    const { visor, llamadas } = visorConCarga({ cargados: ["a", "b"], descargados: [] });
+    assert.deepEqual(await prepararModelos(visor, ["a", "bv", "a"], { esperaMs: 0 }), { cargados: [], noEncontrados: [] });
+    assert.deepEqual(llamadas, []);
+  });
+
+  it("carga los que faltan, espera a que estén listos y luego los descarga sin tocar los que estaban", async () => {
+    const { visor, llamadas, cargados } = visorConCarga({ cargados: ["a"], descargados: ["b", "c"], pasos: 2 });
+    const r = await prepararModelos(visor, ["a", "b", "c"], { esperaMs: 0 });
+    assert.deepEqual(r, { cargados: ["b", "c"], noEncontrados: [] });
+    assert.deepEqual(llamadas, ["+b", "+c"]);
+    assert.deepEqual([...cargados].sort(), ["a", "b", "c"]);
+    await soltarModelos(visor, r.cargados);
+    assert.deepEqual([...cargados], ["a"]);
+    await soltarModelos(visor, []); // nothing to unload
+    assert.equal(llamadas.length, 4);
+  });
+
+  it("avisa de los modelos que no están en el proyecto o que no terminan de cargar", async () => {
+    const { visor } = visorConCarga({ cargados: [], descargados: ["lento", "vacio"], pasos: 1000, sinObjetos: ["vacio"] });
+    const r = await prepararModelos(visor, ["lento", "vacio", "otro"], { esperaMs: 0, intentos: 3 });
+    assert.deepEqual(r.noEncontrados.sort(), ["lento", "otro", "vacio"]);
+    assert.deepEqual(r.cargados.sort(), ["lento", "vacio"]); // loaded, so they get unloaded after
   });
 });

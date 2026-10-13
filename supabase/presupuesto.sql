@@ -39,6 +39,10 @@ create table if not exists public.presupuesto_vistas (
   primary key (project_id, user_id)
 );
 
+-- Qué debe hacer el panel del visor al abrirse: 'ver' (seleccionar elementos) o 'memoria'
+-- (actualizar la memoria de cantidades de todas las partidas).
+alter table public.presupuesto_vistas add column if not exists tarea text not null default 'ver';
+
 -- Catálogo de insumos. base_id = proyecto de Trimble Connect dueño del catálogo.
 create table if not exists public.presupuesto_insumos (
   id          uuid        primary key,
@@ -137,6 +141,13 @@ with (security_invoker = true) as
   select project_id, item_id, count(*) as elementos, coalesce(sum(cantidad), 0) as suma
   from public.presupuesto_elementos
   group by project_id, item_id;
+
+-- Modelos a los que pertenecen los elementos asociados a partidas, con cuántos elementos tiene cada uno.
+create or replace view public.presupuesto_modelos_usados
+with (security_invoker = true) as
+  select project_id, model_id, count(*)::integer as elementos
+  from public.presupuesto_elementos
+  group by project_id, model_id;
 
 -- Guarda insumos (nuevos o editados) de un catálogo. Una fila con el id de un insumo
 -- de otro catálogo no se toca.

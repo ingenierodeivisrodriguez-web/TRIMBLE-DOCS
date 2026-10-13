@@ -33,6 +33,7 @@ export default function ColumnasMemoria({
   api,
   puedeEditar,
   visor,
+  onActualizarMemoria,
   onSaved,
   onError,
 }: {
@@ -41,6 +42,8 @@ export default function ColumnasMemoria({
   puedeEditar: boolean;
   /** Present when this runs in the 3D viewer: the models' properties can be read from it. */
   visor?: Visor;
+  /** Updates the memoria de cantidades of every partida with the models linked to the budget. */
+  onActualizarMemoria?: () => Promise<void>;
   onSaved: (estado: EstadoResponse) => void;
   onError: (text: string) => void;
 }) {
@@ -54,6 +57,8 @@ export default function ColumnasMemoria({
   const [completo, setCompleto] = useState(false);
   const [leyendo, setLeyendo] = useState("");
   const cancelar = useRef(false);
+  const [actualizando, setActualizando] = useState(false);
+  const [aviso, setAviso] = useState("");
 
   const cargar = useCallback(async () => {
     try {
@@ -126,6 +131,21 @@ export default function ColumnasMemoria({
       onError(message(err));
     } finally {
       setLeyendo("");
+    }
+  }
+
+  async function actualizarTodas() {
+    if (!onActualizarMemoria) return;
+    setActualizando(true);
+    setAviso("");
+    onError("");
+    try {
+      await onActualizarMemoria();
+      setAviso(visor ? "" : "Abriendo el visor 3D: abre el panel Presupuesto y la actualización empieza sola.");
+    } catch (err) {
+      onError(message(err));
+    } finally {
+      setActualizando(false);
     }
   }
 
@@ -278,7 +298,26 @@ export default function ColumnasMemoria({
             <button type="button" style={secondary} disabled={busy} onClick={() => setLista(DEFAULT_COLUMNAS_MEMORIA)}>
               Restablecer las de fábrica
             </button>
+            {onActualizarMemoria && (
+              <button
+                type="button"
+                style={{ ...secondary, borderColor: "var(--tc-blue-700)", fontWeight: 600 }}
+                disabled={busy || actualizando || cambio}
+                onClick={actualizarTodas}
+                title={cambio ? "Guarda las columnas primero" : "Lee del modelo los datos de las columnas en todas las partidas que ya tienen elementos asociados"}
+              >
+                {actualizando ? "Preparando..." : "Actualizar la memoria de todas las partidas"}
+              </button>
+            )}
           </div>
+          {onActualizarMemoria && (
+            <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)", lineHeight: 1.5 }}>
+              {visor
+                ? "Lee los modelos asociados al presupuesto (carga los que falten y los descarga al terminar) y guarda los datos de las columnas en cada elemento."
+                : "Los modelos solo se pueden leer en el visor 3D: esto lo abre, y su panel Presupuesto lee todos los modelos asociados al presupuesto (carga los que falten y los descarga al terminar). Guarda el presupuesto antes."}
+            </p>
+          )}
+          {aviso && <p style={{ margin: "6px 0 0", fontSize: 13, color: "var(--tc-blue-800)" }}>{aviso}</p>}
         </>
       )}
     </section>

@@ -354,8 +354,21 @@ export async function pedirVista(ctx: Ctx, body: unknown): Promise<{ elementos: 
     if (typeof e.modelId !== "string" || !e.modelId || e.modelId.length > 100) bad("Elemento sin modelo.");
     return { ifcGuid: e.ifcGuid, modelId: e.modelId };
   });
-  await ctx.store.saveVista(ctx.projectId, ctx.caller.id, { itemId: o.itemId, elementos });
+  await ctx.store.saveVista(ctx.projectId, ctx.caller.id, { tarea: "ver", itemId: o.itemId, elementos });
   return { elementos: elementos.length };
+}
+
+/**
+ * Asks the viewer panel to update the memoria de cantidades of every partida
+ * the next time this user opens it (only the viewer can read the models).
+ * Answers which model to open the viewer with: the one with most elements.
+ */
+export async function pedirActualizacionMemoria(ctx: Ctx): Promise<{ modelId: string; modelos: number; elementos: number }> {
+  await requireEdit(ctx);
+  const usados = [...(await ctx.store.modelosUsados(ctx.projectId))].sort((a, b) => b.elementos - a.elementos);
+  if (usados.length === 0) bad("Todavía no hay elementos del modelo asociados a ninguna partida.");
+  await ctx.store.saveVista(ctx.projectId, ctx.caller.id, { tarea: "memoria", itemId: "", elementos: [] });
+  return { modelId: usados[0].modelId, modelos: usados.length, elementos: usados.reduce((sum, m) => sum + m.elementos, 0) };
 }
 
 /** What this user asked to see in 3D, once (it is removed when read), if it is recent. */
