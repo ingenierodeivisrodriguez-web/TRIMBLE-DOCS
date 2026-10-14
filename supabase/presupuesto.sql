@@ -377,6 +377,22 @@ as $$
    where project_id = p_project_id;
 $$;
 
+-- La evaluación de cada tarea del asistente.
+create or replace function public.presupuesto_ia_resumen_tareas(p_project_id text)
+returns table (tarea text, pendientes bigint, aceptados_sin_cambios bigint, aceptados_editados bigint, rechazados bigint)
+language sql
+stable
+as $$
+  select tarea,
+         count(*) filter (where estado = 'pendiente'),
+         count(*) filter (where estado = 'aceptado' and not editado),
+         count(*) filter (where estado = 'aceptado' and editado),
+         count(*) filter (where estado = 'rechazado')
+    from public.presupuesto_ia_borradores
+   where project_id = p_project_id and estado <> 'reemplazado'
+   group by tarea;
+$$;
+
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. Las funciones se ejecutan con los permisos de quien las llama.
 alter table public.presupuesto_config enable row level security;
@@ -399,6 +415,7 @@ revoke all on function public.presupuesto_guardar_programacion(text, jsonb, inte
 revoke all on function public.presupuesto_ia_gasto(text, timestamptz, text) from public;
 revoke all on function public.presupuesto_ia_resumen(text) from public;
 revoke all on function public.presupuesto_ia_gasto_proyectos(timestamptz) from public;
+revoke all on function public.presupuesto_ia_resumen_tareas(text) from public;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
@@ -409,6 +426,7 @@ begin
     grant execute on function public.presupuesto_ia_gasto(text, timestamptz, text) to service_role;
     grant execute on function public.presupuesto_ia_resumen(text) to service_role;
     grant execute on function public.presupuesto_ia_gasto_proyectos(timestamptz) to service_role;
+    grant execute on function public.presupuesto_ia_resumen_tareas(text) to service_role;
   end if;
 end;
 $$;

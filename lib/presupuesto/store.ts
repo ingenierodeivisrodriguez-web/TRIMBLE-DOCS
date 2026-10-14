@@ -1,5 +1,5 @@
 import type { Responsable } from "../propiedades/types";
-import type { BorradorIA, CupoGuardado, EstadoBorrador, RegistroUsoIA, ResumenBorradores, TareaIA } from "./ia/tipos";
+import type { BorradorGenerico, CupoGuardado, EstadoBorrador, RegistroUsoIA, ResumenesIA, TareaIA } from "./ia/tipos";
 import { StoreError } from "../propiedades/store";
 import type {
   CamposModelo,
@@ -78,15 +78,16 @@ export interface PresupuestoStore {
   gastoIA(projectId: string, desde: string, userId: string): Promise<{ proyecto: number; usuario: number }>;
   usosIA(projectId: string, limite: number): Promise<RegistroUsoIA[]>;
   /** Saves new drafts; the pending ones of the same partidas and task are marked "reemplazado". */
-  guardarBorradoresIA(projectId: string, borradores: BorradorIA[]): Promise<void>;
-  borradoresIA(projectId: string, filtro: { estado?: EstadoBorrador; tarea?: TareaIA; ids?: string[] }): Promise<BorradorIA[]>;
+  guardarBorradoresIA(projectId: string, borradores: BorradorGenerico[]): Promise<void>;
+  borradoresIA(projectId: string, filtro: { estado?: EstadoBorrador; tarea?: TareaIA; ids?: string[] }): Promise<BorradorGenerico[]>;
   /** Records the decisions on pending drafts; returns how many changed. */
   decidirBorradoresIA(
     projectId: string,
-    decisiones: { id: string; estado: "aceptado" | "rechazado"; editado: boolean; final: BorradorIA["final"] }[],
+    decisiones: { id: string; estado: "aceptado" | "rechazado"; editado: boolean; final: BorradorGenerico["final"] }[],
     user: string
   ): Promise<number>;
-  resumenBorradoresIA(projectId: string): Promise<ResumenBorradores>;
+  /** The evaluation of each task. */
+  resumenBorradoresIA(projectId: string): Promise<ResumenesIA>;
   /** The schedule (Gantt), versioned like the budget. */
   getProgramacion(projectId: string): Promise<StoredDocumento | null>;
   saveProgramacion(projectId: string, data: unknown, version: number, user: string): Promise<number | "conflict">;
@@ -249,11 +250,11 @@ interface BorradorRow {
   tarea: string;
   item_id: string;
   referencia: string;
-  propuesta: BorradorIA["propuesta"];
-  anterior: BorradorIA["anterior"];
+  propuesta: BorradorGenerico["propuesta"];
+  anterior: BorradorGenerico["anterior"];
   estado: string;
   editado: boolean;
-  final: BorradorIA["final"];
+  final: BorradorGenerico["final"];
   uso_id: number | null;
   creado: string;
   creado_por: string;
@@ -261,7 +262,7 @@ interface BorradorRow {
   decidido_por: string | null;
 }
 
-function borradorDeFila(r: BorradorRow): BorradorIA {
+function borradorDeFila(r: BorradorRow): BorradorGenerico {
   return {
     id: r.id,
     tarea: r.tarea as TareaIA,
@@ -691,17 +692,20 @@ function supabaseStore(): PresupuestoStore | null {
 
     async resumenBorradoresIA(projectId) {
       return ia(async () => {
-        const rows = await json<{ pendientes: number; aceptados_sin_cambios: number; aceptados_editados: number; rechazados: number }[]>("/rpc/presupuesto_ia_resumen", {
-          method: "POST",
-          body: JSON.stringify({ p_project_id: projectId }),
-        });
-        const r = rows[0];
-        return {
-          pendientes: Number(r?.pendientes ?? 0),
-          aceptadosSinCambios: Number(r?.aceptados_sin_cambios ?? 0),
-          aceptadosEditados: Number(r?.aceptados_editados ?? 0),
-          rechazados: Number(r?.rechazados ?? 0),
-        };
+        const rows = await json<{ tarea: string; pendientes: number; aceptados_sin_cambios: number; aceptados_editados: number; rechazados: number }[]>(
+          "/rpc/presupuesto_ia_resumen_tareas",
+          { method: "POST", body: JSON.stringify({ p_project_id: projectId }) }
+        );
+        const out: ResumenesIA = {};
+        for (const r of rows) {
+          out[r.tarea as TareaIA] = {
+            pendientes: Number(r.pendientes),
+            aceptadosSinCambios: Number(r.aceptados_sin_cambios),
+            aceptadosEditados: Number(r.aceptados_editados),
+            rechazados: Number(r.rechazados),
+          };
+        }
+        return out;
       });
     },
 
@@ -814,7 +818,7 @@ export function memoryStore(): PresupuestoStore {
   const programaciones = new Map<string, StoredDocumento>();
   const cuposIA = new Map<string, CupoGuardado>();
   const usosIA: RegistroUsoIA[] = [];
-  const borradoresIA = new Map<string, BorradorIA & { projectId: string }>();
+  const borradoresIA = new Map<string, BorradorGenerico & { projectId: string }>();
   const campos = new Map<string, CamposModelo>();
   const vistas = new Map<string, { vista: VistaPendiente; creado: number }>();
   const mediciones = new Map<string, Medicion & { projectId: string }>();
@@ -993,13 +997,16 @@ export function memoryStore(): PresupuestoStore {
       return n;
     },
     async resumenBorradoresIA(projectId) {
-      const l = [...borradoresIA.values()].filter((b) => b.projectId === projectId);
-      return {
-        pendientes: l.filter((b) => b.estado === "pendiente").length,
-        aceptadosSinCambios: l.filter((b) => b.estado === "aceptado" && !b.editado).length,
-        aceptadosEditados: l.filter((b) => b.estado === "aceptado" && b.editado).length,
-        rechazados: l.filter((b) => b.estado === "rechazado").length,
-      };
+      const out: ResumenesIA = {};
+      for (const b of borradoresIA.values()) {
+        if (b.projectId !== projectId || b.estado === "reemplazado") continue;
+        const r = (out[b.tarea] ??= { pendientes: 0, aceptadosSinCambios: 0, aceptadosEditados: 0, rechazados: 0 });
+        if (b.estado === "pendiente") r.pendientes++;
+        else if (b.estado === "rechazado") r.rechazados++;
+        else if (b.editado) r.aceptadosEditados++;
+        else r.aceptadosSinCambios++;
+      }
+      return out;
     },
     async getProgramacion(projectId) {
       const d = programaciones.get(projectId);

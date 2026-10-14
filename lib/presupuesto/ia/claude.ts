@@ -10,6 +10,8 @@ export const MODELO_POR_DEFECTO = "claude-opus-5-5";
 export interface PeticionIA {
   /** Fixed instructions (cached between calls). */
   sistema: string;
+  /** Data that repeats across the calls of a task, like the catalog (cached too). */
+  datosFijos?: string;
   /** The data of this call. */
   usuario: string;
   /** JSON Schema the answer must follow. */
@@ -54,7 +56,10 @@ export function clienteClaude(apiKey: string, modelo: string = MODELO_POR_DEFECT
           // If a safety classifier declines, Anthropic re-runs the request on its recommended model.
           betas: ["server-side-fallback-2026-07-01"],
           fallbacks: "default",
-          system: [{ type: "text", text: p.sistema, cache_control: { type: "ephemeral" } }],
+          system: [
+            { type: "text", text: p.sistema, cache_control: { type: "ephemeral" } },
+            ...(p.datosFijos ? [{ type: "text" as const, text: p.datosFijos, cache_control: { type: "ephemeral" as const } }] : []),
+          ],
           messages: [{ role: "user", content: p.usuario }],
           output_config: { effort: p.esfuerzo, format: { type: "json_schema", schema: p.esquema } },
         });

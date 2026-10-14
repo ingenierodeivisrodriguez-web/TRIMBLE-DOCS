@@ -1,5 +1,22 @@
 import { createRequester, TokenSource } from "../propiedades/client";
-import type { BorradorIA, CupoGlobalIA, CupoIA, EstadoIAResponse, GenerarEdtResponse, PartidaEdtIA, ResumenBorradores } from "./ia/tipos";
+import type {
+  BorradorEstructuraIA,
+  BorradorIA,
+  BorradorInsumoIA,
+  CapituloIA,
+  CupoGlobalIA,
+  CupoIA,
+  EstadoCupo,
+  EstadoIAResponse,
+  GenerarEdtResponse,
+  GenerarInsumosResponse,
+  InsumoCatalogoIA,
+  PartidaCatalogoIA,
+  PartidaEdtIA,
+  PartidaInsumosIA,
+  PeticionEstructura,
+  ResumenesIA,
+} from "./ia/tipos";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
 import {
   AtributoPropiedad,
@@ -53,9 +70,15 @@ export interface PresupuestoApi {
   guardarCupoIA(patch: { proyecto?: CupoIA; otro?: { proyecto: string; cupo: CupoIA }; global?: CupoGlobalIA }): Promise<EstadoIAResponse>;
   generarEdtIA(contexto: string, partidas: PartidaEdtIA[]): Promise<GenerarEdtResponse>;
   borradoresIA(): Promise<BorradorIA[]>;
-  decidirBorradoresIA(
-    decisiones: { id: string; estado: "aceptado" | "rechazado"; final?: { descripcion: string; criterios: string } }[]
-  ): Promise<{ decididos: number; resumen: ResumenBorradores }>;
+  borradoresEstructuraIA(): Promise<BorradorEstructuraIA[]>;
+  borradoresInsumosIA(): Promise<BorradorInsumoIA[]>;
+  /** Records what was accepted (with what was applied, `final`), edited or rejected. */
+  decidirBorradoresIA(decisiones: { id: string; estado: "aceptado" | "rechazado"; final?: unknown }[]): Promise<{ decididos: number; resumen: ResumenesIA }>;
+  proponerCapitulosIA(p: PeticionEstructura): Promise<{ capitulos: CapituloIA[]; costoCop: number; cupo: EstadoCupo }>;
+  proponerPartidasIA(
+    p: PeticionEstructura & { capitulo: CapituloIA; otros: string[]; catalogo: PartidaCatalogoIA[] }
+  ): Promise<{ borrador: BorradorEstructuraIA; costoCop: number; cupo: EstadoCupo }>;
+  generarInsumosIA(contexto: string, partidas: PartidaInsumosIA[], catalogo: InsumoCatalogoIA[]): Promise<GenerarInsumosResponse>;
   getProgramacion(): Promise<ProgramacionResponse>;
   guardarProgramacion(programacion: Programacion, version: number): Promise<{ version: number }>;
   getResumen(): Promise<ResumenElementos>;
@@ -122,7 +145,12 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     getEstadoIA: () => request("/ia"),
     guardarCupoIA: (patch) => request("/ia/cupo", send("PUT", patch)),
     generarEdtIA: (contexto, partidas) => request("/ia/edt", send("POST", { contexto, partidas })),
-    borradoresIA: () => request<{ borradores: BorradorIA[] }>("/ia/borradores").then((r) => r.borradores),
+    borradoresIA: () => request<{ borradores: BorradorIA[] }>("/ia/borradores?tarea=edt").then((r) => r.borradores),
+    borradoresEstructuraIA: () => request<{ borradores: BorradorEstructuraIA[] }>("/ia/borradores?tarea=estructura").then((r) => r.borradores),
+    borradoresInsumosIA: () => request<{ borradores: BorradorInsumoIA[] }>("/ia/borradores?tarea=insumos").then((r) => r.borradores),
+    proponerCapitulosIA: (p) => request("/ia/estructura/capitulos", send("POST", p)),
+    proponerPartidasIA: (p) => request("/ia/estructura/partidas", send("POST", p)),
+    generarInsumosIA: (contexto, partidas, catalogo) => request("/ia/insumos", send("POST", { contexto, partidas, catalogo })),
     decidirBorradoresIA: (decisiones) => request("/ia/borradores", send("PUT", { decisiones })),
     getProgramacion: () => request("/programacion"),
     guardarProgramacion: (programacion, version) => request("/programacion", send("PUT", { programacion, version })),

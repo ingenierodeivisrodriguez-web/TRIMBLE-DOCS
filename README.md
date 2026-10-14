@@ -1359,11 +1359,39 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
 - **Excel**: la programación, el calendario valorizado, el de insumos y la
   curva S en un libro; cada ventana exporta también lo suyo.
 
-### Asistente IA (fases 0 y 1)
+### Asistente IA (fases 0 a 3)
 
 El botón **🤖 Asistente IA** del encabezado abre el asistente. Usa Claude
 (Anthropic) o Gemini (Google AI Studio) desde el servidor; la clave vive solo en Vercel. **Nada de lo que
 propone entra al presupuesto hasta que una persona lo acepta.**
+
+**Fase 3: crear la EDT** (pestaña *Crear EDT*). Se describe el proyecto (por
+ejemplo "edificio de vivienda estrato 6, 15 pisos, 4 apartamentos por piso, 2
+pisos de comercio, sótanos de parqueadero") y se elige agrupar **solo por
+capítulos** o **por capítulos y pisos** (con el número de pisos tipo, que se
+lee de la descripción), el **detalle** (resumido o detallado) y el
+subpresupuesto donde insertar. Primero propone los **capítulos** en orden de
+ejecución, con la práctica colombiana; se pueden quitar, renombrar o marcar
+"por piso". Luego propone las **partidas de cada capítulo**, una llamada por
+capítulo, y **usa las partidas del catálogo** cuando corresponden: así llegan
+con su análisis de precios. Las que no están en el catálogo quedan como
+partidas nuevas sin análisis. Cada capítulo llega como borrador: se quitan o
+corrigen partidas y se **inserta** al final del subpresupuesto (los capítulos
+"por piso" se repiten bajo PISO 1, PISO 2...) o se **descarta**. Los metrados
+quedan en 0. No pone precios ni metrados.
+
+**Fase 2: insumos** (pestaña *Insumos*). Para las partidas sin análisis de
+precios (o todas), revisa qué insumos necesitan (MO, MT, EQ, SC) contra el
+catálogo: los que el catálogo ya tiene se señalan, y los que faltan llegan
+como borradores con las partidas que los usan (si el mismo insumo sale en
+varios lotes, se acumulan sus partidas). Se corrigen tipo, descripción y
+unidad, y se **crean en el catálogo sin precio** (quien puede editar el
+catálogo); el precio lo pone la persona. Armar el análisis de cada partida
+con ellos es la fase 4.
+
+El catálogo se envía como **datos fijos** que el proveedor guarda en caché
+entre las llamadas de una tarea; si tiene más de 1.500 entradas, se envían las
+que más se parecen a lo que se está trabajando.
 
 **Fase 1: diccionario EDT.** Redacta la *descripción del trabajo* y los
 *criterios de aceptación* de cada partida para el mercado colombiano:
@@ -1398,9 +1426,11 @@ Sin configurar, el asistente está **apagado**. Desde el proyecto gestor (o desd
 tarea, modelo, partidas, tokens, costo en dólares y en pesos con la TRM
 usada, versión de las instrucciones y resultado (correcto, error, rechazado
 por la IA o incompleto). La pestaña **Uso y cupo** muestra las barras del
-cupo, las últimas 50 solicitudes y la **evaluación**: cuántos borradores se
-aceptaron sin cambios, con cambios o se rechazaron (la meta de la fase 1 es
-al menos 70 % aceptados sin cambios).
+cupo, las últimas 50 solicitudes y la **evaluación por tarea** (crear EDT,
+diccionario, insumos): cuántos borradores se aceptaron sin cambios, con
+cambios o se rechazaron (la meta del diccionario es al menos 70 % aceptados
+sin cambios; en Crear EDT, "con cambios" es que se quitaron o corrigieron
+partidas antes de insertarlas).
 
 **Proveedor y modelo.** La app funciona con dos proveedores detrás de la
 misma interfaz y usa el que tenga clave en Vercel (Anthropic primero si hay
@@ -1461,7 +1491,8 @@ ejecutar sin perder datos):
 | `presupuesto_ia_cupos` | Cupo del asistente IA por proyecto (`_global`: valores por defecto y TRM) |
 | `presupuesto_ia_uso` | Registro de cada llamada al modelo: persona, modelo, tokens, costo USD y COP, resultado |
 | `presupuesto_ia_borradores` | Propuestas de la IA con su estado (pendiente, aceptado, rechazado, reemplazado), si se editaron y quién decidió |
-| `presupuesto_ia_gasto` / `presupuesto_ia_resumen` | Lo gastado en el mes y la evaluación de los borradores |
+| `presupuesto_ia_gasto` / `presupuesto_ia_gasto_proyectos` | Lo gastado en el mes por un proyecto y una persona, y por cada proyecto |
+| `presupuesto_ia_resumen_tareas` | La evaluación de los borradores de cada tarea |
 
 RLS está activado y sin políticas: solo el servidor, con la clave de
 servicio, lee y escribe.
@@ -1487,7 +1518,10 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `GET /api/presupuesto/ia` | Estado del asistente: disponible, permisos, cupo del mes, registro de uso y evaluación |
 | `PUT /api/presupuesto/ia/cupo` | `{ proyecto?, global? }`: cupos y TRM (solo administradores del proyecto gestor) |
 | `POST /api/presupuesto/ia/edt` | `{ contexto, partidas }` (hasta 12): propone el diccionario EDT; responde los borradores, el costo y el cupo (402 si no alcanza el cupo) |
-| `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes / `{ decisiones: [{ id, estado, final? }] }` |
+| `POST /api/presupuesto/ia/estructura/capitulos` | `{ descripcion, agrupacion, detalle }`: los capítulos de la EDT |
+| `POST /api/presupuesto/ia/estructura/partidas` | `{ descripcion, agrupacion, detalle, capitulo, otros, catalogo }`: las partidas de un capítulo, guardadas como borrador |
+| `POST /api/presupuesto/ia/insumos` | `{ contexto, partidas, catalogo }`: insumos de un lote; los que faltan quedan como borradores |
+| `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes de una tarea (`?tarea=edt\|estructura\|insumos`) / `{ decisiones: [{ id, estado, final? }] }` (`final` es lo que se aplicó; si difiere de la propuesta cuenta como editado) |
 | `GET` / `PUT /api/presupuesto/programacion` | Leer (`programacion: null` hasta el primer guardado) / guardar `{ programacion, version }` (solo quien edita; 409 `version-conflict`) |
 | `GET /api/presupuesto/elementos/resumen` | Mediciones y conteos por partida |
 | `POST /api/presupuesto/elementos/consulta` | `{ itemIds }` o `{ ifcGuids }` |

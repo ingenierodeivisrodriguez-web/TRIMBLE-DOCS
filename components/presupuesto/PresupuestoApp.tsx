@@ -4,6 +4,7 @@ import { CSSProperties, ReactNode, useCallback, useEffect, useMemo, useState } f
 import { ApuCalculado, calcularPie, calcularSubpresupuesto, factorGastos, listaInsumos, SubpresupuestoCalculado, totalGastos } from "../../lib/presupuesto/calc";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { importarApu, JORNADA, nuevoId, partidaDesdeCatalogo, resolverPresupuesto, snapshotInsumo, subpresupuestoVacio } from "../../lib/presupuesto/doc";
+import type { PropuestaCapitulo, PropuestaInsumo } from "../../lib/presupuesto/ia/tipos";
 import { clonarBloque, conItem, conPartida, conSubpresupuesto } from "../../lib/presupuesto/edit";
 import { exportarExcel, nombreSeguro } from "../../lib/presupuesto/excel";
 import { fecha, fmt } from "../../lib/presupuesto/format";
@@ -150,6 +151,48 @@ export default function PresupuestoApp({
         }),
       })),
     }));
+    return n;
+  }
+
+  /**
+   * An accepted chapter of the AI's EDT, at the end of a subpresupuesto: its title, and its
+   * partidas (repeated under "PISO n" when it goes per floor). Catalog partidas come with their
+   * unit cost analysis; the others are new, without resources. Answers how many partidas it added.
+   */
+  function insertarCapituloIA(destino: string, cap: PropuestaCapitulo, pisos: number): number {
+    const fuente = catalogo ? { insumos: catalogo.insumoMap, partidas: catalogo.partidaMap } : null;
+    let n = 0;
+    setDoc((d) => {
+      let next = d;
+      const nuevos: Item[] = [{ id: nuevoId(), tipo: "titulo", nivel: 0, descripcion: cap.titulo }];
+      const grupos = cap.porPiso && pisos > 1 ? Array.from({ length: pisos }, (_, i) => `PISO ${i + 1}`) : [null];
+      for (const g of grupos) {
+        if (g) nuevos.push({ id: nuevoId(), tipo: "titulo", nivel: 1, descripcion: g });
+        const nivel = g ? 2 : 1;
+        for (const p of cap.partidas) {
+          const delCatalogo = p.catalogoId && fuente ? fuente.partidas.get(p.catalogoId) : undefined;
+          if (delCatalogo && fuente) {
+            const r = partidaDesdeCatalogo(delCatalogo, fuente, next);
+            next = { ...next, insumos: r.insumos, subpartidas: r.subpartidas };
+            nuevos.push({ ...r.item, nivel });
+          } else {
+            nuevos.push({ id: nuevoId(), tipo: "partida", nivel, codigo: "", descripcion: p.descripcion, unidad: p.unidad, omniclass: "", rendimiento: 1, jornada: JORNADA, componentes: [], metrado: 0, origenId: null });
+          }
+          n++;
+        }
+      }
+      return conSubpresupuesto(next, destino, (x) => ({ ...x, items: [...x.items, ...nuevos] }));
+    });
+    return n;
+  }
+
+  /** Accepted AI resources go into the catalog, without a price. */
+  async function crearInsumosIA(lista: PropuestaInsumo[]): Promise<number> {
+    if (!catalogo || !estado?.canEditBase) throw new Error("No puedes modificar el catálogo de este proyecto.");
+    const ahora = new Date().toISOString();
+    const filas = lista.map((x) => ({ id: nuevoId(), codigo: "", descripcion: x.descripcion, unidad: x.unidad, precio: 0, tipo: x.tipo, iu: "", omniclass: "" }));
+    const n = await api.guardarInsumos(filas);
+    s.catalogoGuardado({ insumos: filas.map((f) => ({ ...f, updatedAt: ahora, updatedBy: estado.user.name })) });
     return n;
   }
 
@@ -781,7 +824,19 @@ export default function PresupuestoApp({
           <ImportarDialog api={api} catalogo={catalogo} canEdit={estado.canEditBase} readOnlyNote={readOnlyBase} onImported={s.reloadCatalogo} onClose={close} />
         ) : null;
       case "ia":
-        return <AsistenteIA api={api} doc={doc} spId={sp.id} projectId={projectId} projectName={projectName} aplicarEdt={aplicarEdtIA} onClose={close} />;
+        return <AsistenteIA
+            api={api}
+            doc={doc}
+            spId={sp.id}
+            projectId={projectId}
+            projectName={projectName}
+            catalogo={catalogo}
+            puedeCatalogo={!!catalogo && estado.canEditBase}
+            aplicarEdt={aplicarEdtIA}
+            insertarCapitulo={insertarCapituloIA}
+            crearInsumos={crearInsumosIA}
+            onClose={close}
+          />;
       case "descartar":
         return (
           <ConfirmDialog

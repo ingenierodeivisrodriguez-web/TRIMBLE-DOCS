@@ -4,9 +4,9 @@ import { handle, readJson } from "../../../../../lib/presupuesto/routes";
 
 export const dynamic = "force-dynamic";
 
-/** The drafts waiting for review. */
+/** The drafts of a task (?tarea=edt|estructura|insumos) waiting for review. */
 export async function GET(req: NextRequest) {
-  return handle(req, async (ctx) => NextResponse.json(await listarBorradoresIA(ctx)));
+  return handle(req, async (ctx) => NextResponse.json(await listarBorradoresIA(ctx, req.nextUrl.searchParams.get("tarea") ?? "edt")));
 }
 
 /** { decisiones: [{ id, estado, final? }] }: records what was accepted, edited or rejected. */

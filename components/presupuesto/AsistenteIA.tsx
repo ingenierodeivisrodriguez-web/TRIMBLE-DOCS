@@ -6,20 +6,35 @@ import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { fecha } from "../../lib/presupuesto/format";
 import { estimarCostoCop, fmtCop } from "../../lib/presupuesto/ia/cupo";
 import { partidasParaEdt, SISTEMA_EDT } from "../../lib/presupuesto/ia/edt";
-import { BorradorIA, Confianza, CupoGlobalIA, CupoIA, CupoProyectoIA, EstadoCupo, EstadoIAResponse, TAREA_IA_NOMBRES } from "../../lib/presupuesto/ia/tipos";
-import type { PresupuestoDoc } from "../../lib/presupuesto/types";
+import {
+  BorradorIA,
+  Confianza,
+  CupoGlobalIA,
+  CupoIA,
+  CupoProyectoIA,
+  EstadoCupo,
+  EstadoIAResponse,
+  PropuestaCapitulo,
+  PropuestaInsumo,
+  TAREA_IA_NOMBRES,
+  TareaIA,
+} from "../../lib/presupuesto/ia/tipos";
+import type { Insumo, PartidaCatalogo, PresupuestoDoc } from "../../lib/presupuesto/types";
+import { CrearEdt, InsumosIA } from "./AsistenteIAFases";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "./ui";
 
 /** Partidas per call: each answer must fit in one server function (about a minute). */
 const LOTE = 5;
 const POR_PAGINA = 40;
 
-type Pestana = "edt" | "borradores" | "uso";
+type Pestana = "crear" | "edt" | "borradores" | "insumos" | "uso";
 
 /**
- * The AI assistant: proposes the EDT dictionary of the partidas as drafts,
- * which a person accepts (into the budget, saved as always), edits or
- * rejects; with the monthly quota and the usage log.
+ * The AI assistant: creates the EDT from the project's description, writes
+ * the EDT dictionary of the partidas and finds the resources they need. All
+ * of it comes as drafts that a person accepts (into the budget or the
+ * catalog, saved as always), edits or rejects; with the monthly quota and
+ * the usage log.
  */
 export default function AsistenteIA({
   api,
@@ -27,7 +42,11 @@ export default function AsistenteIA({
   spId,
   projectId,
   projectName,
+  catalogo,
+  puedeCatalogo,
   aplicarEdt,
+  insertarCapitulo,
+  crearInsumos,
   onClose,
 }: {
   api: PresupuestoApi;
@@ -36,11 +55,19 @@ export default function AsistenteIA({
   spId: string;
   projectId: string;
   projectName: string;
+  catalogo: { insumos: Insumo[]; partidas: PartidaCatalogo[] } | null;
+  /** The person can add to the catalog. */
+  puedeCatalogo: boolean;
   /** Puts accepted texts into the budget; answers how many partidas were found. */
   aplicarEdt: (cambios: { itemId: string; descripcion: string; criterios: string }[]) => number;
+  /** Adds an accepted chapter at the end of a subpresupuesto; answers how many partidas it added. */
+  insertarCapitulo: (spId: string, capitulo: PropuestaCapitulo, pisos: number) => number;
+  /** Creates accepted resources in the catalog (without a price). */
+  crearInsumos: (lista: PropuestaInsumo[]) => Promise<number>;
   onClose: () => void;
 }) {
-  const [pestana, setPestana] = useState<Pestana>("edt");
+  const sinPartidas = !doc.subpresupuestos.some((sp) => sp.items.some((i) => i.tipo === "partida"));
+  const [pestana, setPestana] = useState<Pestana>(sinPartidas ? "crear" : "edt");
   const [estado, setEstado] = useState<EstadoIAResponse | null>(null);
   const [error, setError] = useState("");
   const [borradores, setBorradores] = useState<BorradorIA[] | null>(null);
@@ -68,7 +95,9 @@ export default function AsistenteIA({
     if (estado?.puedeUsar && borradores === null) cargarBorradores();
   }, [estado?.puedeUsar, borradores, cargarBorradores]);
 
-  const pendientes = borradores?.length ?? estado?.resumen.pendientes ?? 0;
+  const pendientes = borradores?.length ?? estado?.resumen.edt?.pendientes ?? 0;
+  const onCupo = (cupo: EstadoCupo) => setEstado((e) => (e ? { ...e, cupo } : e));
+  const onResumen = (resumen: EstadoIAResponse["resumen"]) => setEstado((e) => (e ? { ...e, resumen } : e));
 
   return (
     <Modal
@@ -78,11 +107,17 @@ export default function AsistenteIA({
       height="92vh"
       toolbar={
         <div role="tablist" style={{ display: "flex", gap: 4 }}>
+          <Tab activa={pestana === "crear"} onClick={() => setPestana("crear")}>
+            Crear EDT
+          </Tab>
           <Tab activa={pestana === "edt"} onClick={() => setPestana("edt")}>
             Diccionario EDT
           </Tab>
           <Tab activa={pestana === "borradores"} onClick={() => setPestana("borradores")}>
-            Borradores por revisar ({pendientes})
+            Revisar diccionario ({pendientes})
+          </Tab>
+          <Tab activa={pestana === "insumos"} onClick={() => setPestana("insumos")}>
+            Insumos
           </Tab>
           <Tab activa={pestana === "uso"} onClick={() => setPestana("uso")}>
             Uso y cupo
@@ -94,6 +129,31 @@ export default function AsistenteIA({
         {error && <Notice kind="error">{error}</Notice>}
         {!estado ? (
           !error && <div style={{ color: "var(--tc-gray-500)" }}>Cargando el asistente...</div>
+        ) : pestana === "crear" ? (
+          <CrearEdt
+            api={api}
+            doc={doc}
+            spId={spId}
+            projectId={projectId}
+            estado={estado}
+            partidasCatalogo={catalogo?.partidas ?? []}
+            insertarCapitulo={insertarCapitulo}
+            onCupo={onCupo}
+            onResumen={onResumen}
+          />
+        ) : pestana === "insumos" ? (
+          <InsumosIA
+            api={api}
+            doc={doc}
+            spId={spId}
+            projectId={projectId}
+            estado={estado}
+            insumosCatalogo={catalogo?.insumos ?? []}
+            puedeCatalogo={puedeCatalogo}
+            crearInsumos={crearInsumos}
+            onCupo={onCupo}
+            onResumen={onResumen}
+          />
         ) : pestana === "edt" ? (
           <GenerarEdt
             api={api}
@@ -101,7 +161,7 @@ export default function AsistenteIA({
             spId={spId}
             projectId={projectId}
             estado={estado}
-            onCupo={(cupo) => setEstado((e) => (e ? { ...e, cupo } : e))}
+            onCupo={onCupo}
             onTerminado={() => {
               cargarBorradores();
               cargar();
@@ -545,8 +605,6 @@ const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "
 
 function UsoYCupo({ api, estado, projectName, onEstado }: { api: PresupuestoApi; estado: EstadoIAResponse; projectName: string; onEstado: (e: EstadoIAResponse) => void }) {
   const { cupo, resumen } = estado;
-  const decididos = resumen.aceptadosSinCambios + resumen.aceptadosEditados + resumen.rechazados;
-  const pct = (n: number) => (decididos ? `${Math.round((n / decididos) * 100)} %` : "—");
   const mes = +cupo.mes.slice(5, 7) - 1;
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, overflow: "auto" }}>
@@ -564,21 +622,46 @@ function UsoYCupo({ api, estado, projectName, onEstado }: { api: PresupuestoApi;
       </Seccion>
 
       <Seccion titulo="Evaluación de los borradores">
-        <div style={{ display: "flex", gap: 22, flexWrap: "wrap", fontSize: 13.5 }}>
-          <span>
-            Aceptados sin cambios: <strong>{resumen.aceptadosSinCambios}</strong> ({pct(resumen.aceptadosSinCambios)})
-          </span>
-          <span>
-            Aceptados con cambios: <strong>{resumen.aceptadosEditados}</strong> ({pct(resumen.aceptadosEditados)})
-          </span>
-          <span>
-            Rechazados: <strong>{resumen.rechazados}</strong> ({pct(resumen.rechazados)})
-          </span>
-          <span>
-            Por revisar: <strong>{resumen.pendientes}</strong>
-          </span>
-        </div>
-        <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" }}>Meta de la fase 1: al menos el 70 % de los borradores aceptados sin cambios.</p>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+          <thead>
+            <tr>
+              <th style={th}>Tarea</th>
+              <th style={th}>Aceptados sin cambios</th>
+              <th style={th}>Aceptados con cambios</th>
+              <th style={th}>Rechazados</th>
+              <th style={th}>Por revisar</th>
+            </tr>
+          </thead>
+          <tbody>
+            {(["estructura", "edt", "insumos"] as TareaIA[]).map((t) => {
+              const r = resumen[t] ?? { pendientes: 0, aceptadosSinCambios: 0, aceptadosEditados: 0, rechazados: 0 };
+              const decididos = r.aceptadosSinCambios + r.aceptadosEditados + r.rechazados;
+              const pct = (n: number) => (decididos ? ` (${Math.round((n / decididos) * 100)} %)` : "");
+              return (
+                <tr key={t}>
+                  <td style={td}>{TAREA_IA_NOMBRES[t]}</td>
+                  <td style={tdNum}>
+                    {r.aceptadosSinCambios}
+                    {pct(r.aceptadosSinCambios)}
+                  </td>
+                  <td style={tdNum}>
+                    {r.aceptadosEditados}
+                    {pct(r.aceptadosEditados)}
+                  </td>
+                  <td style={tdNum}>
+                    {r.rechazados}
+                    {pct(r.rechazados)}
+                  </td>
+                  <td style={tdNum}>{r.pendientes}</td>
+                </tr>
+              );
+            })}
+          </tbody>
+        </table>
+        <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" }}>
+          Meta: al menos el 70 % de los borradores del diccionario aceptados sin cambios. En Crear EDT, «con cambios» significa que quitaste o corregiste
+          partidas antes de insertarlas.
+        </p>
       </Seccion>
 
       {estado.puedeAdministrar && <AdministrarCupos api={api} estado={estado} projectName={projectName} onEstado={onEstado} />}

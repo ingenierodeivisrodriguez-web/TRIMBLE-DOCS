@@ -1,9 +1,11 @@
 // The AI assistant of Presupuesto: its quota, its usage log and the drafts it
 // proposes (nothing it proposes reaches the budget until a person accepts it).
 
-/** The tasks the assistant does. Phase 1: the work breakdown dictionary. */
-export type TareaIA = "edt";
-export const TAREA_IA_NOMBRES: Record<TareaIA, string> = { edt: "Diccionario EDT" };
+import type { TipoInsumo } from "../types";
+
+/** The tasks the assistant does: the EDT dictionary (phase 1), the resources (phase 2) and the EDT itself (phase 3). */
+export type TareaIA = "edt" | "insumos" | "estructura";
+export const TAREA_IA_NOMBRES: Record<TareaIA, string> = { edt: "Diccionario EDT", insumos: "Insumos", estructura: "Crear EDT" };
 
 /** Monthly quota of a project, set by the platform's administrators (the "gestor" project). */
 export interface CupoIA {
@@ -88,13 +90,27 @@ export interface PropuestaEdt {
   confianza: Confianza;
 }
 
-export interface BorradorIA {
+/** A draft as stored: what it proposes depends on the task. */
+export interface BorradorGenerico {
   id: string;
   tarea: TareaIA;
-  /** The partida (budget row) it is for. */
+  /** What it is for: a partida, a chapter key or a resource key. */
   itemId: string;
-  /** "1.2.3 DESCRIPCIÓN" when it was proposed, to show it even if the row changed. */
   referencia: string;
+  propuesta: unknown;
+  anterior: unknown;
+  estado: EstadoBorrador;
+  editado: boolean;
+  final: unknown;
+  usoId: number | null;
+  creado: string;
+  creadoPor: string;
+  decidido: string | null;
+  decididoPor: string | null;
+}
+
+export interface BorradorIA extends BorradorGenerico {
+  tarea: "edt";
   propuesta: PropuestaEdt;
   /** What the partida had then. */
   anterior: { descripcion: string; criterios: string } | null;
@@ -103,11 +119,95 @@ export interface BorradorIA {
   editado: boolean;
   /** What was applied, when accepted. */
   final: { descripcion: string; criterios: string } | null;
-  usoId: number | null;
-  creado: string;
-  creadoPor: string;
-  decidido: string | null;
-  decididoPor: string | null;
+}
+
+// ---- phase 3: the EDT (chapters and partidas) from the project's description
+
+export type AgrupacionEdt = "capitulos" | "pisos";
+export type DetalleEdt = "resumido" | "detallado";
+
+export interface CapituloIA {
+  /** In capitals, like the catalog. */
+  titulo: string;
+  /** One sentence: what the chapter covers. */
+  alcance: string;
+  /** Its partidas repeat on every typical floor (grouping by floors). */
+  porPiso: boolean;
+}
+
+export interface PartidaPropuestaIA {
+  /** A catalog partida that fits (it brings its unit cost analysis), or null for a new one. */
+  catalogoId: string | null;
+  descripcion: string;
+  unidad: string;
+}
+
+export interface PropuestaCapitulo extends CapituloIA {
+  partidas: PartidaPropuestaIA[];
+}
+
+export interface BorradorEstructuraIA extends BorradorGenerico {
+  tarea: "estructura";
+  propuesta: PropuestaCapitulo;
+  anterior: null;
+  final: PropuestaCapitulo | null;
+}
+
+/** What the person wants built. */
+export interface PeticionEstructura {
+  descripcion: string;
+  agrupacion: AgrupacionEdt;
+  detalle: DetalleEdt;
+}
+
+/** A catalog partida offered to the model. */
+export interface PartidaCatalogoIA {
+  id: string;
+  descripcion: string;
+  unidad: string;
+}
+
+// ---- phase 2: the resources the partidas need
+
+/** A catalog resource offered to the model. */
+export interface InsumoCatalogoIA {
+  id: string;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+}
+
+/** A resource the catalog lacks, proposed to create (without a price: the person sets it). */
+export interface PropuestaInsumo {
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  /** The partidas that need it ("1.2 DESCRIPCIÓN"). */
+  usadoEn: string[];
+}
+
+export interface BorradorInsumoIA extends BorradorGenerico {
+  tarea: "insumos";
+  propuesta: PropuestaInsumo;
+  anterior: null;
+  final: PropuestaInsumo | null;
+}
+
+/** A partida whose resources are asked for. */
+export interface PartidaInsumosIA {
+  id: string;
+  item: string;
+  descripcion: string;
+  unidad: string;
+  capitulo: string;
+}
+
+export interface GenerarInsumosResponse {
+  borradores: BorradorInsumoIA[];
+  /** Resources the catalog already has that these partidas use. */
+  delCatalogo: { id: string; descripcion: string; partidas: string[] }[];
+  costoCop: number;
+  cupo: EstadoCupo;
 }
 
 /** How the drafts were judged: the base evaluation of the assistant. */
@@ -117,6 +217,9 @@ export interface ResumenBorradores {
   aceptadosEditados: number;
   rechazados: number;
 }
+
+/** The evaluation of each task (tasks without drafts are left out). */
+export type ResumenesIA = Partial<Record<TareaIA, ResumenBorradores>>;
 
 export interface EstadoIAResponse {
   /** The server has a key (ANTHROPIC_API_KEY or GEMINI_API_KEY). */
@@ -136,7 +239,7 @@ export interface EstadoIAResponse {
   /** Every project with its own quota, for the administrators. */
   proyectos: CupoProyectoIA[] | null;
   usos: RegistroUsoIA[];
-  resumen: ResumenBorradores;
+  resumen: ResumenesIA;
 }
 
 /** A partida as it is sent to propose its EDT dictionary. */
@@ -162,5 +265,7 @@ export interface GenerarEdtResponse {
 }
 
 export const MAX_PARTIDAS_LOTE_IA = 12;
+/** Catalog entries offered to the model in one call. */
+export const MAX_CATALOGO_IA = 1500;
 export const MAX_CONTEXTO_IA = 2000;
 export const MAX_TEXTO_EDT_IA = 2000;

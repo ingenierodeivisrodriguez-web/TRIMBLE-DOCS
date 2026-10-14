@@ -53,7 +53,9 @@ export function clienteGemini(
       model: m,
       contents: p.usuario,
       config: {
-        systemInstruction: conEsquema ? p.sistema : `${p.sistema}\n\nResponde solo con un objeto JSON que cumpla este esquema (JSON Schema):\n${JSON.stringify(p.esquema)}`,
+        systemInstruction:
+          (p.datosFijos ? `${p.sistema}\n\n${p.datosFijos}` : p.sistema) +
+          (conEsquema ? "" : `\n\nResponde solo con un objeto JSON que cumpla este esquema (JSON Schema):\n${JSON.stringify(p.esquema)}`),
         responseMimeType: "application/json",
         ...(conEsquema ? { responseJsonSchema: p.esquema } : {}),
         maxOutputTokens: p.maxTokens,

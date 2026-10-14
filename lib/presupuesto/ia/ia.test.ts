@@ -11,7 +11,10 @@ import { leerRespuestaEdt, mensajeEdt, partidasParaEdt } from "./edt";
 import { ApiError } from "@google/genai";
 import { clienteGemini, leerRespuestaGemini, mensajeGoogle, ModelosGemini } from "./gemini";
 import { elegirProveedor } from "./proveedor";
-import { decidirBorradoresIA, generarEdtIA, getEstadoIA, guardarCupoIA, listarBorradoresIA } from "./servicio";
+import { candidatos, leerInsumos } from "./insumos";
+import { leerCapitulos, leerPartidas, pisosDe } from "./estructura";
+import { decidirBorradoresIA, generarEdtIA, generarInsumosIA, getEstadoIA, guardarCupoIA, listarBorradoresIA, proponerCapitulosIA, proponerPartidasIA } from "./servicio";
+import type { BorradorEstructuraIA, BorradorInsumoIA } from "./tipos";
 import type { PartidaEdtIA } from "./tipos";
 
 const admin: Caller = { id: "u1", name: "Ana", isAdmin: true };
@@ -215,7 +218,7 @@ describe("asistente IA: permisos, cupo, registro y borradores", () => {
     const estado = await getEstadoIA(ctx(store, admin));
     assert.equal(estado.usos.length, 1);
     assert.deepEqual([estado.usos[0].estado, estado.usos[0].items, estado.usos[0].userName, estado.usos[0].versionPrompt], ["ok", 2, "Ana", "edt-co-1"]);
-    assert.equal(estado.resumen.pendientes, 2);
+    assert.equal(estado.resumen.edt?.pendientes, 2);
     assert.deepEqual(estado.usos.length && (await getEstadoIA(ctx(store, lector))).usos, []); // readers don't see the log
   });
 
@@ -258,7 +261,7 @@ describe("asistente IA: permisos, cupo, registro y borradores", () => {
         { id: b3.id, estado: "rechazado" },
       ],
     });
-    assert.deepEqual(r, { decididos: 3, resumen: { pendientes: 0, aceptadosSinCambios: 1, aceptadosEditados: 1, rechazados: 1 } });
+    assert.deepEqual(r, { decididos: 3, resumen: { edt: { pendientes: 0, aceptadosSinCambios: 1, aceptadosEditados: 1, rechazados: 1 } } });
     // Already decided: nothing changes.
     assert.equal((await decidirBorradoresIA(ctx(store, admin), { decisiones: [{ id: b1.id, estado: "rechazado" }] })).decididos, 0);
     await assert.rejects(decidirBorradoresIA(ctx(store, lector), { decisiones: [{ id: b1.id, estado: "rechazado" }] }), status(403));
@@ -360,5 +363,129 @@ describe("respaldo de Google", () => {
       }) as unknown as ModelosGemini;
     await assert.rejects(clienteGemini("k", "gemini-x", "gemini-3.5-flash-lite", falla(404)).generar(peticion), /NOT_FOUND: Model not found/);
     await assert.rejects(clienteGemini("k", "gemini-x", null, falla(503)).generar(peticion), /falló después de reintentar/);
+  });
+});
+
+describe("fase 3: crear la EDT desde la descripción", () => {
+  const catalogo = [
+    { id: "cat-1", descripcion: "CONCRETO 3000 PSI COLUMNAS", unidad: "M3" },
+    { id: "cat-2", descripcion: "PAÑETE LISO MUROS", unidad: "M2" },
+  ];
+
+  it("lee capítulos sin repetir, en mayúsculas, y por piso solo si se agrupa por pisos", () => {
+    const texto = JSON.stringify({
+      capitulos: [
+        { titulo: "Estructura", alcance: "Columnas y placas.", porPiso: true },
+        { titulo: "ESTRUCTURA", alcance: "Repetido", porPiso: false },
+        { titulo: "", alcance: "Sin nombre", porPiso: false },
+        { titulo: "Cubierta", alcance: "Impermeabilización.", porPiso: false },
+      ],
+    });
+    assert.deepEqual(leerCapitulos(texto, "pisos"), [
+      { titulo: "ESTRUCTURA", alcance: "Columnas y placas.", porPiso: true },
+      { titulo: "CUBIERTA", alcance: "Impermeabilización.", porPiso: false },
+    ]);
+    assert.equal(leerCapitulos(texto, "capitulos")[0].porPiso, false);
+    assert.throws(() => leerCapitulos(JSON.stringify({ capitulos: [] }), "capitulos"), /no propuso/);
+  });
+
+  it("las partidas del catálogo llegan con su descripción y unidad; las demás son nuevas", () => {
+    const texto = JSON.stringify({
+      partidas: [
+        { catalogo: "P1", descripcion: "otra cosa", unidad: "UN" },
+        { catalogo: "P1", descripcion: "repetida", unidad: "M3" },
+        { catalogo: null, descripcion: "Acero de refuerzo 60000 psi", unidad: "kg" },
+        { catalogo: "P99", descripcion: "Código que no existe", unidad: "m2" },
+      ],
+    });
+    assert.deepEqual(leerPartidas(texto, catalogo), [
+      { catalogoId: "cat-1", descripcion: "CONCRETO 3000 PSI COLUMNAS", unidad: "M3" },
+      { catalogoId: null, descripcion: "ACERO DE REFUERZO 60000 PSI", unidad: "KG" },
+      { catalogoId: null, descripcion: "CÓDIGO QUE NO EXISTE", unidad: "M2" },
+    ]);
+    assert.equal(pisosDe("Edificio de 15 pisos con 4 apartamentos por piso"), 15);
+    assert.equal(pisosDe("Bodega"), 1);
+  });
+
+  it("propone capítulos y luego las partidas de cada uno, con el catálogo como datos fijos", async () => {
+    const store = memoryStore();
+    await guardarDocumento(ctx(store, admin), { doc: documentoVacio(), version: 0 });
+    await guardarCupoIA(ctx(store, vendedor), { proyecto: { habilitada: true, cupoProyectoCop: 100_000, cupoUsuarioCop: 50_000 } });
+    const pedido = { descripcion: "Edificio de vivienda de 15 pisos, 4 apartamentos por piso", agrupacion: "pisos", detalle: "resumido" };
+    const caps = falsa(() => ({ texto: JSON.stringify({ capitulos: [{ titulo: "Estructura", alcance: "Columnas y placas.", porPiso: true }] }) }));
+    const r = await proponerCapitulosIA(ctx(store, admin, caps.cliente), pedido);
+    assert.deepEqual(r.capitulos, [{ titulo: "ESTRUCTURA", alcance: "Columnas y placas.", porPiso: true }]);
+    await assert.rejects(proponerCapitulosIA(ctx(store, admin, caps.cliente), { ...pedido, descripcion: "corto" }), /más de detalle/);
+
+    const parts = falsa(() => ({ texto: JSON.stringify({ partidas: [{ catalogo: "P1", descripcion: "x", unidad: "x" }, { catalogo: null, descripcion: "Placa maciza", unidad: "m2" }] }) }));
+    const { borrador } = await proponerPartidasIA(ctx(store, admin, parts.cliente), { ...pedido, capitulo: r.capitulos[0], otros: ["CUBIERTA"], catalogo });
+    assert.match(parts.llamadas[0].datosFijos!, /P1 \| CONCRETO 3000 PSI COLUMNAS \| M3/);
+    assert.match(parts.llamadas[0].usuario, /CUBIERTA/);
+    assert.deepEqual(borrador.propuesta.partidas.map((x) => x.catalogoId), ["cat-1", null]);
+    // Asking again for the same chapter replaces its pending draft.
+    await proponerPartidasIA(ctx(store, admin, parts.cliente), { ...pedido, capitulo: r.capitulos[0], otros: [], catalogo });
+    const pendientes = (await listarBorradoresIA(ctx(store, admin), "estructura")).borradores as BorradorEstructuraIA[];
+    assert.equal(pendientes.length, 1);
+
+    // Accepting with changes counts as edited; the evaluation is per task.
+    const final = { ...pendientes[0].propuesta, partidas: pendientes[0].propuesta.partidas.slice(0, 1) };
+    const d = await decidirBorradoresIA(ctx(store, admin), { decisiones: [{ id: pendientes[0].id, estado: "aceptado", final }] });
+    assert.deepEqual(d.resumen.estructura, { pendientes: 0, aceptadosSinCambios: 0, aceptadosEditados: 1, rechazados: 0 });
+    assert.equal(d.resumen.edt, undefined);
+  });
+});
+
+describe("fase 2: insumos de las partidas", () => {
+  const catalogo = [
+    { id: "i-1", descripcion: "OFICIAL", unidad: "HH", tipo: "MO" as const },
+    { id: "i-2", descripcion: "CEMENTO GRIS 50 KG", unidad: "BLS", tipo: "MT" as const },
+  ];
+  const partidas = [
+    { id: "p1", item: "1.1", descripcion: "PAÑETE LISO MUROS", unidad: "M2", capitulo: "OBRA GRIS" },
+    { id: "p2", item: "1.2", descripcion: "MAMPOSTERÍA BLOQUE No. 5", unidad: "M2", capitulo: "OBRA GRIS" },
+  ];
+
+  it("usa los del catálogo, junta los nuevos repetidos y reconoce los que el catálogo ya tiene", () => {
+    const texto = JSON.stringify({
+      insumos: [
+        { catalogo: "I1", descripcion: "Oficial", unidad: "HH", tipo: "MO", partidas: ["p1", "p2"] },
+        { catalogo: null, descripcion: "Cemento gris 50 kg", unidad: "bls", tipo: "MT", partidas: ["p1"] },
+        { catalogo: null, descripcion: "Arena de pega", unidad: "m3", tipo: "MT", partidas: ["p1"] },
+        { catalogo: null, descripcion: "ARENA DE PEGA", unidad: "M3", tipo: "MT", partidas: ["p2", "zz"] },
+        { catalogo: null, descripcion: "Bloque No. 5", unidad: "un", tipo: "XX", partidas: ["zz"] },
+      ],
+    });
+    const r = leerInsumos(texto, partidas, catalogo);
+    assert.deepEqual([...r.delCatalogo].map(([id, s]) => [id, [...s].sort()]), [
+      ["i-1", ["p1", "p2"]],
+      ["i-2", ["p1"]],
+    ]);
+    assert.deepEqual([...r.nuevos.values()].map((n) => [n.descripcion, n.unidad, n.tipo, [...n.partidas]]), [["ARENA DE PEGA", "M3", "MT", ["p1", "p2"]]]);
+  });
+
+  it("si el catálogo es grande, ofrece los insumos que más se parecen a las partidas", () => {
+    const grande = Array.from({ length: 50 }, (_, i) => ({ descripcion: `OTRO ${i}` })).concat([{ descripcion: "BLOQUE DE CONCRETO No. 5" }]);
+    assert.deepEqual(candidatos(grande, ["MAMPOSTERÍA BLOQUE No. 5"], 3).map((c) => c.descripcion), ["OTRO 0", "OTRO 1", "BLOQUE DE CONCRETO No. 5"]);
+  });
+
+  it("guarda como borradores los que faltan, con las partidas que los usan", async () => {
+    const store = memoryStore();
+    await guardarDocumento(ctx(store, admin), { doc: documentoVacio(), version: 0 });
+    await guardarCupoIA(ctx(store, vendedor), { proyecto: { habilitada: true, cupoProyectoCop: 100_000, cupoUsuarioCop: 50_000 } });
+    const { cliente, llamadas } = falsa(() => ({
+      texto: JSON.stringify({ insumos: [{ catalogo: "I2", descripcion: "", unidad: "", tipo: "MT", partidas: ["p1"] }, { catalogo: null, descripcion: "Arena de pega", unidad: "m3", tipo: "MT", partidas: ["p1", "p2"] }] }),
+    }));
+    const r = await generarInsumosIA(ctx(store, admin, cliente), { contexto: "", partidas, catalogo });
+    assert.match(llamadas[0].datosFijos!, /I2 \| MT \| CEMENTO GRIS 50 KG \| BLS/);
+    assert.deepEqual(r.delCatalogo, [{ id: "i-2", descripcion: "CEMENTO GRIS 50 KG", partidas: ["1.1 PAÑETE LISO MUROS"] }]);
+    assert.deepEqual(r.borradores.map((b) => b.propuesta), [{ descripcion: "ARENA DE PEGA", unidad: "M3", tipo: "MT", usadoEn: ["1.1 PAÑETE LISO MUROS", "1.2 MAMPOSTERÍA BLOQUE No. 5"] }]);
+    // The same new resource in a later batch keeps the partidas of both.
+    const otra = falsa(() => ({ texto: JSON.stringify({ insumos: [{ catalogo: null, descripcion: "ARENA DE PEGA", unidad: "M3", tipo: "MT", partidas: ["p3"] }] }) }));
+    await generarInsumosIA(ctx(store, admin, otra.cliente), { contexto: "", partidas: [{ id: "p3", item: "2.1", descripcion: "PAÑETE FACHADA", unidad: "M2", capitulo: "FACHADA" }], catalogo });
+    const b = ((await listarBorradoresIA(ctx(store, admin), "insumos")).borradores as BorradorInsumoIA[])[0];
+    assert.deepEqual(b.propuesta.usadoEn, ["1.1 PAÑETE LISO MUROS", "1.2 MAMPOSTERÍA BLOQUE No. 5", "2.1 PAÑETE FACHADA"]);
+    await assert.rejects(decidirBorradoresIA(ctx(store, admin), { decisiones: [{ id: b.id, estado: "aceptado", final: { ...b.propuesta, tipo: "XX" } }] }), status(400));
+    const d = await decidirBorradoresIA(ctx(store, admin), { decisiones: [{ id: b.id, estado: "aceptado", final: { ...b.propuesta, unidad: "m3 suelto" } }] });
+    assert.deepEqual(d.resumen.insumos, { pendientes: 0, aceptadosSinCambios: 0, aceptadosEditados: 1, rechazados: 0 });
   });
 });
