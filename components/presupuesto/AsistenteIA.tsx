@@ -282,7 +282,13 @@ function GenerarEdt({
           Disponible este mes: {fmtCop(Math.max(0, Math.min(estado.cupo.cupoProyectoCop - estado.cupo.gastoProyectoCop, estado.cupo.cupoUsuarioCop - estado.cupo.gastoUsuarioCop)))}
         </span>
         {!corriendo ? (
-          <button type="button" style={{ ...acceptButton, marginLeft: "auto" }} disabled={bloqueado || partidas.length === 0} onClick={generar}>
+          <button
+            type="button"
+            style={{ ...acceptButton, marginLeft: "auto", ...(bloqueado || partidas.length === 0 ? apagado : {}) }}
+            disabled={bloqueado || partidas.length === 0}
+            title={estado.cupo.nivel === "deshabilitada" || estado.cupo.nivel === "agotado" ? estado.cupo.mensaje : undefined}
+            onClick={generar}
+          >
             Generar borradores
           </button>
         ) : (
@@ -406,7 +412,7 @@ function Borradores({
           />
           Seleccionar los de esta página
         </label>
-        <button type="button" style={{ ...acceptButton, padding: "6px 14px", fontSize: 14 }} disabled={ocupado || !seleccionados.length} onClick={() => decidir(seleccionados, "aceptado")}>
+        <button type="button" style={{ ...acceptButton, padding: "6px 14px", fontSize: 14, ...(ocupado || !seleccionados.length ? apagado : {}) }} disabled={ocupado || !seleccionados.length} onClick={() => decidir(seleccionados, "aceptado")}>
           Aceptar seleccionados ({seleccionados.length})
         </button>
         <button type="button" style={{ ...botonSec, color: "#8a1c14" }} disabled={ocupado || !seleccionados.length} onClick={() => decidir(seleccionados, "rechazado")}>
@@ -707,3 +713,5 @@ const mini: CSSProperties = { display: "block", width: "100%", border: `1px soli
 const botonSec: CSSProperties = { border: `1px solid ${C.border}`, background: "#fff", borderRadius: 4, padding: "6px 12px", cursor: "pointer", fontFamily: "inherit", fontSize: 13.5 };
 const linkBtn: CSSProperties = { border: "none", background: "transparent", color: "var(--tc-blue-700)", textDecoration: "underline", cursor: "pointer", padding: 0, font: "inherit" };
 const h4: CSSProperties = { margin: "4px 0 8px", fontSize: 13.5 };
+/** A button that can not be used now. */
+const apagado: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
