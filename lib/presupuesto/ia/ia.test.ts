@@ -8,7 +8,8 @@ import { memoryStore, PresupuestoStore } from "../store";
 import type { ClienteIA, PeticionIA, RespuestaIA } from "./claude";
 import { aCop, costoUsd, disponibleCop, estadoCupo, fmtCop, inicioDeMes } from "./cupo";
 import { leerRespuestaEdt, mensajeEdt, partidasParaEdt } from "./edt";
-import { leerRespuestaGemini, mensajeGoogle } from "./gemini";
+import { ApiError } from "@google/genai";
+import { clienteGemini, leerRespuestaGemini, mensajeGoogle, ModelosGemini } from "./gemini";
 import { elegirProveedor } from "./proveedor";
 import { decidirBorradoresIA, generarEdtIA, getEstadoIA, guardarCupoIA, listarBorradoresIA } from "./servicio";
 import type { PartidaEdtIA } from "./tipos";
@@ -326,5 +327,38 @@ describe("errores de Google", () => {
       "UNAVAILABLE: The model is overloaded. Please try again later."
     );
     assert.equal(mensajeGoogle("algo raro"), "algo raro");
+  });
+});
+
+describe("respaldo de Google", () => {
+  const peticion = { sistema: "Instrucciones", usuario: "Datos", esquema: { type: "object" }, maxTokens: 1000, esfuerzo: "low" as const };
+  const ok = (texto: string) => ({ text: texto, usageMetadata: { promptTokenCount: 10, candidatesTokenCount: 5 }, candidates: [{ finishReason: "STOP" }] });
+
+  it("si el modelo principal falla en Google, responde el de respaldo con una solicitud más sencilla", async () => {
+    const pedidas: { model: string; config?: { responseJsonSchema?: unknown; systemInstruction?: unknown } }[] = [];
+    const sdk = {
+      async generateContent(p: { model: string; config?: { responseJsonSchema?: unknown; systemInstruction?: unknown } }) {
+        pedidas.push(p);
+        if (p.model === "gemini-3.8-flash") throw new ApiError({ status: 500, message: '{"error":{"code":500,"message":"Internal error","status":"INTERNAL"}}' });
+        return ok("{}");
+      },
+    } as unknown as ModelosGemini;
+    const r = await clienteGemini("k", "gemini-3.8-flash", "gemini-3.5-flash-lite", sdk).generar(peticion);
+    assert.equal(r.modelo, "gemini-3.5-flash-lite");
+    assert.equal(r.tokens[0].modelo, "gemini-3.5-flash-lite");
+    assert.ok(pedidas[0].config?.responseJsonSchema);
+    assert.equal(pedidas[1].config?.responseJsonSchema, undefined);
+    assert.match(String(pedidas[1].config?.systemInstruction), /JSON Schema/);
+  });
+
+  it("no usa el respaldo para errores de la solicitud o de límites, y explica qué dijo Google", async () => {
+    const falla = (status: number) =>
+      ({
+        async generateContent() {
+          throw new ApiError({ status, message: '{"error":{"message":"Model not found","status":"NOT_FOUND"}}' });
+        },
+      }) as unknown as ModelosGemini;
+    await assert.rejects(clienteGemini("k", "gemini-x", "gemini-3.5-flash-lite", falla(404)).generar(peticion), /NOT_FOUND: Model not found/);
+    await assert.rejects(clienteGemini("k", "gemini-x", null, falla(503)).generar(peticion), /falló después de reintentar/);
   });
 });

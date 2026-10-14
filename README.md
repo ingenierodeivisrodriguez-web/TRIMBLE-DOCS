@@ -1415,7 +1415,11 @@ las dos; `PRESUPUESTO_IA_PROVEEDOR` lo fuerza):
   gratuito** con límites de solicitudes por minuto y por día (los muestra AI
   Studio); en ese nivel **Google puede usar lo enviado para mejorar sus
   productos**, así que sirve para pilotos con datos no confidenciales. En el
-  nivel de pago no.
+  nivel de pago no. Si Google falla de su lado (errores 500/503), el servidor reintenta dos
+  veces y, si sigue fallando, prueba una vez con `gemini-3.5-flash-lite` y una
+  solicitud más sencilla (`PRESUPUESTO_IA_MODELO_RESPALDO` lo cambia; `no` lo
+  apaga). El registro de uso dice qué modelo respondió, y los errores muestran
+  el mensaje de Google.
 
 `PRESUPUESTO_IA_MODELO` cambia el modelo (por ejemplo `claude-sonnet-5-5`
 o `gemini-3.5-flash-lite`); su nombre también elige el proveedor. El costo

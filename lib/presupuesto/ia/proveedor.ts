@@ -2,7 +2,7 @@
 // (Gemini, AI Studio). Chosen with Vercel variables; the rest of the app
 // doesn't know which one answers.
 import { clienteClaude, ClienteIA, MODELO_POR_DEFECTO } from "./claude";
-import { clienteGemini, MODELO_GEMINI_POR_DEFECTO } from "./gemini";
+import { clienteGemini, MODELO_GEMINI_POR_DEFECTO, MODELO_GEMINI_RESPALDO } from "./gemini";
 
 export type Proveedor = "anthropic" | "google";
 
@@ -43,5 +43,8 @@ export function elegirProveedor(env: Env): { proveedor: Proveedor; apiKey: strin
 export function clienteIA(env: Env = process.env): ClienteIA | null {
   const p = elegirProveedor(env);
   if (!p) return null;
-  return p.proveedor === "google" ? clienteGemini(p.apiKey, p.modelo) : clienteClaude(p.apiKey, p.modelo);
+  if (p.proveedor === "anthropic") return clienteClaude(p.apiKey, p.modelo);
+  // PRESUPUESTO_IA_MODELO_RESPALDO changes Google's backup model; "no" turns it off.
+  const respaldo = env.PRESUPUESTO_IA_MODELO_RESPALDO?.trim();
+  return clienteGemini(p.apiKey, p.modelo, respaldo === "no" ? null : respaldo || MODELO_GEMINI_RESPALDO);
 }

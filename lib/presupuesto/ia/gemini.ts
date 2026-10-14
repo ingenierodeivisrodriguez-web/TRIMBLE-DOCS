@@ -7,6 +7,15 @@ import type { ClienteIA, RespuestaIA } from "./claude";
 
 /** Has a free tier in AI Studio; good for a pilot. */
 export const MODELO_GEMINI_POR_DEFECTO = "gemini-3.8-flash";
+/** Tried when the main model keeps failing on Google's side (500/503). */
+export const MODELO_GEMINI_RESPALDO = "gemini-3.5-flash-lite";
+
+type PeticionGemini = Parameters<GoogleGenAI["models"]["generateContent"]>[0];
+type RespuestaGemini = Awaited<ReturnType<GoogleGenAI["models"]["generateContent"]>>;
+/** The part of the SDK used (tests pass a fake). */
+export interface ModelosGemini {
+  generateContent(p: PeticionGemini): Promise<RespuestaGemini>;
+}
 
 const NIVEL: Record<"low" | "medium" | "high", ThinkingLevel> = { low: ThinkingLevel.LOW, medium: ThinkingLevel.MEDIUM, high: ThinkingLevel.HIGH };
 
@@ -20,34 +29,53 @@ const BLOQUEOS = new Set<string>([
   FinishReason.LANGUAGE,
 ]);
 
-export function clienteGemini(apiKey: string, modelo: string = MODELO_GEMINI_POR_DEFECTO): ClienteIA {
+/**
+ * @param respaldo Model tried once if the main one fails on Google's side (null: none). That
+ * request is simpler: JSON mode with the schema written in the instructions instead of
+ * Google's schema option (the answer is validated the same way afterwards).
+ */
+export function clienteGemini(
+  apiKey: string,
+  modelo: string = MODELO_GEMINI_POR_DEFECTO,
+  respaldo: string | null = MODELO_GEMINI_RESPALDO,
+  modelos?: ModelosGemini
+): ClienteIA {
   // Each call is a small batch and must end within the server function (60 s). A busy or failing
   // server (500/503) answers fast, so it is retried twice after 1.5 and 3 s; limits (429) are not.
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: { timeout: 50_000, retryOptions: { attempts: 3, initialDelay: 1.5, maxDelay: 4, httpStatusCodes: [500, 502, 503, 504] } },
-  });
+  const sdk =
+    modelos ??
+    new GoogleGenAI({
+      apiKey,
+      httpOptions: { timeout: 45_000, retryOptions: { attempts: 3, initialDelay: 1.5, maxDelay: 4, httpStatusCodes: [500, 502, 503, 504] } },
+    }).models;
+  const pedir = (m: string, p: Parameters<ClienteIA["generar"]>[0], conEsquema: boolean) =>
+    sdk.generateContent({
+      model: m,
+      contents: p.usuario,
+      config: {
+        systemInstruction: conEsquema ? p.sistema : `${p.sistema}\n\nResponde solo con un objeto JSON que cumpla este esquema (JSON Schema):\n${JSON.stringify(p.esquema)}`,
+        responseMimeType: "application/json",
+        ...(conEsquema ? { responseJsonSchema: p.esquema } : {}),
+        maxOutputTokens: p.maxTokens,
+        thinkingConfig: { thinkingLevel: NIVEL[p.esfuerzo] },
+      },
+    });
   return {
     proveedor: "Google",
     modelo,
     async generar(p) {
-      let r;
       try {
-        r = await ai.models.generateContent({
-          model: modelo,
-          contents: p.usuario,
-          config: {
-            systemInstruction: p.sistema,
-            responseMimeType: "application/json",
-            responseJsonSchema: p.esquema,
-            maxOutputTokens: p.maxTokens,
-            thinkingConfig: { thinkingLevel: NIVEL[p.esfuerzo] },
-          },
-        });
+        return leerRespuestaGemini(await pedir(modelo, p, true), modelo);
       } catch (err) {
-        throw errorDeGemini(err);
+        const fallaDeGoogle = err instanceof ApiError && err.status >= 500;
+        if (!fallaDeGoogle || !respaldo || respaldo === modelo) throw errorDeGemini(err);
+        console.error(`[presupuesto-ia] ${modelo} falló en Google (${(err as ApiError).status}: ${mensajeGoogle((err as ApiError).message)}); se intenta con ${respaldo}.`);
+        try {
+          return leerRespuestaGemini(await pedir(respaldo, p, false), respaldo);
+        } catch (err2) {
+          throw errorDeGemini(err2);
+        }
       }
-      return leerRespuestaGemini(r, modelo);
     },
   };
 }
