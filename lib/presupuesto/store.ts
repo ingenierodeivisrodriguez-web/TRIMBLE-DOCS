@@ -77,6 +77,8 @@ export interface PresupuestoStore {
   /** Pesos spent since `desde` by the project and by one person. */
   gastoIA(projectId: string, desde: string, userId: string): Promise<{ proyecto: number; usuario: number }>;
   usosIA(projectId: string, limite: number): Promise<RegistroUsoIA[]>;
+  /** Calls one person made since `desde` (counted up to 100). */
+  llamadasIA(projectId: string, userId: string, desde: string): Promise<number>;
   /** Saves new drafts; the pending ones of the same partidas and task are marked "reemplazado". */
   guardarBorradoresIA(projectId: string, borradores: BorradorGenerico[]): Promise<void>;
   borradoresIA(projectId: string, filtro: { estado?: EstadoBorrador; tarea?: TareaIA; ids?: string[] }): Promise<BorradorGenerico[]>;
@@ -648,6 +650,15 @@ function supabaseStore(): PresupuestoStore | null {
       });
     },
 
+    async llamadasIA(projectId, userId, desde) {
+      return ia(async () => {
+        const rows = await json<{ id: number }[]>(
+          `/presupuesto_ia_uso?project_id=${eq(projectId)}&user_id=${eq(userId)}&creado=gte.${encodeURIComponent(desde)}&select=id&limit=100`
+        );
+        return rows.length;
+      });
+    },
+
     async guardarBorradoresIA(projectId, borradores) {
       if (!borradores.length) return;
       await ia(async () => {
@@ -992,6 +1003,10 @@ export function memoryStore(): PresupuestoStore {
     },
     async usosIA(projectId, limite) {
       return usosIA.filter((u) => u.projectId === projectId).reverse().slice(0, limite);
+    },
+    async llamadasIA(projectId, userId, desde) {
+      const d = Date.parse(desde);
+      return Math.min(usosIA.filter((u) => u.projectId === projectId && u.userId === userId && Date.parse(u.creado) >= d).length, 100);
     },
     async guardarBorradoresIA(projectId, lista) {
       const items = new Set(lista.map((b) => `${b.tarea}|${b.itemId}`));

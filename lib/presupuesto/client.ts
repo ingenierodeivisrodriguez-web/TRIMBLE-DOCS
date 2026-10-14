@@ -1,5 +1,6 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type {
+  BorradorApuIA,
   BorradorEstructuraIA,
   BorradorIA,
   BorradorInsumoIA,
@@ -8,13 +9,17 @@ import type {
   CupoIA,
   EstadoCupo,
   EstadoIAResponse,
+  GenerarApuResponse,
   GenerarEdtResponse,
   GenerarInsumosResponse,
   InsumoCatalogoIA,
+  MensajeChatIA,
+  PartidaApuIA,
   PartidaCatalogoIA,
   PartidaEdtIA,
   PartidaInsumosIA,
   PeticionEstructura,
+  RespuestaChatIA,
   ResumenesIA,
 } from "./ia/tipos";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
@@ -79,6 +84,11 @@ export interface PresupuestoApi {
     p: PeticionEstructura & { capitulo: CapituloIA; otros: string[]; catalogo: PartidaCatalogoIA[] }
   ): Promise<{ borrador: BorradorEstructuraIA; costoCop: number; cupo: EstadoCupo }>;
   generarInsumosIA(contexto: string, partidas: PartidaInsumosIA[], catalogo: InsumoCatalogoIA[]): Promise<GenerarInsumosResponse>;
+  /** The analysis of a batch of partidas; with `evaluar`, nothing is saved (to compare with the catalog). */
+  generarApuIA(p: { contexto: string; partidas: PartidaApuIA[]; catalogo: InsumoCatalogoIA[]; evaluar?: boolean }): Promise<GenerarApuResponse>;
+  borradoresApuIA(): Promise<BorradorApuIA[]>;
+  /** A question about the open budget, sent as text. */
+  chatIA(p: { pregunta: string; contexto: string; historial: MensajeChatIA[] }): Promise<RespuestaChatIA>;
   getProgramacion(): Promise<ProgramacionResponse>;
   guardarProgramacion(programacion: Programacion, version: number): Promise<{ version: number }>;
   getResumen(): Promise<ResumenElementos>;
@@ -151,6 +161,9 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     proponerCapitulosIA: (p) => request("/ia/estructura/capitulos", send("POST", p)),
     proponerPartidasIA: (p) => request("/ia/estructura/partidas", send("POST", p)),
     generarInsumosIA: (contexto, partidas, catalogo) => request("/ia/insumos", send("POST", { contexto, partidas, catalogo })),
+    generarApuIA: (p) => request("/ia/apu", send("POST", p)),
+    borradoresApuIA: () => request<{ borradores: BorradorApuIA[] }>("/ia/borradores?tarea=apu").then((r) => r.borradores),
+    chatIA: (p) => request("/ia/chat", send("POST", p)),
     decidirBorradoresIA: (decisiones) => request("/ia/borradores", send("PUT", { decisiones })),
     getProgramacion: () => request("/programacion"),
     guardarProgramacion: (programacion, version) => request("/programacion", send("PUT", { programacion, version })),

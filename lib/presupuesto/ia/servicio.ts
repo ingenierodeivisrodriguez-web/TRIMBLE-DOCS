@@ -3,9 +3,13 @@
 // call costs, and drafts that only reach the budget when a person accepts them.
 import { isValidProjectId } from "../../access";
 import { ServiceError } from "../../propiedades/service";
+import { redondear } from "../calc";
+import { JORNADA } from "../doc";
 import { plegar } from "../format";
 import { Ctx, requireEdit, puedeEditar } from "../service";
 import { TipoInsumo, TIPOS_INSUMO } from "../types";
+import { claveLinea, ESQUEMA_APU, leerApu, MAX_CUADRILLA, maxTokensApu, mensajeApu, SISTEMA_APU, VERSION_PROMPT_APU } from "./apu";
+import { ESQUEMA_CHAT, leerChat, mensajeChat, presupuestoComoDatos, SISTEMA_CHAT, VERSION_PROMPT_CHAT } from "./chat";
 import { errorDeIA, RespuestaIA } from "./claude";
 import { aCop, costoUsd, disponibleCop, estadoCupo, estimarCostoCop, fmtCop, globalPorDefecto, inicioDeMes } from "./cupo";
 import { ESQUEMA_EDT, leerRespuestaEdt, maxTokensEdt, mensajeEdt, SISTEMA_EDT, VERSION_PROMPT_EDT } from "./edt";
@@ -25,6 +29,7 @@ import {
 } from "./estructura";
 import { catalogoInsumosTexto, ESQUEMA_INSUMOS, leerInsumos, maxTokensInsumos, mensajeInsumos, SISTEMA_INSUMOS, VERSION_PROMPT_INSUMOS } from "./insumos";
 import {
+  BorradorApuIA,
   BorradorEstructuraIA,
   BorradorGenerico,
   BorradorIA,
@@ -35,22 +40,37 @@ import {
   CupoProyectoIA,
   EstadoCupo,
   EstadoIAResponse,
+  GenerarApuResponse,
   GenerarEdtResponse,
   GenerarInsumosResponse,
   InsumoCatalogoIA,
+  LineaApuIA,
   MAX_CATALOGO_IA,
+  MAX_CONTEXTO_CHAT,
   MAX_CONTEXTO_IA,
+  MAX_HISTORIAL_CHAT,
+  MAX_LINEAS_APU,
+  MAX_LLAMADAS_MINUTO_IA,
+  MAX_PARTIDAS_LOTE_APU,
   MAX_PARTIDAS_LOTE_IA,
+  MAX_PREGUNTA_CHAT,
+  MAX_REFERENCIAS_APU,
   MAX_TEXTO_EDT_IA,
+  MensajeChatIA,
+  PartidaApuIA,
   PartidaCatalogoIA,
   PartidaEdtIA,
   PartidaInsumosIA,
   PeticionEstructura,
+  PropuestaApu,
   PropuestaCapitulo,
   PropuestaInsumo,
+  ReferenciaApuIA,
   RegistroUsoIA,
+  RespuestaChatIA,
   ResumenesIA,
   TareaIA,
+  TAREAS_CON_BORRADORES,
 } from "./tipos";
 
 type PropuestaEdtFinal = { descripcion: string; criterios: string };
@@ -280,8 +300,12 @@ async function llamar<T>(ctx: Ctx, l: Llamada<T>): Promise<{ resultado: T; usoId
   if (!cliente) {
     throw new ServiceError("El asistente IA no está configurado: falta la clave del proveedor (ANTHROPIC_API_KEY o GEMINI_API_KEY) en Vercel.", 503, "ia-sin-clave");
   }
-  const cupo = await cupoActual(ctx);
+  const haceUnMinuto = new Date((ctx.deps.ahora?.() ?? new Date()).getTime() - 60_000).toISOString();
+  const [cupo, recientes] = await Promise.all([cupoActual(ctx), ctx.store.llamadasIA(ctx.projectId, ctx.caller.id, haceUnMinuto)]);
   if (cupo.nivel === "deshabilitada" || cupo.nivel === "agotado") throw new ServiceError(cupo.mensaje, 402, "ia-cupo");
+  if (recientes >= MAX_LLAMADAS_MINUTO_IA) {
+    throw new ServiceError("Hiciste muchas solicitudes al asistente en el último minuto. Espera un momento y continúa.", 429, "ia-frecuencia");
+  }
   const tope = estimarCostoCop(cliente.modelo, l.sistema.length + (l.datosFijos?.length ?? 0) + l.usuario.length, l.maxTokens, cupo.trm);
   const queda = disponibleCop(cupo);
   if (tope > queda) {
@@ -450,6 +474,19 @@ export async function proponerPartidasIA(ctx: Ctx, body: unknown): Promise<{ bor
 
 // ---------------------------------------------------------------- phase 2: the resources
 
+/** The catalog resources offered to the model (units as long as the catalog allows). */
+function validarCatalogoInsumos(value: unknown): InsumoCatalogoIA[] {
+  return validarCatalogo<InsumoCatalogoIA>(value, "Catálogo de insumos", (x, i) => {
+    if (!TIPOS_INSUMO.includes(x.tipo as TipoInsumo)) bad(`Insumo del catálogo ${i + 1}: tipo no válido.`);
+    return {
+      id: idValido(x.id, `Insumo del catálogo ${i + 1}`),
+      descripcion: texto(x.descripcion, `Insumo del catálogo ${i + 1}`, 300, true),
+      unidad: texto(x.unidad, `Unidad del insumo del catálogo ${i + 1}`, 40),
+      tipo: x.tipo as TipoInsumo,
+    };
+  });
+}
+
 /** Phase 2: the resources a batch of partidas needs; the missing ones are saved as drafts to create. */
 export async function generarInsumosIA(ctx: Ctx, body: unknown): Promise<GenerarInsumosResponse> {
   const o = (body ?? {}) as Record<string, unknown>;
@@ -470,15 +507,7 @@ export async function generarInsumosIA(ctx: Ctx, body: unknown): Promise<Generar
       capitulo: texto(p.capitulo, `Partida ${i + 1}: capítulo`, 400),
     };
   });
-  const catalogo = validarCatalogo<InsumoCatalogoIA>(o.catalogo, "Catálogo de insumos", (x, i) => {
-    if (!TIPOS_INSUMO.includes(x.tipo as TipoInsumo)) bad(`Insumo del catálogo ${i + 1}: tipo no válido.`);
-    return {
-      id: idValido(x.id, `Insumo del catálogo ${i + 1}`),
-      descripcion: texto(x.descripcion, `Insumo del catálogo ${i + 1}`, 300, true),
-      unidad: texto(x.unidad, `Unidad del insumo del catálogo ${i + 1}`, 20),
-      tipo: x.tipo as TipoInsumo,
-    };
-  });
+  const catalogo = validarCatalogoInsumos(o.catalogo);
   const { resultado, usoId, costoCop } = await llamar(ctx, {
     tarea: "insumos",
     version: VERSION_PROMPT_INSUMOS,
@@ -519,13 +548,190 @@ export async function generarInsumosIA(ctx: Ctx, body: unknown): Promise<Generar
   };
 }
 
+// ---------------------------------------------------------------- phase 4: the unit cost analysis
+
+/** A number within limits (null when `nulo` allows it). */
+function cifra(value: unknown, what: string, max: number, nulo = false): number | null {
+  if (nulo && (value === null || value === undefined)) return null;
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0) bad(`${what}: se esperaba un número mayor o igual a 0.`);
+  if (value > max) bad(`${what}: máximo ${max}.`);
+  return value;
+}
+
+function validarReferencia(value: unknown, what: string, ids: Set<string>): ReferenciaApuIA {
+  const r = (value ?? {}) as Record<string, unknown>;
+  const rendimiento = cifra(r.rendimiento, `${what}: rendimiento`, 1_000_000)!;
+  const lineas = Array.isArray(r.lineas) ? r.lineas.slice(0, MAX_LINEAS_APU) : [];
+  return {
+    descripcion: texto(r.descripcion, what, 300, true),
+    unidad: texto(r.unidad, `${what}: unidad`, 40),
+    rendimiento,
+    lineas: lineas
+      .map((v, k) => {
+        const l = (v ?? {}) as Record<string, unknown>;
+        return {
+          insumoId: typeof l.insumoId === "string" ? l.insumoId : "",
+          cuadrilla: cifra(l.cuadrilla, `${what}: línea ${k + 1}`, 1000, true),
+          cantidad: cifra(l.cantidad ?? 0, `${what}: línea ${k + 1}`, 10_000_000)!,
+        };
+      })
+      // Only resources that were offered can be named by their code.
+      .filter((l) => ids.has(l.insumoId)),
+    subpartidas: (Array.isArray(r.subpartidas) ? r.subpartidas : []).filter((s): s is string => typeof s === "string").slice(0, 10).map((s) => s.slice(0, 200)),
+  };
+}
+
+function validarPartidasApu(value: unknown, catalogo: InsumoCatalogoIA[]): PartidaApuIA[] {
+  if (!Array.isArray(value) || value.length === 0) bad("No hay partidas para enviar.");
+  if (value.length > MAX_PARTIDAS_LOTE_APU) bad(`Máximo ${MAX_PARTIDAS_LOTE_APU} partidas por lote.`);
+  const ofrecidos = new Set(catalogo.map((c) => c.id));
+  const ids = new Set<string>();
+  return value.map((v, i) => {
+    const p = (v ?? {}) as Record<string, unknown>;
+    const what = `Partida ${i + 1}`;
+    const id = idValido(p.id, what);
+    if (ids.has(id)) bad(`${what}: está repetida.`);
+    ids.add(id);
+    const refs = Array.isArray(p.referencias) ? p.referencias.slice(0, MAX_REFERENCIAS_APU) : [];
+    return {
+      id,
+      item: texto(p.item, `${what}: item`, 40),
+      descripcion: texto(p.descripcion, `${what}: descripción`, 300, true),
+      unidad: texto(p.unidad, `${what}: unidad`, 40),
+      capitulo: texto(p.capitulo, `${what}: capítulo`, 400),
+      jornada: typeof p.jornada === "number" && p.jornada > 0 && p.jornada <= 24 ? p.jornada : JORNADA,
+      referencias: refs.map((r, k) => validarReferencia(r, `${what}: partida parecida ${k + 1}`, ofrecidos)),
+    };
+  });
+}
+
+/**
+ * Phase 4: the unit cost analysis of a batch of partidas, with the catalog's
+ * resources and similar catalog partidas as examples. Saved as drafts, or,
+ * with `evaluar`, only returned (to compare with the catalog's own analysis).
+ */
+export async function generarApuIA(ctx: Ctx, body: unknown): Promise<GenerarApuResponse> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as Record<string, unknown>;
+  const contexto = texto(o.contexto, "Contexto del proyecto", MAX_CONTEXTO_IA);
+  const evaluar = o.evaluar === true;
+  const catalogo = validarCatalogoInsumos(o.catalogo);
+  const partidas = validarPartidasApu(o.partidas, catalogo);
+  const { resultado, usoId, costoCop } = await llamar(ctx, {
+    tarea: "apu",
+    version: VERSION_PROMPT_APU,
+    sistema: SISTEMA_APU,
+    datosFijos: catalogoInsumosTexto(catalogo),
+    usuario: mensajeApu(contexto, partidas, catalogo),
+    esquema: ESQUEMA_APU,
+    maxTokens: maxTokensApu(partidas.length),
+    esfuerzo: ESFUERZO,
+    items: partidas.length,
+    leer: (t) => leerApu(t, partidas, catalogo),
+    resumen: (r) => {
+      const nuevos = [...r.propuestas.values()].reduce((s, x) => s + x.lineas.filter((l) => !l.insumoId).length, 0);
+      return `${evaluar ? "Evaluación: " : ""}${r.propuestas.size} de ${partidas.length} análisis, ${nuevos} insumo(s) nuevo(s)`;
+    },
+  });
+  const propuestas = [...resultado.propuestas].map(([itemId, propuesta]) => ({ itemId, propuesta }));
+  const porId = new Map(partidas.map((p) => [p.id, p]));
+  const borradores = evaluar
+    ? []
+    : propuestas.map(({ itemId, propuesta }) =>
+        nuevoBorrador<BorradorApuIA>(ctx, { tarea: "apu", itemId, referencia: `${porId.get(itemId)!.item} ${porId.get(itemId)!.descripcion}`, propuesta, anterior: null, usoId })
+      );
+  await ctx.store.guardarBorradoresIA(ctx.projectId, borradores);
+  return { borradores, propuestas, faltantes: resultado.faltantes, costoCop, cupo: await cupoActual(ctx) };
+}
+
+// ---------------------------------------------------------------- phase 5: questions about the budget
+
+function validarHistorial(value: unknown): MensajeChatIA[] {
+  if (value === undefined || value === null) return [];
+  if (!Array.isArray(value)) bad("Conversación: se esperaba una lista.");
+  return value.slice(-MAX_HISTORIAL_CHAT).map((v, i) => {
+    const m = (v ?? {}) as Record<string, unknown>;
+    if (m.rol !== "usuario" && m.rol !== "asistente") bad(`Conversación ${i + 1}: rol no válido.`);
+    return { rol: m.rol, texto: texto(m.texto, `Conversación ${i + 1}`, 8000, true) };
+  });
+}
+
+/**
+ * Phase 5: answers a question about the open budget, which the browser sends
+ * as text (as computed on screen). It only reads: nothing is saved but the log.
+ */
+export async function chatIA(ctx: Ctx, body: unknown): Promise<RespuestaChatIA> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as Record<string, unknown>;
+  const pregunta = texto(o.pregunta, "La pregunta", MAX_PREGUNTA_CHAT, true);
+  const contexto = texto(o.contexto, "El presupuesto", MAX_CONTEXTO_CHAT, true);
+  const historial = validarHistorial(o.historial);
+  const { resultado, costoCop } = await llamar(ctx, {
+    tarea: "chat",
+    version: VERSION_PROMPT_CHAT,
+    sistema: SISTEMA_CHAT,
+    datosFijos: presupuestoComoDatos(contexto),
+    usuario: mensajeChat(historial, pregunta),
+    esquema: ESQUEMA_CHAT,
+    maxTokens: 6000,
+    esfuerzo: ESFUERZO,
+    items: 0,
+    leer: leerChat,
+    resumen: () => `Pregunta: ${pregunta.replace(/\s+/g, " ").slice(0, 120)}`,
+  });
+  return { ...resultado, costoCop, cupo: await cupoActual(ctx) };
+}
+
 // ---------------------------------------------------------------- drafts
 
 /** The drafts of a task waiting for review. */
 export async function listarBorradoresIA(ctx: Ctx, tarea: unknown = "edt"): Promise<{ borradores: BorradorGenerico[] }> {
   await requireEdit(ctx);
-  const t: TareaIA = tarea === "insumos" || tarea === "estructura" ? tarea : "edt";
+  const t: TareaIA = TAREAS_CON_BORRADORES.includes(tarea as TareaIA) ? (tarea as TareaIA) : "edt";
   return { borradores: await ctx.store.borradoresIA(ctx.projectId, { estado: "pendiente", tarea: t }) };
+}
+
+/**
+ * JSON with its keys sorted: what was proposed comes back from the database
+ * (jsonb) with its keys in another order, so comparing plain JSON would count
+ * every accepted draft as edited.
+ */
+export function canonico(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonico).join(",")}]`;
+  if (value && typeof value === "object") {
+    const o = value as Record<string, unknown>;
+    return `{${Object.keys(o)
+      .filter((k) => o[k] !== undefined)
+      .sort()
+      .map((k) => `${JSON.stringify(k)}:${canonico(o[k])}`)
+      .join(",")}}`;
+  }
+  return JSON.stringify(value) ?? "null";
+}
+
+/** What was applied of an analysis: its lines (some may be removed) with their crews or quantities, and the yield. */
+function validarFinalApu(f: Record<string, unknown>, what: string, b: BorradorApuIA): PropuestaApu {
+  const p = b.propuesta;
+  const rendimiento = cifra(f.rendimiento, `${what}: rendimiento`, 1_000_000)!;
+  if (!(rendimiento > 0)) bad(`${what}: el rendimiento debe ser mayor que 0.`);
+  const lineas = Array.isArray(f.lineas) ? f.lineas : bad(`${what}: faltan las líneas del análisis.`);
+  if (lineas.length > MAX_LINEAS_APU) bad(`${what}: máximo ${MAX_LINEAS_APU} líneas.`);
+  const propuestas = new Map(p.lineas.map((l) => [claveLinea(l), l]));
+  return {
+    rendimiento: redondear(rendimiento, 4),
+    lineas: lineas.map((v, i): LineaApuIA => {
+      const x = (v ?? {}) as Record<string, unknown>;
+      const l = propuestas.get(
+        claveLinea({ insumoId: typeof x.insumoId === "string" ? x.insumoId : null, descripcion: String(x.descripcion ?? ""), unidad: String(x.unidad ?? "") })
+      );
+      if (!l) bad(`${what}: la línea ${i + 1} no es de la propuesta.`);
+      return l.cuadrilla === null
+        ? { ...l, cantidad: redondear(cifra(x.cantidad, `${what}: cantidad de la línea ${i + 1}`, 10_000_000)!, 4) }
+        : { ...l, cuadrilla: redondear(cifra(x.cuadrilla, `${what}: cuadrilla de la línea ${i + 1}`, MAX_CUADRILLA)!, 4) };
+    }),
+    supuestos: p.supuestos,
+    confianza: p.confianza,
+  };
 }
 
 function validarFinalEdt(f: Record<string, unknown>, what: string): PropuestaEdtFinal {
@@ -592,11 +798,15 @@ export async function decidirBorradoresIA(ctx: Ctx, body: unknown): Promise<{ de
             ? f
               ? validarFinalInsumo(f, what, b as BorradorInsumoIA)
               : (b as BorradorInsumoIA).propuesta
-            : f
-              ? validarFinalCapitulo(f, what, b as BorradorEstructuraIA)
-              : (b as BorradorEstructuraIA).propuesta;
+            : b.tarea === "apu"
+              ? f
+                ? validarFinalApu(f, what, b as BorradorApuIA)
+                : (b as BorradorApuIA).propuesta
+              : f
+                ? validarFinalCapitulo(f, what, b as BorradorEstructuraIA)
+                : (b as BorradorEstructuraIA).propuesta;
       const propuesta = b.tarea === "edt" ? { descripcion: (b as BorradorIA).propuesta.descripcion, criterios: (b as BorradorIA).propuesta.criterios } : b.propuesta;
-      return { id: d.id, estado: d.estado, editado: JSON.stringify(final) !== JSON.stringify(propuesta), final };
+      return { id: d.id, estado: d.estado, editado: canonico(final) !== canonico(propuesta), final };
     });
   const decididos = decisiones.length ? await ctx.store.decidirBorradoresIA(ctx.projectId, decisiones, ctx.caller.name) : 0;
   return { decididos, resumen: await ctx.store.resumenBorradoresIA(ctx.projectId) };

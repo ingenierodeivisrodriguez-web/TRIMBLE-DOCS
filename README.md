@@ -1359,11 +1359,62 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
 - **Excel**: la programación, el calendario valorizado, el de insumos y la
   curva S en un libro; cada ventana exporta también lo suyo.
 
-### Asistente IA (fases 0 a 3)
+### Asistente IA (fases 0 a 5)
 
 El botón **🤖 Asistente IA** del encabezado abre el asistente. Usa Claude
 (Anthropic) o Gemini (Google AI Studio) desde el servidor; la clave vive solo en Vercel. **Nada de lo que
 propone entra al presupuesto hasta que una persona lo acepta.**
+
+**Fase 5: preguntas** (pestaña *Preguntar*). Un chat sobre el presupuesto
+abierto: qué capítulos y partidas pesan más, qué partidas no tienen análisis,
+metrado o precios, cuánto pesa la mano de obra, qué insumos concentran el
+costo, qué costos unitarios parecen fuera de lo normal. **Solo lee**: no cambia
+nada. Con cada pregunta el navegador envía un resumen del presupuesto tal como
+está en pantalla (capítulos y partidas con metrado, costo unitario, parcial y
+su división MO/MT/EQ/SC/SP, notas como "sin análisis", el pie, los gastos
+generales y la lista de insumos con precios), hasta 150.000 caracteres: si no
+cabe, deja fuera las partidas y los insumos de menor valor y lo dice. El
+resumen va como datos fijos (en caché entre las preguntas) y la conversación
+(las últimas 12 intervenciones) como datos. Las partidas que menciona la
+respuesta aparecen como enlaces que cierran el asistente y seleccionan la
+partida (abriendo sus títulos). La conversación y la pestaña se conservan
+durante la sesión del navegador.
+
+**Fase 4: análisis de precios** (pestaña *Análisis (APU)*). Para las partidas
+sin análisis (o todas) propone el **rendimiento**, las **cuadrillas** de mano
+de obra y equipos que se pagan por hora (la cantidad sale de cuadrilla ×
+jornada ÷ rendimiento, como en el editor de APU), las **cantidades** de
+materiales y subcontratos con su desperdicio, y el % de la mano de obra para la
+herramienta menor (%MO). Usa los **insumos del catálogo** y, como ejemplo,
+hasta 3 **partidas parecidas del catálogo** que ya tienen análisis (por
+palabras de la descripción y unidad), sin precios. Si falta un insumo
+indispensable, lo propone como **nuevo**. Lo que el servidor acepta: solo
+partidas pedidas, rendimiento mayor que 0, códigos del catálogo que se
+ofrecieron, un insumo "nuevo" que el catálogo ya tiene se toma del catálogo,
+la cuadrilla solo para MO y EQ por hora (HH, HM); para los pagados por día (DIA,
+JR) la cuadrilla se pasa a días por unidad; nada repetido; sin subpartidas (así
+no hay ciclos). El navegador envía lotes de 3 partidas. Cada análisis llega
+como borrador con su **confianza** y sus **supuestos**, y la revisión muestra
+cada línea con los precios del presupuesto (o del catálogo), el **costo
+unitario propuesto**, el actual si la partida ya tenía análisis (al aplicar se
+reemplaza), el rango de las **partidas parecidas** con un aviso si queda por
+debajo del 75 % de la más barata o por encima del 125 % de la más cara, y
+cuántos insumos quedan **sin precio**. Se corrigen el rendimiento, las
+cuadrillas y las cantidades, o se quitan líneas, y se **aplica** (los insumos
+nuevos se crean una vez en el catálogo sin precio, si la persona puede
+editarlo; si no, esas líneas no se agregan) o se **descarta**. Lo aplicado va
+al presupuesto: después se guarda como siempre. Los precios nunca vienen de la
+IA.
+
+**Evaluar con el catálogo** (en la misma pestaña). Pide el análisis de
+partidas del catálogo que ya lo tienen (al menos dos insumos y costo
+unitario), sin mostrarle el suyo ni sus copias con la misma descripción, y
+compara el costo unitario con los precios del catálogo. Elige siempre la
+misma muestra repartida en el catálogo (6, 10, 20 o 30 partidas), así se
+puede repetir al cambiar de modelo. Muestra el % de partidas con costo
+unitario dentro de ±25 % (meta: 50 %), los insumos inventados (meta: 0) y las
+que quedaron sin análisis (meta: 0). No guarda borradores; el uso queda en el
+registro como "Evaluación".
 
 **Fase 3: crear la EDT** (pestaña *Crear EDT*). Se describe el proyecto (por
 ejemplo "edificio de vivienda estrato 6, 15 pisos, 4 apartamentos por piso, 2
@@ -1386,8 +1437,8 @@ catálogo: los que el catálogo ya tiene se señalan, y los que faltan llegan
 como borradores con las partidas que los usan (si el mismo insumo sale en
 varios lotes, se acumulan sus partidas). Se corrigen tipo, descripción y
 unidad, y se **crean en el catálogo sin precio** (quien puede editar el
-catálogo); el precio lo pone la persona. Armar el análisis de cada partida
-con ellos es la fase 4.
+catálogo); el precio lo pone la persona. El análisis de cada partida se arma
+en la fase 4.
 
 El catálogo se envía como **datos fijos** que el proveedor guarda en caché
 entre las llamadas de una tarea; si tiene más de 1.500 entradas, se envían las
@@ -1402,15 +1453,19 @@ propone. Se eligen las partidas (este subpresupuesto o todo, y solo las que
 no tienen texto) y un contexto opcional del proyecto. El navegador envía
 lotes de 5 partidas, muestra el avance y el costo, y se puede cancelar. Cada
 propuesta llega como **borrador** con su nivel de confianza (alta, media o
-baja). En **Borradores por revisar** se corrige el texto si hace falta y se
+baja). En **Revisar diccionario** se corrige el texto si hace falta y se
 **acepta** (pasa a la partida; después se guarda el presupuesto como
 siempre) o se **rechaza**. Pedir de nuevo una partida reemplaza su borrador
 pendiente.
 
-**Qué se envía.** Número, descripción, unidad, capítulo y OmniClass de cada
-partida, su texto actual del diccionario y el contexto escrito. No se envían
-precios, nombres ni correos. Los textos van como datos: si una descripción
-trae instrucciones, el modelo las ignora.
+**Qué se envía.** En el diccionario, número, descripción, unidad, capítulo y
+OmniClass de cada partida, su texto actual y el contexto escrito. En crear la
+EDT, insumos y análisis, además la descripción, unidad y tipo de los insumos y
+partidas del catálogo, y los análisis de las partidas parecidas, **sin
+precios**. En las preguntas, el resumen del presupuesto **con sus costos y
+precios** (la pestaña lo advierte). Nunca nombres de personas ni correos. Los
+textos van como datos: si una descripción trae instrucciones, el modelo las
+ignora.
 
 **Cupo (fase 0).** Lo fijan los **administradores del proyecto gestor** de la
 plataforma (`PRESUPUESTO_IA_PROYECTO_GESTOR`, por ejemplo tu MANAGER
@@ -1427,10 +1482,29 @@ tarea, modelo, partidas, tokens, costo en dólares y en pesos con la TRM
 usada, versión de las instrucciones y resultado (correcto, error, rechazado
 por la IA o incompleto). La pestaña **Uso y cupo** muestra las barras del
 cupo, las últimas 50 solicitudes y la **evaluación por tarea** (crear EDT,
-diccionario, insumos): cuántos borradores se aceptaron sin cambios, con
-cambios o se rechazaron (la meta del diccionario es al menos 70 % aceptados
-sin cambios; en Crear EDT, "con cambios" es que se quitaron o corrigieron
-partidas antes de insertarlas).
+diccionario, insumos, análisis): cuántos borradores se aceptaron sin cambios,
+con cambios o se rechazaron (la meta del diccionario es al menos 70 %
+aceptados sin cambios; en Crear EDT, "con cambios" es que se quitaron o
+corrigieron partidas antes de insertarlas; en Análisis, que se cambió el
+rendimiento, una cuadrilla o una cantidad, o se quitaron líneas). Lo aplicado
+se compara con lo propuesto sin importar el orden de las claves (la base de
+datos, jsonb, no lo conserva). Las preguntas quedan en el registro con sus
+primeras palabras.
+
+**Protecciones (fase 5).**
+
+- Cada persona puede hacer hasta **20 solicitudes por minuto** en un proyecto
+  (429 `ia-frecuencia`): un ciclo que se descontrole no agota el cupo. El
+  navegador no reintenta por cupo ni por frecuencia; sí una vez, a los 6
+  segundos, cuando el proveedor está ocupado o limitado.
+- Antes de cada llamada: permiso de edición, clave del proveedor, asistente
+  habilitado, cupo y costo máximo de la llamada contra lo que queda.
+- Todo lo que llega del navegador se valida (tamaños, números, códigos) y todo
+  lo que responde el modelo se vuelve a validar antes de mostrarlo o
+  guardarlo.
+- Para apagar el asistente en un proyecto, se desmarca **Habilitado** en su
+  cupo; para apagarlo en toda la plataforma, se quita la clave del proveedor en
+  Vercel y se vuelve a desplegar.
 
 **Proveedor y modelo.** La app funciona con dos proveedores detrás de la
 misma interfaz y usa el que tenga clave en Vercel (Anthropic primero si hay
@@ -1446,8 +1520,8 @@ las dos; `PRESUPUESTO_IA_PROVEEDOR` lo fuerza):
   Studio); en ese nivel **Google puede usar lo enviado para mejorar sus
   productos**, así que sirve para pilotos con datos no confidenciales. En el
   nivel de pago no. Si Google falla de su lado (errores 500/503), el servidor reintenta dos
-  veces y, si sigue fallando, prueba una vez con `gemini-3.5-flash-lite` y una
-  solicitud más sencilla (`PRESUPUESTO_IA_MODELO_RESPALDO` lo cambia; `no` lo
+  veces y, si sigue fallando o si el modelo se queda sin cuota (429), prueba una
+  vez con `gemini-3.5-flash-lite` y una solicitud más sencilla (`PRESUPUESTO_IA_MODELO_RESPALDO` lo cambia; `no` lo
   apaga). El registro de uso dice qué modelo respondió, y los errores muestran
   el mensaje de Google.
 
@@ -1463,7 +1537,7 @@ duplican el 01-01-2027.
 | Acción | Quién |
 |---|---|
 | Ver el presupuesto, los catálogos y los elementos asociados | Cualquier miembro del proyecto |
-| Usar el asistente IA y revisar sus borradores | Administradores del proyecto y los editores del presupuesto |
+| Usar el asistente IA (también las preguntas) y revisar sus borradores | Administradores del proyecto y los editores del presupuesto |
 | Fijar los cupos del asistente IA y la TRM | Administradores del proyecto gestor de la plataforma |
 | Editar el presupuesto y su programación, y asociar elementos en el visor | Administradores del proyecto y los **editores** (personas o grupos) que elijan en ⚙ Configuración |
 | Editar los catálogos | Administradores y editores del proyecto **dueño** de los catálogos (la base) |
@@ -1521,7 +1595,9 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `POST /api/presupuesto/ia/estructura/capitulos` | `{ descripcion, agrupacion, detalle }`: los capítulos de la EDT |
 | `POST /api/presupuesto/ia/estructura/partidas` | `{ descripcion, agrupacion, detalle, capitulo, otros, catalogo }`: las partidas de un capítulo, guardadas como borrador |
 | `POST /api/presupuesto/ia/insumos` | `{ contexto, partidas, catalogo }`: insumos de un lote; los que faltan quedan como borradores |
-| `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes de una tarea (`?tarea=edt\|estructura\|insumos`) / `{ decisiones: [{ id, estado, final? }] }` (`final` es lo que se aplicó; si difiere de la propuesta cuenta como editado) |
+| `POST /api/presupuesto/ia/apu` | `{ contexto, partidas, catalogo, evaluar? }` (hasta 6 partidas, cada una con hasta 3 parecidas): el análisis de precios de un lote, guardado como borrador (con `evaluar`, solo se responde) |
+| `POST /api/presupuesto/ia/chat` | `{ pregunta, contexto, historial }`: responde una pregunta sobre el presupuesto (`{ respuesta, items }`, con los códigos de las partidas que menciona) |
+| `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes de una tarea (`?tarea=edt\|estructura\|insumos\|apu`) / `{ decisiones: [{ id, estado, final? }] }` (`final` es lo que se aplicó; si difiere de la propuesta cuenta como editado) |
 | `GET` / `PUT /api/presupuesto/programacion` | Leer (`programacion: null` hasta el primer guardado) / guardar `{ programacion, version }` (solo quien edita; 409 `version-conflict`) |
 | `GET /api/presupuesto/elementos/resumen` | Mediciones y conteos por partida |
 | `POST /api/presupuesto/elementos/consulta` | `{ itemIds }` o `{ ifcGuids }` |
@@ -1544,6 +1620,7 @@ Asistente IA (variables de Vercel, nunca en el repositorio):
 | `PRESUPUESTO_IA_PROVEEDOR` | Opcional. `anthropic` o `google` cuando hay las dos claves |
 | `PRESUPUESTO_IA_PROYECTO_GESTOR` | Id del proyecto de Trimble Connect cuyos administradores fijan los cupos (por ejemplo, MANAGER PROJECT) |
 | `PRESUPUESTO_IA_MODELO` | Opcional. Modelo a usar (por defecto `claude-opus-5-5` o `gemini-3.8-flash`) |
+| `PRESUPUESTO_IA_MODELO_RESPALDO` | Opcional (Google). Modelo que responde si el principal falla o se queda sin cuota (por defecto `gemini-3.5-flash-lite`; `no` lo apaga) |
 | `PRESUPUESTO_IA_TRM` | Opcional. TRM inicial (por defecto 4.000) mientras no se guarde una en el asistente |
 
 ---

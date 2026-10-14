@@ -26,31 +26,31 @@ import { acceptButton, baseInput, C, labelStyle, message, Notice, Square } from 
 const LOTE_INSUMOS = 6;
 
 /** Calls the assistant, retrying once after a few seconds when the provider is busy or limited. */
-async function conReintento<T>(fn: () => Promise<T>): Promise<T> {
+export async function conReintento<T>(fn: () => Promise<T>): Promise<T> {
   try {
     return await fn();
   } catch (err) {
-    if (!(err instanceof ApiError) || ![429, 502, 503, 504].includes(err.status) || err.code === "ia-sin-clave" || err.code === "ia-cupo") throw err;
+    if (!(err instanceof ApiError) || ![429, 502, 503, 504].includes(err.status) || ["ia-sin-clave", "ia-cupo", "ia-frecuencia"].includes(err.code ?? "")) throw err;
     await new Promise((r) => setTimeout(r, 6000));
     return fn();
   }
 }
 
-function bloqueadoPor(estado: EstadoIAResponse): string {
+export function bloqueadoPor(estado: EstadoIAResponse): string {
   if (!estado.disponible) return "El asistente IA no está configurado en el servidor (falta la clave del proveedor en Vercel).";
   if (!estado.puedeUsar) return "Solo los administradores del proyecto y los editores del presupuesto usan el asistente.";
   if (estado.cupo.nivel === "deshabilitada" || estado.cupo.nivel === "agotado") return estado.cupo.mensaje;
   return "";
 }
 
-function Aviso({ estado }: { estado: EstadoIAResponse }) {
+export function Aviso({ estado }: { estado: EstadoIAResponse }) {
   const b = bloqueadoPor(estado);
   if (b) return <Notice kind="error">{b}</Notice>;
   if (estado.cupo.nivel === "aviso") return <Notice kind="warning">{estado.cupo.mensaje}</Notice>;
   return null;
 }
 
-function Progreso({ hechos, total, texto }: { hechos: number; total: number; texto: string }) {
+export function Progreso({ hechos, total, texto }: { hechos: number; total: number; texto: string }) {
   return (
     <div>
       <div style={{ height: 10, background: "#e6eaf0", borderRadius: 5, overflow: "hidden" }}>
@@ -208,7 +208,7 @@ export function CrearEdt({
       <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5 }}>
         Describe el proyecto y el asistente arma la EDT: primero los <strong>capítulos</strong> (los revisas) y luego las <strong>partidas</strong> de cada uno.
         Usa las partidas de tu catálogo ({partidasCatalogo.length}) cuando sirven, así llegan con su análisis de precios; las demás quedan como partidas
-        nuevas para completar. No pone precios ni metrados.
+        nuevas, y su análisis se arma en la pestaña <strong>Análisis (APU)</strong>. No pone precios ni metrados.
       </p>
       <label>
         <span style={labelStyle}>Descripción del proyecto</span>
@@ -389,7 +389,7 @@ export function InsumosIA({
   /** The person can add to the catalog. */
   puedeCatalogo: boolean;
   /** Creates the resources in the catalog (without a price). */
-  crearInsumos: (lista: PropuestaInsumo[]) => Promise<number>;
+  crearInsumos: (lista: Pick<PropuestaInsumo, "descripcion" | "unidad" | "tipo">[]) => Promise<Insumo[]>;
   onCupo: (c: EstadoCupo) => void;
   onResumen: (r: ResumenesIA) => void;
 }) {
@@ -487,8 +487,8 @@ export function InsumosIA({
       <Aviso estado={estado} />
       <p style={{ margin: 0, fontSize: 13.5, lineHeight: 1.5 }}>
         Revisa qué <strong>insumos</strong> (mano de obra, materiales, equipos y subcontratos) necesitan las partidas. Los que ya están en tu catálogo
-        ({insumosCatalogo.length}) se señalan; los que faltan se proponen para crearlos <strong>sin precio</strong>: el precio lo pones tú. Armar el análisis de
-        cada partida con ellos es la siguiente fase.
+        ({insumosCatalogo.length}) se señalan; los que faltan se proponen para crearlos <strong>sin precio</strong>: el precio lo pones tú. El análisis de
+        cada partida (cuadrillas, rendimientos y cantidades) se arma en la pestaña <strong>Análisis (APU)</strong>.
       </p>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13.5 }}>
         <div role="radiogroup" aria-label="Alcance">
@@ -615,7 +615,7 @@ function Fila({ children }: { children: ReactNode }) {
   return <>{children}</>;
 }
 
-function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
+export function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) {
   return (
     <fieldset style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "8px 12px 12px", margin: 0, background: "#fff" }}>
       <legend style={{ fontSize: 13.5, fontWeight: 600, padding: "0 6px" }}>{titulo}</legend>
@@ -624,9 +624,9 @@ function Seccion({ titulo, children }: { titulo: string; children: ReactNode }) 
   );
 }
 
-const th: CSSProperties = { padding: "6px 8px", fontWeight: 600, borderBottom: `1px solid ${C.border}`, borderRight: `1px solid ${C.grid}`, textAlign: "center", background: "#f3f4f6" };
-const td: CSSProperties = { padding: "5px 8px", borderBottom: `1px solid ${C.grid}`, borderRight: `1px solid ${C.grid}` };
-const botonSec: CSSProperties = { border: `1px solid ${C.border}`, background: "#fff", borderRadius: 4, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 };
-const quitar: CSSProperties = { border: "none", background: "transparent", color: "#b3261e", cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
-const iaChip: CSSProperties = { display: "inline-block", borderRadius: 10, background: "#ede7f6", color: "#5e35b1", padding: "1px 6px", fontSize: 11, fontWeight: 600 };
-const apagado: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };
+export const th: CSSProperties = { padding: "6px 8px", fontWeight: 600, borderBottom: `1px solid ${C.border}`, borderRight: `1px solid ${C.grid}`, textAlign: "center", background: "#f3f4f6" };
+export const td: CSSProperties = { padding: "5px 8px", borderBottom: `1px solid ${C.grid}`, borderRight: `1px solid ${C.grid}` };
+export const botonSec: CSSProperties = { border: `1px solid ${C.border}`, background: "#fff", borderRadius: 4, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 };
+export const quitar: CSSProperties = { border: "none", background: "transparent", color: "#b3261e", cursor: "pointer", fontSize: 13, fontFamily: "inherit" };
+export const iaChip: CSSProperties = { display: "inline-block", borderRadius: 10, background: "#ede7f6", color: "#5e35b1", padding: "1px 6px", fontSize: 11, fontWeight: 600 };
+export const apagado: CSSProperties = { opacity: 0.45, cursor: "not-allowed" };

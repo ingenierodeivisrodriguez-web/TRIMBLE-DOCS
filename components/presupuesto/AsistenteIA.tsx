@@ -5,6 +5,7 @@ import { ApiError } from "../../lib/propiedades/client";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { fecha } from "../../lib/presupuesto/format";
 import { estimarCostoCop, fmtCop } from "../../lib/presupuesto/ia/cupo";
+import type { ContextoChat } from "../../lib/presupuesto/ia/chat";
 import { partidasParaEdt, SISTEMA_EDT } from "../../lib/presupuesto/ia/edt";
 import {
   BorradorIA,
@@ -17,9 +18,11 @@ import {
   PropuestaCapitulo,
   PropuestaInsumo,
   TAREA_IA_NOMBRES,
-  TareaIA,
+  TAREAS_CON_BORRADORES,
 } from "../../lib/presupuesto/ia/tipos";
 import type { Insumo, PartidaCatalogo, PresupuestoDoc } from "../../lib/presupuesto/types";
+import { ApuIA, CambioApu } from "./AsistenteIAApu";
+import { ChatIA } from "./AsistenteIAChat";
 import { CrearEdt, InsumosIA } from "./AsistenteIAFases";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "./ui";
 
@@ -27,14 +30,16 @@ import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInpu
 const LOTE = 5;
 const POR_PAGINA = 40;
 
-type Pestana = "crear" | "edt" | "borradores" | "insumos" | "uso";
+type Pestana = "crear" | "edt" | "borradores" | "insumos" | "apu" | "chat" | "uso";
+const PESTANAS: Pestana[] = ["crear", "edt", "borradores", "insumos", "apu", "chat", "uso"];
 
 /**
  * The AI assistant: creates the EDT from the project's description, writes
- * the EDT dictionary of the partidas and finds the resources they need. All
- * of it comes as drafts that a person accepts (into the budget or the
- * catalog, saved as always), edits or rejects; with the monthly quota and
- * the usage log.
+ * the EDT dictionary of the partidas, finds the resources they need and
+ * analyzes their unit cost. All of it comes as drafts that a person accepts
+ * (into the budget or the catalog, saved as always), edits or rejects. It
+ * also answers questions about the budget (only reading it). With the
+ * monthly quota and the usage log.
  */
 export default function AsistenteIA({
   api,
@@ -47,6 +52,9 @@ export default function AsistenteIA({
   aplicarEdt,
   insertarCapitulo,
   crearInsumos,
+  aplicarApu,
+  contextoChat,
+  irAPartida,
   onClose,
 }: {
   api: PresupuestoApi;
@@ -62,12 +70,35 @@ export default function AsistenteIA({
   aplicarEdt: (cambios: { itemId: string; descripcion: string; criterios: string }[]) => number;
   /** Adds an accepted chapter at the end of a subpresupuesto; answers how many partidas it added. */
   insertarCapitulo: (spId: string, capitulo: PropuestaCapitulo, pisos: number) => number;
-  /** Creates accepted resources in the catalog (without a price). */
-  crearInsumos: (lista: PropuestaInsumo[]) => Promise<number>;
+  /** Creates accepted resources in the catalog (without a price) and answers them. */
+  crearInsumos: (lista: Pick<PropuestaInsumo, "descripcion" | "unidad" | "tipo">[]) => Promise<Insumo[]>;
+  /** Puts accepted analyses into the partidas; answers how many were found. */
+  aplicarApu: (cambios: CambioApu[]) => number;
+  /** The budget as text for questions, as it is on screen. */
+  contextoChat: () => ContextoChat;
+  /** Closes the assistant and selects a partida in the budget. */
+  irAPartida: (spId: string, itemId: string) => void;
   onClose: () => void;
 }) {
   const sinPartidas = !doc.subpresupuestos.some((sp) => sp.items.some((i) => i.tipo === "partida"));
-  const [pestana, setPestana] = useState<Pestana>(sinPartidas ? "crear" : "edt");
+  const clavePestana = `presupuesto.ia.pestana.${projectId}`;
+  const [pestana, setPestanaState] = useState<Pestana>(() => {
+    try {
+      const guardada = sessionStorage.getItem(clavePestana) as Pestana | null;
+      if (guardada && PESTANAS.includes(guardada)) return guardada;
+    } catch {
+      // storage unavailable
+    }
+    return sinPartidas ? "crear" : "edt";
+  });
+  const setPestana = (p: Pestana) => {
+    setPestanaState(p);
+    try {
+      sessionStorage.setItem(clavePestana, p);
+    } catch {
+      // storage unavailable
+    }
+  };
   const [estado, setEstado] = useState<EstadoIAResponse | null>(null);
   const [error, setError] = useState("");
   const [borradores, setBorradores] = useState<BorradorIA[] | null>(null);
@@ -119,6 +150,12 @@ export default function AsistenteIA({
           <Tab activa={pestana === "insumos"} onClick={() => setPestana("insumos")}>
             Insumos
           </Tab>
+          <Tab activa={pestana === "apu"} onClick={() => setPestana("apu")}>
+            Análisis (APU)
+          </Tab>
+          <Tab activa={pestana === "chat"} onClick={() => setPestana("chat")}>
+            Preguntar
+          </Tab>
           <Tab activa={pestana === "uso"} onClick={() => setPestana("uso")}>
             Uso y cupo
           </Tab>
@@ -154,6 +191,22 @@ export default function AsistenteIA({
             onCupo={onCupo}
             onResumen={onResumen}
           />
+        ) : pestana === "apu" ? (
+          <ApuIA
+            api={api}
+            doc={doc}
+            spId={spId}
+            projectId={projectId}
+            estado={estado}
+            catalogo={catalogo}
+            puedeCatalogo={puedeCatalogo}
+            aplicarApu={aplicarApu}
+            crearInsumos={crearInsumos}
+            onCupo={onCupo}
+            onResumen={onResumen}
+          />
+        ) : pestana === "chat" ? (
+          <ChatIA api={api} projectId={projectId} estado={estado} contexto={contextoChat} irAPartida={irAPartida} onCupo={onCupo} />
         ) : pestana === "edt" ? (
           <GenerarEdt
             api={api}
@@ -344,8 +397,8 @@ function GenerarEdt({
             <>
               {todo ? "El presupuesto" : "Este subpresupuesto"} no tiene partidas.
               {!todo && enTodo > 0 ? " Elige «Todo el presupuesto» o cambia de subpresupuesto." : ""} Este paso redacta el diccionario de las partidas que ya
-              existen: primero agrégalas (desde el catálogo o con Importar Excel). Crear la EDT completa a partir de la descripción del proyecto es otra tarea
-              del asistente que todavía no está disponible.
+              existen: primero agrégalas (desde el catálogo o con Importar Excel), o crea la EDT completa desde la descripción del proyecto en la
+              pestaña Crear EDT.
             </>
           ) : (
             <>
@@ -633,7 +686,7 @@ function UsoYCupo({ api, estado, projectName, onEstado }: { api: PresupuestoApi;
             </tr>
           </thead>
           <tbody>
-            {(["estructura", "edt", "insumos"] as TareaIA[]).map((t) => {
+            {TAREAS_CON_BORRADORES.map((t) => {
               const r = resumen[t] ?? { pendientes: 0, aceptadosSinCambios: 0, aceptadosEditados: 0, rechazados: 0 };
               const decididos = r.aceptadosSinCambios + r.aceptadosEditados + r.rechazados;
               const pct = (n: number) => (decididos ? ` (${Math.round((n / decididos) * 100)} %)` : "");
@@ -660,7 +713,8 @@ function UsoYCupo({ api, estado, projectName, onEstado }: { api: PresupuestoApi;
         </table>
         <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" }}>
           Meta: al menos el 70 % de los borradores del diccionario aceptados sin cambios. En Crear EDT, «con cambios» significa que quitaste o corregiste
-          partidas antes de insertarlas.
+          partidas antes de insertarlas; en Análisis (APU), que cambiaste el rendimiento, una cuadrilla o una cantidad, o quitaste líneas. Para medir los
+          análisis contra tu catálogo usa «Evaluar el asistente con tu catálogo» en la pestaña Análisis (APU).
         </p>
       </Seccion>
 

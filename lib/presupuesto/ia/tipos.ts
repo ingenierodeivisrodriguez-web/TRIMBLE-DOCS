@@ -3,9 +3,21 @@
 
 import type { TipoInsumo } from "../types";
 
-/** The tasks the assistant does: the EDT dictionary (phase 1), the resources (phase 2) and the EDT itself (phase 3). */
-export type TareaIA = "edt" | "insumos" | "estructura";
-export const TAREA_IA_NOMBRES: Record<TareaIA, string> = { edt: "Diccionario EDT", insumos: "Insumos", estructura: "Crear EDT" };
+/**
+ * The tasks the assistant does: the EDT dictionary (phase 1), the resources (phase 2), the EDT
+ * itself (phase 3), the unit cost analysis of the partidas (phase 4) and questions about the
+ * budget (phase 5).
+ */
+export type TareaIA = "edt" | "insumos" | "estructura" | "apu" | "chat";
+export const TAREA_IA_NOMBRES: Record<TareaIA, string> = {
+  edt: "Diccionario EDT",
+  insumos: "Insumos",
+  estructura: "Crear EDT",
+  apu: "Análisis (APU)",
+  chat: "Preguntas",
+};
+/** The tasks whose drafts a person reviews. */
+export const TAREAS_CON_BORRADORES: TareaIA[] = ["estructura", "edt", "insumos", "apu"];
 
 /** Monthly quota of a project, set by the platform's administrators (the "gestor" project). */
 export interface CupoIA {
@@ -210,6 +222,88 @@ export interface GenerarInsumosResponse {
   cupo: EstadoCupo;
 }
 
+// ---- phase 4: the unit cost analysis (APU) of the partidas
+
+/**
+ * A line of a proposed analysis: a catalog resource, or a new one (insumoId null) to create
+ * without a price. Labor and equipment paid by the hour take a crew (cuadrilla), and their
+ * quantity is cuadrilla × jornada ÷ rendimiento; the rest take a quantity per unit (with waste).
+ */
+export interface LineaApuIA {
+  insumoId: string | null;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  cuadrilla: number | null;
+  /** Per unit of the partida (0 when the crew sets it); for "%MO" resources, a percentage of the labor. */
+  cantidad: number;
+}
+
+export interface PropuestaApu {
+  /** Units of the partida a crew does in a working day. */
+  rendimiento: number;
+  lineas: LineaApuIA[];
+  /** What it assumed (mix, thickness, waste...), for the person to check. */
+  supuestos: string;
+  confianza: Confianza;
+}
+
+export interface BorradorApuIA extends BorradorGenerico {
+  tarea: "apu";
+  propuesta: PropuestaApu;
+  anterior: null;
+  final: PropuestaApu | null;
+}
+
+/** A catalog partida with its analysis, shown to the model as an example (no prices). */
+export interface ReferenciaApuIA {
+  descripcion: string;
+  unidad: string;
+  rendimiento: number;
+  lineas: { insumoId: string; cuadrilla: number | null; cantidad: number }[];
+  /** Subpartidas it uses, as text ("CONCRETO 3000 PSI (M3) × 1.05"). */
+  subpartidas: string[];
+}
+
+/** A partida whose analysis is asked for. */
+export interface PartidaApuIA {
+  id: string;
+  item: string;
+  descripcion: string;
+  unidad: string;
+  capitulo: string;
+  /** Hours of its working day. */
+  jornada: number;
+  /** Similar catalog partidas with their analysis. */
+  referencias: ReferenciaApuIA[];
+}
+
+export interface GenerarApuResponse {
+  /** The proposals saved as drafts (none when evaluating). */
+  borradores: BorradorApuIA[];
+  /** Every proposal, by partida (also when evaluating, where nothing is saved). */
+  propuestas: { itemId: string; propuesta: PropuestaApu }[];
+  /** Partidas left without a usable answer. */
+  faltantes: string[];
+  costoCop: number;
+  cupo: EstadoCupo;
+}
+
+// ---- phase 5: questions about the budget
+
+export interface MensajeChatIA {
+  rol: "usuario" | "asistente";
+  texto: string;
+}
+
+export interface RespuestaChatIA {
+  respuesta: string;
+  /** Codes ("P12") of the partidas the answer is about, as the context named them. */
+  items: string[];
+  costoCop: number;
+  cupo: EstadoCupo;
+}
+
 /** How the drafts were judged: the base evaluation of the assistant. */
 export interface ResumenBorradores {
   pendientes: number;
@@ -265,6 +359,16 @@ export interface GenerarEdtResponse {
 }
 
 export const MAX_PARTIDAS_LOTE_IA = 12;
+/** Partidas per call for their analysis (a longer answer each). */
+export const MAX_PARTIDAS_LOTE_APU = 6;
+export const MAX_LINEAS_APU = 40;
+export const MAX_REFERENCIAS_APU = 3;
+/** The budget sent with a question (characters). */
+export const MAX_CONTEXTO_CHAT = 150_000;
+export const MAX_PREGUNTA_CHAT = 1500;
+export const MAX_HISTORIAL_CHAT = 12;
+/** Calls a person can make in a minute (protects the quota from a runaway loop). */
+export const MAX_LLAMADAS_MINUTO_IA = 20;
 /** Catalog entries offered to the model in one call. */
 export const MAX_CATALOGO_IA = 1500;
 export const MAX_CONTEXTO_IA = 2000;

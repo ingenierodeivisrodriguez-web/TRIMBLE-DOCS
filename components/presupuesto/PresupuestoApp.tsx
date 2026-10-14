@@ -4,6 +4,7 @@ import { CSSProperties, ReactNode, useCallback, useEffect, useMemo, useState } f
 import { ApuCalculado, calcularPie, calcularSubpresupuesto, factorGastos, listaInsumos, SubpresupuestoCalculado, totalGastos } from "../../lib/presupuesto/calc";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { importarApu, JORNADA, nuevoId, partidaDesdeCatalogo, resolverPresupuesto, snapshotInsumo, subpresupuestoVacio } from "../../lib/presupuesto/doc";
+import { contextoPresupuesto } from "../../lib/presupuesto/ia/chat";
 import type { PropuestaCapitulo, PropuestaInsumo } from "../../lib/presupuesto/ia/tipos";
 import { clonarBloque, conItem, conPartida, conSubpresupuesto } from "../../lib/presupuesto/edit";
 import { exportarExcel, nombreSeguro } from "../../lib/presupuesto/excel";
@@ -14,6 +15,7 @@ import { bajar, bloqueDe, desangrar, insertar, quitar, sangrar, subir } from "..
 import { ElementoVinculado, Insumo, Item, ItemPartida, PartidaCatalogo } from "../../lib/presupuesto/types";
 import ApuDialog, { DatosPartida, partidaVacia } from "./ApuDialog";
 import AsistenteIA from "./AsistenteIA";
+import type { CambioApu } from "./AsistenteIAApu";
 import ApuEditor from "./ApuEditor";
 import BudgetGrid, { CampoEditable } from "./BudgetGrid";
 import CatalogoInsumos from "./CatalogoInsumos";
@@ -186,14 +188,61 @@ export default function PresupuestoApp({
     return n;
   }
 
-  /** Accepted AI resources go into the catalog, without a price. */
-  async function crearInsumosIA(lista: PropuestaInsumo[]): Promise<number> {
+  /** Accepted AI resources go into the catalog, without a price; answers them as created. */
+  async function crearInsumosIA(lista: Pick<PropuestaInsumo, "descripcion" | "unidad" | "tipo">[]): Promise<Insumo[]> {
     if (!catalogo || !estado?.canEditBase) throw new Error("No puedes modificar el catálogo de este proyecto.");
     const ahora = new Date().toISOString();
     const filas = lista.map((x) => ({ id: nuevoId(), codigo: "", descripcion: x.descripcion, unidad: x.unidad, precio: 0, tipo: x.tipo, iu: "", omniclass: "" }));
-    const n = await api.guardarInsumos(filas);
-    s.catalogoGuardado({ insumos: filas.map((f) => ({ ...f, updatedAt: ahora, updatedBy: estado.user.name })) });
+    await api.guardarInsumos(filas);
+    const creados: Insumo[] = filas.map((f) => ({ ...f, updatedAt: ahora, updatedBy: estado.user.name }));
+    s.catalogoGuardado({ insumos: creados });
+    return creados;
+  }
+
+  /**
+   * Accepted AI analyses go into their partidas (wherever they are): the yield and the lines,
+   * with the resources priced as the budget has them (else copied from the catalog).
+   */
+  function aplicarApuIA(cambios: CambioApu[]): number {
+    const porId = new Map(cambios.map((c) => [c.itemId, c]));
+    let n = 0;
+    setDoc((d) => {
+      let insumos = d.insumos;
+      for (const c of cambios) for (const ins of c.insumos) if (!insumos[ins.id]) insumos = { ...insumos, [ins.id]: snapshotInsumo(ins) };
+      return {
+        ...d,
+        insumos,
+        subpresupuestos: d.subpresupuestos.map((x) => ({
+          ...x,
+          items: x.items.map((i) => {
+            const c = porId.get(i.id);
+            if (!c || i.tipo !== "partida") return i;
+            n++;
+            return { ...i, rendimiento: c.rendimiento, componentes: c.componentes };
+          }),
+        })),
+      };
+    });
     return n;
+  }
+
+  /** From an answer of the assistant: shows the partida in the budget (opening its titles). */
+  function irAPartida(destino: string, itemId: string) {
+    const x = doc?.subpresupuestos.find((y) => y.id === destino);
+    const i = x ? x.items.findIndex((it) => it.id === itemId) : -1;
+    if (!x || i < 0) return;
+    const titulos: string[] = [];
+    let nivel = x.items[i].nivel;
+    for (let k = i - 1; k >= 0 && nivel > 0; k--) {
+      if (x.items[k].nivel < nivel) {
+        titulos.push(x.items[k].id);
+        nivel = x.items[k].nivel;
+      }
+    }
+    setCollapsed((c) => new Set([...c].filter((id) => !titulos.includes(id))));
+    setSpId(destino);
+    setSelectedId(itemId);
+    setDialogo(null);
   }
 
   const loadMemoria = useCallback((itemId: string) => api.elementosDe({ itemIds: [itemId] }), [api]);
@@ -842,6 +891,9 @@ export default function PresupuestoApp({
             aplicarEdt={aplicarEdtIA}
             insertarCapitulo={insertarCapituloIA}
             crearInsumos={crearInsumosIA}
+            aplicarApu={aplicarApuIA}
+            contextoChat={() => contextoPresupuesto(doc, calculados, resolver ? listaInsumos(doc.subpresupuestos, resolver, metrado) : [])}
+            irAPartida={irAPartida}
             onClose={close}
           />;
       case "descartar":
