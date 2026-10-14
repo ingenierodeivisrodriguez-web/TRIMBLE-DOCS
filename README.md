@@ -1362,7 +1362,7 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
 ### Asistente IA (fases 0 y 1)
 
 El botón **🤖 Asistente IA** del encabezado abre el asistente. Usa Claude
-(Anthropic) desde el servidor; la clave vive solo en Vercel. **Nada de lo que
+(Anthropic) o Gemini (Google AI Studio) desde el servidor; la clave vive solo en Vercel. **Nada de lo que
 propone entra al presupuesto hasta que una persona lo acepta.**
 
 **Fase 1: diccionario EDT.** Redacta la *descripción del trabajo* y los
@@ -1402,11 +1402,27 @@ cupo, las últimas 50 solicitudes y la **evaluación**: cuántos borradores se
 aceptaron sin cambios, con cambios o se rechazaron (la meta de la fase 1 es
 al menos 70 % aceptados sin cambios).
 
-**Modelo.** `claude-opus-5-5` con esfuerzo bajo y salida estructurada
-(JSON Schema), instrucciones en caché y respaldo automático del proveedor si
-un filtro de seguridad rechaza la solicitud (`fallbacks: "default"`).
-`PRESUPUESTO_IA_MODELO` lo cambia (por ejemplo `claude-sonnet-5-5`, más
-barato); el costo usa el precio del modelo que respondió.
+**Proveedor y modelo.** La app funciona con dos proveedores detrás de la
+misma interfaz y usa el que tenga clave en Vercel (Anthropic primero si hay
+las dos; `PRESUPUESTO_IA_PROVEEDOR` lo fuerza):
+
+- **Anthropic (Claude):** `claude-opus-5-5` por defecto, con esfuerzo bajo,
+  salida estructurada (JSON Schema), instrucciones en caché y respaldo
+  automático del proveedor si un filtro de seguridad rechaza la solicitud
+  (`fallbacks: "default"`).
+- **Google AI Studio (Gemini):** `gemini-3.8-flash` por defecto, con
+  razonamiento bajo y salida en JSON con el mismo esquema. Tiene **nivel
+  gratuito** con límites de solicitudes por minuto y por día (los muestra AI
+  Studio); en ese nivel **Google puede usar lo enviado para mejorar sus
+  productos**, así que sirve para pilotos con datos no confidenciales. En el
+  nivel de pago no.
+
+`PRESUPUESTO_IA_MODELO` cambia el modelo (por ejemplo `claude-sonnet-5-5`
+o `gemini-3.5-flash-lite`); su nombre también elige el proveedor. El costo
+usa el precio de lista del modelo que respondió; en el nivel gratuito de
+Google no se cobra, pero el cupo cuenta ese valor de referencia para seguir
+limitando el uso. Google anunció que los precios de 3.8 y 3.6 Flash se
+duplican el 01-01-2027.
 
 ### Permisos
 
@@ -1485,9 +1501,11 @@ Asistente IA (variables de Vercel, nunca en el repositorio):
 
 | Variable | Uso |
 |---|---|
-| `ANTHROPIC_API_KEY` | Clave del API de Anthropic. Sin ella el asistente dice que no está configurado |
+| `ANTHROPIC_API_KEY` | Clave del API de Anthropic (proveedor Claude) |
+| `GEMINI_API_KEY` | Clave de Google AI Studio (proveedor Gemini). Sin ninguna de las dos, el asistente dice que no está configurado |
+| `PRESUPUESTO_IA_PROVEEDOR` | Opcional. `anthropic` o `google` cuando hay las dos claves |
 | `PRESUPUESTO_IA_PROYECTO_GESTOR` | Id del proyecto de Trimble Connect cuyos administradores fijan los cupos (por ejemplo, MANAGER PROJECT) |
-| `PRESUPUESTO_IA_MODELO` | Opcional. Modelo a usar (por defecto `claude-opus-5-5`) |
+| `PRESUPUESTO_IA_MODELO` | Opcional. Modelo a usar (por defecto `claude-opus-5-5` o `gemini-3.8-flash`) |
 | `PRESUPUESTO_IA_TRM` | Opcional. TRM inicial (por defecto 4.000) mientras no se guarde una en el asistente |
 
 ---

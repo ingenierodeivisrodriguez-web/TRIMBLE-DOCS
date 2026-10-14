@@ -3,7 +3,7 @@
 // call costs, and drafts that only reach the budget when a person accepts them.
 import { ServiceError } from "../../propiedades/service";
 import { Ctx, requireEdit, puedeEditar } from "../service";
-import { errorDeIA, MODELO_POR_DEFECTO, RespuestaIA } from "./claude";
+import { errorDeIA, RespuestaIA } from "./claude";
 import { aCop, costoUsd, disponibleCop, estadoCupo, estimarCostoCop, fmtCop, globalPorDefecto, inicioDeMes } from "./cupo";
 import { ESQUEMA_EDT, leerRespuestaEdt, maxTokensEdt, mensajeEdt, SISTEMA_EDT, VERSION_PROMPT_EDT } from "./edt";
 import {
@@ -71,7 +71,8 @@ export async function getEstadoIA(ctx: Ctx): Promise<EstadoIAResponse> {
   ]);
   return {
     disponible: !!cliente,
-    modelo: cliente?.modelo ?? MODELO_POR_DEFECTO,
+    proveedor: cliente?.proveedor ?? "",
+    modelo: cliente?.modelo ?? "",
     puedeUsar,
     puedeAdministrar,
     gestorConfigurado: !!ctx.deps.iaGestor,
@@ -184,7 +185,7 @@ export async function generarEdtIA(ctx: Ctx, body: unknown): Promise<GenerarEdtR
   await requireEdit(ctx);
   const cliente = ctx.deps.ia?.() ?? null;
   if (!cliente) {
-    throw new ServiceError("El asistente IA no está configurado: falta la variable ANTHROPIC_API_KEY en Vercel.", 503, "ia-sin-clave");
+    throw new ServiceError("El asistente IA no está configurado: falta la clave del proveedor (ANTHROPIC_API_KEY o GEMINI_API_KEY) en Vercel.", 503, "ia-sin-clave");
   }
   const { contexto, partidas } = validarPeticionEdt(body);
   const cupo = await cupoActual(ctx);

@@ -232,7 +232,10 @@ function GenerarEdt({
   return (
     <>
       {!estado.disponible && (
-        <Notice kind="error">El asistente IA no está configurado en el servidor: el administrador de la plataforma debe poner la variable ANTHROPIC_API_KEY en Vercel.</Notice>
+        <Notice kind="error">
+          El asistente IA no está configurado en el servidor: el administrador de la plataforma debe poner en Vercel la clave del proveedor
+          (ANTHROPIC_API_KEY o GEMINI_API_KEY).
+        </Notice>
       )}
       {!estado.puedeUsar && <Notice kind="info">Solo los administradores del proyecto y los editores del presupuesto usan el asistente.</Notice>}
       <BannerCupo cupo={estado.cupo} />
@@ -242,8 +245,9 @@ function GenerarEdt({
         aceptes cada borrador.
       </p>
       <p style={{ margin: 0, fontSize: 12.5, color: "var(--tc-gray-500)" }}>
-        Al proveedor de IA (Anthropic, modelo {estado.modelo}) se envían el número, la descripción, la unidad y el capítulo de cada partida, su texto
-        actual del diccionario y el contexto que escribas. No se envían precios, nombres ni correos.
+        Al proveedor de IA{estado.proveedor ? ` (${estado.proveedor}, modelo ${estado.modelo})` : ""} se envían el número, la descripción, la unidad y el
+        capítulo de cada partida, su texto actual del diccionario y el contexto que escribas. No se envían precios, nombres ni correos.
+        {estado.proveedor === "Google" && " En el nivel gratuito de Google AI Studio, Google puede usar lo enviado para mejorar sus productos: úsalo solo para pilotos con datos no confidenciales."}
       </p>
       <div style={{ display: "flex", gap: 24, flexWrap: "wrap", fontSize: 13.5 }}>
         <div role="radiogroup" aria-label="Alcance">
@@ -526,7 +530,8 @@ function UsoYCupo({ api, estado, onEstado }: { api: PresupuestoApi; estado: Esta
           <Barra etiqueta="Tú" gasto={cupo.gastoUsuarioCop} cupo={cupo.cupoUsuarioCop} />
         </div>
         <p style={{ margin: "10px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" }}>
-          Costo estimado con los precios del proveedor ({estado.modelo}) y una TRM de {fmtCop(cupo.trm)} por dólar. {cupo.propio ? "Este proyecto tiene cupo propio." : "Este proyecto usa el cupo por defecto."} Aviso al 80 %
+          Costo estimado con los precios de lista del proveedor ({estado.proveedor} {estado.modelo}) y una TRM de {fmtCop(cupo.trm)} por dólar
+          {estado.proveedor === "Google" ? " (en el nivel gratuito de Google no se cobra, pero el cupo cuenta este valor de referencia)" : ""}. {cupo.propio ? "Este proyecto tiene cupo propio." : "Este proyecto usa el cupo por defecto."} Aviso al 80 %
           y bloqueo al 100 %.
         </p>
       </Seccion>

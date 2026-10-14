@@ -8,6 +8,8 @@ import { memoryStore, PresupuestoStore } from "../store";
 import type { ClienteIA, PeticionIA, RespuestaIA } from "./claude";
 import { aCop, costoUsd, disponibleCop, estadoCupo, fmtCop, inicioDeMes } from "./cupo";
 import { leerRespuestaEdt, mensajeEdt, partidasParaEdt } from "./edt";
+import { leerRespuestaGemini } from "./gemini";
+import { elegirProveedor } from "./proveedor";
 import { decidirBorradoresIA, generarEdtIA, getEstadoIA, guardarCupoIA, listarBorradoresIA } from "./servicio";
 import type { PartidaEdtIA } from "./tipos";
 
@@ -21,6 +23,7 @@ const partida = (id: string, descripcion = "CONCRETO COLUMNAS"): PartidaEdtIA =>
 function falsa(responder?: (p: PeticionIA, ids: string[]) => Partial<RespuestaIA> | Error) {
   const llamadas: PeticionIA[] = [];
   const cliente: ClienteIA = {
+    proveedor: "Anthropic",
     modelo: "claude-opus-5-5",
     async generar(p) {
       llamadas.push(p);
@@ -256,5 +259,42 @@ describe("asistente IA: permisos, cupo, registro y borradores", () => {
     await assert.rejects(generarEdtIA(ctx(store, admin, cliente), { partidas: Array.from({ length: 13 }, (_, i) => partida(`p${i}`)) }), /Máximo 12/);
     await assert.rejects(generarEdtIA(ctx(store, admin, cliente), { partidas: [partida("p1"), partida("p1")] }), /repetida/);
     await assert.rejects(generarEdtIA(ctx(store, admin, cliente), { partidas: [{ ...partida("p1"), descripcion: "" }] }), /obligatorio/);
+  });
+});
+
+describe("proveedor del modelo", () => {
+  it("usa el proveedor que tenga clave, Anthropic primero, o el que se pida", () => {
+    assert.equal(elegirProveedor({}), null);
+    assert.deepEqual(elegirProveedor({ GEMINI_API_KEY: "g" }), { proveedor: "google", apiKey: "g", modelo: "gemini-3.8-flash" });
+    assert.deepEqual(elegirProveedor({ ANTHROPIC_API_KEY: "a", GEMINI_API_KEY: "g" }), { proveedor: "anthropic", apiKey: "a", modelo: "claude-opus-5-5" });
+    assert.equal(elegirProveedor({ ANTHROPIC_API_KEY: "a", GEMINI_API_KEY: "g", PRESUPUESTO_IA_PROVEEDOR: "Google" })!.proveedor, "google");
+    // The model's name also chooses the provider.
+    assert.deepEqual(elegirProveedor({ ANTHROPIC_API_KEY: "a", GOOGLE_API_KEY: "g", PRESUPUESTO_IA_MODELO: "gemini-3.5-flash-lite" }), {
+      proveedor: "google",
+      apiKey: "g",
+      modelo: "gemini-3.5-flash-lite",
+    });
+    // A model of the other provider is ignored; asking for a provider without its key gives nothing.
+    assert.equal(elegirProveedor({ GEMINI_API_KEY: "g", PRESUPUESTO_IA_PROVEEDOR: "google", PRESUPUESTO_IA_MODELO: "claude-sonnet-5-5" })!.modelo, "gemini-3.8-flash");
+    assert.equal(elegirProveedor({ GEMINI_API_KEY: "g", PRESUPUESTO_IA_PROVEEDOR: "anthropic" }), null);
+  });
+
+  it("el costo de Gemini usa sus precios (el pensamiento cuenta como salida)", () => {
+    assert.equal(costoUsd([{ modelo: "gemini-3.8-flash", entrada: 1_000_000, salida: 1_000_000, cacheEscritura: 0, cacheLectura: 1_000_000 }]), 0.75 + 3.75 + 0.075);
+  });
+});
+
+describe("respuestas de Gemini", () => {
+  const uso = { promptTokenCount: 3000, cachedContentTokenCount: 1000, candidatesTokenCount: 800, thoughtsTokenCount: 400 };
+  it("descuenta la caché de la entrada y suma el razonamiento a la salida", () => {
+    const r = leerRespuestaGemini({ text: "{\"partidas\":[]}", usageMetadata: uso, candidates: [{ finishReason: "STOP" }] }, "gemini-3.8-flash");
+    assert.deepEqual(r.tokens, [{ modelo: "gemini-3.8-flash", entrada: 2000, salida: 1200, cacheEscritura: 0, cacheLectura: 1000 }]);
+    assert.deepEqual([r.stopReason, r.texto, r.rechazo], ["end_turn", "{\"partidas\":[]}", null]);
+  });
+  it("respuesta cortada por el límite, y bloqueos por seguridad", () => {
+    assert.equal(leerRespuestaGemini({ text: "{", usageMetadata: uso, candidates: [{ finishReason: "MAX_TOKENS" }] }, "m").stopReason, "max_tokens");
+    const bloqueada = leerRespuestaGemini({ usageMetadata: uso, candidates: [{ finishReason: "SAFETY" }] }, "m");
+    assert.deepEqual([bloqueada.stopReason, bloqueada.texto, bloqueada.rechazo], ["refusal", null, "SAFETY"]);
+    assert.equal(leerRespuestaGemini({ promptFeedback: { blockReason: "PROHIBITED_CONTENT" } }, "m").rechazo, "PROHIBITED_CONTENT");
   });
 });

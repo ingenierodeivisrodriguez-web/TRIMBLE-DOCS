@@ -1,5 +1,6 @@
-// The only place that talks to Claude. The key lives in Vercel
-// (ANTHROPIC_API_KEY), never in the repository; the model is chosen here.
+// The assistant's model behind one interface, and Claude (Anthropic) as one
+// of its providers (proveedor.ts chooses; gemini.ts is the other). The key
+// lives in Vercel (ANTHROPIC_API_KEY), never in the repository.
 import Anthropic from "@anthropic-ai/sdk";
 import { ServiceError } from "../../propiedades/service";
 import type { TokensIA } from "./cupo";
@@ -30,20 +31,19 @@ export interface RespuestaIA {
 }
 
 export interface ClienteIA {
+  /** Who answers: "Anthropic" or "Google". */
+  proveedor: string;
   modelo: string;
   generar(p: PeticionIA): Promise<RespuestaIA>;
 }
 
-/** The real client, or null when the server has no key. */
-export function clienteClaude(): ClienteIA | null {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) return null;
-  const modelo = process.env.PRESUPUESTO_IA_MODELO?.trim() || MODELO_POR_DEFECTO;
+export function clienteClaude(apiKey: string, modelo: string = MODELO_POR_DEFECTO): ClienteIA {
   // Each call is a small batch and must end within the server function (60 s): no retries
   // here; the browser retries a failed batch once.
   const client = new Anthropic({ apiKey, maxRetries: 0, timeout: 55_000 });
 
   return {
+    proveedor: "Anthropic",
     modelo,
     async generar(p) {
       let r: Anthropic.Beta.BetaMessage;

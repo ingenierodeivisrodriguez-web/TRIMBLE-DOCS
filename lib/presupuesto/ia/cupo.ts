@@ -16,6 +16,14 @@ const PRECIOS: Record<string, Precio> = {
   "claude-haiku-5-5": { entrada: 0.1, salida: 0.5, cacheLectura: 0.01 },
   "claude-opus-5": { entrada: 5, salida: 25, cacheLectura: 0.5 },
   "claude-opus-4-8": { entrada: 5, salida: 25, cacheLectura: 0.5 },
+  // Google AI Studio, paid tier (thinking is billed as output). The free tier costs nothing, but
+  // the quota counts these reference prices so it still limits use. Google announced that the
+  // 3.8 and 3.6 Flash prices double on 01-01-2027.
+  "gemini-3.8-flash": { entrada: 0.75, salida: 3.75, cacheLectura: 0.075 },
+  "gemini-3.6-flash": { entrada: 0.75, salida: 3.75, cacheLectura: 0.075 },
+  "gemini-3.5-flash-lite": { entrada: 0.3, salida: 2.5, cacheLectura: 0.03 },
+  "gemini-3.1-flash-lite": { entrada: 0.25, salida: 1.5, cacheLectura: 0.025 },
+  "gemini-4-argon": { entrada: 2, salida: 10, cacheLectura: 0.1 },
 };
 /** A model not in the table is counted at the highest price, so the quota never falls short. */
 const PRECIO_DESCONOCIDO: Precio = { entrada: 10, salida: 50, cacheLectura: 1 };

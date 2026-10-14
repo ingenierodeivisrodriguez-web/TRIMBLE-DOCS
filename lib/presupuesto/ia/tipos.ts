@@ -107,8 +107,10 @@ export interface ResumenBorradores {
 }
 
 export interface EstadoIAResponse {
-  /** The server has ANTHROPIC_API_KEY. */
+  /** The server has a key (ANTHROPIC_API_KEY or GEMINI_API_KEY). */
   disponible: boolean;
+  /** "Anthropic" or "Google" ("" when none is configured). */
+  proveedor: string;
   modelo: string;
   /** Editors of the budget use it. */
   puedeUsar: boolean;
