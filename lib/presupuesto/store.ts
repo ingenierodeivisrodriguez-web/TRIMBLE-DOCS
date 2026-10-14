@@ -111,6 +111,9 @@ export interface PresupuestoStore {
 // ---------------------------------------------------------------- Supabase
 
 const REQUEST_TIMEOUT_MS = 20_000;
+const LENTA = "La base de datos (Supabase) tardó demasiado en responder. Intenta de nuevo en un momento.";
+/** The request ran out of time (the fetch or reading its answer). */
+const esTiempo = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
 const PAGE = 1000;
 const IN_CHUNK = 150;
 
@@ -304,12 +307,19 @@ function supabaseStore(): PresupuestoStore | null {
   if (!key.startsWith("sb_")) headers.Authorization = `Bearer ${key}`;
 
   async function call(path: string, init: RequestInit = {}): Promise<Response> {
-    const res = await fetch(`${rest}${path}`, {
-      ...init,
-      headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-      cache: "no-store",
-    });
+    let res: Response;
+    try {
+      res = await fetch(`${rest}${path}`, {
+        ...init,
+        headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
+        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+        cache: "no-store",
+      });
+    } catch (err) {
+      // Reads are retried by json(); a write that timed out is reported plainly.
+      if (esTiempo(err) && init.method && init.method !== "GET") throw new StoreError(LENTA, 504);
+      throw err;
+    }
     if (res.ok) return res;
     const body = await res.text().catch(() => "");
     let detail: { code?: string; message?: string } = {};
@@ -329,8 +339,18 @@ function supabaseStore(): PresupuestoStore | null {
     throw new StoreError(`Supabase respondió ${res.status}${detail.message ? `: ${detail.message}` : ""}`);
   }
 
+  /** The answer as JSON. A read that runs out of time (sending or receiving) is tried once more. */
   async function json<T>(path: string, init?: RequestInit): Promise<T> {
-    return (await (await call(path, init)).json()) as T;
+    const lectura = !init?.method || init.method === "GET";
+    for (let intento = 0; ; intento++) {
+      try {
+        return (await (await call(path, init)).json()) as T;
+      } catch (err) {
+        if (!esTiempo(err)) throw err;
+        if (lectura && intento === 0) continue;
+        throw new StoreError(LENTA, 504);
+      }
+    }
   }
 
   /** Every row of a query, a page at a time (Supabase caps each answer). */

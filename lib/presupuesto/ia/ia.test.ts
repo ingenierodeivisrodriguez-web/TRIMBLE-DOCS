@@ -364,6 +364,26 @@ describe("respaldo de Google", () => {
     await assert.rejects(clienteGemini("k", "gemini-x", "gemini-3.5-flash-lite", falla(404)).generar(peticion), /NOT_FOUND: Model not found/);
     await assert.rejects(clienteGemini("k", "gemini-x", null, falla(503)).generar(peticion), /falló después de reintentar/);
   });
+
+  it("si el modelo principal se queda sin cuota, prueba el de respaldo; si tampoco hay, lo explica", async () => {
+    const sinCuota = (modelos: string[]) =>
+      ({
+        async generateContent(p: { model: string }) {
+          if (modelos.includes(p.model)) {
+            throw new ApiError({
+              status: 429,
+              message: '{"error":{"code":429,"message":"You exceeded your current quota.\\n* Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 0, model: gemini-3.8-flash","status":"RESOURCE_EXHAUSTED"}}',
+            });
+          }
+          return ok("{}");
+        },
+      }) as unknown as ModelosGemini;
+    assert.equal((await clienteGemini("k", "gemini-3.8-flash", "gemini-3.5-flash-lite", sinCuota(["gemini-3.8-flash"])).generar(peticion)).modelo, "gemini-3.5-flash-lite");
+    await assert.rejects(
+      clienteGemini("k", "gemini-3.8-flash", "gemini-3.5-flash-lite", sinCuota(["gemini-3.8-flash", "gemini-3.5-flash-lite"])).generar(peticion),
+      /no tiene cupo gratuito para este modelo \(límite 0\).*limit: 0, model: gemini-3.8-flash/
+    );
+  });
 });
 
 describe("fase 3: crear la EDT desde la descripción", () => {

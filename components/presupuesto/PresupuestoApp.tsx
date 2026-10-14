@@ -532,7 +532,14 @@ export default function PresupuestoApp({
               </button>
             </span>
           )}
-          {s.catalogoError && <span style={{ color: "#8a1c14" }}>Catálogo: {s.catalogoError}</span>}
+          {s.catalogoError && (
+            <span style={{ color: "#8a1c14" }}>
+              No se pudo cargar el catálogo: {s.catalogoError}{" "}
+              <button type="button" style={linkBtn} onClick={() => s.reloadCatalogo()}>
+                Reintentar
+              </button>
+            </span>
+          )}
           {programacion.dirty && (
             <span style={{ color: "#7a5300" }}>
               La programación tiene cambios sin guardar.{" "}

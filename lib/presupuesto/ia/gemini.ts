@@ -69,7 +69,8 @@ export function clienteGemini(
       try {
         return leerRespuestaGemini(await pedir(modelo, p, true), modelo);
       } catch (err) {
-        const fallaDeGoogle = err instanceof ApiError && err.status >= 500;
+        // A failure on Google's side, or the main model's quota used up (each model has its own).
+        const fallaDeGoogle = err instanceof ApiError && (err.status >= 500 || err.status === 429);
         if (!fallaDeGoogle || !respaldo || respaldo === modelo) throw errorDeGemini(err);
         console.error(`[presupuesto-ia] ${modelo} falló en Google (${(err as ApiError).status}: ${mensajeGoogle((err as ApiError).message)}); se intenta con ${respaldo}.`);
         try {
@@ -118,12 +119,12 @@ export function mensajeGoogle(raw: string): string {
   if (inicio >= 0) {
     try {
       const o = JSON.parse(raw.slice(inicio)) as { error?: { message?: string; status?: string } };
-      if (o.error?.message) return `${o.error.status ? `${o.error.status}: ` : ""}${o.error.message}`.slice(0, 300);
+      if (o.error?.message) return `${o.error.status ? `${o.error.status}: ` : ""}${o.error.message}`.replace(/\s+/g, " ").slice(0, 700);
     } catch {
       // not JSON
     }
   }
-  return raw.slice(0, 300);
+  return raw.replace(/\s+/g, " ").slice(0, 700);
 }
 
 /** Errors of the API as messages a person can act on, with what Google said (also in the server's log). */
@@ -135,7 +136,18 @@ export function errorDeGemini(err: unknown): ServiceError {
       return new ServiceError(`La clave GEMINI_API_KEY de Vercel no es válida o no tiene permiso (Google: ${dijo}).`, 503, "ia-clave");
     }
     if (err.status === 429) {
-      return new ServiceError(`Se alcanzó el límite de solicitudes de Google AI Studio (el nivel gratuito tiene límites por minuto y por día). Espera y continúa. (Google: ${dijo})`, 429, "ia-limite");
+      if (/limit:\s*0\b/.test(dijo)) {
+        return new ServiceError(
+          `Tu cuenta de Google AI Studio no tiene cupo gratuito para este modelo (límite 0). Activa la facturación del proyecto en AI Studio, o usa otro modelo con la variable PRESUPUESTO_IA_MODELO. (Google: ${dijo})`,
+          429,
+          "ia-limite"
+        );
+      }
+      return new ServiceError(
+        `Se agotó la cuota de tu cuenta de Google AI Studio (el nivel gratuito tiene límites por minuto y por día). Espera un rato, o activa la facturación en AI Studio para quitar el límite. (Google: ${dijo})`,
+        429,
+        "ia-limite"
+      );
     }
     if (err.status === 400 || err.status === 404) {
       return new ServiceError(`Google no aceptó la solicitud (${err.status}): ${dijo}`, 502, "ia-solicitud");
