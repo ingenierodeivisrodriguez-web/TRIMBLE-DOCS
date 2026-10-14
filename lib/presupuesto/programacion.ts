@@ -450,6 +450,43 @@ export function leerPredecesoras(
   return { deps };
 }
 
+/** Links two partidas: `de` becomes a predecessor of `a` (finish-to-start, no lag, unless told otherwise). */
+export function enlazar(
+  tareas: Record<string, TareaProgramada>,
+  p: Pick<Programado, "porId">,
+  de: string,
+  a: string,
+  dep: Pick<Dependencia, "tipo" | "desfase"> = { tipo: "FC", desfase: 0 }
+): { tareas: Record<string, TareaProgramada> } | { error: string } {
+  const origen = p.porId.get(de);
+  const destino = p.porId.get(a);
+  if (!origen || !destino || origen.tipo !== "partida" || destino.tipo !== "partida") return { error: "Solo se enlazan partidas (no títulos ni subpresupuestos)." };
+  if (de === a) return { error: "Una partida no puede ser su propia predecesora." };
+  const actuales = tareas[a]?.predecesoras ?? [];
+  if (actuales.some((d) => d.id === de)) return { error: `La fila ${origen.fila} ya es predecesora de la fila ${destino.fila}: doble clic en la flecha para cambiar el enlace.` };
+  if (actuales.length >= MAX_PREDECESORAS) return { error: `La fila ${destino.fila} ya tiene el máximo de ${MAX_PREDECESORAS} predecesoras.` };
+  if (creaCiclo(tareas, a, [...actuales.map((d) => d.id), de])) return { error: `No se puede: la fila ${origen.fila} ya depende de la fila ${destino.fila} y se formaría un ciclo.` };
+  return { tareas: { ...tareas, [a]: { ...tareas[a], predecesoras: [...actuales, { id: de, tipo: dep.tipo, desfase: dep.desfase }] } } };
+}
+
+/** Changes the link from `de` to `a`, or removes it (`cambio` null). */
+export function cambiarEnlace(
+  tareas: Record<string, TareaProgramada>,
+  de: string,
+  a: string,
+  cambio: Pick<Dependencia, "tipo" | "desfase"> | null
+): Record<string, TareaProgramada> {
+  const t = tareas[a];
+  if (!t?.predecesoras?.some((d) => d.id === de)) return tareas;
+  const predecesoras = cambio ? t.predecesoras.map((d) => (d.id === de ? { id: de, tipo: cambio.tipo, desfase: cambio.desfase } : d)) : t.predecesoras.filter((d) => d.id !== de);
+  const { predecesoras: _p, ...resto } = t;
+  const nueva: TareaProgramada = predecesoras.length ? { ...resto, predecesoras } : resto;
+  const out = { ...tareas };
+  if (Object.keys(nueva).length) out[a] = nueva;
+  else delete out[a];
+  return out;
+}
+
 // ---------------------------------------------------------------- money over time
 
 export type TipoPeriodo = "semana" | "mes";

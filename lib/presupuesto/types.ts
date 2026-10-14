@@ -374,10 +374,10 @@ export const MAX_EDITORES = 50;
 export type TipoDependencia = "FC" | "CC" | "FF" | "CF";
 export const TIPOS_DEPENDENCIA: TipoDependencia[] = ["FC", "CC", "FF", "CF"];
 export const TIPO_DEPENDENCIA_NOMBRES: Record<TipoDependencia, string> = {
-  FC: "Fin - Comienzo",
-  CC: "Comienzo - Comienzo",
-  FF: "Fin - Fin",
-  CF: "Comienzo - Fin",
+  FC: "Fin a comienzo (FC)",
+  CC: "Comienzo a comienzo (CC)",
+  FF: "Fin a fin (FF)",
+  CF: "Comienzo a fin (CF)",
 };
 
 export interface Dependencia {

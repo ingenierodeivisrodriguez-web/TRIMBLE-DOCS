@@ -1325,6 +1325,17 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
   aparece en la barra y en la celda). Doble clic en una partida abre su
   detalle, con las predecesoras en lista (partida, tipo, desfase), sus
   sucesoras, las cuadrillas y la fecha "no comenzar antes de".
+- **Enlazar arrastrando.** En el diagrama, se pulsa sobre la barra de una
+  actividad y se arrastra: sale una línea verde punteada y la fila de destino
+  se resalta. Al soltar sobre otra partida, la primera queda como su
+  predecesora **fin a comienzo** y aparece la flecha (si ya estaba enlazada,
+  sería un ciclo o es un título, la barra de estado lo dice). Cerca del borde,
+  el diagrama se desplaza para llegar a filas o días fuera de la vista.
+- **Doble clic en una flecha** abre *Dependencia entre tareas*: De, Con, el
+  **Tipo** (fin a comienzo, comienzo a comienzo, fin a fin, comienzo a fin) y el
+  **Retardo** en días hábiles (con flechas; negativo para adelantarse), con
+  **Eliminar**, **Aceptar** y **Cancelar**. Al pasar el ratón la flecha se
+  resalta en azul.
 - **Fecha fija.** Escribir una fecha en *Inicio* de una partida fija "no
   comenzar antes de" (📌); borrarla la quita.
 - **Calendario laboral.** Horas de trabajo de cada día de la semana (un

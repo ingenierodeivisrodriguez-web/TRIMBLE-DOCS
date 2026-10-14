@@ -5,6 +5,8 @@ import { calcularSubpresupuesto, SubpresupuestoCalculado } from "./calc";
 import { agregarEspeciales, Calendario, festivosColombia, pascua } from "./calendario";
 import { documentoVacio, resolverPresupuesto } from "./doc";
 import {
+  cambiarEnlace,
+  enlazar,
   calendarioInsumos,
   calendarioValorizado,
   creaCiclo,
@@ -365,5 +367,46 @@ describe("guardar la programación", () => {
     await assert.rejects(intento((p) => (p.tareas.p2.predecesoras = [{ id: "p1", tipo: "XX" as "FC", desfase: 0 }])), /FC, CC, FF o CF/);
     await assert.rejects(intento((p) => (p.tareas.p2.duracion = -1)), /mayor o igual a 0/);
     await assert.rejects(intento((p) => (p.redondeo = "raro" as "dia")), /Redondeo/);
+  });
+});
+
+describe("enlazar arrastrando en el diagrama", () => {
+  const doc = documento([partida("p1", 300, 150), partida("p2", 54, 20), partida("p3", 100, 100)]);
+  const r = programar(doc, calcular(doc), prog("2026-10-05"));
+
+  it("la actividad de origen queda como predecesora fin-comienzo de la de destino", () => {
+    const x = enlazar({ p2: { cuadrillas: 2 } }, r, "p1", "p2");
+    assert.ok("tareas" in x);
+    assert.deepEqual(x.tareas.p2, { cuadrillas: 2, predecesoras: [fc("p1")] });
+    const y = enlazar(x.tareas, r, "p2", "p3");
+    assert.ok("tareas" in y);
+    const nuevo = programar(doc, calcular(doc), prog("2026-10-05", y.tareas));
+    assert.deepEqual(
+      ["p1", "p2", "p3"].map((id) => nuevo.porId.get(id)!.inicio),
+      ["2026-10-05", "2026-10-07", "2026-10-09"] // p2 lasts 2 days with its 2 crews
+    );
+  });
+
+  it("no repite enlaces, no enlaza títulos ni a sí misma, y no deja hacer ciclos", () => {
+    const tareas = { p2: { predecesoras: [fc("p1")] }, p3: { predecesoras: [fc("p2")] } };
+    const error = (de: string, a: string) => {
+      const x = enlazar(tareas, r, de, a);
+      return "error" in x ? x.error : "";
+    };
+    assert.match(error("p1", "p2"), /ya es predecesora/);
+    assert.match(error("t1", "p2"), /Solo se enlazan partidas/);
+    assert.match(error("p2", "p2"), /propia/);
+    assert.match(error("p3", "p1"), /ciclo/); // p1 -> p2 -> p3 -> p1
+  });
+
+  it("el diálogo de la flecha cambia el tipo y el retardo, o elimina el enlace", () => {
+    const tareas = { p2: { duracion: 3, predecesoras: [fc("p1"), fc("p3")] }, p3: { predecesoras: [fc("p1")] } };
+    const cambiada = cambiarEnlace(tareas, "p1", "p2", { tipo: "CC", desfase: -1 });
+    assert.deepEqual(cambiada.p2.predecesoras, [{ id: "p1", tipo: "CC", desfase: -1 }, fc("p3")]);
+    const sinUno = cambiarEnlace(tareas, "p3", "p2", null);
+    assert.deepEqual(sinUno.p2, { duracion: 3, predecesoras: [fc("p1")] });
+    const sinTarea = cambiarEnlace(tareas, "p1", "p3", null);
+    assert.equal(sinTarea.p3, undefined); // nothing else was set
+    assert.equal(cambiarEnlace(tareas, "p2", "p3", null), tareas); // no such link
   });
 });

@@ -525,7 +525,7 @@ export function TareaDialog({
                     <select value={d.tipo} disabled={!editable} onChange={(e) => setDep(i, { tipo: e.target.value as TipoDependencia })} style={{ ...baseInput, width: "100%" }} aria-label={`Tipo de la predecesora ${i + 1}`}>
                       {TIPOS_DEPENDENCIA.map((t) => (
                         <option key={t} value={t}>
-                          {t} · {TIPO_DEPENDENCIA_NOMBRES[t]}
+                          {TIPO_DEPENDENCIA_NOMBRES[t]}
                         </option>
                       ))}
                     </select>
@@ -870,3 +870,134 @@ const td: CSSProperties = { padding: "4px 8px", borderBottom: `1px solid ${C.gri
 const tdNum: CSSProperties = { ...td, textAlign: "right", fontVariantNumeric: "tabular-nums", whiteSpace: "nowrap" };
 const botonSec: CSSProperties = { border: `1px solid ${C.border}`, background: "#fff", borderRadius: 4, padding: "5px 10px", cursor: "pointer", fontFamily: "inherit", fontSize: 13 };
 const quitar: CSSProperties = { border: "none", background: "transparent", color: "#b3261e", cursor: "pointer", fontSize: 14, fontFamily: "inherit" };
+
+// ---------------------------------------------------------------- one link (double click on an arrow)
+
+const EXPLICA_TIPO: Record<TipoDependencia, string> = {
+  FC: "«Con» empieza cuando «De» termina.",
+  CC: "«Con» empieza cuando «De» empieza.",
+  FF: "«Con» termina cuando «De» termina.",
+  CF: "«Con» termina cuando «De» empieza.",
+};
+
+const textoRetardo = (n: number) => `${String(n).replace(".", ",")}d`;
+
+/** Lag in working days, like "2d" or "-1d", with arrows to step it. */
+function RetardoInput({ value, onChange, disabled }: { value: number; onChange: (n: number) => void; disabled?: boolean }) {
+  const [text, setText] = useState(textoRetardo(value));
+  useEffect(() => setText(textoRetardo(value)), [value]);
+  const cambiar = (n: number) => onChange(Math.max(-10_000, Math.min(10_000, Math.round(n * 100) / 100)));
+  function leer() {
+    const n = parseNumberInput(text.replace(/d[ií]as?|d/gi, ""));
+    if (n === null) setText(textoRetardo(value));
+    else cambiar(n);
+  }
+  const flecha: CSSProperties = { border: `1px solid var(--tc-gray-300)`, background: "#fff", width: 22, height: 16, padding: 0, fontSize: 9, lineHeight: "14px", cursor: disabled ? "default" : "pointer", fontFamily: "inherit" };
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 2 }}>
+      <input
+        type="text"
+        aria-label="Retardo en días"
+        value={text}
+        disabled={disabled}
+        onChange={(e) => setText(e.target.value)}
+        onBlur={leer}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") leer();
+          if (e.key === "ArrowUp") {
+            e.preventDefault();
+            cambiar(value + 1);
+          }
+          if (e.key === "ArrowDown") {
+            e.preventDefault();
+            cambiar(value - 1);
+          }
+        }}
+        style={{ ...baseInput, width: 80, textAlign: "right" }}
+      />
+      <span style={{ display: "inline-flex", flexDirection: "column" }}>
+        <button type="button" aria-label="Un día más" disabled={disabled} onClick={() => cambiar(value + 1)} style={{ ...flecha, borderRadius: "3px 3px 0 0" }}>
+          ▲
+        </button>
+        <button type="button" aria-label="Un día menos" disabled={disabled} onClick={() => cambiar(value - 1)} style={{ ...flecha, borderRadius: "0 0 3px 3px", borderTop: "none" }}>
+          ▼
+        </button>
+      </span>
+    </span>
+  );
+}
+
+export function DependenciaDialog({
+  de,
+  a,
+  dep,
+  editable,
+  onAccept,
+  onEliminar,
+  onClose,
+}: {
+  /** The predecessor. */
+  de: FilaGantt;
+  /** The successor. */
+  a: FilaGantt;
+  dep: Dependencia;
+  editable: boolean;
+  onAccept: (cambio: Pick<Dependencia, "tipo" | "desfase">) => void;
+  onEliminar: () => void;
+  onClose: () => void;
+}) {
+  const [tipo, setTipo] = useState<TipoDependencia>(dep.tipo);
+  const [desfase, setDesfase] = useState(dep.desfase);
+  const fila = (f: FilaGantt) => (
+    <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }} title={`${f.numero} ${f.descripcion}`}>
+      <span style={{ color: "var(--tc-gray-500)" }}>Fila {f.fila} ·</span> {f.numero} {f.descripcion}
+    </span>
+  );
+  const boton: CSSProperties = { ...acceptButton, background: "#fff", color: "var(--tc-gray-700)", border: `1px solid var(--tc-gray-300)` };
+  return (
+    <Modal
+      title="Dependencia entre tareas"
+      onClose={onClose}
+      width={600}
+      footer={
+        <>
+          <button type="button" onClick={onEliminar} disabled={!editable} style={{ ...boton, color: "#b3261e", borderColor: "#e3a8a3", marginRight: "auto" }}>
+            Eliminar
+          </button>
+          <button type="button" onClick={() => onAccept({ tipo, desfase })} disabled={!editable} style={acceptButton}>
+            Aceptar
+          </button>
+          <button type="button" onClick={onClose} style={boton}>
+            Cancelar
+          </button>
+        </>
+      }
+    >
+      <div style={{ padding: "14px 18px 4px", display: "grid", gridTemplateColumns: "56px 1fr", rowGap: 12, columnGap: 10, alignItems: "center", fontSize: 14 }}>
+        <span style={{ color: "var(--tc-gray-500)" }}>De:</span>
+        {fila(de)}
+        <span style={{ color: "var(--tc-gray-500)" }}>Con:</span>
+        {fila(a)}
+        <span style={{ color: "var(--tc-gray-500)" }}>Tipo:</span>
+        <span style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap" }}>
+          <select value={tipo} disabled={!editable} onChange={(e) => setTipo(e.target.value as TipoDependencia)} style={{ ...baseInput, minWidth: 230 }} aria-label="Tipo de enlace">
+            {TIPOS_DEPENDENCIA.map((t) => (
+              <option key={t} value={t}>
+                {TIPO_DEPENDENCIA_NOMBRES[t]}
+              </option>
+            ))}
+          </select>
+          <label style={{ display: "flex", alignItems: "center", gap: 6 }}>
+            Retardo:
+            <RetardoInput value={desfase} onChange={setDesfase} disabled={!editable} />
+          </label>
+        </span>
+        <span />
+        <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", lineHeight: 1.5 }}>
+          {EXPLICA_TIPO[tipo]} Retardo en días hábiles:{" "}
+          {desfase > 0 ? `espera ${textoRetardo(desfase)}.` : desfase < 0 ? `se adelanta ${textoRetardo(-desfase)} (empieza o termina antes).` : "sin espera; con un número negativo se adelanta."}
+        </span>
+      </div>
+    </Modal>
+  );
+}

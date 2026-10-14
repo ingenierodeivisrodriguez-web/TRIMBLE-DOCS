@@ -58,6 +58,23 @@ export interface GanttProps {
   onPredecesoras: (id: string, texto: string) => string | null;
   onCuadrillas: (id: string, n: number | null) => void;
   onOpen: (id: string) => void;
+  /** A bar was dragged onto another: `de` becomes a predecessor of `a`. */
+  onEnlazar: (de: string, a: string) => void;
+  /** Double click on the arrow from `de` to `a`. */
+  onEditarEnlace: (de: string, a: string) => void;
+}
+
+/** A link being drawn by dragging from a bar (positions in the chart's body). */
+interface Arrastre {
+  de: string;
+  x0: number;
+  y0: number;
+  x: number;
+  y: number;
+  /** Where the press started (screen), to tell a click from a drag. */
+  sx: number;
+  sy: number;
+  activo: boolean;
 }
 
 export default function Gantt(props: GanttProps) {
@@ -67,6 +84,9 @@ export default function Gantt(props: GanttProps) {
   const [anchoIzq, setAnchoIzq] = useState(640);
   const [vista, setVista] = useState({ top: 0, alto: 600 });
   const [errores, setErrores] = useState<Map<string, string>>(new Map());
+  const cuerpo = useRef<HTMLDivElement>(null);
+  const [arrastre, setArrastre] = useState<Arrastre | null>(null);
+  const [enlaceSobre, setEnlaceSobre] = useState<string | null>(null);
 
   useLayoutEffect(() => {
     const r = der.current;
@@ -137,6 +157,58 @@ export default function Gantt(props: GanttProps) {
     if (!r || f.vacia) return;
     const x0 = x(f.es, "inicio");
     if (x0 < r.scrollLeft + 20 || x0 > r.scrollLeft + r.clientWidth - 80) r.scrollLeft = Math.max(0, x0 - 60);
+  }
+
+  /** Where the pointer is, in the chart's body. */
+  function punto(e: { clientX: number; clientY: number }) {
+    const r = cuerpo.current!.getBoundingClientRect();
+    return { x: e.clientX - r.left, y: e.clientY - r.top };
+  }
+
+  /** The partida a link would go to, at a height of the chart's body. */
+  function destinoEn(y: number, de: string): FilaGantt | null {
+    const f = filas[Math.floor(y / ROW_H)];
+    return f && f.tipo === "partida" && f.id !== de ? f : null;
+  }
+
+  function empezarEnlace(e: React.PointerEvent, f: FilaGantt, i: number) {
+    if (!editable || e.button !== 0 || !cuerpo.current) return;
+    const p = punto(e);
+    const xFin = f.ef > f.es ? x(f.ef, "fin") : x(f.es, "inicio");
+    setArrastre({ de: f.id, x0: xFin, y0: i * ROW_H + ROW_H / 2, x: p.x, y: p.y, sx: e.clientX, sy: e.clientY, activo: false });
+    try {
+      cuerpo.current.setPointerCapture(e.pointerId); // keep receiving the moves outside the bar
+    } catch {
+      // not an active pointer (e.g. a synthetic event): moves over the chart still arrive
+    }
+  }
+
+  function moverEnlace(e: React.PointerEvent) {
+    if (!arrastre) return;
+    const activo = arrastre.activo || Math.hypot(e.clientX - arrastre.sx, e.clientY - arrastre.sy) > 5;
+    // Near an edge, the chart scrolls to reach rows and days out of view.
+    const sc = der.current;
+    if (activo && sc) {
+      const r = sc.getBoundingClientRect();
+      if (e.clientY < r.top + HEAD_H + 24) sc.scrollTop -= 14;
+      else if (e.clientY > r.bottom - 28) sc.scrollTop += 14;
+      if (e.clientX < r.left + 24) sc.scrollLeft -= 14;
+      else if (e.clientX > r.right - 28) sc.scrollLeft += 14;
+    }
+    const p = punto(e);
+    setArrastre({ ...arrastre, x: p.x, y: p.y, activo });
+  }
+
+  function soltarEnlace(e: React.PointerEvent) {
+    if (!arrastre) return;
+    try {
+      cuerpo.current?.releasePointerCapture(e.pointerId);
+    } catch {
+      // it wasn't captured
+    }
+    const destino = arrastre.activo ? destinoEn(punto(e).y, arrastre.de) : null;
+    setArrastre(null);
+    if (destino) props.onEnlazar(arrastre.de, destino.id);
   }
 
   function arrastrarDivisor(e: React.PointerEvent<HTMLDivElement>) {
@@ -318,7 +390,11 @@ export default function Gantt(props: GanttProps) {
             )}
           </div>
           <div
-            style={{ position: "relative", height: altoCuerpo }}
+            ref={cuerpo}
+            style={{ position: "relative", height: altoCuerpo, cursor: arrastre?.activo ? "crosshair" : undefined, touchAction: arrastre ? "none" : undefined }}
+            onPointerMove={moverEnlace}
+            onPointerUp={soltarEnlace}
+            onPointerCancel={() => setArrastre(null)}
             onMouseDown={(e) => {
               const i = Math.floor((e.clientY - e.currentTarget.getBoundingClientRect().top) / ROW_H);
               if (filas[i]) onSelect(filas[i].id);
@@ -378,20 +454,24 @@ export default function Gantt(props: GanttProps) {
                   <div
                     key={f.id}
                     title={titulo}
-                    style={{ position: "absolute", top: i * ROW_H + 9, left: x0 - 6, width: 12, height: 12, transform: "rotate(45deg)", background: roja ? COLOR.critica : COLOR.resumen }}
+                    onPointerDown={(e) => empezarEnlace(e, f, i)}
+                    style={{ position: "absolute", top: i * ROW_H + 9, left: x0 - 6, width: 12, height: 12, transform: "rotate(45deg)", background: roja ? COLOR.critica : COLOR.resumen, cursor: editable ? "crosshair" : undefined }}
                   />
                 );
               }
               return (
                 <div
                   key={f.id}
-                  title={titulo}
+                  title={editable ? `${titulo}\nArrastra hasta otra actividad para que esta sea su predecesora.` : titulo}
+                  onPointerDown={(e) => empezarEnlace(e, f, i)}
                   style={{
                     position: "absolute",
                     top: i * ROW_H + 8,
                     left: x0,
                     width: Math.max(x1 - x0, 3),
                     height: 14,
+                    cursor: editable ? "crosshair" : undefined,
+                    touchAction: editable ? "none" : undefined,
                     borderRadius: 3,
                     background: roja ? COLOR.critica : COLOR.barra,
                     border: `1px solid ${roja ? COLOR.criticaBorde : COLOR.barraBorde}`,
@@ -400,6 +480,17 @@ export default function Gantt(props: GanttProps) {
                 />
               );
             })}
+            {/* the activity a dragged link would go to */}
+            {arrastre?.activo &&
+              (() => {
+                const destino = destinoEn(arrastre.y, arrastre.de);
+                if (!destino) return null;
+                return (
+                  <div
+                    style={{ position: "absolute", left: 0, width: ancho, top: Math.floor(arrastre.y / ROW_H) * ROW_H, height: ROW_H, background: "rgba(46,160,67,0.16)", outline: "1px solid #2ea043", pointerEvents: "none" }}
+                  />
+                );
+              })()}
             {/* links */}
             <svg width={ancho} height={altoCuerpo} style={{ position: "absolute", top: 0, left: 0, pointerEvents: "none", overflow: "visible" }} aria-hidden>
               <defs>
@@ -409,7 +500,19 @@ export default function Gantt(props: GanttProps) {
                 <marker id="gantt-flecha-critica" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
                   <path d="M0,0 L7,3.5 L0,7 z" fill={COLOR.critica} />
                 </marker>
+                <marker id="gantt-flecha-sobre" markerWidth="7" markerHeight="7" refX="6" refY="3.5" orient="auto">
+                  <path d="M0,0 L7,3.5 L0,7 z" fill="#1a73e8" />
+                </marker>
+                <marker id="gantt-flecha-nueva" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+                  <path d="M0,0 L8,4 L0,8 z" fill="#2ea043" />
+                </marker>
               </defs>
+              {arrastre?.activo && (
+                <>
+                  <circle cx={arrastre.x0} cy={arrastre.y0} r={4} fill="#2ea043" />
+                  <line x1={arrastre.x0} y1={arrastre.y0} x2={arrastre.x} y2={arrastre.y} stroke="#2ea043" strokeWidth={2} strokeDasharray="6 4" markerEnd="url(#gantt-flecha-nueva)" />
+                </>
+              )}
               {enlaces
                 .filter((e) => Math.min(e.de, e.a) < end && Math.max(e.de, e.a) >= start)
                 .map((e) => {
@@ -425,19 +528,40 @@ export default function Gantt(props: GanttProps) {
                   const xb = hastaInicio ? x2 - 6 : x2 + 6;
                   const ym = y2 > y1 ? y2 - ROW_H / 2 + 2 : y2 + ROW_H / 2 - 2;
                   const roja = critica && e.critico;
+                  const clave = `${p.id}>${s.id}`;
+                  const sobre = enlaceSobre === clave;
+                  const dep = s.predecesoras.find((x) => x.id === p.id);
                   const d =
                     (hastaInicio ? xa <= xb : xa >= xb)
                       ? `M${x1},${y1} H${xa} V${y2} H${x2}`
                       : `M${x1},${y1} H${xa} V${ym} H${xb} V${y2} H${x2}`;
                   return (
-                    <path
-                      key={`${e.de}-${e.a}`}
-                      d={d}
-                      fill="none"
-                      stroke={roja ? COLOR.critica : COLOR.enlace}
-                      strokeWidth={roja ? 1.6 : 1.1}
-                      markerEnd={`url(#${roja ? "gantt-flecha-critica" : "gantt-flecha"})`}
-                    />
+                    <g key={clave}>
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke={sobre ? "#1a73e8" : roja ? COLOR.critica : COLOR.enlace}
+                        strokeWidth={sobre ? 2.4 : roja ? 1.6 : 1.1}
+                        markerEnd={`url(#${sobre ? "gantt-flecha-sobre" : roja ? "gantt-flecha-critica" : "gantt-flecha"})`}
+                      />
+                      {/* a wider invisible line, easier to point at: double click edits the link */}
+                      <path
+                        d={d}
+                        fill="none"
+                        stroke="transparent"
+                        strokeWidth={10}
+                        style={{ pointerEvents: arrastre ? "none" : "stroke", cursor: "pointer" }}
+                        onMouseEnter={() => setEnlaceSobre(clave)}
+                        onMouseLeave={() => setEnlaceSobre((k) => (k === clave ? null : k))}
+                        onMouseDown={(ev) => ev.stopPropagation()}
+                        onDoubleClick={(ev) => {
+                          ev.stopPropagation();
+                          props.onEditarEnlace(p.id, s.id);
+                        }}
+                      >
+                        <title>{`Fila ${p.fila} → fila ${s.fila}: ${dep?.tipo ?? e.tipo}${dep?.desfase ? ` ${dep.desfase > 0 ? "+" : ""}${dep.desfase} d` : ""}\nDoble clic para cambiar o eliminar el enlace.`}</title>
+                      </path>
+                    </g>
                   );
                 })}
             </svg>

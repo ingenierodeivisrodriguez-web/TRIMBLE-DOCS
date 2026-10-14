@@ -5,18 +5,19 @@ import type { Resolver, SubpresupuestoCalculado } from "../../lib/presupuesto/ca
 import { fechaCorta } from "../../lib/presupuesto/calendario";
 import { exportarExcel, nombreSeguro } from "../../lib/presupuesto/excel";
 import { fecha, fmt } from "../../lib/presupuesto/format";
-import { calendarioInsumos, calendarioValorizado, curvaS, leerPredecesoras, programar } from "../../lib/presupuesto/programacion";
+import { calendarioInsumos, calendarioValorizado, cambiarEnlace, curvaS, enlazar, leerPredecesoras, programar } from "../../lib/presupuesto/programacion";
 import { tablaCalendarioInsumos, tablaCalendarioValorizado, tablaCurvaS, tablaProgramacion } from "../../lib/presupuesto/reportes";
 import { MAX_DURACION_DIAS, PresupuestoDoc, TareaProgramada } from "../../lib/presupuesto/types";
 import Gantt from "./Gantt";
-import { CalendarioDialog, CurvaSDialog, EstimarDialog, FechaCampo, InsumosPeriodoDialog, TareaDialog, ValorizadoDialog } from "./ProgramacionDialogs";
+import { CalendarioDialog, CurvaSDialog, DependenciaDialog, EstimarDialog, FechaCampo, InsumosPeriodoDialog, TareaDialog, ValorizadoDialog } from "./ProgramacionDialogs";
 import { ConfirmDialog } from "./SimpleDialogs";
 import { C, message, Notice } from "./ui";
 import type { useProgramacion } from "./useProgramacion";
 
 type Dialogo =
   | { tipo: "calendario" | "estimar" | "curva" | "valorizado" | "insumos" | "recargar" }
-  | { tipo: "tarea"; id: string };
+  | { tipo: "tarea"; id: string }
+  | { tipo: "enlace"; de: string; a: string };
 
 /**
  * The schedule (Gantt) of the budget: its outline gives the tasks, the
@@ -279,6 +280,17 @@ export default function Programacion({
             return null;
           }}
           onOpen={(id) => setDialogo({ tipo: "tarea", id })}
+          onEnlazar={(de, a) => {
+            const r = enlazar(prog.tareas, res, de, a);
+            if ("error" in r) {
+              setAviso(r.error);
+              return;
+            }
+            setProg((x) => ({ ...x, tareas: r.tareas }));
+            setAviso("");
+            setSelectedId(a);
+          }}
+          onEditarEnlace={(de, a) => setDialogo({ tipo: "enlace", de, a })}
         />
       )}
 
@@ -343,6 +355,29 @@ export default function Programacion({
             }}
           />
         ) : null;
+      }
+      case "enlace": {
+        const de = res?.porId.get(dialogo.de);
+        const a = res?.porId.get(dialogo.a);
+        const dep = a?.predecesoras.find((d) => d.id === dialogo.de);
+        if (!de || !a || !dep) return null;
+        return (
+          <DependenciaDialog
+            de={de}
+            a={a}
+            dep={dep}
+            editable={canEdit}
+            onClose={close}
+            onAccept={(cambio) => {
+              setProg((x) => ({ ...x, tareas: cambiarEnlace(x.tareas, de.id, a.id, cambio) }));
+              close();
+            }}
+            onEliminar={() => {
+              setProg((x) => ({ ...x, tareas: cambiarEnlace(x.tareas, de.id, a.id, null) }));
+              close();
+            }}
+          />
+        );
       }
       case "curva":
         return res ? <CurvaSDialog res={res} doc={doc} proyecto={projectName} onClose={close} /> : null;
