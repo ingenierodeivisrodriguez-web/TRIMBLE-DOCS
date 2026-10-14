@@ -67,6 +67,10 @@ export interface PresupuestoStore {
   getDocumento(projectId: string): Promise<StoredDocumento | null>;
   // ---- the AI assistant ("_global" holds the defaults)
   getCupoIA(projectId: string): Promise<CupoGuardado | null>;
+  /** Every project with its own quota (not "_global"). */
+  listarCuposIA(): Promise<(CupoGuardado & { projectId: string })[]>;
+  /** Pesos spent since `desde`, by project. */
+  gastoProyectosIA(desde: string): Promise<Map<string, number>>;
   saveCupoIA(projectId: string, cupo: CupoGuardado, user: string): Promise<void>;
   /** Logs a call to the model; returns its id. */
   registrarUsoIA(uso: Omit<RegistroUsoIA, "id" | "creado">): Promise<number>;
@@ -168,6 +172,29 @@ function toPartida(r: PartidaRow): PartidaCatalogo {
     omniclass: r.omniclass,
     componentes: Array.isArray(r.componentes) ? r.componentes : [],
     ...(r.edt ? { edt: r.edt } : {}),
+    updatedAt: r.updated_at,
+    updatedBy: r.updated_by,
+  };
+}
+
+interface CupoRow {
+  project_id: string;
+  habilitada: boolean;
+  cupo_proyecto_cop: number | string;
+  cupo_usuario_cop: number | string;
+  trm: number | string | null;
+  project_name?: string | null;
+  updated_at: string;
+  updated_by: string | null;
+}
+
+function cupoDeFila(r: CupoRow): CupoGuardado {
+  return {
+    habilitada: r.habilitada,
+    cupoProyectoCop: Number(r.cupo_proyecto_cop),
+    cupoUsuarioCop: Number(r.cupo_usuario_cop),
+    trm: r.trm === null ? null : Number(r.trm),
+    projectName: r.project_name ?? null,
     updatedAt: r.updated_at,
     updatedBy: r.updated_by,
   };
@@ -291,7 +318,7 @@ function supabaseStore(): PresupuestoStore | null {
       // not JSON
     }
     if (/version-conflict/.test(body)) throw new StoreError("version-conflict", 409);
-    if (/(memoria|edt|tarea)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
+    if (/(memoria|edt|tarea|project_name)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (detail.code === "23505") throw new StoreError("duplicate-code", 409);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) {
@@ -514,19 +541,25 @@ function supabaseStore(): PresupuestoStore | null {
 
     async getCupoIA(projectId) {
       return ia(async () => {
-        const rows = await json<{ habilitada: boolean; cupo_proyecto_cop: number | string; cupo_usuario_cop: number | string; trm: number | string | null; updated_at: string; updated_by: string | null }[]>(
-          `/presupuesto_ia_cupos?project_id=${eq(projectId)}&select=habilitada,cupo_proyecto_cop,cupo_usuario_cop,trm,updated_at,updated_by`
-        );
-        if (!rows.length) return null;
-        const r = rows[0];
-        return {
-          habilitada: r.habilitada,
-          cupoProyectoCop: Number(r.cupo_proyecto_cop),
-          cupoUsuarioCop: Number(r.cupo_usuario_cop),
-          trm: r.trm === null ? null : Number(r.trm),
-          updatedAt: r.updated_at,
-          updatedBy: r.updated_by,
-        };
+        const rows = await json<CupoRow[]>(`/presupuesto_ia_cupos?project_id=${eq(projectId)}&select=*`);
+        return rows.length ? cupoDeFila(rows[0]) : null;
+      });
+    },
+
+    async listarCuposIA() {
+      return ia(async () => {
+        const rows = await all<CupoRow>(`/presupuesto_ia_cupos?project_id=neq._global&select=*&order=updated_at.desc`);
+        return rows.map((r) => ({ ...cupoDeFila(r), projectId: r.project_id }));
+      });
+    },
+
+    async gastoProyectosIA(desde) {
+      return ia(async () => {
+        const rows = await json<{ project_id: string; gasto: number | string }[]>("/rpc/presupuesto_ia_gasto_proyectos", {
+          method: "POST",
+          body: JSON.stringify({ p_desde: desde }),
+        });
+        return new Map(rows.map((r) => [r.project_id, Number(r.gasto)]));
       });
     },
 
@@ -541,6 +574,7 @@ function supabaseStore(): PresupuestoStore | null {
             cupo_proyecto_cop: cupo.cupoProyectoCop,
             cupo_usuario_cop: cupo.cupoUsuarioCop,
             trm: cupo.trm ?? null,
+            ...(cupo.projectName ? { project_name: cupo.projectName } : {}),
             updated_at: new Date().toISOString(),
             updated_by: user,
           }),
@@ -909,7 +943,17 @@ export function memoryStore(): PresupuestoStore {
       return c ? { ...c } : null;
     },
     async saveCupoIA(projectId, cupo, user) {
-      cuposIA.set(projectId, { ...cupo, updatedAt: new Date().toISOString(), updatedBy: user });
+      const antes = cuposIA.get(projectId);
+      cuposIA.set(projectId, { ...cupo, projectName: cupo.projectName ?? antes?.projectName ?? null, updatedAt: new Date().toISOString(), updatedBy: user });
+    },
+    async listarCuposIA() {
+      return [...cuposIA].filter(([id]) => id !== "_global").map(([projectId, c]) => ({ ...c, projectId }));
+    },
+    async gastoProyectosIA(desde) {
+      const d = Date.parse(desde);
+      const out = new Map<string, number>();
+      for (const u of usosIA) if (Date.parse(u.creado) >= d) out.set(u.projectId, Math.round(((out.get(u.projectId) ?? 0) + u.costoCop) * 100) / 100);
+      return out;
     },
     async registrarUsoIA(u) {
       const id = usosIA.length + 1;

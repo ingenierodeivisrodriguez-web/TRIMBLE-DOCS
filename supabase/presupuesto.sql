@@ -294,6 +294,8 @@ create table if not exists public.presupuesto_ia_cupos (
   updated_by        text
 );
 
+alter table public.presupuesto_ia_cupos add column if not exists project_name text;
+
 -- Registro de cada llamada al modelo: quién, qué tarea, modelo, tokens y costo.
 create table if not exists public.presupuesto_ia_uso (
   id                     bigint generated always as identity primary key,
@@ -349,6 +351,18 @@ as $$
    where project_id = p_project_id and creado >= p_desde;
 $$;
 
+-- Lo gastado desde una fecha por cada proyecto (para la lista de los administradores).
+create or replace function public.presupuesto_ia_gasto_proyectos(p_desde timestamptz)
+returns table (project_id text, gasto numeric)
+language sql
+stable
+as $$
+  select project_id, coalesce(sum(costo_cop), 0)
+    from public.presupuesto_ia_uso
+   where creado >= p_desde
+   group by project_id;
+$$;
+
 -- Cómo se juzgaron los borradores: la evaluación base del asistente.
 create or replace function public.presupuesto_ia_resumen(p_project_id text)
 returns table (pendientes bigint, aceptados_sin_cambios bigint, aceptados_editados bigint, rechazados bigint)
@@ -384,6 +398,7 @@ revoke all on function public.presupuesto_guardar(text, jsonb, integer, text) fr
 revoke all on function public.presupuesto_guardar_programacion(text, jsonb, integer, text) from public;
 revoke all on function public.presupuesto_ia_gasto(text, timestamptz, text) from public;
 revoke all on function public.presupuesto_ia_resumen(text) from public;
+revoke all on function public.presupuesto_ia_gasto_proyectos(timestamptz) from public;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
@@ -393,6 +408,7 @@ begin
     grant execute on function public.presupuesto_guardar_programacion(text, jsonb, integer, text) to service_role;
     grant execute on function public.presupuesto_ia_gasto(text, timestamptz, text) to service_role;
     grant execute on function public.presupuesto_ia_resumen(text) to service_role;
+    grant execute on function public.presupuesto_ia_gasto_proyectos(timestamptz) to service_role;
   end if;
 end;
 $$;

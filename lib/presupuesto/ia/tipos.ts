@@ -22,8 +22,20 @@ export interface CupoGlobalIA extends CupoIA {
 
 export interface CupoGuardado extends CupoIA {
   trm?: number | null;
+  /** The Trimble Connect project's name when the quota was saved. */
+  projectName?: string | null;
   updatedAt?: string | null;
   updatedBy?: string | null;
+}
+
+/** A project with its own quota, as the platform's administrators see it. */
+export interface CupoProyectoIA extends CupoIA {
+  projectId: string;
+  nombre: string;
+  /** Spent this month (hora de Colombia). */
+  gastoMesCop: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
 }
 
 export type NivelCupo = "ok" | "aviso" | "agotado" | "deshabilitada";
@@ -121,6 +133,8 @@ export interface EstadoIAResponse {
   cupo: EstadoCupo;
   /** The defaults, for the administrators. */
   global: CupoGlobalIA | null;
+  /** Every project with its own quota, for the administrators. */
+  proyectos: CupoProyectoIA[] | null;
   usos: RegistroUsoIA[];
   resumen: ResumenBorradores;
 }

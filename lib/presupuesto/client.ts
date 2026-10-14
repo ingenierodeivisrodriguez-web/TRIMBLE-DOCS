@@ -50,7 +50,7 @@ export interface PresupuestoApi {
   getDocumento(): Promise<DocumentoResponse>;
   guardarDocumento(doc: PresupuestoDoc, version: number): Promise<{ version: number }>;
   getEstadoIA(): Promise<EstadoIAResponse>;
-  guardarCupoIA(patch: { proyecto?: CupoIA; global?: CupoGlobalIA }): Promise<EstadoIAResponse>;
+  guardarCupoIA(patch: { proyecto?: CupoIA; otro?: { proyecto: string; cupo: CupoIA }; global?: CupoGlobalIA }): Promise<EstadoIAResponse>;
   generarEdtIA(contexto: string, partidas: PartidaEdtIA[]): Promise<GenerarEdtResponse>;
   borradoresIA(): Promise<BorradorIA[]>;
   decidirBorradoresIA(

@@ -1392,7 +1392,7 @@ colombianos. Hay valores por defecto para los proyectos sin cupo propio y la
 **TRM** con que se pasa el costo del proveedor (en dólares) a pesos. El mes
 se cuenta en hora de Colombia. Aviso al 80 % y bloqueo al 100 %: antes de
 cada lote se calcula su costo máximo y no se envía si supera lo que queda.
-Sin configurar, el asistente está **apagado**.
+Sin configurar, el asistente está **apagado**. Desde el proyecto gestor (o desde cualquier proyecto, si eres administrador del gestor) la pestaña **Uso y cupo → Administrar cupos** tiene: el cupo del proyecto abierto, **Habilitar otro proyecto** pegando su dirección de Trimble Connect o su id, la lista de **proyectos con cupo propio** con lo gastado en el mes (editable en la misma fila) y los valores por defecto con la TRM. El cupo es por proyecto, no por persona: en un proyecto habilitado lo usan sus administradores y los editores del presupuesto, cada uno con el tope mensual por persona.
 
 **Registro.** Cada llamada queda en `presupuesto_ia_uso`: fecha, persona,
 tarea, modelo, partidas, tokens, costo en dólares y en pesos con la TRM

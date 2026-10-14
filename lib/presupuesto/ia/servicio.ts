@@ -1,6 +1,7 @@
 // The assistant's rules: who uses it (the budget's editors), who sets its
 // quota (the administrators of the platform's "gestor" project), what each
 // call costs, and drafts that only reach the budget when a person accepts them.
+import { isValidProjectId } from "../../access";
 import { ServiceError } from "../../propiedades/service";
 import { Ctx, requireEdit, puedeEditar } from "../service";
 import { errorDeIA, RespuestaIA } from "./claude";
@@ -10,6 +11,7 @@ import {
   BorradorIA,
   CupoGlobalIA,
   CupoIA,
+  CupoProyectoIA,
   EstadoCupo,
   EstadoIAResponse,
   GenerarEdtResponse,
@@ -69,6 +71,7 @@ export async function getEstadoIA(ctx: Ctx): Promise<EstadoIAResponse> {
     ve ? ctx.store.resumenBorradoresIA(ctx.projectId) : Promise.resolve<ResumenBorradores>({ pendientes: 0, aceptadosSinCambios: 0, aceptadosEditados: 0, rechazados: 0 }),
     puedeAdministrar ? cupoGlobal(ctx) : Promise.resolve(null),
   ]);
+  const proyectos = puedeAdministrar ? await proyectosConCupo(ctx) : null;
   return {
     disponible: !!cliente,
     proveedor: cliente?.proveedor ?? "",
@@ -78,9 +81,33 @@ export async function getEstadoIA(ctx: Ctx): Promise<EstadoIAResponse> {
     gestorConfigurado: !!ctx.deps.iaGestor,
     cupo,
     global,
+    proyectos,
     usos,
     resumen,
   };
+}
+
+/** Every project with its own quota and what it spent this month. */
+async function proyectosConCupo(ctx: Ctx): Promise<CupoProyectoIA[]> {
+  const mes = inicioDeMes(ctx.deps.ahora?.() ?? new Date());
+  const [cupos, gastos] = await Promise.all([ctx.store.listarCuposIA(), ctx.store.gastoProyectosIA(mes.desde)]);
+  return cupos.map((c) => ({
+    projectId: c.projectId,
+    nombre: c.projectName || c.projectId,
+    habilitada: c.habilitada,
+    cupoProyectoCop: c.cupoProyectoCop,
+    cupoUsuarioCop: c.cupoUsuarioCop,
+    gastoMesCop: gastos.get(c.projectId) ?? 0,
+    updatedAt: c.updatedAt ?? null,
+    updatedBy: c.updatedBy ?? null,
+  }));
+}
+
+/** "https://web.connect.trimble.com/projects/AbC123/data" or "AbC123" -> "AbC123". */
+export function idDeProyecto(text: string): string {
+  const t = text.trim();
+  const m = /projects\/([A-Za-z0-9_-]{4,64})/.exec(t);
+  return m ? m[1] : t;
 }
 
 function pesos(value: unknown, what: string): number {
@@ -95,20 +122,34 @@ function validarCupo(value: unknown, what: string): CupoIA {
   return { habilitada: o.habilitada, cupoProyectoCop: pesos(o.cupoProyectoCop, `${what}: cupo del proyecto`), cupoUsuarioCop: pesos(o.cupoUsuarioCop, `${what}: cupo por persona`) };
 }
 
-/** { proyecto?: CupoIA, global?: CupoGlobalIA }: only the platform's administrators. */
+/**
+ * { proyecto?: CupoIA, otro?: { proyecto: id or URL, cupo: CupoIA }, global?: CupoGlobalIA }:
+ * the quota of this project, of another one, or the defaults. Only the platform's administrators.
+ */
 export async function guardarCupoIA(ctx: Ctx, body: unknown): Promise<EstadoIAResponse> {
   if (!(await esGestorIA(ctx))) {
     throw new ServiceError("Solo los administradores de la plataforma (proyecto gestor) cambian los cupos del asistente IA.", 403, "not-ia-admin");
   }
-  const o = (body ?? {}) as { proyecto?: unknown; global?: unknown };
-  if (o.proyecto === undefined && o.global === undefined) bad("No hay cambios de cupo.");
+  const o = (body ?? {}) as { proyecto?: unknown; global?: unknown; otro?: unknown };
+  if (o.proyecto === undefined && o.global === undefined && o.otro === undefined) bad("No hay cambios de cupo.");
+  const nombreDe = (id: string) => ctx.deps.projectName(id).catch(() => "");
   if (o.global !== undefined) {
     const g = validarCupo(o.global, "Valores por defecto");
     const trm = (o.global as { trm?: unknown }).trm;
     if (typeof trm !== "number" || !Number.isFinite(trm) || trm < 100 || trm > 100_000) bad("TRM: se esperaban los pesos por dólar (entre 100 y 100.000).");
     await ctx.store.saveCupoIA(GLOBAL, { ...g, trm: Math.round(trm * 100) / 100 }, ctx.caller.name);
   }
-  if (o.proyecto !== undefined) await ctx.store.saveCupoIA(ctx.projectId, validarCupo(o.proyecto, "Cupo del proyecto"), ctx.caller.name);
+  if (o.proyecto !== undefined) {
+    const cupo = validarCupo(o.proyecto, "Cupo del proyecto");
+    await ctx.store.saveCupoIA(ctx.projectId, { ...cupo, projectName: (await nombreDe(ctx.projectId)) || null }, ctx.caller.name);
+  }
+  if (o.otro !== undefined) {
+    const otro = (o.otro ?? {}) as { proyecto?: unknown; cupo?: unknown };
+    const id = typeof otro.proyecto === "string" ? idDeProyecto(otro.proyecto) : "";
+    if (!isValidProjectId(id) || id === GLOBAL) bad("Escribe el id del proyecto o pega su dirección de Trimble Connect (la que contiene /projects/...).");
+    const cupo = validarCupo(otro.cupo, "Cupo del proyecto");
+    await ctx.store.saveCupoIA(id, { ...cupo, projectName: (await nombreDe(id)) || null }, ctx.caller.name);
+  }
   return getEstadoIA(ctx);
 }
 

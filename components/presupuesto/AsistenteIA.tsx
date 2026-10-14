@@ -6,7 +6,7 @@ import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { fecha } from "../../lib/presupuesto/format";
 import { estimarCostoCop, fmtCop } from "../../lib/presupuesto/ia/cupo";
 import { partidasParaEdt, SISTEMA_EDT } from "../../lib/presupuesto/ia/edt";
-import { BorradorIA, Confianza, CupoGlobalIA, CupoIA, EstadoCupo, EstadoIAResponse, TAREA_IA_NOMBRES } from "../../lib/presupuesto/ia/tipos";
+import { BorradorIA, Confianza, CupoGlobalIA, CupoIA, CupoProyectoIA, EstadoCupo, EstadoIAResponse, TAREA_IA_NOMBRES } from "../../lib/presupuesto/ia/tipos";
 import type { PresupuestoDoc } from "../../lib/presupuesto/types";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "./ui";
 
@@ -26,6 +26,7 @@ export default function AsistenteIA({
   doc,
   spId,
   projectId,
+  projectName,
   aplicarEdt,
   onClose,
 }: {
@@ -34,6 +35,7 @@ export default function AsistenteIA({
   /** The subpresupuesto on screen. */
   spId: string;
   projectId: string;
+  projectName: string;
   /** Puts accepted texts into the budget; answers how many partidas were found. */
   aplicarEdt: (cambios: { itemId: string; descripcion: string; criterios: string }[]) => number;
   onClose: () => void;
@@ -119,7 +121,7 @@ export default function AsistenteIA({
             }}
           />
         ) : (
-          <UsoYCupo api={api} estado={estado} onEstado={setEstado} />
+          <UsoYCupo api={api} estado={estado} projectName={projectName} onEstado={setEstado} />
         )}
       </div>
     </Modal>
@@ -522,7 +524,7 @@ function Barra({ etiqueta, gasto, cupo }: { etiqueta: string; gasto: number; cup
 
 const MESES = ["enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto", "septiembre", "octubre", "noviembre", "diciembre"];
 
-function UsoYCupo({ api, estado, onEstado }: { api: PresupuestoApi; estado: EstadoIAResponse; onEstado: (e: EstadoIAResponse) => void }) {
+function UsoYCupo({ api, estado, projectName, onEstado }: { api: PresupuestoApi; estado: EstadoIAResponse; projectName: string; onEstado: (e: EstadoIAResponse) => void }) {
   const { cupo, resumen } = estado;
   const decididos = resumen.aceptadosSinCambios + resumen.aceptadosEditados + resumen.rechazados;
   const pct = (n: number) => (decididos ? `${Math.round((n / decididos) * 100)} %` : "—");
@@ -530,7 +532,7 @@ function UsoYCupo({ api, estado, onEstado }: { api: PresupuestoApi; estado: Esta
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14, overflow: "auto" }}>
       <BannerCupo cupo={cupo} />
-      <Seccion titulo={`Cupo de ${MESES[mes]} de ${cupo.mes.slice(0, 4)} (se renueva el 1 de ${MESES[(mes + 1) % 12]}, hora de Colombia)`}>
+      <Seccion titulo={`Cupo de ${projectName || "este proyecto"} en ${MESES[mes]} de ${cupo.mes.slice(0, 4)} (se renueva el 1 de ${MESES[(mes + 1) % 12]}, hora de Colombia)`}>
         <div style={{ display: "flex", gap: 24, flexWrap: "wrap" }}>
           <Barra etiqueta="Proyecto" gasto={cupo.gastoProyectoCop} cupo={cupo.cupoProyectoCop} />
           <Barra etiqueta="Tú" gasto={cupo.gastoUsuarioCop} cupo={cupo.cupoUsuarioCop} />
@@ -560,7 +562,7 @@ function UsoYCupo({ api, estado, onEstado }: { api: PresupuestoApi; estado: Esta
         <p style={{ margin: "8px 0 0", fontSize: 12.5, color: "var(--tc-gray-500)" }}>Meta de la fase 1: al menos el 70 % de los borradores aceptados sin cambios.</p>
       </Seccion>
 
-      {estado.puedeAdministrar && <AdministrarCupos api={api} estado={estado} onEstado={onEstado} />}
+      {estado.puedeAdministrar && <AdministrarCupos api={api} estado={estado} projectName={projectName} onEstado={onEstado} />}
 
       <Seccion titulo={`Registro de uso (últimas ${estado.usos.length} solicitudes)`}>
         {estado.usos.length === 0 ? (
@@ -609,20 +611,24 @@ function UsoYCupo({ api, estado, onEstado }: { api: PresupuestoApi; estado: Esta
 
 const ESTADOS = { ok: "Correcto", error: "Error", rechazado: "Rechazado por la IA", incompleto: "Incompleto" };
 
-function AdministrarCupos({ api, estado, onEstado }: { api: PresupuestoApi; estado: EstadoIAResponse; onEstado: (e: EstadoIAResponse) => void }) {
+function AdministrarCupos({ api, estado, projectName, onEstado }: { api: PresupuestoApi; estado: EstadoIAResponse; projectName: string; onEstado: (e: EstadoIAResponse) => void }) {
   const [proyecto, setProyecto] = useState<CupoIA>({ habilitada: estado.cupo.habilitada, cupoProyectoCop: estado.cupo.cupoProyectoCop, cupoUsuarioCop: estado.cupo.cupoUsuarioCop });
   const [global, setGlobal] = useState<CupoGlobalIA>(estado.global ?? { habilitada: false, cupoProyectoCop: 0, cupoUsuarioCop: 0, trm: estado.cupo.trm });
   const [nota, setNota] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
   const [ocupado, setOcupado] = useState(false);
 
-  async function guardar(patch: { proyecto?: CupoIA; global?: CupoGlobalIA }, texto: string) {
+  const [nuevo, setNuevo] = useState<{ proyecto: string; cupo: CupoIA }>({ proyecto: "", cupo: { habilitada: true, cupoProyectoCop: 50_000, cupoUsuarioCop: 20_000 } });
+
+  async function guardar(patch: { proyecto?: CupoIA; otro?: { proyecto: string; cupo: CupoIA }; global?: CupoGlobalIA }, texto: string): Promise<boolean> {
     setOcupado(true);
     setNota(null);
     try {
       onEstado(await api.guardarCupoIA(patch));
       setNota({ kind: "info", texto });
+      return true;
     } catch (err) {
       setNota({ kind: "error", texto: message(err) });
+      return false;
     } finally {
       setOcupado(false);
     }
@@ -653,17 +659,117 @@ function AdministrarCupos({ api, estado, onEstado }: { api: PresupuestoApi; esta
   return (
     <Seccion titulo="Administrar cupos (administradores de la plataforma)">
       {nota && <Notice kind={nota.kind}>{nota.texto}</Notice>}
-      <h4 style={h4}>Este proyecto</h4>
+      <h4 style={h4}>Este proyecto{projectName ? ` (${projectName})` : ""}</h4>
       {campos(proyecto, setProyecto)}
-      <button type="button" style={{ ...botonSec, marginTop: 8 }} disabled={ocupado} onClick={() => guardar({ proyecto }, "Cupo del proyecto guardado.")}>
+      <button type="button" style={{ ...botonSec, marginTop: 8 }} disabled={ocupado} onClick={() => guardar({ proyecto }, `Cupo de ${projectName || "este proyecto"} guardado.`)}>
         Guardar el cupo de este proyecto
       </button>
+
+      <h4 style={{ ...h4, marginTop: 16 }}>Habilitar otro proyecto</h4>
+      <p style={{ margin: "0 0 8px", fontSize: 12.5, color: "var(--tc-gray-500)" }}>
+        Pega la dirección del proyecto en Trimble Connect (la que contiene /projects/...) o su id. Así se habilita sin abrirlo.
+      </p>
+      <label style={{ display: "block", marginBottom: 8 }}>
+        <span style={labelStyle}>Proyecto (dirección o id)</span>
+        <input
+          type="text"
+          value={nuevo.proyecto}
+          onChange={(e) => setNuevo({ ...nuevo, proyecto: e.target.value })}
+          placeholder="https://web.connect.trimble.com/projects/AbC123.../data"
+          style={{ ...baseInput, width: "100%", maxWidth: 560 }}
+          aria-label="Dirección o id del proyecto"
+        />
+      </label>
+      {campos(nuevo.cupo, (cupo) => setNuevo({ ...nuevo, cupo }))}
+      <button
+        type="button"
+        style={{ ...botonSec, marginTop: 8 }}
+        disabled={ocupado || !nuevo.proyecto.trim()}
+        onClick={async () => {
+          if (await guardar({ otro: nuevo }, "Proyecto guardado: ya aparece en la lista.")) setNuevo({ ...nuevo, proyecto: "" });
+        }}
+      >
+        Guardar el cupo de ese proyecto
+      </button>
+
+      <h4 style={{ ...h4, marginTop: 16 }}>Proyectos con cupo propio ({estado.proyectos?.length ?? 0})</h4>
+      {estado.proyectos?.length ? (
+        <ProyectosConCupo proyectos={estado.proyectos} ocupado={ocupado} onGuardar={(p, cupo) => guardar({ otro: { proyecto: p.projectId, cupo } }, `Cupo de ${p.nombre} guardado.`)} />
+      ) : (
+        <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>Ninguno todavía.</span>
+      )}
       <h4 style={{ ...h4, marginTop: 16 }}>Por defecto, para los proyectos sin cupo propio</h4>
       {campos(global, (c) => setGlobal({ ...global, ...c }), { trm: global.trm, setTrm: (trm) => setGlobal({ ...global, trm }) })}
       <button type="button" style={{ ...botonSec, marginTop: 8 }} disabled={ocupado} onClick={() => guardar({ global }, "Valores por defecto guardados.")}>
         Guardar los valores por defecto
       </button>
     </Seccion>
+  );
+}
+
+/** Each project with its own quota: on/off, quotas and what it spent this month, editable in place. */
+function ProyectosConCupo({ proyectos, ocupado, onGuardar }: { proyectos: CupoProyectoIA[]; ocupado: boolean; onGuardar: (p: CupoProyectoIA, cupo: CupoIA) => void }) {
+  const [cambios, setCambios] = useState<Map<string, CupoIA>>(new Map());
+  return (
+    <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+      <thead>
+        <tr>
+          <th style={th}>Proyecto</th>
+          <th style={th}>Habilitado</th>
+          <th style={th}>Cupo del proyecto</th>
+          <th style={th}>Cupo por persona</th>
+          <th style={th}>Gastado este mes</th>
+          <th style={th}>Último cambio</th>
+          <th style={th} />
+        </tr>
+      </thead>
+      <tbody>
+        {proyectos.map((p) => {
+          const v = cambios.get(p.projectId) ?? { habilitada: p.habilitada, cupoProyectoCop: p.cupoProyectoCop, cupoUsuarioCop: p.cupoUsuarioCop };
+          const set = (c: CupoIA) => setCambios((m) => new Map(m).set(p.projectId, c));
+          const cambiado = cambios.has(p.projectId);
+          return (
+            <tr key={p.projectId}>
+              <td style={td}>
+                <strong>{p.nombre}</strong>
+                {p.nombre !== p.projectId && <div style={{ fontSize: 11.5, color: "var(--tc-gray-500)" }}>{p.projectId}</div>}
+              </td>
+              <td style={{ ...td, textAlign: "center" }}>
+                <input type="checkbox" aria-label={`Habilitado en ${p.nombre}`} checked={v.habilitada} onChange={(e) => set({ ...v, habilitada: e.target.checked })} />
+              </td>
+              <td style={td}>
+                <NumInput value={v.cupoProyectoCop} decimals={0} ariaLabel={`Cupo del proyecto ${p.nombre}`} onCommit={(n) => set({ ...v, cupoProyectoCop: n ?? 0 })} style={{ width: 130 }} />
+              </td>
+              <td style={td}>
+                <NumInput value={v.cupoUsuarioCop} decimals={0} ariaLabel={`Cupo por persona en ${p.nombre}`} onCommit={(n) => set({ ...v, cupoUsuarioCop: n ?? 0 })} style={{ width: 130 }} />
+              </td>
+              <td style={tdNum}>{fmtCop(p.gastoMesCop)}</td>
+              <td style={{ ...td, fontSize: 12, color: "var(--tc-gray-500)" }}>
+                {p.updatedAt ? fecha(p.updatedAt) : ""}
+                {p.updatedBy ? ` · ${p.updatedBy}` : ""}
+              </td>
+              <td style={td}>
+                <button
+                  type="button"
+                  style={{ ...botonSec, padding: "4px 10px", fontWeight: cambiado ? 700 : 400 }}
+                  disabled={ocupado || !cambiado}
+                  onClick={() => {
+                    onGuardar(p, v);
+                    setCambios((m) => {
+                      const n = new Map(m);
+                      n.delete(p.projectId);
+                      return n;
+                    });
+                  }}
+                >
+                  Guardar
+                </button>
+              </td>
+            </tr>
+          );
+        })}
+      </tbody>
+    </table>
   );
 }
 

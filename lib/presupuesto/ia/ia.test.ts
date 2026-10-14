@@ -172,6 +172,26 @@ describe("asistente IA: permisos, cupo, registro y borradores", () => {
     await assert.rejects(guardarCupoIA(ctx(store, vendedor), { global: { habilitada: true, cupoProyectoCop: 1, cupoUsuarioCop: 1, trm: 5 } }), /TRM/);
   });
 
+  it("desde el proyecto gestor se habilita otro proyecto con su dirección, y la lista muestra lo gastado", async () => {
+    const store = memoryStore();
+    const enGestor: Ctx = { ...ctx(store, vendedor), caller: { ...vendedor, isAdmin: true }, projectId: "gestor", deps: { ...ctx(store, vendedor).deps, projectName: async (id) => (id === "Lab123456" ? "Laboratorio" : "") } };
+    const e = await guardarCupoIA(enGestor, {
+      otro: { proyecto: "https://web.connect.trimble.com/projects/Lab123456/data/folder/x", cupo: { habilitada: true, cupoProyectoCop: 30_000, cupoUsuarioCop: 10_000 } },
+    });
+    assert.deepEqual(
+      e.proyectos!.map((p) => [p.projectId, p.nombre, p.habilitada, p.cupoProyectoCop, p.gastoMesCop]),
+      [["Lab123456", "Laboratorio", true, 30_000, 0]]
+    );
+    // In that project an editor can now use it, and what they spend shows in the list.
+    const enLab: Ctx = { ...ctx(store, admin, falsa().cliente), projectId: "Lab123456" };
+    await guardarDocumento(enLab, { doc: documentoVacio(), version: 0 });
+    assert.equal((await getEstadoIA(enLab)).cupo.nivel, "ok");
+    await generarEdtIA(enLab, { partidas: [partida("p1")] });
+    assert.equal((await getEstadoIA(enGestor)).proyectos![0].gastoMesCop, 112);
+    await assert.rejects(guardarCupoIA(enGestor, { otro: { proyecto: "no es un id!", cupo: { habilitada: true, cupoProyectoCop: 1, cupoUsuarioCop: 1 } } }), /dirección/);
+    assert.equal((await getEstadoIA(ctx(store, admin))).proyectos, null); // only the administrators of the platform see the list
+  });
+
   it("sin clave, apagado, o sin permiso de edición no se llama a la IA", async () => {
     const { cliente, llamadas } = falsa();
     const store = memoryStore();

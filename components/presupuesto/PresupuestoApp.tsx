@@ -781,7 +781,7 @@ export default function PresupuestoApp({
           <ImportarDialog api={api} catalogo={catalogo} canEdit={estado.canEditBase} readOnlyNote={readOnlyBase} onImported={s.reloadCatalogo} onClose={close} />
         ) : null;
       case "ia":
-        return <AsistenteIA api={api} doc={doc} spId={sp.id} projectId={projectId} aplicarEdt={aplicarEdtIA} onClose={close} />;
+        return <AsistenteIA api={api} doc={doc} spId={sp.id} projectId={projectId} projectName={projectName} aplicarEdt={aplicarEdtIA} onClose={close} />;
       case "descartar":
         return (
           <ConfirmDialog
