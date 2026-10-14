@@ -1297,12 +1297,63 @@ Al subir el archivo:
   inválido, insumo no encontrado, código repetido, subpartidas circulares...).
 - Se envía por lotes de 1.000.
 
+### Programación (Gantt)
+
+El botón **📅 Programación (Gantt)** del encabezado cambia el presupuesto por su
+programación. Se arma sola desde la EDT del presupuesto: cada subpresupuesto,
+título y partida es una fila (con su número de fila, que es como se escriben
+las predecesoras), y los títulos abarcan sus partidas. Usa lo que se ve en
+pantalla, aunque el presupuesto tenga cambios sin guardar. La programación se
+guarda aparte (botón **Guardar** o Ctrl+S, con su propia versión); al volver
+al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
+
+- **Duración.** Si no se escribe, sale de **metrado ÷ (rendimiento ×
+  cuadrillas)**. El rendimiento es por jornada de la partida (normalmente
+  8 h) y se convierte a la jornada del calendario. Escrita a mano se ve en
+  negrita; borrarla vuelve a la estimada. 0 días es un hito (rombo).
+- **⏱ Estimar duración** muestra, partida por partida, la duración actual, la
+  estimada y la que queda. Se elige el redondeo (días enteros, medios días o
+  sin redondear) y si reemplaza también las escritas a mano.
+- **Inicio y fin.** El proyecto tiene una fecha de **Inicio** y el **Fin** se
+  calcula (con los días hábiles). **Fecha fin** es opcional: se marca con una
+  línea morada y avisa si el proyecto termina después.
+- **Predecesoras.** En la columna se escriben filas: `4` (fin-comienzo),
+  `6CC+2` (empieza 2 días después de que empiece la 6), `9FF` (termina
+  cuando termina la 9), `3CF`, y con **desfase negativo para adelantarse**:
+  `5-1` empieza un día antes de que termine la 5. Se separan con `;`. Solo
+  se enlazan partidas; no se aceptan ciclos ni filas inexistentes (el error
+  aparece en la barra y en la celda). Doble clic en una partida abre su
+  detalle, con las predecesoras en lista (partida, tipo, desfase), sus
+  sucesoras, las cuadrillas y la fecha "no comenzar antes de".
+- **Fecha fija.** Escribir una fecha en *Inicio* de una partida fija "no
+  comenzar antes de" (📌); borrarla la quita.
+- **Calendario laboral.** Horas de trabajo de cada día de la semana (un
+  sábado de 4 h cuenta medio día), las horas que equivalen a un día de
+  duración y los **días especiales**: festivos (0 horas) o días con otro
+  horario, uno por uno. El botón **Festivos de Colombia** agrega los del año
+  elegido (Ley Emiliani: los que se corren al lunes, y Semana Santa).
+  El diagrama sombrea los días sin trabajo.
+- **Ruta crítica.** Se calcula con el método de la ruta crítica (CPM), en horas
+  de trabajo: holgura = inicio tardío − inicio temprano. **Mostrar ruta
+  crítica** pinta de rojo las barras y los enlaces sin holgura; la columna
+  *Holgura* dice cuántos días puede retrasarse cada partida.
+- **📈 Curva S** semanal (lunes a domingo) o mensual: valor de cada periodo
+  (barras) y % acumulado (línea), con su tabla, por subpresupuesto o de todo.
+- **Calendario valorizado**: el parcial de cada partida repartido mes a mes (o
+  semana a semana) según sus horas de trabajo en cada periodo; los títulos
+  suman sus partidas y cada mes muestra su % del total.
+- **Calendario de insumos**: cada insumo (de las partidas y sus subpartidas,
+  también los "%MO") repartido mes a mes siguiendo a las partidas que lo usan,
+  en **costo** o en **cantidades**.
+- **Excel**: la programación, el calendario valorizado, el de insumos y la
+  curva S en un libro; cada ventana exporta también lo suyo.
+
 ### Permisos
 
 | Acción | Quién |
 |---|---|
 | Ver el presupuesto, los catálogos y los elementos asociados | Cualquier miembro del proyecto |
-| Editar el presupuesto y asociar elementos en el visor | Administradores del proyecto y los **editores** (personas o grupos) que elijan en ⚙ Configuración |
+| Editar el presupuesto y su programación, y asociar elementos en el visor | Administradores del proyecto y los **editores** (personas o grupos) que elijan en ⚙ Configuración |
 | Editar los catálogos | Administradores y editores del proyecto **dueño** de los catálogos (la base) |
 | Elegir editores y base | Administradores del proyecto |
 
@@ -1323,6 +1374,8 @@ ejecutar sin perder datos):
 | `presupuesto_modelos_usados` | Vista: modelos (archivos) de los elementos asociados y cuántos elementos tiene cada uno |
 | `presupuesto_guardar_insumos` / `_partidas` | Guardan lotes; una fila con el id de otro catálogo no se toca |
 | `presupuesto_guardar` | Guarda el presupuesto si la versión coincide y limpia los elementos de partidas borradas |
+| `presupuesto_programacion` | La programación (Gantt) de cada proyecto (jsonb: inicio, fecha fin, calendario, redondeo y, por partida, duración, cuadrillas, predecesoras y fecha fija) con su `version` |
+| `presupuesto_guardar_programacion` | Guarda la programación si la versión coincide |
 
 RLS está activado y sin políticas: solo el servidor, con la clave de
 servicio, lee y escribe.
@@ -1345,6 +1398,7 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `POST /api/presupuesto/catalogo/insumos` · `.../partidas` · `.../omniclass` | Crear o actualizar en lote (hasta 1.000 por envío) |
 | `DELETE /api/presupuesto/catalogo/insumos/{id}` · `.../partidas/{id}` | Eliminar (409 `in-use` si se usa) |
 | `GET` / `PUT /api/presupuesto/documento` | Leer / guardar `{ doc, version }` (409 `version-conflict`) |
+| `GET` / `PUT /api/presupuesto/programacion` | Leer (`programacion: null` hasta el primer guardado) / guardar `{ programacion, version }` (solo quien edita; 409 `version-conflict`) |
 | `GET /api/presupuesto/elementos/resumen` | Mediciones y conteos por partida |
 | `POST /api/presupuesto/elementos/consulta` | `{ itemIds }` o `{ ifcGuids }` |
 | `PUT /api/presupuesto/elementos` | `{ itemId, upsert: [{ ifcGuid, modelId, cantidad }], remove: [ifcGuid] }` |

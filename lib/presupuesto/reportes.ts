@@ -1,7 +1,10 @@
 // The budget's printable tables, shared by the Excel and PDF exports.
 import { FilaInsumo, FilaPieCalculada, parcialGasto, SubpresupuestoCalculado, totalGastos, totalTituloGasto } from "./calc";
+import { fechaCorta } from "./calendario";
 import type { Tabla } from "./excel";
 import { fmt } from "./format";
+import type { CalendarioValorizado, CurvaS, FilaInsumoPeriodo, Periodo, Programado } from "./programacion";
+import { textoPredecesoras } from "./programacion";
 import { GastosGenerales, RUBRO_NOMBRES, RUBROS } from "./types";
 
 export function tablaPresupuesto(nombre: string, calc: SubpresupuestoCalculado, pie: FilaPieCalculada[], desglose: boolean): Tabla {
@@ -91,5 +94,120 @@ export function tablaGastos(g: GastosGenerales, cdTotal: number): Tabla {
       { header: "Parcial", width: 15, decimales: 2 },
     ],
     filas,
+  };
+}
+
+// ---------------------------------------------------------------- schedule
+
+export function tablaProgramacion(p: Programado, proyecto: string): Tabla {
+  const filaDe = (id: string) => p.porId.get(id)?.fila;
+  return {
+    titulo: `Programación: ${proyecto}`,
+    subtitulo: `Inicio ${fechaCorta(p.inicio)} · Fin ${fechaCorta(p.fin)} · ${fmt(p.dias)} días hábiles`,
+    hoja: "Programación",
+    columnas: [
+      { header: "Fila", width: 6, align: "center" },
+      { header: "Item", width: 9 },
+      { header: "Partida", width: 55 },
+      { header: "Duración (días)", width: 11, decimales: 2 },
+      { header: "Inicio", width: 12, align: "center" },
+      { header: "Fin", width: 12, align: "center" },
+      { header: "Predecesoras", width: 16 },
+      { header: "Cuadrillas", width: 10, decimales: 2 },
+      { header: "Rendimiento", width: 12, decimales: 2 },
+      { header: "Metrado", width: 12, decimales: 2 },
+      { header: "Holgura (días)", width: 11, decimales: 2 },
+      { header: "Ruta crítica", width: 10, align: "center" },
+    ],
+    filas: p.filas.map((f) => ({
+      celdas: [
+        f.fila,
+        f.tipo === "sp" ? "SP" : f.numero,
+        f.descripcion,
+        f.vacia ? null : f.duracion,
+        f.vacia ? "" : fechaCorta(f.inicio),
+        f.vacia ? "" : fechaCorta(f.fin),
+        f.tipo === "partida" ? textoPredecesoras(f.predecesoras, filaDe) : "",
+        f.tipo === "partida" ? f.cuadrillas : null,
+        f.rendimiento,
+        f.metrado,
+        f.vacia ? null : f.holgura,
+        f.critica ? "Sí" : "",
+      ],
+      negrita: f.tipo !== "partida",
+      nivel: f.nivel,
+    })),
+  };
+}
+
+const cabeceraPeriodo = (x: Periodo, pct?: number) => (pct === undefined ? x.etiqueta : `${x.etiqueta} (${fmt(pct, 3)}%)`);
+
+export function tablaCalendarioValorizado(cv: CalendarioValorizado, nombre: string): Tabla {
+  return {
+    titulo: `Calendario valorizado: ${nombre}`,
+    hoja: "Calendario valorizado",
+    columnas: [
+      { header: "Item", width: 9 },
+      { header: "Partida", width: 55 },
+      { header: "Unidad", width: 8, align: "center" },
+      { header: "Metrado", width: 12, decimales: 2 },
+      { header: "PU", width: 12, decimales: 2 },
+      { header: "Parcial", width: 15, decimales: 2 },
+      ...cv.periodos.map((x, i) => ({ header: cabeceraPeriodo(x, cv.porcentajes[i]), width: 15, decimales: 2 })),
+    ],
+    filas: [
+      ...cv.filas.map((f) => ({
+        celdas: [f.fila.tipo === "sp" ? "SP" : f.fila.numero, f.fila.descripcion, f.fila.unidad, f.fila.metrado, f.fila.cu, f.fila.parcial, ...f.montos],
+        negrita: f.fila.tipo !== "partida",
+        nivel: f.fila.nivel,
+      })),
+      { celdas: ["", "TOTAL", "", null, null, cv.total, ...cv.totales], negrita: true },
+    ],
+  };
+}
+
+export function tablaCalendarioInsumos(c: { periodos: Periodo[]; filas: FilaInsumoPeriodo[]; totales: number[]; total: number }, nombre: string, modo: "costo" | "cantidad"): Tabla {
+  return {
+    titulo: `Calendario de insumos (${modo === "costo" ? "costo" : "cantidades"}): ${nombre}`,
+    hoja: "Calendario de insumos",
+    columnas: [
+      { header: "Tipo", width: 6, align: "center" },
+      { header: "Insumo", width: 50 },
+      { header: "Unidad", width: 8, align: "center" },
+      { header: "Cantidad", width: 14, decimales: 3 },
+      { header: "PU", width: 12, decimales: 2 },
+      { header: "Parcial", width: 15, decimales: 2 },
+      ...c.periodos.map((x) => ({ header: x.etiqueta, width: 15, decimales: modo === "costo" ? 2 : 3 })),
+    ],
+    filas: [
+      ...c.filas.map((f) => ({
+        celdas: [
+          f.tipo,
+          f.descripcion,
+          f.unidad,
+          f.porcentajeMO ? null : f.cantidad,
+          f.porcentajeMO ? null : f.precio,
+          f.parcial,
+          ...(modo === "costo" ? f.montos : f.porcentajeMO ? f.montos : f.cantidades),
+        ],
+      })),
+      ...(modo === "costo" ? [{ celdas: ["", "TOTAL", "", null, null, c.total, ...c.totales], negrita: true }] : []),
+    ],
+  };
+}
+
+export function tablaCurvaS(cs: CurvaS, nombre: string, tipo: "semana" | "mes"): Tabla {
+  return {
+    titulo: `Curva S (${tipo === "semana" ? "semanal" : "mensual"}): ${nombre}`,
+    hoja: "Curva S",
+    columnas: [
+      { header: "Periodo", width: 18 },
+      { header: "Desde", width: 12, align: "center" },
+      { header: "Hasta", width: 12, align: "center" },
+      { header: "Valor del periodo", width: 16, decimales: 2 },
+      { header: "Acumulado", width: 16, decimales: 2 },
+      { header: "% acumulado", width: 12, decimales: 2 },
+    ],
+    filas: cs.periodos.map((x, i) => ({ celdas: [x.etiqueta, fechaCorta(x.desde), fechaCorta(x.hasta), cs.montos[i], cs.acumulado[i], cs.porcentaje[i]] })),
   };
 }

@@ -64,6 +64,9 @@ export interface PresupuestoStore {
   saveCamposModelo(projectId: string, data: Pick<CamposModelo, "modelos" | "campos">, user: string): Promise<void>;
 
   getDocumento(projectId: string): Promise<StoredDocumento | null>;
+  /** The schedule (Gantt), versioned like the budget. */
+  getProgramacion(projectId: string): Promise<StoredDocumento | null>;
+  saveProgramacion(projectId: string, data: unknown, version: number, user: string): Promise<number | "conflict">;
   /** Saves if the stored version is still `version` (0: none yet); returns the new version. */
   saveDocumento(projectId: string, data: unknown, version: number, user: string): Promise<number | "conflict">;
 
@@ -395,6 +398,31 @@ function supabaseStore(): PresupuestoStore | null {
       }
     },
 
+    async getProgramacion(projectId) {
+      try {
+        const rows = await json<{ data: unknown; version: number; updated_at: string; updated_by: string | null }[]>(
+          `/presupuesto_programacion?project_id=${eq(projectId)}&select=data,version,updated_at,updated_by`
+        );
+        if (!rows.length) return null;
+        const r = rows[0];
+        return { data: r.data, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by };
+      } catch (err) {
+        // The other tables exist; this one came later.
+        if (err instanceof StoreError && err.message === SETUP_HINT) throw new StoreError(UPGRADE_HINT);
+        throw err;
+      }
+    },
+
+    async saveProgramacion(projectId, data, version, user) {
+      try {
+        return await rpc("presupuesto_guardar_programacion", { p_project_id: projectId, p_data: data, p_version: version, p_user: user });
+      } catch (err) {
+        if (err instanceof StoreError && err.message === "version-conflict") return "conflict";
+        if (err instanceof StoreError && err.message === SETUP_HINT) throw new StoreError(UPGRADE_HINT);
+        throw err;
+      }
+    },
+
     async listMediciones(projectId) {
       const rows = await json<{ item_id: string; campo: string | null; campo_label: string; unidad: string }[]>(
         `/presupuesto_mediciones?project_id=${eq(projectId)}&select=item_id,campo,campo_label,unidad`
@@ -476,6 +504,7 @@ export function memoryStore(): PresupuestoStore {
   const partidas = new Map<string, PartidaCatalogo & { baseId: string }>();
   const omniclass = new Map<string, OmniclassEntry & { baseId: string }>();
   const documentos = new Map<string, StoredDocumento>();
+  const programaciones = new Map<string, StoredDocumento>();
   const campos = new Map<string, CamposModelo>();
   const vistas = new Map<string, { vista: VistaPendiente; creado: number }>();
   const mediciones = new Map<string, Medicion & { projectId: string }>();
@@ -598,6 +627,15 @@ export function memoryStore(): PresupuestoStore {
       for (const [k, e] of elementos) if (e.projectId === projectId && !partidaIds.has(e.itemId)) elementos.delete(k);
       for (const [k, m] of mediciones) if (m.projectId === projectId && !partidaIds.has(m.itemId)) mediciones.delete(k);
       return next;
+    },
+    async getProgramacion(projectId) {
+      const d = programaciones.get(projectId);
+      return d ? { ...d, data: structuredClone(d.data) } : null;
+    },
+    async saveProgramacion(projectId, data, version, user) {
+      if ((programaciones.get(projectId)?.version ?? 0) !== version) return "conflict";
+      programaciones.set(projectId, { data: structuredClone(data), version: version + 1, updatedAt: new Date().toISOString(), updatedBy: user });
+      return version + 1;
     },
     async listMediciones(projectId) {
       return [...mediciones.values()].filter((m) => m.projectId === projectId).map(({ projectId: _p, ...m }) => m);

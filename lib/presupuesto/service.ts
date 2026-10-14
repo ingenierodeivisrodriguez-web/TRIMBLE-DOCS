@@ -23,9 +23,11 @@ import {
   MAX_IMPORT_ROWS,
   OmniclassEntry,
   PresupuestoDoc,
+  Programacion,
+  ProgramacionResponse,
   ResumenElementos,
 } from "./types";
-import { idsDePartidas, UUID_RE, validarCamposModelo, validarColumnasMemoria, validarDocumento, validarInsumo, validarPartida } from "./validate";
+import { idsDePartidas, UUID_RE, validarCamposModelo, validarProgramacion, validarColumnasMemoria, validarDocumento, validarInsumo, validarPartida } from "./validate";
 
 /** What the service needs from Trimble Connect besides the caller of the current project. */
 export interface Deps {
@@ -307,6 +309,34 @@ export async function guardarDocumento(ctx: Ctx, body: unknown): Promise<{ versi
   if (result === "conflict") {
     throw new ServiceError(
       "Otra persona guardó el presupuesto mientras lo editabas. Tus cambios siguen en pantalla: recarga para ver los suyos y vuelve a aplicarlos.",
+      409,
+      "version-conflict"
+    );
+  }
+  return { version: result };
+}
+
+// ---------------------------------------------------------------- schedule
+
+const MAX_PROGRAMACION_BYTES = 2_000_000;
+
+/** The schedule (Gantt) of the budget; null until it is first saved. */
+export async function getProgramacion(ctx: Ctx): Promise<ProgramacionResponse> {
+  const stored = await ctx.store.getProgramacion(ctx.projectId);
+  if (!stored) return { programacion: null, version: 0, updatedAt: null, updatedBy: null };
+  return { programacion: stored.data as Programacion, version: stored.version, updatedAt: stored.updatedAt, updatedBy: stored.updatedBy };
+}
+
+export async function guardarProgramacion(ctx: Ctx, body: unknown): Promise<{ version: number }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as { programacion?: unknown; version?: unknown };
+  if (!Number.isInteger(o.version) || (o.version as number) < 0) bad("Falta la versión de la programación.");
+  const programacion = validarProgramacion(o.programacion);
+  if (JSON.stringify(programacion).length > MAX_PROGRAMACION_BYTES) bad("La programación es demasiado grande para guardarla de una vez.");
+  const result = await ctx.store.saveProgramacion(ctx.projectId, programacion, o.version as number, ctx.caller.name);
+  if (result === "conflict") {
+    throw new ServiceError(
+      "Otra persona guardó la programación mientras la editabas. Tus cambios siguen en pantalla: recarga para ver los suyos y vuelve a aplicarlos.",
       409,
       "version-conflict"
     );

@@ -2,11 +2,15 @@
 // (known fields only, trimmed text). Anything wrong is a 400 with a message
 // the user can act on.
 import { ServiceError } from "../propiedades/service";
+import { DIAS_SEMANA, esFechaIso } from "./calendario";
 import { VARIABLE_RE } from "./formula";
 import { validarEsquema } from "./tree";
 import {
+  CalendarioLaboral,
   CampoModelo,
   ColumnaMemoria,
+  Dependencia,
+  DiaEspecial,
   Componente,
   Edt,
   FilaPie,
@@ -18,6 +22,9 @@ import {
   MAX_CAMPOS_MODELO,
   MAX_COLUMNAS_MEMORIA,
   MAX_COMPONENTES,
+  MAX_DIAS_ESPECIALES,
+  MAX_DURACION_DIAS,
+  MAX_PREDECESORAS,
   MAX_ITEMS,
   MAX_PIE,
   MAX_SHORT_TEXT,
@@ -25,9 +32,13 @@ import {
   MAX_TEXT,
   PartidaData,
   PresupuestoDoc,
+  Programacion,
+  RedondeoDuracion,
   Subpartida,
   Subpresupuesto,
+  TareaProgramada,
   TipoInsumo,
+  TIPOS_DEPENDENCIA,
   TIPOS_INSUMO,
   TituloGasto,
 } from "./types";
@@ -290,4 +301,87 @@ export function validarCamposModelo(value: unknown): { modelos: string[]; campos
 /** Item ids of the budget's partidas. */
 export function idsDePartidas(doc: PresupuestoDoc): Set<string> {
   return new Set(doc.subpresupuestos.flatMap((sp) => sp.items.filter((i) => i.tipo === "partida").map((i) => i.id)));
+}
+
+// ---------------------------------------------------------------- schedule
+
+function fechaIso(value: unknown, what: string): string {
+  if (!esFechaIso(value)) fail(`${what}: fecha no válida.`);
+  return value;
+}
+
+function horas(value: unknown, what: string): number {
+  const h = num(value, what);
+  if (h > 24) fail(`${what}: máximo 24 horas.`);
+  return h;
+}
+
+function validarCalendario(value: unknown): CalendarioLaboral {
+  const c = obj(value, "Calendario");
+  const semana = list(c.horasSemana, "Horas de cada día de la semana", 7);
+  if (semana.length !== 7) fail("Calendario: se esperaban las horas de los 7 días de la semana.");
+  const horasSemana = semana.map((h, i) => horas(h, `Horas del ${DIAS_SEMANA[i].toLowerCase()}`));
+  if (!horasSemana.some((h) => h > 0)) fail("El calendario necesita al menos un día de la semana con horas de trabajo.");
+  const jornada = num(c.jornada, "Horas de una jornada", { positive: true });
+  if (jornada > 24) fail("Horas de una jornada: máximo 24.");
+  const fechas = new Set<string>();
+  const especiales: DiaEspecial[] = list(c.especiales ?? [], "Días especiales", MAX_DIAS_ESPECIALES).map((v, i) => {
+    const d = obj(v, `Día especial ${i + 1}`);
+    const fecha = fechaIso(d.fecha, `Día especial ${i + 1}`);
+    if (fechas.has(fecha)) fail(`El día ${fecha.split("-").reverse().join("-")} está repetido en el calendario.`);
+    fechas.add(fecha);
+    return { fecha, horas: horas(d.horas, `Horas del ${fecha}`), nombre: text(d.nombre, `Nombre del día ${fecha}`, 80) };
+  });
+  especiales.sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return { horasSemana, jornada, especiales };
+}
+
+function validarTarea(value: unknown, what: string): TareaProgramada | null {
+  const t = obj(value, what);
+  const out: TareaProgramada = {};
+  if (t.duracion !== undefined && t.duracion !== null) {
+    out.duracion = redondear2(num(t.duracion, `${what}: duración`));
+    if (out.duracion > MAX_DURACION_DIAS) fail(`${what}: duración máxima ${MAX_DURACION_DIAS} días.`);
+  }
+  if (t.cuadrillas !== undefined && t.cuadrillas !== null) {
+    out.cuadrillas = num(t.cuadrillas, `${what}: cuadrillas`, { positive: true });
+    if (out.cuadrillas > 1000) fail(`${what}: máximo 1000 cuadrillas.`);
+    if (out.cuadrillas === 1) delete out.cuadrillas;
+  }
+  if (t.inicio !== undefined && t.inicio !== null && t.inicio !== "") out.inicio = fechaIso(t.inicio, `${what}: inicio`);
+  if (t.predecesoras !== undefined) {
+    const vistos = new Set<string>();
+    const deps: Dependencia[] = list(t.predecesoras, `${what}: predecesoras`, MAX_PREDECESORAS).map((v) => {
+      const d = obj(v, `${what}: predecesora`);
+      const depId = id(d.id, `${what}: predecesora`);
+      if (vistos.has(depId)) fail(`${what}: una predecesora está repetida.`);
+      vistos.add(depId);
+      if (!TIPOS_DEPENDENCIA.includes(d.tipo as Dependencia["tipo"])) fail(`${what}: el tipo de enlace debe ser FC, CC, FF o CF.`);
+      const desfase = redondear2(num(d.desfase ?? 0, `${what}: desfase`, { min: -MAX_DURACION_DIAS }));
+      if (desfase > MAX_DURACION_DIAS) fail(`${what}: desfase demasiado grande.`);
+      return { id: depId, tipo: d.tipo as Dependencia["tipo"], desfase };
+    });
+    if (deps.length) out.predecesoras = deps;
+  }
+  return Object.keys(out).length ? out : null;
+}
+
+const redondear2 = (n: number) => Math.round(n * 100) / 100;
+
+export function validarProgramacion(value: unknown): Programacion {
+  const o = obj(value, "Programación");
+  const inicio = fechaIso(o.inicio, "Inicio del proyecto");
+  const finObjetivo = o.finObjetivo === null || o.finObjetivo === undefined || o.finObjetivo === "" ? null : fechaIso(o.finObjetivo, "Fecha fin");
+  if (finObjetivo && finObjetivo < inicio) fail("La fecha fin no puede ser anterior al inicio del proyecto.");
+  const redondeo = (o.redondeo ?? "dia") as RedondeoDuracion;
+  if (!["dia", "medio", "no"].includes(redondeo)) fail("Redondeo de la duración no válido.");
+  const crudo = obj(o.tareas ?? {}, "Tareas");
+  const entradas = Object.entries(crudo);
+  if (entradas.length > MAX_ITEMS) fail(`Tareas: máximo ${MAX_ITEMS}.`);
+  const tareas: Record<string, TareaProgramada> = {};
+  for (const [k, v] of entradas) {
+    const t = validarTarea(v, `Tarea ${id(k, "Tarea")}`);
+    if (t) tareas[k] = t;
+  }
+  return { inicio, finObjetivo, calendario: validarCalendario(o.calendario), redondeo, tareas };
 }

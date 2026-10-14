@@ -105,6 +105,16 @@ create table if not exists public.presupuesto_documentos (
   updated_by text
 );
 
+-- Programación (Gantt) del presupuesto: fecha de inicio, calendario laboral y, por partida,
+-- duración, cuadrillas, predecesoras y restricciones. Versionada como el presupuesto.
+create table if not exists public.presupuesto_programacion (
+  project_id text        primary key,
+  data       jsonb       not null,
+  version    integer     not null default 1,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+
 -- Elementos del modelo asociados a cada partida (item_id = id de la fila del presupuesto).
 create table if not exists public.presupuesto_elementos (
   id         bigint      generated always as identity primary key,
@@ -243,6 +253,34 @@ begin
 end;
 $$;
 
+-- Guarda la programación si nadie la guardó desde `p_version` (0: todavía no existe).
+create or replace function public.presupuesto_guardar_programacion(p_project_id text, p_data jsonb, p_version integer, p_user text)
+returns integer
+language plpgsql
+as $$
+declare
+  v_version integer;
+begin
+  if p_version = 0 then
+    insert into public.presupuesto_programacion (project_id, data, version, updated_by)
+    values (p_project_id, p_data, 1, p_user)
+    on conflict (project_id) do nothing;
+    if not found then
+      raise exception 'version-conflict';
+    end if;
+    return 1;
+  end if;
+  update public.presupuesto_programacion
+     set data = p_data, version = version + 1, updated_at = now(), updated_by = p_user
+   where project_id = p_project_id and version = p_version
+  returning version into v_version;
+  if v_version is null then
+    raise exception 'version-conflict';
+  end if;
+  return v_version;
+end;
+$$;
+
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. Las funciones se ejecutan con los permisos de quien las llama.
 alter table public.presupuesto_config enable row level security;
@@ -254,15 +292,18 @@ alter table public.presupuesto_omniclass enable row level security;
 alter table public.presupuesto_documentos enable row level security;
 alter table public.presupuesto_elementos enable row level security;
 alter table public.presupuesto_mediciones enable row level security;
+alter table public.presupuesto_programacion enable row level security;
 revoke all on function public.presupuesto_guardar_insumos(text, jsonb, text) from public;
 revoke all on function public.presupuesto_guardar_partidas(text, jsonb, text) from public;
 revoke all on function public.presupuesto_guardar(text, jsonb, integer, text) from public;
+revoke all on function public.presupuesto_guardar_programacion(text, jsonb, integer, text) from public;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     grant execute on function public.presupuesto_guardar_insumos(text, jsonb, text) to service_role;
     grant execute on function public.presupuesto_guardar_partidas(text, jsonb, text) to service_role;
     grant execute on function public.presupuesto_guardar(text, jsonb, integer, text) to service_role;
+    grant execute on function public.presupuesto_guardar_programacion(text, jsonb, integer, text) to service_role;
   end if;
 end;
 $$;

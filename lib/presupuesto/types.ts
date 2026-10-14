@@ -367,3 +367,77 @@ export const MAX_NIVEL = 9;
 export const MAX_IMPORT_ROWS = 1000;
 export const MAX_ELEMENTS_PER_REQUEST = 500;
 export const MAX_EDITORES = 50;
+
+// ---------------------------------------------------------------- schedule (programación / Gantt)
+
+/** How a task depends on another: Fin-Comienzo, Comienzo-Comienzo, Fin-Fin, Comienzo-Fin. */
+export type TipoDependencia = "FC" | "CC" | "FF" | "CF";
+export const TIPOS_DEPENDENCIA: TipoDependencia[] = ["FC", "CC", "FF", "CF"];
+export const TIPO_DEPENDENCIA_NOMBRES: Record<TipoDependencia, string> = {
+  FC: "Fin - Comienzo",
+  CC: "Comienzo - Comienzo",
+  FF: "Fin - Fin",
+  CF: "Comienzo - Fin",
+};
+
+export interface Dependencia {
+  /** The predecessor partida's id. */
+  id: string;
+  tipo: TipoDependencia;
+  /** Working days after the predecessor's date; negative to start in advance (adelanto). */
+  desfase: number;
+}
+
+/** What the user set for a partida in the schedule (the rest comes from the budget). */
+export interface TareaProgramada {
+  /** Working days. Not set: estimated from metrado ÷ (rendimiento × cuadrillas). */
+  duracion?: number;
+  /** Crews working at once (for the estimate). Default 1. */
+  cuadrillas?: number;
+  predecesoras?: Dependencia[];
+  /** "Don't start before" this date (YYYY-MM-DD). */
+  inicio?: string;
+}
+
+export interface DiaEspecial {
+  /** YYYY-MM-DD */
+  fecha: string;
+  /** Hours worked that day: 0 for a holiday. */
+  horas: number;
+  nombre: string;
+}
+
+export interface CalendarioLaboral {
+  /** Hours worked each day of the week, Monday first. */
+  horasSemana: number[];
+  /** Hours of a working day: one day of duration is this many hours. */
+  jornada: number;
+  /** Holidays and days with other hours. */
+  especiales: DiaEspecial[];
+}
+
+/** How estimated durations are rounded up. */
+export type RedondeoDuracion = "dia" | "medio" | "no";
+
+export interface Programacion {
+  /** Project start (YYYY-MM-DD). */
+  inicio: string;
+  /** Date the project should end by (YYYY-MM-DD), to compare. */
+  finObjetivo: string | null;
+  calendario: CalendarioLaboral;
+  redondeo: RedondeoDuracion;
+  /** By partida id. */
+  tareas: Record<string, TareaProgramada>;
+}
+
+export interface ProgramacionResponse {
+  /** null until the schedule is first saved. */
+  programacion: Programacion | null;
+  version: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+}
+
+export const MAX_DIAS_ESPECIALES = 1000;
+export const MAX_PREDECESORAS = 50;
+export const MAX_DURACION_DIAS = 10_000;

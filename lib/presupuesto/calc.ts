@@ -245,6 +245,41 @@ export interface FilaInsumo {
 
 const ORDEN_TIPO: Record<TipoInsumo, number> = { MO: 0, MT: 1, EQ: 2, SC: 3 };
 
+/** Resources used: quantities by resource id, and the money of "%MO" resources. */
+export interface Consumo {
+  cantidades: Map<string, number>;
+  montos: Map<string, number>;
+}
+
+/**
+ * The resources `factor` units of an APU use (a partida's metrado), going
+ * into subpartidas; added to `out` when given.
+ */
+export function consumoDeApu(
+  apu: Apu,
+  factor: number,
+  r: Resolver,
+  cache: Map<string, ApuCalculado> = new Map(),
+  out: Consumo = { cantidades: new Map(), montos: new Map() },
+  stack: string[] = []
+): Consumo {
+  if (factor === 0) return out;
+  const calculada = calcularApu(apu, r, { cache, stack });
+  for (const l of calculada.lineas) {
+    if (l.error) continue;
+    const c = l.componente;
+    if (c.tipo === "subpartida") {
+      const sub = r.subpartida(c.id);
+      if (sub) consumoDeApu(sub, factor * l.cantidad, r, cache, out, [...stack, c.id]);
+    } else if (l.porcentajeMO) {
+      out.montos.set(c.id, (out.montos.get(c.id) ?? 0) + factor * l.parcial);
+    } else {
+      out.cantidades.set(c.id, (out.cantidades.get(c.id) ?? 0) + factor * l.cantidad);
+    }
+  }
+  return out;
+}
+
 /**
  * Every resource the given partidas use, added up: each partida's metrado
  * times the quantity in its APU, going into subpartidas.
@@ -254,34 +289,16 @@ export function listaInsumos(
   r: Resolver,
   metradoModelo: (itemId: string) => MetradoModelo | null = () => null
 ): FilaInsumo[] {
-  const cantidades = new Map<string, number>();
-  const montos = new Map<string, number>(); // "%MO" resources
+  const consumo: Consumo = { cantidades: new Map(), montos: new Map() };
   const cache = new Map<string, ApuCalculado>();
-
-  function acumular(apu: Apu, factor: number, stack: string[]) {
-    if (factor === 0) return;
-    const calculada = calcularApu(apu, r, { cache, stack });
-    for (const l of calculada.lineas) {
-      if (l.error) continue;
-      const c = l.componente;
-      if (c.tipo === "subpartida") {
-        const sub = r.subpartida(c.id);
-        if (sub) acumular(sub, factor * l.cantidad, [...stack, c.id]);
-      } else if (l.porcentajeMO) {
-        montos.set(c.id, (montos.get(c.id) ?? 0) + factor * l.parcial);
-      } else {
-        cantidades.set(c.id, (cantidades.get(c.id) ?? 0) + factor * l.cantidad);
-      }
-    }
-  }
-
   for (const sp of sps) {
     for (const item of sp.items) {
       if (item.tipo !== "partida") continue;
       const modelo = metradoModelo(item.id);
-      acumular(item, redondear(modelo ? modelo.valor : item.metrado, 2), []);
+      consumoDeApu(item, redondear(modelo ? modelo.valor : item.metrado, 2), r, cache, consumo);
     }
   }
+  const { cantidades, montos } = consumo;
 
   const filas: FilaInsumo[] = [];
   for (const [id, cantidad] of cantidades) {

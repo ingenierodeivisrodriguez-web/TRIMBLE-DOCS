@@ -21,9 +21,11 @@ import GastosGenerales from "./GastosGenerales";
 import ImportarDialog from "./ImportarDialog";
 import ListaInsumos from "./ListaInsumos";
 import PieDialog from "./PieDialog";
+import Programacion from "./Programacion";
 import { ConfirmDialog, TextoDialog } from "./SimpleDialogs";
 import { C, message, Notice } from "./ui";
 import { usePresupuesto } from "./usePresupuesto";
+import { useProgramacion } from "./useProgramacion";
 
 type Dialogo =
   | { tipo: "titulo"; editar?: string }
@@ -58,6 +60,9 @@ export default function PresupuestoApp({
   const s = usePresupuesto(api);
   const { doc, setDoc, estado, catalogo } = s;
   const canEdit = !!estado?.canEdit;
+  // The budget, or its schedule (Gantt).
+  const [vista, setVista] = useState<"presupuesto" | "programacion">("presupuesto");
+  const programacion = useProgramacion(api, vista === "programacion", estado?.user.name ?? null);
   const spKey = `presupuesto.sp.${projectId}`;
   const [spId, setSpIdState] = useState<string | null>(() => {
     try {
@@ -148,6 +153,7 @@ export default function PresupuestoApp({
   // Ctrl+S saves.
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (vista !== "presupuesto") return; // the schedule saves its own
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "s") {
         e.preventDefault();
         if (canEdit && s.dirty && !s.saving) s.save();
@@ -155,7 +161,7 @@ export default function PresupuestoApp({
     }
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [canEdit, s]);
+  }, [canEdit, s, vista]);
 
   const setItems = useCallback(
     (change: (items: Item[]) => Item[]) => {
@@ -301,6 +307,21 @@ export default function PresupuestoApp({
     return <div style={{ padding: 24, color: "var(--tc-gray-500)" }}>Cargando el presupuesto...</div>;
   }
 
+  if (vista === "programacion" && resolver) {
+    return (
+      <Programacion
+        p={programacion}
+        doc={doc}
+        calculados={calculados}
+        resolver={resolver}
+        canEdit={canEdit}
+        projectName={projectName}
+        presupuestoSinGuardar={s.dirty}
+        onVolver={() => setVista("presupuesto")}
+      />
+    );
+  }
+
   const readOnlyBase = estado.baseNote;
   const dis = !canEdit;
   const partidaSel = selected?.tipo === "partida" ? (selected as ItemPartida) : null;
@@ -315,6 +336,9 @@ export default function PresupuestoApp({
           {!estado.esBasePropia && ` · catálogo: ${estado.config.baseProjectName || estado.config.baseProjectId}`}
           {!canEdit && " · solo consulta"}
         </span>
+        <HeadButton onClick={() => setVista("programacion")} strong>
+          📅 Programación (Gantt)
+        </HeadButton>
         <HeadButton onClick={() => setDialogo({ tipo: "insumos" })} disabled={!catalogo}>
           Catálogo de insumos
         </HeadButton>
@@ -417,7 +441,7 @@ export default function PresupuestoApp({
       </div>
 
       {/* Status */}
-      {(s.saveError || aviso || s.catalogoError || s.dirty || s.meta.updatedAt) && (
+      {(s.saveError || aviso || s.catalogoError || s.dirty || s.meta.updatedAt || programacion.dirty) && (
         <div style={{ padding: "4px 10px", fontSize: 12.5, display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap", borderBottom: `1px solid ${C.grid}` }}>
           {s.saveError ? (
             <span style={{ color: "#8a1c14" }}>
@@ -444,6 +468,14 @@ export default function PresupuestoApp({
             </span>
           )}
           {s.catalogoError && <span style={{ color: "#8a1c14" }}>Catálogo: {s.catalogoError}</span>}
+          {programacion.dirty && (
+            <span style={{ color: "#7a5300" }}>
+              La programación tiene cambios sin guardar.{" "}
+              <button type="button" style={linkBtn} onClick={() => setVista("programacion")}>
+                Ir a la programación
+              </button>
+            </span>
+          )}
         </div>
       )}
 
@@ -746,7 +778,7 @@ export default function PresupuestoApp({
   }
 }
 
-function HeadButton({ onClick, disabled, children }: { onClick: () => void; disabled?: boolean; children: ReactNode }) {
+function HeadButton({ onClick, disabled, children, strong }: { onClick: () => void; disabled?: boolean; children: ReactNode; strong?: boolean }) {
   return (
     <button
       type="button"
@@ -754,11 +786,12 @@ function HeadButton({ onClick, disabled, children }: { onClick: () => void; disa
       disabled={disabled}
       style={{
         border: "1px solid rgba(255,255,255,0.45)",
-        background: "rgba(255,255,255,0.1)",
+        background: strong ? "rgba(255,255,255,0.25)" : "rgba(255,255,255,0.1)",
         color: "#fff",
         borderRadius: 4,
         padding: "5px 10px",
         fontSize: 13,
+        fontWeight: strong ? 700 : 400,
         cursor: disabled ? "default" : "pointer",
         opacity: disabled ? 0.5 : 1,
         fontFamily: "inherit",

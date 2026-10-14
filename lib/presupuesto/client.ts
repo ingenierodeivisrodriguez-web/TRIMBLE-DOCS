@@ -19,6 +19,8 @@ import {
   OmniclassEntry,
   PartidaData,
   PresupuestoDoc,
+  Programacion,
+  ProgramacionResponse,
   ResumenElementos,
 } from "./types";
 
@@ -46,6 +48,8 @@ export interface PresupuestoApi {
   guardarOmniclass(entradas: OmniclassEntry[]): Promise<number>;
   getDocumento(): Promise<DocumentoResponse>;
   guardarDocumento(doc: PresupuestoDoc, version: number): Promise<{ version: number }>;
+  getProgramacion(): Promise<ProgramacionResponse>;
+  guardarProgramacion(programacion: Programacion, version: number): Promise<{ version: number }>;
   getResumen(): Promise<ResumenElementos>;
   elementosDe(filter: { itemIds?: string[]; ifcGuids?: string[] }): Promise<ElementoVinculado[]>;
   guardarElementos(
@@ -107,6 +111,8 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
       ),
     getDocumento: () => request("/documento"),
     guardarDocumento: (doc, version) => request("/documento", send("PUT", { doc, version })),
+    getProgramacion: () => request("/programacion"),
+    guardarProgramacion: (programacion, version) => request("/programacion", send("PUT", { programacion, version })),
     getResumen: () => request("/elementos/resumen"),
     async elementosDe(filter) {
       const out: ElementoVinculado[] = [];
