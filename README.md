@@ -1201,6 +1201,12 @@ elementos de las partidas que ya no existen.
   5 m² con tres elementos de 2, 2 y 1 m² da valores de 2×PU, 2×PU y 1×PU. Si
   la suma de los elementos no coincide con el metrado de la partida, lo avisa.
   Con muchos elementos el listado muestra 12 filas y se desplaza por dentro.
+  **Ordenar:** al pulsar el título de una columna (también Cantidad y Valor) el
+  listado se ordena de forma ascendente (▲); otro clic, descendente (▼); un
+  tercero vuelve al orden de siempre. Los textos se ordenan en orden natural
+  ("Nivel 2" antes que "Nivel 10"), los números por valor, y los elementos sin
+  dato en esa columna quedan al final. El orden es solo para verlos: no cambia
+  nada guardado y se reinicia al abrir otra partida.
 - **Columnas de la memoria (⚙ Configuración).** Administradores y editores
   eligen hasta 6 columnas, en el orden que quieran y con el título que
   quieran. Cada una puede ser:

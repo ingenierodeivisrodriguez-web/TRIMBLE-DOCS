@@ -81,6 +81,46 @@ export function porUbicacion<T extends { memoria: Memoria | null }>(list: T[], c
   });
 }
 
+/** How the user sorted the memoria's list: by a column id, or by "@cantidad" / "@valor". */
+export interface OrdenMemoria {
+  por: string;
+  dir: "asc" | "desc";
+}
+
+/** The next click on a column header: ascending, then descending, then back to the default order. */
+export function siguienteOrden(actual: OrdenMemoria | null, por: string): OrdenMemoria | null {
+  if (!actual || actual.por !== por) return { por, dir: "asc" };
+  return actual.dir === "asc" ? { por, dir: "desc" } : null;
+}
+
+/**
+ * Sorts the elements by one column (text in natural order, "2" before "10";
+ * numbers by value). Elements without a value in it stay at the end in
+ * either direction, and ties keep the default order.
+ */
+export function ordenarMemoria<T extends { ifcGuid: string; cantidad: number | null; memoria: Memoria | null }>(
+  list: T[],
+  columnas: ColumnaMemoria[],
+  orden: OrdenMemoria | null
+): T[] {
+  if (!orden) return list;
+  const numerico = orden.por === "@cantidad" || orden.por === "@valor";
+  const col = columnas.find((c) => c.id === orden.por);
+  if (!numerico && !col) return list;
+  const collator = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+  const signo = orden.dir === "desc" ? -1 : 1;
+  const valor = (e: T): string | number | null => (numerico ? e.cantidad : col!.fuente === "ifcguid" ? e.ifcGuid : e.memoria?.[col!.id] ?? "");
+  return [...list].sort((a, b) => {
+    const x = valor(a);
+    const y = valor(b);
+    const sinX = x === null || x === "";
+    const sinY = y === null || y === "";
+    if (sinX || sinY) return sinX === sinY ? 0 : sinX ? 1 : -1;
+    const d = typeof x === "number" && typeof y === "number" ? x - y : collator.compare(String(x), String(y));
+    return d * signo;
+  });
+}
+
 /**
  * What gets stored for an element: the model columns only (Propiedades values
  * are read live), the new reading over the previous one where it found data.

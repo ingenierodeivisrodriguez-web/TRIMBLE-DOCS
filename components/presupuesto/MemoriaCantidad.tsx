@@ -3,7 +3,7 @@
 import { CSSProperties, useEffect, useMemo, useState } from "react";
 import { redondear } from "../../lib/presupuesto/calc";
 import { fmt } from "../../lib/presupuesto/format";
-import { porUbicacion } from "../../lib/presupuesto/memoria";
+import { OrdenMemoria, ordenarMemoria, porUbicacion, siguienteOrden } from "../../lib/presupuesto/memoria";
 import type { ColumnaMemoria, ElementoVinculado } from "../../lib/presupuesto/types";
 import { C, message } from "./ui";
 
@@ -66,7 +66,29 @@ export default function MemoriaCantidad({
     };
   }, [itemId, load]);
 
-  const filas = useMemo(() => porUbicacion(elementos ?? [], columnas), [elementos, columnas]);
+  // Sorted by the column the user clicked (a second click reverses it, a third goes back to the default order).
+  const [orden, setOrden] = useState<OrdenMemoria | null>(null);
+  useEffect(() => setOrden(null), [itemId]);
+  const filas = useMemo(() => ordenarMemoria(porUbicacion(elementos ?? [], columnas), columnas, orden), [elementos, columnas, orden]);
+
+  const cabecera = (por: string, texto: string, title?: string) => {
+    const activo = orden?.por === por ? orden.dir : null;
+    return (
+      <th key={por} style={th} title={title} aria-sort={activo === "asc" ? "ascending" : activo === "desc" ? "descending" : "none"}>
+        <button
+          type="button"
+          onClick={() => setOrden((o) => siguienteOrden(o, por))}
+          style={sortBtn}
+          title={`Ordenar por ${texto}: clic para ascendente, otro para descendente, otro para quitar el orden`}
+        >
+          <span style={{ overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{texto}</span>
+          <span aria-hidden style={{ fontSize: 10, width: 10, flexShrink: 0, color: activo ? "var(--tc-blue-700)" : "#b8bec7" }}>
+            {activo === "asc" ? "▲" : activo === "desc" ? "▼" : "↕"}
+          </span>
+        </button>
+      </th>
+    );
+  };
   const cantidadTotal = filas.reduce((sum, e) => sum + (e.cantidad ?? 0), 0);
   const valorTotal = filas.reduce((sum, e) => sum + redondear((e.cantidad ?? 0) * cu, 2), 0);
   const sinDatos = filas.filter((e) => !e.memoria || !columnas.some((c) => c.fuente !== "ifcguid" && e.memoria?.[c.id])).length;
@@ -116,14 +138,10 @@ export default function MemoriaCantidad({
             <thead>
               <tr style={{ position: "sticky", top: 0, background: "#f3f4f6", height: THEAD }}>
                 <th style={th}>#</th>
-                {columnas.map((c) => (
-                  <th key={c.id} style={th} title={c.fuente === "propiedad" ? "Atributo de Propiedades" : c.fuente === "ifcguid" ? "IFCGUID del elemento" : "Propiedad del modelo"}>
-                    {c.label}
-                  </th>
-                ))}
-                <th style={th}>Cantidad{unidad ? ` (${unidad})` : ""}</th>
+                {columnas.map((c) => cabecera(c.id, c.label, c.fuente === "propiedad" ? "Atributo de Propiedades" : c.fuente === "ifcguid" ? "IFCGUID del elemento" : "Propiedad del modelo"))}
+                {cabecera("@cantidad", `Cantidad${unidad ? ` (${unidad})` : ""}`)}
                 <th style={th}>PU</th>
-                <th style={th}>Valor</th>
+                {cabecera("@valor", "Valor")}
                 {onVer && <th style={th}>3D</th>}
               </tr>
             </thead>
@@ -201,6 +219,7 @@ const box: CSSProperties = {
   overflow: "hidden",
 };
 const th: CSSProperties = { padding: "5px 8px", fontWeight: 600, borderBottom: `1px solid ${C.border}`, borderRight: `1px solid ${C.grid}`, textAlign: "center", background: "#f3f4f6" };
+const sortBtn: CSSProperties = { display: "flex", alignItems: "center", justifyContent: "center", gap: 4, width: "100%", border: "none", background: "transparent", padding: 0, font: "inherit", fontWeight: 600, color: "inherit", cursor: "pointer" };
 const td: CSSProperties = { padding: "3px 8px", borderBottom: `1px solid ${C.grid}`, borderRight: `1px solid ${C.grid}` };
 const tdNum: CSSProperties = { ...td, textAlign: "right", fontVariantNumeric: "tabular-nums" };
 const verBtn: CSSProperties = { border: "1px solid var(--tc-blue-500)", background: "#fff", color: "var(--tc-blue-700)", borderRadius: 4, padding: "1px 8px", fontSize: 12, cursor: "pointer", fontFamily: "inherit", whiteSpace: "nowrap" };

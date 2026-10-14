@@ -4,7 +4,7 @@ import { buildDataset } from "../graficos/modelData";
 import { Caller, ServiceError } from "../propiedades/service";
 import { memoryStore as propiedadesStore } from "../propiedades/store";
 import { documentoVacio } from "./doc";
-import { memoriaDe, memoriaLimpia, memoriaParaGuardar, porUbicacion } from "./memoria";
+import { memoriaDe, memoriaLimpia, memoriaParaGuardar, ordenarMemoria, porUbicacion, siguienteOrden } from "./memoria";
 import { consultarElementos, Ctx, getAtributos, getDocumento, getEstado, guardarDocumento, guardarElementos, updateConfig } from "./service";
 import { memoryStore } from "./store";
 import type { ColumnaMemoria, Memoria } from "./types";
@@ -172,5 +172,47 @@ describe("columnas configurables de la memoria", () => {
     assert.deepEqual(por.get(G1), { nivel: "Piso 2", estado: "Aprobado", fecha: "09-03-2026" });
     assert.deepEqual(por.get(G2), { nivel: "Piso 3", estado: "", fecha: "" });
     assert.deepEqual((await getAtributos(ctx(lector))).atributos.map((a) => a.title), ["Estado", "Fecha de instalación"]);
+  });
+});
+
+describe("ordenar la lista de la memoria por una columna", () => {
+  const columnas: ColumnaMemoria[] = [
+    { id: "nivel", label: "Nivel", fuente: "modelo", clave: "Ubicación · Nivel" },
+    { id: "guid", label: "ID", fuente: "ifcguid", clave: "" },
+  ];
+  const el = (ifcGuid: string, nivel: string | null, cantidad: number | null) => ({ ifcGuid, cantidad, memoria: nivel === null ? null : { nivel } });
+  const lista = [el("c", "NIVEL 10", 5), el("a", "NIVEL 2", 20), el("b", null, 7), el("d", "NIVEL 1", null), el("e", "NIVEL 2", 3)];
+  const ids = (l: { ifcGuid: string }[]) => l.map((e) => e.ifcGuid).join("");
+
+  it("texto en orden natural, ascendente y descendente, con los vacíos siempre al final", () => {
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "nivel", dir: "asc" })), "daecb"); // NIVEL 1, 2, 2, 10, (none)
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "nivel", dir: "desc" })), "caedb");
+  });
+
+  it("los iguales conservan el orden que traían", () => {
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "nivel", dir: "asc" }).slice(1, 3)), "ae");
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "nivel", dir: "desc" }).slice(1, 3)), "ae");
+  });
+
+  it("números por valor (no por texto) y los elementos sin cantidad al final", () => {
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "@cantidad", dir: "asc" })), "ecbad");
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "@cantidad", dir: "desc" })), "abced");
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "@valor", dir: "asc" })), "ecbad");
+  });
+
+  it("también ordena por el IFCGUID, no cambia la lista original y sin orden la deja igual", () => {
+    assert.equal(ids(ordenarMemoria(lista, columnas, { por: "guid", dir: "desc" })), "edcba");
+    assert.equal(ids(lista), "cabde");
+    assert.equal(ordenarMemoria(lista, columnas, null), lista);
+    assert.equal(ordenarMemoria(lista, columnas, { por: "ya-no-existe", dir: "asc" }), lista);
+  });
+
+  it("clic sucesivo en el encabezado: ascendente, descendente, y vuelve al orden de siempre", () => {
+    const a = siguienteOrden(null, "nivel");
+    assert.deepEqual(a, { por: "nivel", dir: "asc" });
+    const b = siguienteOrden(a, "nivel");
+    assert.deepEqual(b, { por: "nivel", dir: "desc" });
+    assert.equal(siguienteOrden(b, "nivel"), null);
+    assert.deepEqual(siguienteOrden(b, "@cantidad"), { por: "@cantidad", dir: "asc" }); // another column starts ascending
   });
 });
