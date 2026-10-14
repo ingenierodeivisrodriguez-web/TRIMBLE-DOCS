@@ -21,9 +21,12 @@ const BLOQUEOS = new Set<string>([
 ]);
 
 export function clienteGemini(apiKey: string, modelo: string = MODELO_GEMINI_POR_DEFECTO): ClienteIA {
-  // Each call is a small batch and must end within the server function (60 s): no retries
-  // here (the SDK would retry up to 5 times); the browser retries a failed batch once.
-  const ai = new GoogleGenAI({ apiKey, httpOptions: { timeout: 55_000, retryOptions: { attempts: 1 } } });
+  // Each call is a small batch and must end within the server function (60 s). A busy or failing
+  // server (500/503) answers fast, so it is retried twice after 1.5 and 3 s; limits (429) are not.
+  const ai = new GoogleGenAI({
+    apiKey,
+    httpOptions: { timeout: 50_000, retryOptions: { attempts: 3, initialDelay: 1.5, maxDelay: 4, httpStatusCodes: [500, 502, 503, 504] } },
+  });
   return {
     proveedor: "Google",
     modelo,
@@ -79,21 +82,38 @@ export function leerRespuestaGemini(
   return { texto: r.text ?? null, stopReason: fin === FinishReason.MAX_TOKENS ? "max_tokens" : "end_turn", modelo, tokens, rechazo: null };
 }
 
-/** Errors of the API as messages a person can act on. */
+/** Google's own words in an error: its JSON "message", or the text as it came. */
+export function mensajeGoogle(raw: string): string {
+  const inicio = raw.indexOf("{");
+  if (inicio >= 0) {
+    try {
+      const o = JSON.parse(raw.slice(inicio)) as { error?: { message?: string; status?: string } };
+      if (o.error?.message) return `${o.error.status ? `${o.error.status}: ` : ""}${o.error.message}`.slice(0, 300);
+    } catch {
+      // not JSON
+    }
+  }
+  return raw.slice(0, 300);
+}
+
+/** Errors of the API as messages a person can act on, with what Google said (also in the server's log). */
 export function errorDeGemini(err: unknown): ServiceError {
   if (err instanceof ApiError) {
+    const dijo = mensajeGoogle(err.message);
+    console.error(`[presupuesto-ia] Google respondió ${err.status}: ${dijo}`);
     if (err.status === 401 || err.status === 403) {
-      return new ServiceError("La clave GEMINI_API_KEY de Vercel no es válida o no tiene permiso: el administrador de la plataforma debe revisarla.", 503, "ia-clave");
+      return new ServiceError(`La clave GEMINI_API_KEY de Vercel no es válida o no tiene permiso (Google: ${dijo}).`, 503, "ia-clave");
     }
     if (err.status === 429) {
-      return new ServiceError("Se alcanzó el límite de solicitudes de Google AI Studio (el nivel gratuito tiene límites por minuto y por día). Espera y continúa.", 429, "ia-limite");
+      return new ServiceError(`Se alcanzó el límite de solicitudes de Google AI Studio (el nivel gratuito tiene límites por minuto y por día). Espera y continúa. (Google: ${dijo})`, 429, "ia-limite");
     }
     if (err.status === 400 || err.status === 404) {
-      return new ServiceError(`Google no aceptó la solicitud: ${err.message}`, 502, "ia-solicitud");
+      return new ServiceError(`Google no aceptó la solicitud (${err.status}): ${dijo}`, 502, "ia-solicitud");
     }
-    if (err.status >= 500) return new ServiceError("El servicio de IA de Google está ocupado o falló. Intenta de nuevo en unos minutos.", 503, "ia-servicio");
-    return new ServiceError(`El servicio de IA de Google respondió con un error (${err.status}).`, 502, "ia-error");
+    if (err.status >= 500) return new ServiceError(`El servicio de IA de Google falló después de reintentar (${err.status}: ${dijo}).`, 503, "ia-servicio");
+    return new ServiceError(`El servicio de IA de Google respondió con un error (${err.status}: ${dijo}).`, 502, "ia-error");
   }
+  console.error("[presupuesto-ia] Error al llamar a Google:", err);
   if (err instanceof Error && /abort|timeout/i.test(`${err.name} ${err.message}`)) {
     return new ServiceError("El servicio de IA tardó demasiado en responder. Intenta con menos partidas por lote.", 504, "ia-tiempo");
   }

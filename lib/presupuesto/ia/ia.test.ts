@@ -8,7 +8,7 @@ import { memoryStore, PresupuestoStore } from "../store";
 import type { ClienteIA, PeticionIA, RespuestaIA } from "./claude";
 import { aCop, costoUsd, disponibleCop, estadoCupo, fmtCop, inicioDeMes } from "./cupo";
 import { leerRespuestaEdt, mensajeEdt, partidasParaEdt } from "./edt";
-import { leerRespuestaGemini } from "./gemini";
+import { leerRespuestaGemini, mensajeGoogle } from "./gemini";
 import { elegirProveedor } from "./proveedor";
 import { decidirBorradoresIA, generarEdtIA, getEstadoIA, guardarCupoIA, listarBorradoresIA } from "./servicio";
 import type { PartidaEdtIA } from "./tipos";
@@ -316,5 +316,15 @@ describe("respuestas de Gemini", () => {
     const bloqueada = leerRespuestaGemini({ usageMetadata: uso, candidates: [{ finishReason: "SAFETY" }] }, "m");
     assert.deepEqual([bloqueada.stopReason, bloqueada.texto, bloqueada.rechazo], ["refusal", null, "SAFETY"]);
     assert.equal(leerRespuestaGemini({ promptFeedback: { blockReason: "PROHIBITED_CONTENT" } }, "m").rechazo, "PROHIBITED_CONTENT");
+  });
+});
+
+describe("errores de Google", () => {
+  it("muestra lo que dijo Google, no solo un mensaje genérico", () => {
+    assert.equal(
+      mensajeGoogle('got status: 503 Service Unavailable. {"error":{"code":503,"message":"The model is overloaded. Please try again later.","status":"UNAVAILABLE"}}'),
+      "UNAVAILABLE: The model is overloaded. Please try again later."
+    );
+    assert.equal(mensajeGoogle("algo raro"), "algo raro");
   });
 });
