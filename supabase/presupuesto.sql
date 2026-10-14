@@ -281,6 +281,88 @@ begin
 end;
 $$;
 
+-- Asistente IA. Cupo mensual en pesos por proyecto y por persona; lo fijan los
+-- administradores del proyecto gestor de la plataforma. project_id = '_global' guarda
+-- los valores por defecto y la TRM.
+create table if not exists public.presupuesto_ia_cupos (
+  project_id        text        primary key,
+  habilitada        boolean     not null default false,
+  cupo_proyecto_cop numeric(14,2) not null default 0 check (cupo_proyecto_cop >= 0),
+  cupo_usuario_cop  numeric(14,2) not null default 0 check (cupo_usuario_cop >= 0),
+  trm               numeric(10,2) check (trm is null or trm > 0),
+  updated_at        timestamptz not null default now(),
+  updated_by        text
+);
+
+-- Registro de cada llamada al modelo: quién, qué tarea, modelo, tokens y costo.
+create table if not exists public.presupuesto_ia_uso (
+  id                     bigint generated always as identity primary key,
+  project_id             text        not null,
+  user_id                text        not null,
+  user_name              text        not null default '',
+  tarea                  text        not null,
+  modelo                 text        not null,
+  items                  integer     not null default 0,
+  tokens_entrada         integer     not null default 0,
+  tokens_salida          integer     not null default 0,
+  tokens_cache_escritura integer     not null default 0,
+  tokens_cache_lectura   integer     not null default 0,
+  costo_usd              numeric(12,6) not null default 0,
+  trm                    numeric(10,2) not null,
+  costo_cop              numeric(14,2) not null default 0,
+  version_prompt         text        not null default '',
+  estado                 text        not null check (estado in ('ok', 'error', 'rechazado', 'incompleto')),
+  detalle                text        not null default '',
+  creado                 timestamptz not null default now()
+);
+create index if not exists presupuesto_ia_uso_mes on public.presupuesto_ia_uso (project_id, creado);
+
+-- Lo que propone la IA, fila por fila, hasta que una persona lo acepta o lo rechaza.
+create table if not exists public.presupuesto_ia_borradores (
+  id           uuid        primary key,
+  project_id   text        not null,
+  tarea        text        not null,
+  item_id      text        not null,
+  referencia   text        not null default '',
+  propuesta    jsonb       not null,
+  anterior     jsonb,
+  estado       text        not null default 'pendiente' check (estado in ('pendiente', 'aceptado', 'rechazado', 'reemplazado')),
+  editado      boolean     not null default false,
+  final        jsonb,
+  uso_id       bigint,
+  creado       timestamptz not null default now(),
+  creado_por   text        not null default '',
+  decidido     timestamptz,
+  decidido_por text
+);
+create index if not exists presupuesto_ia_borradores_estado on public.presupuesto_ia_borradores (project_id, estado, creado);
+
+-- Lo gastado desde una fecha por el proyecto y por una persona.
+create or replace function public.presupuesto_ia_gasto(p_project_id text, p_desde timestamptz, p_user_id text)
+returns table (proyecto numeric, usuario numeric)
+language sql
+stable
+as $$
+  select coalesce(sum(costo_cop), 0),
+         coalesce(sum(costo_cop) filter (where user_id = p_user_id), 0)
+    from public.presupuesto_ia_uso
+   where project_id = p_project_id and creado >= p_desde;
+$$;
+
+-- Cómo se juzgaron los borradores: la evaluación base del asistente.
+create or replace function public.presupuesto_ia_resumen(p_project_id text)
+returns table (pendientes bigint, aceptados_sin_cambios bigint, aceptados_editados bigint, rechazados bigint)
+language sql
+stable
+as $$
+  select count(*) filter (where estado = 'pendiente'),
+         count(*) filter (where estado = 'aceptado' and not editado),
+         count(*) filter (where estado = 'aceptado' and editado),
+         count(*) filter (where estado = 'rechazado')
+    from public.presupuesto_ia_borradores
+   where project_id = p_project_id;
+$$;
+
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. Las funciones se ejecutan con los permisos de quien las llama.
 alter table public.presupuesto_config enable row level security;
@@ -293,10 +375,15 @@ alter table public.presupuesto_documentos enable row level security;
 alter table public.presupuesto_elementos enable row level security;
 alter table public.presupuesto_mediciones enable row level security;
 alter table public.presupuesto_programacion enable row level security;
+alter table public.presupuesto_ia_cupos enable row level security;
+alter table public.presupuesto_ia_uso enable row level security;
+alter table public.presupuesto_ia_borradores enable row level security;
 revoke all on function public.presupuesto_guardar_insumos(text, jsonb, text) from public;
 revoke all on function public.presupuesto_guardar_partidas(text, jsonb, text) from public;
 revoke all on function public.presupuesto_guardar(text, jsonb, integer, text) from public;
 revoke all on function public.presupuesto_guardar_programacion(text, jsonb, integer, text) from public;
+revoke all on function public.presupuesto_ia_gasto(text, timestamptz, text) from public;
+revoke all on function public.presupuesto_ia_resumen(text) from public;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
@@ -304,6 +391,8 @@ begin
     grant execute on function public.presupuesto_guardar_partidas(text, jsonb, text) to service_role;
     grant execute on function public.presupuesto_guardar(text, jsonb, integer, text) to service_role;
     grant execute on function public.presupuesto_guardar_programacion(text, jsonb, integer, text) to service_role;
+    grant execute on function public.presupuesto_ia_gasto(text, timestamptz, text) to service_role;
+    grant execute on function public.presupuesto_ia_resumen(text) to service_role;
   end if;
 end;
 $$;

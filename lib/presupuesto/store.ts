@@ -1,4 +1,5 @@
 import type { Responsable } from "../propiedades/types";
+import type { BorradorIA, CupoGuardado, EstadoBorrador, RegistroUsoIA, ResumenBorradores, TareaIA } from "./ia/tipos";
 import { StoreError } from "../propiedades/store";
 import type {
   CamposModelo,
@@ -64,6 +65,24 @@ export interface PresupuestoStore {
   saveCamposModelo(projectId: string, data: Pick<CamposModelo, "modelos" | "campos">, user: string): Promise<void>;
 
   getDocumento(projectId: string): Promise<StoredDocumento | null>;
+  // ---- the AI assistant ("_global" holds the defaults)
+  getCupoIA(projectId: string): Promise<CupoGuardado | null>;
+  saveCupoIA(projectId: string, cupo: CupoGuardado, user: string): Promise<void>;
+  /** Logs a call to the model; returns its id. */
+  registrarUsoIA(uso: Omit<RegistroUsoIA, "id" | "creado">): Promise<number>;
+  /** Pesos spent since `desde` by the project and by one person. */
+  gastoIA(projectId: string, desde: string, userId: string): Promise<{ proyecto: number; usuario: number }>;
+  usosIA(projectId: string, limite: number): Promise<RegistroUsoIA[]>;
+  /** Saves new drafts; the pending ones of the same partidas and task are marked "reemplazado". */
+  guardarBorradoresIA(projectId: string, borradores: BorradorIA[]): Promise<void>;
+  borradoresIA(projectId: string, filtro: { estado?: EstadoBorrador; tarea?: TareaIA; ids?: string[] }): Promise<BorradorIA[]>;
+  /** Records the decisions on pending drafts; returns how many changed. */
+  decidirBorradoresIA(
+    projectId: string,
+    decisiones: { id: string; estado: "aceptado" | "rechazado"; editado: boolean; final: BorradorIA["final"] }[],
+    user: string
+  ): Promise<number>;
+  resumenBorradoresIA(projectId: string): Promise<ResumenBorradores>;
   /** The schedule (Gantt), versioned like the budget. */
   getProgramacion(projectId: string): Promise<StoredDocumento | null>;
   saveProgramacion(projectId: string, data: unknown, version: number, user: string): Promise<number | "conflict">;
@@ -154,6 +173,92 @@ function toPartida(r: PartidaRow): PartidaCatalogo {
   };
 }
 
+interface UsoRow {
+  id: number;
+  project_id: string;
+  user_id: string;
+  user_name: string;
+  tarea: string;
+  modelo: string;
+  items: number;
+  tokens_entrada: number;
+  tokens_salida: number;
+  tokens_cache_escritura: number;
+  tokens_cache_lectura: number;
+  costo_usd: number | string;
+  trm: number | string;
+  costo_cop: number | string;
+  version_prompt: string;
+  estado: string;
+  detalle: string;
+  creado: string;
+}
+
+function usoDeFila(r: UsoRow): RegistroUsoIA {
+  return {
+    id: Number(r.id),
+    projectId: r.project_id,
+    userId: r.user_id,
+    userName: r.user_name,
+    tarea: r.tarea as TareaIA,
+    modelo: r.modelo,
+    items: r.items,
+    tokensEntrada: r.tokens_entrada,
+    tokensSalida: r.tokens_salida,
+    tokensCacheEscritura: r.tokens_cache_escritura,
+    tokensCacheLectura: r.tokens_cache_lectura,
+    costoUsd: Number(r.costo_usd),
+    trm: Number(r.trm),
+    costoCop: Number(r.costo_cop),
+    versionPrompt: r.version_prompt,
+    estado: r.estado as RegistroUsoIA["estado"],
+    detalle: r.detalle,
+    creado: r.creado,
+  };
+}
+
+interface BorradorRow {
+  id: string;
+  tarea: string;
+  item_id: string;
+  referencia: string;
+  propuesta: BorradorIA["propuesta"];
+  anterior: BorradorIA["anterior"];
+  estado: string;
+  editado: boolean;
+  final: BorradorIA["final"];
+  uso_id: number | null;
+  creado: string;
+  creado_por: string;
+  decidido: string | null;
+  decidido_por: string | null;
+}
+
+function borradorDeFila(r: BorradorRow): BorradorIA {
+  return {
+    id: r.id,
+    tarea: r.tarea as TareaIA,
+    itemId: r.item_id,
+    referencia: r.referencia,
+    propuesta: r.propuesta,
+    anterior: r.anterior,
+    estado: r.estado as EstadoBorrador,
+    editado: r.editado,
+    final: r.final,
+    usoId: r.uso_id === null ? null : Number(r.uso_id),
+    creado: r.creado,
+    creadoPor: r.creado_por,
+    decidido: r.decidido,
+    decididoPor: r.decidido_por,
+  };
+}
+
+function agrupar<T, K>(list: T[], key: (x: T) => K): Map<K, T[]> {
+  const out = new Map<K, T[]>();
+  for (const x of list) out.set(key(x), [...(out.get(key(x)) ?? []), x]);
+  return out;
+}
+
 function chunks<T>(list: T[], size: number): T[][] {
   const out: T[][] = [];
   for (let i = 0; i < list.length; i += size) out.push(list.slice(i, i + size));
@@ -213,6 +318,15 @@ function supabaseStore(): PresupuestoStore | null {
   const eq = (value: string) => `eq.${encodeURIComponent(value)}`;
   const inList = (values: string[]) => `in.(${encodeURIComponent(values.map((v) => `"${v}"`).join(","))})`;
   const rpc = (fn: string, body: unknown) => json<number>(`/rpc/${fn}`, { method: "POST", body: JSON.stringify(body) });
+  /** The assistant's tables came later: a missing one means the SQL must be run again. */
+  async function ia<T>(fn: () => Promise<T>): Promise<T> {
+    try {
+      return await fn();
+    } catch (err) {
+      if (err instanceof StoreError && err.message === SETUP_HINT) throw new StoreError(UPGRADE_HINT);
+      throw err;
+    }
+  }
 
   return {
     async getConfig(projectId) {
@@ -398,6 +512,165 @@ function supabaseStore(): PresupuestoStore | null {
       }
     },
 
+    async getCupoIA(projectId) {
+      return ia(async () => {
+        const rows = await json<{ habilitada: boolean; cupo_proyecto_cop: number | string; cupo_usuario_cop: number | string; trm: number | string | null; updated_at: string; updated_by: string | null }[]>(
+          `/presupuesto_ia_cupos?project_id=${eq(projectId)}&select=habilitada,cupo_proyecto_cop,cupo_usuario_cop,trm,updated_at,updated_by`
+        );
+        if (!rows.length) return null;
+        const r = rows[0];
+        return {
+          habilitada: r.habilitada,
+          cupoProyectoCop: Number(r.cupo_proyecto_cop),
+          cupoUsuarioCop: Number(r.cupo_usuario_cop),
+          trm: r.trm === null ? null : Number(r.trm),
+          updatedAt: r.updated_at,
+          updatedBy: r.updated_by,
+        };
+      });
+    },
+
+    async saveCupoIA(projectId, cupo, user) {
+      await ia(() =>
+        call("/presupuesto_ia_cupos?on_conflict=project_id", {
+          method: "POST",
+          headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+          body: JSON.stringify({
+            project_id: projectId,
+            habilitada: cupo.habilitada,
+            cupo_proyecto_cop: cupo.cupoProyectoCop,
+            cupo_usuario_cop: cupo.cupoUsuarioCop,
+            trm: cupo.trm ?? null,
+            updated_at: new Date().toISOString(),
+            updated_by: user,
+          }),
+        })
+      );
+    },
+
+    async registrarUsoIA(u) {
+      return ia(async () => {
+        const rows = await json<{ id: number }[]>("/presupuesto_ia_uso?select=id", {
+          method: "POST",
+          headers: { Prefer: "return=representation" },
+          body: JSON.stringify({
+            project_id: u.projectId,
+            user_id: u.userId,
+            user_name: u.userName,
+            tarea: u.tarea,
+            modelo: u.modelo,
+            items: u.items,
+            tokens_entrada: u.tokensEntrada,
+            tokens_salida: u.tokensSalida,
+            tokens_cache_escritura: u.tokensCacheEscritura,
+            tokens_cache_lectura: u.tokensCacheLectura,
+            costo_usd: u.costoUsd,
+            trm: u.trm,
+            costo_cop: u.costoCop,
+            version_prompt: u.versionPrompt,
+            estado: u.estado,
+            detalle: u.detalle.slice(0, 500),
+          }),
+        });
+        return rows[0]?.id ?? 0;
+      });
+    },
+
+    async gastoIA(projectId, desde, userId) {
+      return ia(async () => {
+        const rows = await json<{ proyecto: number | string; usuario: number | string }[]>("/rpc/presupuesto_ia_gasto", {
+          method: "POST",
+          body: JSON.stringify({ p_project_id: projectId, p_desde: desde, p_user_id: userId }),
+        });
+        return { proyecto: Number(rows[0]?.proyecto ?? 0), usuario: Number(rows[0]?.usuario ?? 0) };
+      });
+    },
+
+    async usosIA(projectId, limite) {
+      return ia(async () => {
+        const rows = await json<UsoRow[]>(`/presupuesto_ia_uso?project_id=${eq(projectId)}&select=*&order=creado.desc&limit=${limite}`);
+        return rows.map(usoDeFila);
+      });
+    },
+
+    async guardarBorradoresIA(projectId, borradores) {
+      if (!borradores.length) return;
+      await ia(async () => {
+        for (const [tarea, lista] of agrupar(borradores, (b) => b.tarea)) {
+          for (const lote of chunks(lista, 200)) {
+            await call(
+              `/presupuesto_ia_borradores?project_id=${eq(projectId)}&tarea=${eq(tarea)}&estado=eq.pendiente&item_id=${inList(lote.map((b) => b.itemId))}`,
+              { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ estado: "reemplazado" }) }
+            );
+          }
+        }
+        for (const lote of chunks(borradores, 200)) {
+          await call("/presupuesto_ia_borradores", {
+            method: "POST",
+            headers: { Prefer: "return=minimal" },
+            body: JSON.stringify(
+              lote.map((b) => ({
+                id: b.id,
+                project_id: projectId,
+                tarea: b.tarea,
+                item_id: b.itemId,
+                referencia: b.referencia,
+                propuesta: b.propuesta,
+                anterior: b.anterior,
+                estado: "pendiente",
+                uso_id: b.usoId,
+                creado_por: b.creadoPor,
+              }))
+            ),
+          });
+        }
+      });
+    },
+
+    async borradoresIA(projectId, filtro) {
+      return ia(async () => {
+        let path = `/presupuesto_ia_borradores?project_id=${eq(projectId)}&select=*&order=creado.asc`;
+        if (filtro.estado) path += `&estado=${eq(filtro.estado)}`;
+        if (filtro.tarea) path += `&tarea=${eq(filtro.tarea)}`;
+        if (filtro.ids) {
+          if (!filtro.ids.length) return [];
+          path += `&id=${inList(filtro.ids)}`;
+        }
+        return (await all<BorradorRow>(path)).map(borradorDeFila);
+      });
+    },
+
+    async decidirBorradoresIA(projectId, decisiones, user) {
+      return ia(async () => {
+        let n = 0;
+        for (const d of decisiones) {
+          const rows = await json<{ id: string }[]>(`/presupuesto_ia_borradores?project_id=${eq(projectId)}&id=${eq(d.id)}&estado=eq.pendiente&select=id`, {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify({ estado: d.estado, editado: d.editado, final: d.final, decidido: new Date().toISOString(), decidido_por: user }),
+          });
+          n += rows.length;
+        }
+        return n;
+      });
+    },
+
+    async resumenBorradoresIA(projectId) {
+      return ia(async () => {
+        const rows = await json<{ pendientes: number; aceptados_sin_cambios: number; aceptados_editados: number; rechazados: number }[]>("/rpc/presupuesto_ia_resumen", {
+          method: "POST",
+          body: JSON.stringify({ p_project_id: projectId }),
+        });
+        const r = rows[0];
+        return {
+          pendientes: Number(r?.pendientes ?? 0),
+          aceptadosSinCambios: Number(r?.aceptados_sin_cambios ?? 0),
+          aceptadosEditados: Number(r?.aceptados_editados ?? 0),
+          rechazados: Number(r?.rechazados ?? 0),
+        };
+      });
+    },
+
     async getProgramacion(projectId) {
       try {
         const rows = await json<{ data: unknown; version: number; updated_at: string; updated_by: string | null }[]>(
@@ -505,6 +778,9 @@ export function memoryStore(): PresupuestoStore {
   const omniclass = new Map<string, OmniclassEntry & { baseId: string }>();
   const documentos = new Map<string, StoredDocumento>();
   const programaciones = new Map<string, StoredDocumento>();
+  const cuposIA = new Map<string, CupoGuardado>();
+  const usosIA: RegistroUsoIA[] = [];
+  const borradoresIA = new Map<string, BorradorIA & { projectId: string }>();
   const campos = new Map<string, CamposModelo>();
   const vistas = new Map<string, { vista: VistaPendiente; creado: number }>();
   const mediciones = new Map<string, Medicion & { projectId: string }>();
@@ -627,6 +903,59 @@ export function memoryStore(): PresupuestoStore {
       for (const [k, e] of elementos) if (e.projectId === projectId && !partidaIds.has(e.itemId)) elementos.delete(k);
       for (const [k, m] of mediciones) if (m.projectId === projectId && !partidaIds.has(m.itemId)) mediciones.delete(k);
       return next;
+    },
+    async getCupoIA(projectId) {
+      const c = cuposIA.get(projectId);
+      return c ? { ...c } : null;
+    },
+    async saveCupoIA(projectId, cupo, user) {
+      cuposIA.set(projectId, { ...cupo, updatedAt: new Date().toISOString(), updatedBy: user });
+    },
+    async registrarUsoIA(u) {
+      const id = usosIA.length + 1;
+      usosIA.push({ ...u, id, creado: new Date().toISOString() });
+      return id;
+    },
+    async gastoIA(projectId, desde, userId) {
+      const d = Date.parse(desde);
+      const delMes = usosIA.filter((u) => u.projectId === projectId && Date.parse(u.creado) >= d);
+      const suma = (l: RegistroUsoIA[]) => Math.round(l.reduce((s, u) => s + u.costoCop, 0) * 100) / 100;
+      return { proyecto: suma(delMes), usuario: suma(delMes.filter((u) => u.userId === userId)) };
+    },
+    async usosIA(projectId, limite) {
+      return usosIA.filter((u) => u.projectId === projectId).reverse().slice(0, limite);
+    },
+    async guardarBorradoresIA(projectId, lista) {
+      const items = new Set(lista.map((b) => `${b.tarea}|${b.itemId}`));
+      for (const b of borradoresIA.values()) {
+        if (b.projectId === projectId && b.estado === "pendiente" && items.has(`${b.tarea}|${b.itemId}`)) b.estado = "reemplazado";
+      }
+      for (const b of lista) borradoresIA.set(b.id, { ...structuredClone(b), estado: "pendiente", projectId });
+    },
+    async borradoresIA(projectId, filtro) {
+      const ids = filtro.ids ? new Set(filtro.ids) : null;
+      return [...borradoresIA.values()]
+        .filter((b) => b.projectId === projectId && (!filtro.estado || b.estado === filtro.estado) && (!filtro.tarea || b.tarea === filtro.tarea) && (!ids || ids.has(b.id)))
+        .map(({ projectId: _p, ...b }) => structuredClone(b));
+    },
+    async decidirBorradoresIA(projectId, decisiones, user) {
+      let n = 0;
+      for (const d of decisiones) {
+        const b = borradoresIA.get(d.id);
+        if (!b || b.projectId !== projectId || b.estado !== "pendiente") continue;
+        Object.assign(b, { estado: d.estado, editado: d.editado, final: d.final, decidido: new Date().toISOString(), decididoPor: user });
+        n++;
+      }
+      return n;
+    },
+    async resumenBorradoresIA(projectId) {
+      const l = [...borradoresIA.values()].filter((b) => b.projectId === projectId);
+      return {
+        pendientes: l.filter((b) => b.estado === "pendiente").length,
+        aceptadosSinCambios: l.filter((b) => b.estado === "aceptado" && !b.editado).length,
+        aceptadosEditados: l.filter((b) => b.estado === "aceptado" && b.editado).length,
+        rechazados: l.filter((b) => b.estado === "rechazado").length,
+      };
     },
     async getProgramacion(projectId) {
       const d = programaciones.get(projectId);

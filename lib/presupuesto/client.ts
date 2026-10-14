@@ -1,4 +1,5 @@
 import { createRequester, TokenSource } from "../propiedades/client";
+import type { BorradorIA, CupoGlobalIA, CupoIA, EstadoIAResponse, GenerarEdtResponse, PartidaEdtIA, ResumenBorradores } from "./ia/tipos";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
 import {
   AtributoPropiedad,
@@ -48,6 +49,13 @@ export interface PresupuestoApi {
   guardarOmniclass(entradas: OmniclassEntry[]): Promise<number>;
   getDocumento(): Promise<DocumentoResponse>;
   guardarDocumento(doc: PresupuestoDoc, version: number): Promise<{ version: number }>;
+  getEstadoIA(): Promise<EstadoIAResponse>;
+  guardarCupoIA(patch: { proyecto?: CupoIA; global?: CupoGlobalIA }): Promise<EstadoIAResponse>;
+  generarEdtIA(contexto: string, partidas: PartidaEdtIA[]): Promise<GenerarEdtResponse>;
+  borradoresIA(): Promise<BorradorIA[]>;
+  decidirBorradoresIA(
+    decisiones: { id: string; estado: "aceptado" | "rechazado"; final?: { descripcion: string; criterios: string } }[]
+  ): Promise<{ decididos: number; resumen: ResumenBorradores }>;
   getProgramacion(): Promise<ProgramacionResponse>;
   guardarProgramacion(programacion: Programacion, version: number): Promise<{ version: number }>;
   getResumen(): Promise<ResumenElementos>;
@@ -111,6 +119,11 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
       ),
     getDocumento: () => request("/documento"),
     guardarDocumento: (doc, version) => request("/documento", send("PUT", { doc, version })),
+    getEstadoIA: () => request("/ia"),
+    guardarCupoIA: (patch) => request("/ia/cupo", send("PUT", patch)),
+    generarEdtIA: (contexto, partidas) => request("/ia/edt", send("POST", { contexto, partidas })),
+    borradoresIA: () => request<{ borradores: BorradorIA[] }>("/ia/borradores").then((r) => r.borradores),
+    decidirBorradoresIA: (decisiones) => request("/ia/borradores", send("PUT", { decisiones })),
     getProgramacion: () => request("/programacion"),
     guardarProgramacion: (programacion, version) => request("/programacion", send("PUT", { programacion, version })),
     getResumen: () => request("/elementos/resumen"),

@@ -11,6 +11,7 @@
     "test": "tsx --test lib/**/*.test.ts"
   },
   "dependencies": {
+    "@anthropic-ai/sdk": "^0.133.0",
     "@upstash/redis": "^1.38.4",
     "exceljs": "^4.4.0",
     "jspdf": "^4.2.1",

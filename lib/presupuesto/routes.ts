@@ -4,6 +4,7 @@ import { resolveCaller } from "../propiedades/caller";
 import { ServiceError } from "../propiedades/service";
 import { propertiesStore, StoreError } from "../propiedades/store";
 import { getProjectDetails, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
+import { clienteClaude } from "./ia/claude";
 import type { Ctx } from "./service";
 import { presupuestoStore } from "./store";
 
@@ -40,6 +41,8 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
           const baseUrl = await resolveProjectBaseUrl(accessToken, otherId);
           return (await getProjectDetails(baseUrl, accessToken, otherId)).name ?? "";
         },
+        ia: () => clienteClaude(),
+        iaGestor: process.env.PRESUPUESTO_IA_PROYECTO_GESTOR?.trim() || null,
       },
     });
   } catch (err) {

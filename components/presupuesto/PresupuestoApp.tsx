@@ -12,6 +12,7 @@ import { tablaGastos, tablaListaInsumos, tablaPresupuesto } from "../../lib/pres
 import { bajar, bloqueDe, desangrar, insertar, quitar, sangrar, subir } from "../../lib/presupuesto/tree";
 import { ElementoVinculado, Insumo, Item, ItemPartida, PartidaCatalogo } from "../../lib/presupuesto/types";
 import ApuDialog, { DatosPartida, partidaVacia } from "./ApuDialog";
+import AsistenteIA from "./AsistenteIA";
 import ApuEditor from "./ApuEditor";
 import BudgetGrid, { CampoEditable } from "./BudgetGrid";
 import CatalogoInsumos from "./CatalogoInsumos";
@@ -42,6 +43,7 @@ type Dialogo =
   | { tipo: "pie" }
   | { tipo: "config" }
   | { tipo: "importar" }
+  | { tipo: "ia" }
   | { tipo: "descartar" };
 
 /** The budget in the project's menu: subpresupuestos, titles and partidas with their APU, and the tools around them. */
@@ -130,6 +132,25 @@ export default function PresupuestoApp({
     const r = await api.pedirActualizacionMemoria();
     const ok = await abrirVisor({ modelId: r.modelId });
     if (!ok) throw new Error("No se pudo abrir el visor 3D. Ábrelo en Trimble Connect y entra al panel Presupuesto: la actualización empieza sola.");
+  }
+
+  /** Accepted AI drafts of the EDT dictionary go into the partidas (the person in charge stays as it was). */
+  function aplicarEdtIA(cambios: { itemId: string; descripcion: string; criterios: string }[]): number {
+    const porId = new Map(cambios.map((c) => [c.itemId, c]));
+    let n = 0;
+    setDoc((d) => ({
+      ...d,
+      subpresupuestos: d.subpresupuestos.map((x) => ({
+        ...x,
+        items: x.items.map((i) => {
+          const c = porId.get(i.id);
+          if (!c || i.tipo !== "partida") return i;
+          n++;
+          return { ...i, edt: { responsable: i.edt?.responsable ?? "", descripcion: c.descripcion, criterios: c.criterios } };
+        }),
+      })),
+    }));
+    return n;
   }
 
   const loadMemoria = useCallback((itemId: string) => api.elementosDe({ itemIds: [itemId] }), [api]);
@@ -339,6 +360,7 @@ export default function PresupuestoApp({
         <HeadButton onClick={() => setVista("programacion")} strong>
           📅 Programación (Gantt)
         </HeadButton>
+        <HeadButton onClick={() => setDialogo({ tipo: "ia" })}>🤖 Asistente IA</HeadButton>
         <HeadButton onClick={() => setDialogo({ tipo: "insumos" })} disabled={!catalogo}>
           Catálogo de insumos
         </HeadButton>
@@ -758,6 +780,8 @@ export default function PresupuestoApp({
         return catalogo ? (
           <ImportarDialog api={api} catalogo={catalogo} canEdit={estado.canEditBase} readOnlyNote={readOnlyBase} onImported={s.reloadCatalogo} onClose={close} />
         ) : null;
+      case "ia":
+        return <AsistenteIA api={api} doc={doc} spId={sp.id} projectId={projectId} aplicarEdt={aplicarEdtIA} onClose={close} />;
       case "descartar":
         return (
           <ConfirmDialog

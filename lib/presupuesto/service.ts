@@ -6,6 +6,7 @@ import type { Responsable } from "../propiedades/types";
 import type { PropertiesStore } from "../propiedades/store";
 import { formatValue } from "../propiedades/values";
 import { documentoVacio } from "./doc";
+import type { ClienteIA } from "./ia/claude";
 import { columnasMemoria, memoriaLimpia } from "./memoria";
 import type { PresupuestoStore, StoredConfig } from "./store";
 import {
@@ -36,6 +37,12 @@ export interface Deps {
   /** The caller as a member of another project; throws when they aren't one. */
   callerIn(projectId: string): Promise<Caller>;
   projectName(projectId: string): Promise<string>;
+  /** The AI client, or null when the server has no key (ANTHROPIC_API_KEY). */
+  ia?: () => ClienteIA | null;
+  /** The platform project whose administrators set the AI quotas (PRESUPUESTO_IA_PROYECTO_GESTOR). */
+  iaGestor?: string | null;
+  /** The current time (tests fix it). */
+  ahora?: () => Date;
 }
 
 export interface Ctx {
@@ -83,9 +90,14 @@ async function permisoBase(ctx: Ctx, config: StoredConfig): Promise<{ ok: boolea
   return { ok, note: ok ? "" : note };
 }
 
-async function requireEdit(ctx: Ctx): Promise<void> {
+/** Whether the caller may change the budget. */
+export async function puedeEditar(ctx: Ctx): Promise<boolean> {
   const config = await configDe(ctx.store, ctx.projectId);
-  if (!(await esEditor(ctx.caller, config.editores))) {
+  return esEditor(ctx.caller, config.editores);
+}
+
+export async function requireEdit(ctx: Ctx): Promise<void> {
+  if (!(await puedeEditar(ctx))) {
     throw new ServiceError("Solo los administradores del proyecto y los editores designados pueden modificar el presupuesto.", 403, "not-editor");
   }
 }

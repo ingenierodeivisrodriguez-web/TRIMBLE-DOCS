@@ -1359,11 +1359,62 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
 - **Excel**: la programación, el calendario valorizado, el de insumos y la
   curva S en un libro; cada ventana exporta también lo suyo.
 
+### Asistente IA (fases 0 y 1)
+
+El botón **🤖 Asistente IA** del encabezado abre el asistente. Usa Claude
+(Anthropic) desde el servidor; la clave vive solo en Vercel. **Nada de lo que
+propone entra al presupuesto hasta que una persona lo acepta.**
+
+**Fase 1: diccionario EDT.** Redacta la *descripción del trabajo* y los
+*criterios de aceptación* de cada partida para el mercado colombiano:
+terminología de obra de Colombia y referencias a la NSR-10, las NTC, el RETIE,
+el RETILAP, el RAS (Resolución 0330 de 2017), la NTC 1500 y la NTC 2050, sin
+inventar numerales ni valores que no sean seguros. El **responsable** no se
+propone. Se eligen las partidas (este subpresupuesto o todo, y solo las que
+no tienen texto) y un contexto opcional del proyecto. El navegador envía
+lotes de 5 partidas, muestra el avance y el costo, y se puede cancelar. Cada
+propuesta llega como **borrador** con su nivel de confianza (alta, media o
+baja). En **Borradores por revisar** se corrige el texto si hace falta y se
+**acepta** (pasa a la partida; después se guarda el presupuesto como
+siempre) o se **rechaza**. Pedir de nuevo una partida reemplaza su borrador
+pendiente.
+
+**Qué se envía.** Número, descripción, unidad, capítulo y OmniClass de cada
+partida, su texto actual del diccionario y el contexto escrito. No se envían
+precios, nombres ni correos. Los textos van como datos: si una descripción
+trae instrucciones, el modelo las ignora.
+
+**Cupo (fase 0).** Lo fijan los **administradores del proyecto gestor** de la
+plataforma (`PRESUPUESTO_IA_PROYECTO_GESTOR`, por ejemplo tu MANAGER
+PROJECT), no los clientes. Por proyecto se define si está **habilitado**, el
+**cupo mensual del proyecto** y el **cupo mensual por persona**, en pesos
+colombianos. Hay valores por defecto para los proyectos sin cupo propio y la
+**TRM** con que se pasa el costo del proveedor (en dólares) a pesos. El mes
+se cuenta en hora de Colombia. Aviso al 80 % y bloqueo al 100 %: antes de
+cada lote se calcula su costo máximo y no se envía si supera lo que queda.
+Sin configurar, el asistente está **apagado**.
+
+**Registro.** Cada llamada queda en `presupuesto_ia_uso`: fecha, persona,
+tarea, modelo, partidas, tokens, costo en dólares y en pesos con la TRM
+usada, versión de las instrucciones y resultado (correcto, error, rechazado
+por la IA o incompleto). La pestaña **Uso y cupo** muestra las barras del
+cupo, las últimas 50 solicitudes y la **evaluación**: cuántos borradores se
+aceptaron sin cambios, con cambios o se rechazaron (la meta de la fase 1 es
+al menos 70 % aceptados sin cambios).
+
+**Modelo.** `claude-opus-5-5` con esfuerzo bajo y salida estructurada
+(JSON Schema), instrucciones en caché y respaldo automático del proveedor si
+un filtro de seguridad rechaza la solicitud (`fallbacks: "default"`).
+`PRESUPUESTO_IA_MODELO` lo cambia (por ejemplo `claude-sonnet-5-5`, más
+barato); el costo usa el precio del modelo que respondió.
+
 ### Permisos
 
 | Acción | Quién |
 |---|---|
 | Ver el presupuesto, los catálogos y los elementos asociados | Cualquier miembro del proyecto |
+| Usar el asistente IA y revisar sus borradores | Administradores del proyecto y los editores del presupuesto |
+| Fijar los cupos del asistente IA y la TRM | Administradores del proyecto gestor de la plataforma |
 | Editar el presupuesto y su programación, y asociar elementos en el visor | Administradores del proyecto y los **editores** (personas o grupos) que elijan en ⚙ Configuración |
 | Editar los catálogos | Administradores y editores del proyecto **dueño** de los catálogos (la base) |
 | Elegir editores y base | Administradores del proyecto |
@@ -1387,6 +1438,10 @@ ejecutar sin perder datos):
 | `presupuesto_guardar` | Guarda el presupuesto si la versión coincide y limpia los elementos de partidas borradas |
 | `presupuesto_programacion` | La programación (Gantt) de cada proyecto (jsonb: inicio, fecha fin, calendario, redondeo y, por partida, duración, cuadrillas, predecesoras y fecha fija) con su `version` |
 | `presupuesto_guardar_programacion` | Guarda la programación si la versión coincide |
+| `presupuesto_ia_cupos` | Cupo del asistente IA por proyecto (`_global`: valores por defecto y TRM) |
+| `presupuesto_ia_uso` | Registro de cada llamada al modelo: persona, modelo, tokens, costo USD y COP, resultado |
+| `presupuesto_ia_borradores` | Propuestas de la IA con su estado (pendiente, aceptado, rechazado, reemplazado), si se editaron y quién decidió |
+| `presupuesto_ia_gasto` / `presupuesto_ia_resumen` | Lo gastado en el mes y la evaluación de los borradores |
 
 RLS está activado y sin políticas: solo el servidor, con la clave de
 servicio, lee y escribe.
@@ -1409,6 +1464,10 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `POST /api/presupuesto/catalogo/insumos` · `.../partidas` · `.../omniclass` | Crear o actualizar en lote (hasta 1.000 por envío) |
 | `DELETE /api/presupuesto/catalogo/insumos/{id}` · `.../partidas/{id}` | Eliminar (409 `in-use` si se usa) |
 | `GET` / `PUT /api/presupuesto/documento` | Leer / guardar `{ doc, version }` (409 `version-conflict`) |
+| `GET /api/presupuesto/ia` | Estado del asistente: disponible, permisos, cupo del mes, registro de uso y evaluación |
+| `PUT /api/presupuesto/ia/cupo` | `{ proyecto?, global? }`: cupos y TRM (solo administradores del proyecto gestor) |
+| `POST /api/presupuesto/ia/edt` | `{ contexto, partidas }` (hasta 12): propone el diccionario EDT; responde los borradores, el costo y el cupo (402 si no alcanza el cupo) |
+| `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes / `{ decisiones: [{ id, estado, final? }] }` |
 | `GET` / `PUT /api/presupuesto/programacion` | Leer (`programacion: null` hasta el primer guardado) / guardar `{ programacion, version }` (solo quien edita; 409 `version-conflict`) |
 | `GET /api/presupuesto/elementos/resumen` | Mediciones y conteos por partida |
 | `POST /api/presupuesto/elementos/consulta` | `{ itemIds }` o `{ ifcGuids }` |
@@ -1421,6 +1480,15 @@ Usa las mismas `SUPABASE_URL` y `SUPABASE_SERVICE_ROLE_KEY`. Basta con
 ejecutar una vez [`supabase/presupuesto.sql`](supabase/presupuesto.sql) en el
 **SQL Editor** de Supabase: mientras no se haga, la API responde con un
 mensaje que indica ese paso.
+
+Asistente IA (variables de Vercel, nunca en el repositorio):
+
+| Variable | Uso |
+|---|---|
+| `ANTHROPIC_API_KEY` | Clave del API de Anthropic. Sin ella el asistente dice que no está configurado |
+| `PRESUPUESTO_IA_PROYECTO_GESTOR` | Id del proyecto de Trimble Connect cuyos administradores fijan los cupos (por ejemplo, MANAGER PROJECT) |
+| `PRESUPUESTO_IA_MODELO` | Opcional. Modelo a usar (por defecto `claude-opus-5-5`) |
+| `PRESUPUESTO_IA_TRM` | Opcional. TRM inicial (por defecto 4.000) mientras no se guarde una en el asistente |
 
 ---
 
