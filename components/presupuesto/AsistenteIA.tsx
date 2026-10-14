@@ -171,6 +171,8 @@ function GenerarEdt({
   const cancelar = useRef(false);
 
   const partidas = useMemo(() => partidasParaEdt(doc, todo ? null : spId, soloIncompletas), [doc, todo, spId, soloIncompletas]);
+  const enAlcance = useMemo(() => partidasParaEdt(doc, todo ? null : spId, false).length, [doc, todo, spId]);
+  const enTodo = useMemo(() => partidasParaEdt(doc, null, false).length, [doc]);
   const lotes = Math.ceil(partidas.length / LOTE);
   // A typical cost (about 300 tokens written per partida); the server stops a batch that could go over the quota.
   const estimado = useMemo(() => {
@@ -267,7 +269,7 @@ function GenerarEdt({
         </label>
       </div>
       <label>
-        <span style={labelStyle}>Contexto del proyecto (opcional, ayuda a que el texto sea más preciso)</span>
+        <span style={labelStyle}>Contexto del proyecto (opcional: describe la obra para que los textos sean más precisos; no es una orden)</span>
         <textarea
           value={contexto}
           maxLength={2000}
@@ -276,6 +278,23 @@ function GenerarEdt({
           style={{ ...baseInput, width: "100%", minHeight: 64, resize: "vertical" }}
         />
       </label>
+      {partidas.length === 0 && (
+        <Notice kind="warning">
+          {enAlcance === 0 ? (
+            <>
+              {todo ? "El presupuesto" : "Este subpresupuesto"} no tiene partidas.
+              {!todo && enTodo > 0 ? " Elige «Todo el presupuesto» o cambia de subpresupuesto." : ""} Este paso redacta el diccionario de las partidas que ya
+              existen: primero agrégalas (desde el catálogo o con Importar Excel). Crear la EDT completa a partir de la descripción del proyecto es otra tarea
+              del asistente que todavía no está disponible.
+            </>
+          ) : (
+            <>
+              Las {enAlcance} partida(s) ya tienen descripción y criterios. Desmarca «Solo las que no tienen descripción o criterios» para que proponga
+              versiones mejoradas.
+            </>
+          )}
+        </Notice>
+      )}
       <div style={{ display: "flex", alignItems: "center", gap: 14, flexWrap: "wrap", fontSize: 13.5 }}>
         <span>
           <strong>{partidas.length}</strong> partida(s) en {lotes} lote(s) de {LOTE}. Costo estimado: <strong>{fmtCop(estimado)}</strong> (puede variar).
