@@ -2,6 +2,10 @@ import type { Responsable } from "../propiedades/types";
 import type { BorradorGenerico, CupoGuardado, EstadoBorrador, RegistroUsoIA, ResumenesIA, TareaIA } from "./ia/tipos";
 import { StoreError } from "../propiedades/store";
 import type {
+  EjecucionItem,
+  LineaBase,
+  LineaBaseResumen,
+  MarcaEjecucion,
   CamposModelo,
   ModeloUsado,
   VistaPendiente,
@@ -108,6 +112,23 @@ export interface PresupuestoStore {
     remove: string[],
     user: string
   ): Promise<void>;
+
+  /** The progress reports (cortes), versioned like the budget. */
+  getAvance(projectId: string): Promise<StoredDocumento | null>;
+  saveAvance(projectId: string, data: unknown, version: number, user: string): Promise<number | "conflict">;
+  /** The project's baselines, newest first (without their rows). */
+  listarLineasBase(projectId: string): Promise<LineaBaseResumen[]>;
+  getLineaBase(projectId: string, id: string): Promise<LineaBase | null>;
+  /** Saves a new baseline and makes it the one in force. */
+  crearLineaBase(projectId: string, linea: Omit<LineaBase, "vigente" | "creada" | "creadaPor">, user: string): Promise<void>;
+  /** Makes another of the project's baselines the one in force; false if it isn't the project's. */
+  usarLineaBase(projectId: string, id: string): Promise<boolean>;
+  /** By partida: its elements, and those built by a date (YYYY-MM-DD), with their quantities. */
+  resumenEjecucion(projectId: string, hasta: string): Promise<EjecucionItem[]>;
+  /** Marks elements of partidas as built on a date (null: not built); answers how many changed. */
+  marcarEjecutados(projectId: string, marcas: MarcaEjecucion[], fecha: string | null, user: string): Promise<number>;
+  /** Every element linked to a partida, with the day it was built. */
+  elementosEjecucion(projectId: string): Promise<{ itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[]>;
 }
 
 // ---------------------------------------------------------------- Supabase
@@ -331,7 +352,7 @@ function supabaseStore(): PresupuestoStore | null {
       // not JSON
     }
     if (/version-conflict/.test(body)) throw new StoreError("version-conflict", 409);
-    if (/(memoria|edt|tarea|project_name)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
+    if (/(memoria|edt|tarea|project_name|ejecutado)/i.test(body) && /PGRST204|42703|column/i.test(body)) throw new StoreError(UPGRADE_HINT);
     if (detail.code === "23505") throw new StoreError("duplicate-code", 409);
     if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
     if (res.status === 401 || res.status === 403) {
@@ -796,17 +817,33 @@ function supabaseStore(): PresupuestoStore | null {
     },
 
     async getElementos(projectId, filter) {
-      type Row = { item_id: string; ifc_guid: string; model_id: string; cantidad: number | null; memoria: Memoria | null };
-      const select = "&select=item_id,ifc_guid,model_id,cantidad,memoria&order=id.asc";
-      const toEl = (r: Row): ElementoVinculado => ({ itemId: r.item_id, ifcGuid: r.ifc_guid, modelId: r.model_id, cantidad: r.cantidad, memoria: r.memoria ?? null });
-      const out: ElementoVinculado[] = [];
-      for (const ids of chunks(filter.itemIds ?? [], IN_CHUNK)) {
-        out.push(...(await all<Row>(`/presupuesto_elementos?project_id=${eq(projectId)}&item_id=${inList(ids)}${select}`)).map(toEl));
+      type Row = { item_id: string; ifc_guid: string; model_id: string; cantidad: number | null; memoria: Memoria | null; ejecutado?: string | null };
+      const toEl = (r: Row): ElementoVinculado => ({
+        itemId: r.item_id,
+        ifcGuid: r.ifc_guid,
+        modelId: r.model_id,
+        cantidad: r.cantidad,
+        memoria: r.memoria ?? null,
+        ejecutado: r.ejecutado ?? null,
+      });
+      const leer = async (columnas: string) => {
+        const select = `&select=${columnas}&order=id.asc`;
+        const out: ElementoVinculado[] = [];
+        for (const ids of chunks(filter.itemIds ?? [], IN_CHUNK)) {
+          out.push(...(await all<Row>(`/presupuesto_elementos?project_id=${eq(projectId)}&item_id=${inList(ids)}${select}`)).map(toEl));
+        }
+        for (const guids of chunks(filter.ifcGuids ?? [], IN_CHUNK)) {
+          out.push(...(await all<Row>(`/presupuesto_elementos?project_id=${eq(projectId)}&ifc_guid=${inList(guids)}${select}`)).map(toEl));
+        }
+        return out;
+      };
+      try {
+        return await leer("item_id,ifc_guid,model_id,cantidad,memoria,ejecutado");
+      } catch (err) {
+        // Before supabase/presupuesto.sql is run again there is no "ejecutado": linking keeps working without it.
+        if (!(err instanceof StoreError) || err.message !== UPGRADE_HINT) throw err;
+        return leer("item_id,ifc_guid,model_id,cantidad,memoria");
       }
-      for (const guids of chunks(filter.ifcGuids ?? [], IN_CHUNK)) {
-        out.push(...(await all<Row>(`/presupuesto_elementos?project_id=${eq(projectId)}&ifc_guid=${inList(guids)}${select}`)).map(toEl));
-      }
-      return out;
     },
 
     async saveElementos(projectId, itemId, upsert, remove, user) {
@@ -835,8 +872,118 @@ function supabaseStore(): PresupuestoStore | null {
         });
       }
     },
+
+    async getAvance(projectId) {
+      return ia(async () => {
+        const rows = await json<{ data: unknown; version: number; updated_at: string; updated_by: string | null }[]>(
+          `/presupuesto_avance?project_id=${eq(projectId)}&select=data,version,updated_at,updated_by`
+        );
+        if (!rows.length) return null;
+        const r = rows[0];
+        return { data: r.data, version: r.version, updatedAt: r.updated_at, updatedBy: r.updated_by };
+      });
+    },
+
+    async saveAvance(projectId, data, version, user) {
+      try {
+        return await ia(() => rpc("presupuesto_guardar_avance", { p_project_id: projectId, p_data: data, p_version: version, p_user: user }));
+      } catch (err) {
+        if (err instanceof StoreError && err.message === "version-conflict") return "conflict";
+        throw err;
+      }
+    },
+
+    async listarLineasBase(projectId) {
+      return ia(async () => (await json<LineaRow[]>(`/presupuesto_lineas_base?project_id=${eq(projectId)}&select=${LINEA_COLUMNAS}&order=creada.desc`)).map(lineaDeFila));
+    },
+
+    async getLineaBase(projectId, id) {
+      return ia(async () => {
+        const rows = await json<(LineaRow & { data: LineaBase["datos"] })[]>(
+          `/presupuesto_lineas_base?project_id=${eq(projectId)}&id=${eq(id)}&select=${LINEA_COLUMNAS},data`
+        );
+        return rows.length ? { ...lineaDeFila(rows[0]), datos: rows[0].data } : null;
+      });
+    },
+
+    async crearLineaBase(projectId, l, user) {
+      await ia(() =>
+        rpc("presupuesto_crear_linea_base", {
+          p_project_id: projectId,
+          p_id: l.id,
+          p_nombre: l.nombre,
+          p_data: l.datos,
+          p_inicio: l.inicio,
+          p_fin: l.fin,
+          p_total: l.total,
+          p_partidas: l.partidas,
+          p_user: user,
+        })
+      );
+    },
+
+    async usarLineaBase(projectId, id) {
+      return ia(async () => (await rpc("presupuesto_usar_linea_base", { p_project_id: projectId, p_id: id })) === 1);
+    },
+
+    async resumenEjecucion(projectId, hasta) {
+      return ia(async () => {
+        type Row = { item_id: string; elementos: number | string; ejecutados: number | string; suma: number | string; suma_ejecutada: number | string };
+        const out: EjecucionItem[] = [];
+        // A set-returning function is capped like any query: read it a page at a time.
+        for (let offset = 0; ; offset += PAGE) {
+          const page = await json<Row[]>(`/rpc/presupuesto_resumen_ejecucion?limit=${PAGE}&offset=${offset}&order=item_id.asc`, {
+            method: "POST",
+            body: JSON.stringify({ p_project_id: projectId, p_hasta: hasta }),
+          });
+          out.push(
+            ...page.map((r) => ({ itemId: r.item_id, elementos: Number(r.elementos), ejecutados: Number(r.ejecutados), suma: Number(r.suma), sumaEjecutada: Number(r.suma_ejecutada) }))
+          );
+          if (page.length < PAGE) return out;
+        }
+      });
+    },
+
+    async marcarEjecutados(projectId, marcas, fecha, user) {
+      let n = 0;
+      for (const [itemId, lista] of agrupar(marcas, (m) => m.itemId)) {
+        for (const guids of chunks(
+          lista.map((m) => m.ifcGuid),
+          IN_CHUNK
+        )) {
+          const rows = await json<{ id: number }[]>(`/presupuesto_elementos?project_id=${eq(projectId)}&item_id=${eq(itemId)}&ifc_guid=${inList(guids)}&select=id`, {
+            method: "PATCH",
+            headers: { Prefer: "return=representation" },
+            body: JSON.stringify({ ejecutado: fecha, ejecutado_por: fecha ? user : null, updated_at: new Date().toISOString(), updated_by: user }),
+          });
+          n += rows.length;
+        }
+      }
+      return n;
+    },
+
+    async elementosEjecucion(projectId) {
+      const rows = await all<{ item_id: string; ifc_guid: string; model_id: string; ejecutado: string | null }>(
+        `/presupuesto_elementos?project_id=${eq(projectId)}&select=item_id,ifc_guid,model_id,ejecutado&order=id.asc`
+      );
+      return rows.map((r) => ({ itemId: r.item_id, ifcGuid: r.ifc_guid, modelId: r.model_id, ejecutado: r.ejecutado ?? null }));
+    },
   };
 }
+
+type LineaRow = { id: string; nombre: string; vigente: boolean; creada: string; creada_por: string | null; inicio: string; fin: string; total: number | string; partidas: number };
+const LINEA_COLUMNAS = "id,nombre,vigente,creada,creada_por,inicio,fin,total,partidas";
+const lineaDeFila = (r: LineaRow): LineaBaseResumen => ({
+  id: r.id,
+  nombre: r.nombre,
+  vigente: r.vigente,
+  creada: r.creada,
+  creadaPor: r.creada_por,
+  inicio: r.inicio,
+  fin: r.fin,
+  total: Number(r.total),
+  partidas: r.partidas,
+});
 
 // ---------------------------------------------------------------- memory
 
@@ -847,6 +994,8 @@ export function memoryStore(): PresupuestoStore {
   const omniclass = new Map<string, OmniclassEntry & { baseId: string }>();
   const documentos = new Map<string, StoredDocumento>();
   const programaciones = new Map<string, StoredDocumento>();
+  const avances = new Map<string, StoredDocumento>();
+  const lineasBase: (LineaBase & { projectId: string })[] = [];
   const cuposIA = new Map<string, CupoGuardado>();
   const usosIA: RegistroUsoIA[] = [];
   const borradoresIA = new Map<string, BorradorGenerico & { projectId: string }>();
@@ -1077,8 +1226,71 @@ export function memoryStore(): PresupuestoStore {
         .map(({ projectId: _p, ...e }) => e);
     },
     async saveElementos(projectId, itemId, upsert, remove) {
-      for (const e of upsert) elementos.set(`${projectId}|${itemId}|${e.ifcGuid}`, { projectId, itemId, ...e });
+      for (const e of upsert) {
+        const k = `${projectId}|${itemId}|${e.ifcGuid}`;
+        // Like the database's upsert: what isn't sent (the day it was built) is kept.
+        elementos.set(k, { projectId, itemId, ...e, ejecutado: elementos.get(k)?.ejecutado ?? null });
+      }
       for (const g of remove) elementos.delete(`${projectId}|${itemId}|${g}`);
+    },
+    async getAvance(projectId) {
+      const d = avances.get(projectId);
+      return d ? { ...d, data: structuredClone(d.data) } : null;
+    },
+    async saveAvance(projectId, data, version, user) {
+      if ((avances.get(projectId)?.version ?? 0) !== version) return "conflict";
+      avances.set(projectId, { data: structuredClone(data), version: version + 1, updatedAt: new Date().toISOString(), updatedBy: user });
+      return version + 1;
+    },
+    async listarLineasBase(projectId) {
+      return [...lineasBase]
+        .reverse()
+        .filter((l) => l.projectId === projectId)
+        .map(({ projectId: _p, datos: _d, ...l }) => ({ ...l }));
+    },
+    async getLineaBase(projectId, id) {
+      const l = lineasBase.find((x) => x.projectId === projectId && x.id === id);
+      if (!l) return null;
+      const { projectId: _p, ...resto } = structuredClone(l);
+      return resto;
+    },
+    async crearLineaBase(projectId, l, user) {
+      for (const x of lineasBase) if (x.projectId === projectId) x.vigente = false;
+      lineasBase.push({ ...structuredClone(l), projectId, vigente: true, creada: new Date().toISOString(), creadaPor: user });
+    },
+    async usarLineaBase(projectId, id) {
+      if (!lineasBase.some((x) => x.projectId === projectId && x.id === id)) return false;
+      for (const x of lineasBase) if (x.projectId === projectId) x.vigente = x.id === id;
+      return true;
+    },
+    async resumenEjecucion(projectId, hasta) {
+      const out = new Map<string, EjecucionItem>();
+      for (const e of elementos.values()) {
+        if (e.projectId !== projectId) continue;
+        const r = out.get(e.itemId) ?? { itemId: e.itemId, elementos: 0, ejecutados: 0, suma: 0, sumaEjecutada: 0 };
+        const hecho = !!e.ejecutado && e.ejecutado <= hasta;
+        r.elementos++;
+        r.suma += e.cantidad ?? 0;
+        if (hecho) {
+          r.ejecutados++;
+          r.sumaEjecutada += e.cantidad ?? 0;
+        }
+        out.set(e.itemId, r);
+      }
+      return [...out.values()];
+    },
+    async marcarEjecutados(projectId, marcas, fecha) {
+      let n = 0;
+      for (const m of marcas) {
+        const e = elementos.get(`${projectId}|${m.itemId}|${m.ifcGuid}`);
+        if (!e) continue;
+        e.ejecutado = fecha;
+        n++;
+      }
+      return n;
+    },
+    async elementosEjecucion(projectId) {
+      return [...elementos.values()].filter((e) => e.projectId === projectId).map((e) => ({ itemId: e.itemId, ifcGuid: e.ifcGuid, modelId: e.modelId, ejecutado: e.ejecutado ?? null }));
     },
   };
 }

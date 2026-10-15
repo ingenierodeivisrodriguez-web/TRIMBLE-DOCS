@@ -8,10 +8,11 @@ import { coincide, fmt } from "../../lib/presupuesto/format";
 import { columnasMemoria, memoriaDe, memoriaParaGuardar } from "../../lib/presupuesto/memoria";
 import { CampoMedible, camposMedibles, etiquetaCampo, sugerirCampo, valorDe } from "../../lib/presupuesto/medicion";
 import { numerar } from "../../lib/presupuesto/tree";
-import { CONTEO, EstadoResponse, ItemPartida, Medicion, Memoria, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
+import { CONTEO, ElementoVinculado, EstadoResponse, ItemPartida, Medicion, Memoria, PresupuestoDoc, ResumenElementos } from "../../lib/presupuesto/types";
 import { leerDataset, MapaGuids, prepararModelos, selector, soltarModelos, Visor } from "../../lib/presupuesto/viewerMap";
 import type { ViewerEventListener } from "../trimble/ExtensionShell";
 import ColumnasMemoria from "./ColumnasMemoria";
+import PanelAvance from "./PanelAvance";
 import { ConfirmDialog } from "./SimpleDialogs";
 import { baseInput, C, message, Modal, Notice } from "./ui";
 
@@ -51,6 +52,9 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   const [leida, setLeida] = useState<Leida | null>(null);
   const [leyendo, setLeyendo] = useState("");
   const [deSeleccion, setDeSeleccion] = useState<Map<string, number>>(new Map());
+  /** The selected elements as linked to partidas (with the day each was built). */
+  const [vinculados, setVinculados] = useState<ElementoVinculado[]>([]);
+  const guidsSeleccion = useRef<string[]>([]);
   const [campoElegido, setCampoElegido] = useState<string | null | undefined>(undefined);
   const [busy, setBusy] = useState("");
   const [nota, setNota] = useState<{ kind: "info" | "warning" | "error"; text: string } | null>(null);
@@ -150,6 +154,15 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
   }, [api, viewer]);
 
   const recargarResumen = useCallback(async () => setResumen(await api.getResumen()), [api]);
+  /** Reads again how the selected elements are linked (after marking them as built). */
+  const releerVinculados = useCallback(async () => {
+    if (!guidsSeleccion.current.length) return;
+    try {
+      setVinculados(await api.elementosDe({ ifcGuids: guidsSeleccion.current }));
+    } catch {
+      // the marks were saved; the counts refresh with the next selection
+    }
+  }, [api]);
 
   // ---- the viewer's selection
   useEffect(() => {
@@ -164,6 +177,8 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
     const current = () => id === seq.current;
     const total = seleccion.reduce((sum, g) => sum + (g.objectRuntimeIds?.length ?? 0), 0);
     setDeSeleccion(new Map());
+    setVinculados([]);
+    guidsSeleccion.current = [];
     if (total === 0) {
       setLeida(null);
       setLeyendo("");
@@ -205,11 +220,13 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
         setLeyendo("");
         const guids = [...records.keys(), ...r.elements.map((e) => e.resolution.guid).filter((g): g is string => !!g && !records.has(g))];
         if (guids.length) {
-          const vinculados = await api.elementosDe({ ifcGuids: [...new Set(guids)] });
+          guidsSeleccion.current = [...new Set(guids)];
+          const vinculados = await api.elementosDe({ ifcGuids: guidsSeleccion.current });
           if (!current()) return;
           const cuenta = new Map<string, number>();
           for (const v of vinculados) cuenta.set(v.itemId, (cuenta.get(v.itemId) ?? 0) + 1);
           setDeSeleccion(cuenta);
+          setVinculados(vinculados);
         }
       } catch (err) {
         if (current()) {
@@ -637,6 +654,15 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: Presupuest
             Actualizar la memoria de todas las partidas ({partidasConElementos.length})
           </button>
         )}
+        <PanelAvance
+          api={api}
+          viewer={viewer}
+          mapa={mapa}
+          vinculados={vinculados}
+          partida={sel ? { id: sel.item.id, etiqueta: `${sel.numero} ${sel.item.descripcion.slice(0, 40)}` } : null}
+          canEdit={canEdit}
+          onMarcado={releerVinculados}
+        />
         {busy && <div style={{ fontSize: 12.5, color: "var(--tc-blue-700)" }}>{busy}</div>}
         {nota && <Notice kind={nota.kind}>{nota.text}</Notice>}
         {!canEdit && <Notice kind="info">Solo los administradores y editores del presupuesto asocian elementos; tú puedes consultar.</Notice>}

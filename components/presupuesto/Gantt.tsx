@@ -37,6 +37,9 @@ const COLOR = {
   parcial: "#f6f8fb",
   hoy: "#e8710a",
   finObjetivo: "#8e24aa",
+  base: "#9aa0a6",
+  avance: "#1f3fa8",
+  avanceCritica: "#8b1a10",
 };
 
 export interface GanttProps {
@@ -62,6 +65,10 @@ export interface GanttProps {
   onEnlazar: (de: string, a: string) => void;
   /** Double click on the arrow from `de` to `a`. */
   onEditarEnlace: (de: string, a: string) => void;
+  /** The baseline's dates of each row, drawn as a thin bar under it (null: not shown). */
+  lineaBase?: Map<string, { inicio: string; fin: string }> | null;
+  /** Each partida's % done in the latest progress report, drawn inside its bar. */
+  avancePct?: Map<string, number> | null;
 }
 
 /** A link being drawn by dragging from a bar (positions in the chart's body). */
@@ -78,7 +85,7 @@ interface Arrastre {
 }
 
 export default function Gantt(props: GanttProps) {
-  const { res, filas, selectedId, onSelect, collapsed, onToggle, critica, pxDia, finObjetivo, editable } = props;
+  const { res, filas, selectedId, onSelect, collapsed, onToggle, critica, pxDia, finObjetivo, editable, lineaBase, avancePct } = props;
   const izq = useRef<HTMLDivElement>(null);
   const der = useRef<HTMLDivElement>(null);
   const [anchoIzq, setAnchoIzq] = useState(640);
@@ -421,13 +428,28 @@ export default function Gantt(props: GanttProps) {
             {finObjetivo && (
               <div title={`Fecha fin: ${fechaCorta(finObjetivo)}`} style={{ position: "absolute", top: 0, height: altoCuerpo, left: diaX(finObjetivo) + pxDia - 1, borderLeft: `2px dashed ${COLOR.finObjetivo}` }} />
             )}
+            {/* the baseline: a thin bar under each row */}
+            {lineaBase &&
+              visibles.map((f, k) => {
+                const b = lineaBase.get(f.id);
+                if (!b) return null;
+                const i = start + k;
+                return (
+                  <div
+                    key={`lb-${f.id}`}
+                    title={`Línea base: ${fechaCorta(b.inicio)} → ${fechaCorta(b.fin)}`}
+                    style={{ position: "absolute", top: i * ROW_H + 24, left: diaX(b.inicio), width: Math.max(diaX(b.fin) + pxDia - diaX(b.inicio), 2), height: 4, background: COLOR.base, borderRadius: 2 }}
+                  />
+                );
+              })}
             {/* bars */}
             {visibles.map((f, k) => {
               if (f.vacia) return null;
               const i = start + k;
               const x0 = x(f.es, "inicio");
               const x1 = f.ef > f.es ? x(f.ef, "fin") : x0;
-              const titulo = `${f.numero} ${f.descripcion}\n${fechaCorta(f.inicio)} → ${fechaCorta(f.fin)} · ${fmt(f.duracion, 2)} días${f.tipo === "partida" ? ` · holgura ${fmt(f.holgura, 2)}` : ""}`;
+              const pct = f.tipo === "partida" ? avancePct?.get(f.id) : undefined;
+              const titulo = `${f.numero} ${f.descripcion}\n${fechaCorta(f.inicio)} → ${fechaCorta(f.fin)} · ${fmt(f.duracion, 2)} días${f.tipo === "partida" ? ` · holgura ${fmt(f.holgura, 2)}` : ""}${pct !== undefined ? ` · avance ${fmt(pct)} %` : ""}`;
               const roja = critica && f.critica;
               if (f.tipo !== "partida") {
                 return (
@@ -476,8 +498,13 @@ export default function Gantt(props: GanttProps) {
                     background: roja ? COLOR.critica : COLOR.barra,
                     border: `1px solid ${roja ? COLOR.criticaBorde : COLOR.barraBorde}`,
                     boxSizing: "border-box",
+                    overflow: "hidden",
                   }}
-                />
+                >
+                  {pct !== undefined && pct > 0 && (
+                    <div style={{ position: "absolute", left: 0, top: 0, bottom: 0, width: `${Math.min(pct, 100)}%`, background: roja ? COLOR.avanceCritica : COLOR.avance, pointerEvents: "none" }} />
+                  )}
+                </div>
               );
             })}
             {/* the activity a dragged link would go to */}

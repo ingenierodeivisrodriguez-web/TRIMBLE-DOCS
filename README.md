@@ -1359,6 +1359,54 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
 - **Excel**: la programación, el calendario valorizado, el de insumos y la
   curva S en un libro; cada ventana exporta también lo suyo.
 
+### Línea base y control de avance (valor ganado)
+
+Tres botones de la barra de Programación:
+
+- **Línea base**: congela la programación aprobada: las fechas, las horas, la
+  duración y el costo de cada partida, título y subpresupuesto, con el
+  calendario. Solo se guarda con el presupuesto y la programación guardados.
+  Una sola es la **vigente** (contra ella se mide el avance); al reprogramar se
+  guarda otra y las anteriores se conservan (no se borran) y se puede volver a
+  medir contra cualquiera. La ventana compara la programación de hoy con la
+  vigente (fin y costo). En el Gantt, **Ver línea base** dibuja bajo cada barra
+  la de la línea base (gris), y cada barra se rellena con el % del último corte.
+- **Avance**: los **cortes** de avance, uno por fecha. Un corte nuevo parte del
+  anterior (el avance y el costo son acumulados). Por partida se escribe el
+  **% real** o la **cantidad ejecutada** (se convierte en % con el metrado) y,
+  si se lleva, el **costo real acumulado**. Al lado: costo, inicio y fin de la
+  línea base, el **% planeado** a la fecha del corte, el valor ganado y el
+  estado (sin iniciar, atrasada, al día, adelantada, terminada); los títulos
+  suman sus partidas. Avisa si un % es menor que en el corte anterior. **Leer el
+  avance del modelo 3D** trae, a la fecha del corte, el % que dan los
+  elementos marcados como ejecutados en el visor (por cantidad medida, o por
+  conteo si la partida no mide); se usa partida por partida o en bloque, siempre
+  confirmándolo: nunca reemplaza lo escrito sin preguntar. Las partidas que no
+  están en la línea base se pueden registrar, pero no cuentan en el valor ganado
+  hasta guardar otra línea base.
+- **📊 Valor ganado**: a la fecha de un corte, de todo el presupuesto, de un
+  subpresupuesto o de un capítulo: costo de la línea base (**BAC**), valor
+  **planeado (PV)**, **ganado (EV)** y **costo real (AC)**; **SPI** = EV ÷ PV y
+  **CPI** = EV ÷ AC (con las partidas que tienen costo real), **SV**, **CV**,
+  costo estimado al final (**EAC** = BAC ÷ CPI) y, con el **cronograma ganado**
+  (la fecha en que la línea base preveía lo ejecutado), el **desfase en días
+  hábiles** y la **fecha fin estimada** al ritmo actual. Lo que todavía no debía
+  empezar no cuenta como atraso. Una lectura en palabras ("la obra va atrasada 5
+  días hábiles y gasta más de lo previsto"), la **curva S planeada contra la
+  real** (PV, EV y AC por semana o mes), la tabla de cortes y la tabla por
+  capítulo. Se exporta a Excel.
+
+**En el visor 3D** (panel Presupuesto → *Avance de obra*): se seleccionan
+elementos y se marcan como **ejecutados** un día, en la partida elegida o en
+todas las partidas de esos elementos; si alguno ya estaba ejecutado con otra
+fecha, pregunta si cambiarlos todos o marcar solo los pendientes. **Desmarcar**
+los vuelve a pendientes. **Colorear** pinta el modelo (todo, o la partida
+elegida) a una fecha: verde ejecutado, rojo pendiente y atrasado (su partida
+debía terminar según la línea base), amarillo pendiente con su partida en
+ejecución, gris pendiente que todavía no le toca; un elemento de varias
+partidas toma la peor. El día de ejecución se guarda en la base de datos del
+presupuesto, nunca en las propiedades del modelo.
+
 ### Asistente IA (fases 0 a 5)
 
 El botón **🤖 Asistente IA** del encabezado abre el asistente. Usa Claude
@@ -1540,6 +1588,7 @@ duplican el 01-01-2027.
 | Usar el asistente IA (también las preguntas) y revisar sus borradores | Administradores del proyecto y los editores del presupuesto |
 | Fijar los cupos del asistente IA y la TRM | Administradores del proyecto gestor de la plataforma |
 | Editar el presupuesto y su programación, y asociar elementos en el visor | Administradores del proyecto y los **editores** (personas o grupos) que elijan en ⚙ Configuración |
+| Guardar líneas base, registrar el avance y marcar elementos ejecutados | Los mismos (los demás miembros consultan el avance, el valor ganado y los colores del modelo) |
 | Editar los catálogos | Administradores y editores del proyecto **dueño** de los catálogos (la base) |
 | Elegir editores y base | Administradores del proyecto |
 
@@ -1562,6 +1611,11 @@ ejecutar sin perder datos):
 | `presupuesto_guardar` | Guarda el presupuesto si la versión coincide y limpia los elementos de partidas borradas |
 | `presupuesto_programacion` | La programación (Gantt) de cada proyecto (jsonb: inicio, fecha fin, calendario, redondeo y, por partida, duración, cuadrillas, predecesoras y fecha fija) con su `version` |
 | `presupuesto_guardar_programacion` | Guarda la programación si la versión coincide |
+| `presupuesto_lineas_base` | Las líneas base de cada proyecto (jsonb con las filas congeladas), una vigente; no se borran |
+| `presupuesto_crear_linea_base` / `presupuesto_usar_linea_base` | Guardan una línea base nueva (queda vigente) / cambian la vigente |
+| `presupuesto_avance` / `presupuesto_guardar_avance` | Los cortes de avance (por fecha: % acumulado y costo real de cada partida) con su `version` |
+| `presupuesto_elementos.ejecutado` | El día en que se ejecutó cada elemento para su partida (marcado en el visor) |
+| `presupuesto_resumen_ejecucion` | Por partida: elementos y cantidades ejecutadas hasta una fecha |
 | `presupuesto_ia_cupos` | Cupo del asistente IA por proyecto (`_global`: valores por defecto y TRM) |
 | `presupuesto_ia_uso` | Registro de cada llamada al modelo: persona, modelo, tokens, costo USD y COP, resultado |
 | `presupuesto_ia_borradores` | Propuestas de la IA con su estado (pendiente, aceptado, rechazado, reemplazado), si se editaron y quién decidió |
@@ -1599,6 +1653,10 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `POST /api/presupuesto/ia/chat` | `{ pregunta, contexto, historial }`: responde una pregunta sobre el presupuesto (`{ respuesta, items }`, con los códigos de las partidas que menciona) |
 | `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes de una tarea (`?tarea=edt\|estructura\|insumos\|apu`) / `{ decisiones: [{ id, estado, final? }] }` (`final` es lo que se aplicó; si difiere de la propuesta cuenta como editado) |
 | `GET` / `PUT /api/presupuesto/programacion` | Leer (`programacion: null` hasta el primer guardado) / guardar `{ programacion, version }` (solo quien edita; 409 `version-conflict`) |
+| `GET` / `PUT /api/presupuesto/avance` | Los cortes, las líneas base y la vigente con sus filas / guardar `{ avance, version }` (409 `version-conflict`) |
+| `GET` / `POST` / `PUT /api/presupuesto/avance/lineas-base` | Una línea base (`?id=`) / guardar `{ nombre, datos }` como vigente / `{ id }` medir contra otra |
+| `GET` / `PUT /api/presupuesto/elementos/ejecucion` | Por partida, elementos ejecutados hasta `?hasta=` / marcar `{ marcas: [{ itemId, ifcGuid }], fecha }` (`null`: pendiente; no en el futuro) |
+| `GET /api/presupuesto/elementos/avance` | Todos los elementos asociados con su día de ejecución (para colorear el modelo) |
 | `GET /api/presupuesto/elementos/resumen` | Mediciones y conteos por partida |
 | `POST /api/presupuesto/elementos/consulta` | `{ itemIds }` o `{ ifcGuids }` |
 | `PUT /api/presupuesto/elementos` | `{ itemId, upsert: [{ ifcGuid, modelId, cantidad }], remove: [ifcGuid] }` |

@@ -8,14 +8,17 @@ import { fecha, fmt } from "../../lib/presupuesto/format";
 import { calendarioInsumos, calendarioValorizado, cambiarEnlace, curvaS, enlazar, leerPredecesoras, programar } from "../../lib/presupuesto/programacion";
 import { tablaCalendarioInsumos, tablaCalendarioValorizado, tablaCurvaS, tablaProgramacion } from "../../lib/presupuesto/reportes";
 import { MAX_DURACION_DIAS, PresupuestoDoc, TareaProgramada } from "../../lib/presupuesto/types";
+import { indicadores, Medidor } from "../../lib/presupuesto/avance";
+import { AvanceDialog, LineaBaseDialog, ValorGanadoDialog } from "./Avance";
 import Gantt from "./Gantt";
 import { CalendarioDialog, CurvaSDialog, DependenciaDialog, EstimarDialog, FechaCampo, InsumosPeriodoDialog, TareaDialog, ValorizadoDialog } from "./ProgramacionDialogs";
 import { ConfirmDialog } from "./SimpleDialogs";
 import { C, message, Notice } from "./ui";
+import type { useAvance } from "./useAvance";
 import type { useProgramacion } from "./useProgramacion";
 
 type Dialogo =
-  | { tipo: "calendario" | "estimar" | "curva" | "valorizado" | "insumos" | "recargar" }
+  | { tipo: "calendario" | "estimar" | "curva" | "valorizado" | "insumos" | "recargar" | "lineaBase" | "avance" | "valorGanado" }
   | { tipo: "tarea"; id: string }
   | { tipo: "enlace"; de: string; a: string };
 
@@ -26,6 +29,7 @@ type Dialogo =
  */
 export default function Programacion({
   p,
+  av,
   doc,
   calculados,
   resolver,
@@ -35,6 +39,8 @@ export default function Programacion({
   onVolver,
 }: {
   p: ReturnType<typeof useProgramacion>;
+  /** The baselines and progress reports (valor ganado). */
+  av: ReturnType<typeof useAvance>;
   doc: PresupuestoDoc;
   calculados: Map<string, SubpresupuestoCalculado>;
   resolver: Resolver;
@@ -51,6 +57,7 @@ export default function Programacion({
   const [dialogo, setDialogo] = useState<Dialogo | null>(null);
   const [aviso, setAviso] = useState("");
   const [exportando, setExportando] = useState(false);
+  const [verBase, setVerBase] = useState(true);
 
   const calculo = useMemo(() => {
     if (!prog) return null;
@@ -63,6 +70,26 @@ export default function Programacion({
   const res = calculo?.res ?? null;
   const visibles = useMemo(() => (res ? res.filas.filter((f) => !f.ancestros.some((a) => collapsed.has(a))) : []), [res, collapsed]);
   const partidas = res ? res.filas.filter((f) => f.tipo === "partida").length : 0;
+
+  // The baseline under the bars and the latest progress report inside them.
+  const cortes = av.avance?.cortes ?? [];
+  const ultimo = cortes.length ? cortes[cortes.length - 1] : null;
+  const fechasBase = useMemo(() => (av.lineaBase ? new Map(av.lineaBase.datos.tareas.map((t) => [t.id, { inicio: t.inicio, fin: t.fin }])) : null), [av.lineaBase]);
+  const avancePct = useMemo(() => (ultimo ? new Map(Object.entries(ultimo.partidas).map(([id, a]) => [id, a.pct])) : null), [ultimo]);
+  const resumenAvance = useMemo(() => {
+    if (!av.lineaBase || !ultimo) return null;
+    try {
+      return indicadores(new Medidor(av.lineaBase.datos), ultimo);
+    } catch {
+      return null;
+    }
+  }, [av.lineaBase, ultimo]);
+  /** Why the schedule can't be frozen as a baseline now. */
+  const pendienteBase = presupuestoSinGuardar
+    ? "Guarda primero el presupuesto: la línea base debe corresponder a lo aprobado y guardado."
+    : p.dirty
+      ? "Guarda primero la programación: la línea base debe corresponder a lo aprobado y guardado."
+      : "";
 
   // Ctrl+S saves the schedule.
   useEffect(() => {
@@ -133,6 +160,16 @@ export default function Programacion({
         <HeadButton onClick={() => setDialogo({ tipo: "curva" })} disabled={!res}>
           📈 Curva S
         </HeadButton>
+        <span style={{ width: 1, height: 22, background: "rgba(255,255,255,0.4)", margin: "0 2px" }} />
+        <HeadButton onClick={() => setDialogo({ tipo: "lineaBase" })} disabled={!res || !!av.loadError}>
+          Línea base
+        </HeadButton>
+        <HeadButton onClick={() => setDialogo({ tipo: "avance" })} disabled={!res || !av.avance}>
+          Avance{av.dirty ? " •" : ""}
+        </HeadButton>
+        <HeadButton onClick={() => setDialogo({ tipo: "valorGanado" })} disabled={!av.avance}>
+          📊 Valor ganado
+        </HeadButton>
       </div>
 
       <div style={{ display: "flex", alignItems: "center", gap: 6, padding: "4px 8px", borderBottom: `1px solid ${C.border}`, flexWrap: "wrap", background: "#fafbfc", fontSize: 13.5 }}>
@@ -165,6 +202,11 @@ export default function Programacion({
         <Tb onClick={exportar} disabled={!res || exportando} title="Programación, calendario valorizado, calendario de insumos y curva S">
           Excel
         </Tb>
+        {av.lineaBase && (
+          <Tb onClick={() => setVerBase((v) => !v)} title="Dibujar bajo cada barra la de la línea base (gris)" strong={verBase}>
+            {verBase ? "Ocultar línea base" : "Ver línea base"}
+          </Tb>
+        )}
         <Sep />
         <span>Zoom:</span>
         <Tb onClick={() => setPxDia((z) => Math.max(3, Math.round(z / 1.4)))} title="Alejar">
@@ -203,6 +245,17 @@ export default function Programacion({
           </span>
         ))}
         {aviso && <span style={{ color: "#8a1c14" }}>{aviso}</span>}
+        {av.loadError && <span style={{ color: "#8a1c14" }}>No se pudo cargar el avance: {av.loadError}</span>}
+        {av.lineaBase && (
+          <span style={{ color: "var(--tc-gray-500)" }}>
+            Línea base: {av.lineaBase.nombre}
+            {resumenAvance && ultimo
+              ? ` · corte del ${fechaCorta(ultimo.fecha)}: ${fmt(resumenAvance.pctReal)} % ejecutado de ${fmt(resumenAvance.pctPlaneado)} % planeado${
+                  resumenAvance.terminada ? "" : resumenAvance.svDias !== null && resumenAvance.svDias < -0.5 ? `, ${fmt(-resumenAvance.svDias, 1)} días de atraso` : resumenAvance.svDias !== null && resumenAvance.svDias > 0.5 ? `, ${fmt(resumenAvance.svDias, 1)} días adelantada` : ", al día"
+                }`
+              : " · sin cortes de avance"}
+          </span>
+        )}
         {critica && res && (
           <span style={{ color: "#d93025" }}>
             Ruta crítica: {res.filas.filter((f) => f.tipo === "partida" && f.critica).length} partida(s) sin holgura.
@@ -291,6 +344,8 @@ export default function Programacion({
             setSelectedId(a);
           }}
           onEditarEnlace={(de, a) => setDialogo({ tipo: "enlace", de, a })}
+          lineaBase={verBase ? fechasBase : null}
+          avancePct={avancePct}
         />
       )}
 
@@ -385,6 +440,12 @@ export default function Programacion({
         return res ? <ValorizadoDialog res={res} doc={doc} proyecto={projectName} onClose={close} /> : null;
       case "insumos":
         return res ? <InsumosPeriodoDialog res={res} doc={doc} resolver={resolver} proyecto={projectName} onClose={close} /> : null;
+      case "lineaBase":
+        return res ? <LineaBaseDialog av={av} res={res} prog={prog} canEdit={canEdit} pendiente={pendienteBase} onClose={close} /> : null;
+      case "avance":
+        return res ? <AvanceDialog av={av} res={res} canEdit={canEdit} onClose={close} /> : null;
+      case "valorGanado":
+        return <ValorGanadoDialog av={av} proyecto={projectName} onClose={close} />;
       case "recargar":
         return (
           <ConfirmDialog

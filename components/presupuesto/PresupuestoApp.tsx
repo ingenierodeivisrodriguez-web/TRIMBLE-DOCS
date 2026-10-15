@@ -29,6 +29,7 @@ import Programacion from "./Programacion";
 import { ConfirmDialog, TextoDialog } from "./SimpleDialogs";
 import { C, message, Notice } from "./ui";
 import { usePresupuesto } from "./usePresupuesto";
+import { useAvance } from "./useAvance";
 import { useProgramacion } from "./useProgramacion";
 
 type Dialogo =
@@ -68,6 +69,7 @@ export default function PresupuestoApp({
   // The budget, or its schedule (Gantt).
   const [vista, setVista] = useState<"presupuesto" | "programacion">("presupuesto");
   const programacion = useProgramacion(api, vista === "programacion", estado?.user.name ?? null);
+  const avance = useAvance(api, vista === "programacion", estado?.user.name ?? null);
   const spKey = `presupuesto.sp.${projectId}`;
   const [spId, setSpIdState] = useState<string | null>(() => {
     try {
@@ -424,6 +426,7 @@ export default function PresupuestoApp({
     return (
       <Programacion
         p={programacion}
+        av={avance}
         doc={doc}
         calculados={calculados}
         resolver={resolver}

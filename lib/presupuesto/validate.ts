@@ -6,7 +6,14 @@ import { DIAS_SEMANA, esFechaIso } from "./calendario";
 import { VARIABLE_RE } from "./formula";
 import { validarEsquema } from "./tree";
 import {
+  AvancePartida,
   CalendarioLaboral,
+  ControlAvance,
+  CorteAvance,
+  LineaBaseDatos,
+  MAX_CORTES,
+  MAX_NIVEL,
+  TareaBase,
   CampoModelo,
   ColumnaMemoria,
   Dependencia,
@@ -384,4 +391,111 @@ export function validarProgramacion(value: unknown): Programacion {
     if (t) tareas[k] = t;
   }
   return { inicio, finObjetivo, calendario: validarCalendario(o.calendario), redondeo, tareas };
+}
+
+// ---------------------------------------------------------------- baseline and progress
+
+const ROW_ID_RE = /^(sp:)?[A-Za-z0-9-]{1,64}$/;
+const fechaVisible = (f: string) => f.split("-").reverse().join("-");
+
+function validarTareaBase(value: unknown, n: number): TareaBase {
+  const t = obj(value, `Fila ${n} de la línea base`);
+  const what = `Fila ${n} de la línea base`;
+  const tipo = t.tipo as TareaBase["tipo"];
+  if (!["sp", "titulo", "partida"].includes(tipo)) fail(`${what}: tipo no válido.`);
+  if (typeof t.id !== "string" || !ROW_ID_RE.test(t.id) || (tipo === "sp") !== t.id.startsWith("sp:")) fail(`${what}: id no válido.`);
+  const nivel = num(t.nivel, `${what}: nivel`);
+  if (!Number.isInteger(nivel) || nivel > MAX_NIVEL + 1) fail(`${what}: nivel no válido.`);
+  const ancestros = list(t.ancestros ?? [], `${what}: filas que la contienen`, MAX_NIVEL + 2).map((a) => {
+    if (typeof a !== "string" || !ROW_ID_RE.test(a)) fail(`${what}: fila que la contiene no válida.`);
+    return a;
+  });
+  const es = num(t.es, `${what}: inicio en horas`);
+  const ef = num(t.ef, `${what}: fin en horas`);
+  if (ef < es) fail(`${what}: termina antes de empezar.`);
+  const inicio = fechaIso(t.inicio, `${what}: inicio`);
+  const fin = fechaIso(t.fin, `${what}: fin`);
+  if (fin < inicio) fail(`${what}: termina antes de empezar.`);
+  return {
+    id: t.id,
+    tipo,
+    spId: id(t.spId, `${what}: subpresupuesto`),
+    nivel,
+    numero: text(t.numero, `${what}: item`, MAX_SHORT_TEXT),
+    descripcion: text(t.descripcion, `${what}: descripción`, MAX_TEXT),
+    unidad: text(t.unidad, `${what}: unidad`, MAX_SHORT_TEXT),
+    ancestros,
+    metrado: t.metrado === null || t.metrado === undefined ? null : num(t.metrado, `${what}: metrado`, { min: -1e13 }),
+    costo: redondear2(num(t.costo, `${what}: costo`, { min: -1e13 })),
+    es,
+    ef,
+    inicio,
+    fin,
+    duracion: num(t.duracion, `${what}: duración`),
+  };
+}
+
+/** A baseline as the browser builds it from the schedule on screen. */
+export function validarLineaBase(value: unknown): LineaBaseDatos {
+  const o = obj(value, "Línea base");
+  const inicio = fechaIso(o.inicio, "Inicio de la línea base");
+  const fin = fechaIso(o.fin, "Fin de la línea base");
+  if (fin < inicio) fail("La línea base termina antes de empezar.");
+  const ids = new Set<string>();
+  const tareas = list(o.tareas, "Filas de la línea base", MAX_ITEMS + MAX_SUBPRESUPUESTOS).map((v, i) => {
+    const t = validarTareaBase(v, i + 1);
+    if (ids.has(t.id)) fail(`Fila ${i + 1} de la línea base: está repetida.`);
+    ids.add(t.id);
+    return t;
+  });
+  if (!tareas.some((t) => t.tipo === "partida")) fail("La línea base no tiene partidas programadas.");
+  return {
+    calendarioInicio: fechaIso(o.calendarioInicio, "Inicio del calendario"),
+    calendario: validarCalendario(o.calendario),
+    inicio,
+    fin,
+    total: redondear2(num(o.total, "Costo total de la línea base", { min: -1e13 })),
+    tareas,
+  };
+}
+
+function validarAvancePartida(value: unknown, what: string): AvancePartida | null {
+  const a = obj(value, what);
+  const pct = redondear2(num(a.pct ?? 0, `${what}: % de avance`));
+  if (pct > 100) fail(`${what}: el avance no puede pasar del 100 %.`);
+  const out: AvancePartida = { pct };
+  if (a.costo !== undefined && a.costo !== null) out.costo = redondear2(num(a.costo, `${what}: costo real`));
+  return out.pct > 0 || out.costo !== undefined ? out : null;
+}
+
+function validarCorte(value: unknown, n: number): CorteAvance {
+  const c = obj(value, `Corte ${n}`);
+  const fecha = fechaIso(c.fecha, `Corte ${n}`);
+  const what = `Corte del ${fechaVisible(fecha)}`;
+  const crudo = obj(c.partidas ?? {}, `${what}: partidas`);
+  const entradas = Object.entries(crudo);
+  if (entradas.length > MAX_ITEMS) fail(`${what}: máximo ${MAX_ITEMS} partidas.`);
+  const partidas: Record<string, AvancePartida> = {};
+  for (const [k, v] of entradas) {
+    const a = validarAvancePartida(v, `${what}, partida ${id(k, `${what}: partida`)}`);
+    if (a) partidas[k] = a;
+  }
+  return { id: id(c.id, `${what}: id`), fecha, nota: text(c.nota, `${what}: nota`, MAX_TEXT), partidas };
+}
+
+/** The progress reports: one per date, sorted by date. */
+export function validarAvance(value: unknown): ControlAvance {
+  const o = obj(value, "Avance");
+  const fechas = new Set<string>();
+  const ids = new Set<string>();
+  const cortes = list(o.cortes ?? [], "Cortes de avance", MAX_CORTES).map((v, i) => {
+    const c = validarCorte(v, i + 1);
+    if (fechas.has(c.fecha)) fail(`Hay dos cortes con la fecha ${fechaVisible(c.fecha)}: deja uno por fecha.`);
+    if (ids.has(c.id)) fail(`Corte del ${fechaVisible(c.fecha)}: id repetido.`);
+    fechas.add(c.fecha);
+    ids.add(c.id);
+    return c;
+  });
+  cortes.sort((a, b) => a.fecha.localeCompare(b.fecha));
+  return { cortes };
 }

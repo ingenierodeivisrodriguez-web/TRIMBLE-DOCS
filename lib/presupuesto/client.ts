@@ -24,6 +24,13 @@ import type {
 } from "./ia/tipos";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
 import {
+  AvanceResponse,
+  ControlAvance,
+  EjecucionItem,
+  LineaBase,
+  LineaBaseDatos,
+  LineaBaseResumen,
+  MarcaEjecucion,
   AtributoPropiedad,
   CampoModelo,
   CamposModelo,
@@ -92,6 +99,19 @@ export interface PresupuestoApi {
   getProgramacion(): Promise<ProgramacionResponse>;
   guardarProgramacion(programacion: Programacion, version: number): Promise<{ version: number }>;
   getResumen(): Promise<ResumenElementos>;
+  /** Progress reports, baselines and the one in force. */
+  getAvance(): Promise<AvanceResponse>;
+  guardarAvance(avance: ControlAvance, version: number): Promise<{ version: number }>;
+  getLineaBase(id: string): Promise<LineaBase>;
+  /** Saves the schedule on screen as the baseline in force. */
+  crearLineaBase(nombre: string, datos: LineaBaseDatos): Promise<LineaBaseResumen>;
+  usarLineaBase(id: string): Promise<LineaBaseResumen[]>;
+  /** By partida: elements built by a date. */
+  resumenEjecucion(hasta: string): Promise<EjecucionItem[]>;
+  /** Marks elements as built that day (null: not built); several requests when there are many. */
+  marcarEjecutados(marcas: MarcaEjecucion[], fecha: string | null): Promise<number>;
+  /** Every linked element with the day it was built. */
+  elementosEjecucion(): Promise<{ itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[]>;
   elementosDe(filter: { itemIds?: string[]; ifcGuids?: string[] }): Promise<ElementoVinculado[]>;
   guardarElementos(
     itemId: string,
@@ -168,6 +188,15 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     getProgramacion: () => request("/programacion"),
     guardarProgramacion: (programacion, version) => request("/programacion", send("PUT", { programacion, version })),
     getResumen: () => request("/elementos/resumen"),
+    getAvance: () => request("/avance"),
+    guardarAvance: (avance, version) => request("/avance", send("PUT", { avance, version })),
+    getLineaBase: (id) => request<{ lineaBase: LineaBase }>(`/avance/lineas-base?id=${encodeURIComponent(id)}`).then((r) => r.lineaBase),
+    crearLineaBase: (nombre, datos) => request<{ lineaBase: LineaBaseResumen }>("/avance/lineas-base", send("POST", { nombre, datos })).then((r) => r.lineaBase),
+    usarLineaBase: (id) => request<{ lineasBase: LineaBaseResumen[] }>("/avance/lineas-base", send("PUT", { id })).then((r) => r.lineasBase),
+    resumenEjecucion: (hasta) => request<{ items: EjecucionItem[] }>(`/elementos/ejecucion?hasta=${encodeURIComponent(hasta)}`).then((r) => r.items),
+    marcarEjecutados: (marcas, fecha) =>
+      inBatches(marcas, MAX_ELEMENTS_PER_REQUEST, (lote) => request<{ marcados: number }>("/elementos/ejecucion", send("PUT", { marcas: lote, fecha })).then((r) => r.marcados)),
+    elementosEjecucion: () => request<{ elementos: { itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[] }>("/elementos/avance").then((r) => r.elementos),
     async elementosDe(filter) {
       const out: ElementoVinculado[] = [];
       const ask = async (body: { itemIds?: string[]; ifcGuids?: string[] }) =>

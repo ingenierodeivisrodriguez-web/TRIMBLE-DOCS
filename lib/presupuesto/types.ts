@@ -247,6 +247,8 @@ export interface ElementoVinculado {
   cantidad: number | null;
   /** Where the element is, read from its model properties when it was linked. */
   memoria: Memoria | null;
+  /** The day it was built for this partida (YYYY-MM-DD), marked in the viewer; null: not yet. */
+  ejecutado?: string | null;
 }
 
 /** Data of a linked element for the columns of the memoria de cantidades, by column id. */
@@ -441,3 +443,112 @@ export interface ProgramacionResponse {
 export const MAX_DIAS_ESPECIALES = 1000;
 export const MAX_PREDECESORAS = 50;
 export const MAX_DURACION_DIAS = 10_000;
+
+// ---------------------------------------------------------------- baseline and progress (valor ganado)
+
+/** A row of a baseline: what was planned for a partida, or for the title or subpresupuesto that holds partidas. */
+export interface TareaBase {
+  /** The item's id; "sp:<id>" for a subpresupuesto. */
+  id: string;
+  tipo: "sp" | "titulo" | "partida";
+  spId: string;
+  nivel: number;
+  numero: string;
+  descripcion: string;
+  unidad: string;
+  /** The rows that contain it, outermost first. */
+  ancestros: string[];
+  metrado: number | null;
+  /** Planned cost (its amount in the budget when the baseline was saved). */
+  costo: number;
+  /** Working hours from the baseline calendar's start. */
+  es: number;
+  ef: number;
+  /** YYYY-MM-DD */
+  inicio: string;
+  fin: string;
+  /** Working days. */
+  duracion: number;
+}
+
+/** The approved schedule, frozen: dates, durations and planned costs. */
+export interface LineaBaseDatos {
+  /** The date the calendar counts hours from (the schedule's start setting). */
+  calendarioInicio: string;
+  calendario: CalendarioLaboral;
+  inicio: string;
+  fin: string;
+  /** Planned cost of the whole budget (BAC). */
+  total: number;
+  /** In the order of the schedule. */
+  tareas: TareaBase[];
+}
+
+export interface LineaBaseResumen {
+  id: string;
+  nombre: string;
+  /** Progress is measured against it. */
+  vigente: boolean;
+  creada: string;
+  creadaPor: string | null;
+  inicio: string;
+  fin: string;
+  total: number;
+  partidas: number;
+}
+
+export interface LineaBase extends LineaBaseResumen {
+  datos: LineaBaseDatos;
+}
+
+/** What a partida had done at a cut date. */
+export interface AvancePartida {
+  /** Cumulative % done, 0 to 100. */
+  pct: number;
+  /** Actual cost to date (cumulative), when it is recorded. */
+  costo?: number;
+}
+
+/** A progress report: each partida's cumulative progress at a date. */
+export interface CorteAvance {
+  id: string;
+  /** YYYY-MM-DD */
+  fecha: string;
+  nota: string;
+  /** By partida id; a partida that isn't listed is at 0 %. */
+  partidas: Record<string, AvancePartida>;
+}
+
+export interface ControlAvance {
+  /** By date. */
+  cortes: CorteAvance[];
+}
+
+export interface AvanceResponse {
+  /** null until the progress is first saved. */
+  avance: ControlAvance | null;
+  version: number;
+  updatedAt: string | null;
+  updatedBy: string | null;
+  lineasBase: LineaBaseResumen[];
+  /** The baseline in force, with its rows. */
+  lineaBase: LineaBase | null;
+}
+
+/** How many of a partida's elements were built by a date, and their quantities. */
+export interface EjecucionItem {
+  itemId: string;
+  elementos: number;
+  ejecutados: number;
+  suma: number;
+  sumaEjecutada: number;
+}
+
+/** An element's mark for a partida (built that day, or not: null). */
+export interface MarcaEjecucion {
+  itemId: string;
+  ifcGuid: string;
+}
+
+export const MAX_CORTES = 400;
+export const MAX_LINEAS_BASE = 50;

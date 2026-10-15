@@ -583,7 +583,7 @@ function SelectorSp({ doc, value, onChange }: { doc: PresupuestoDoc; value: stri
   );
 }
 
-function Alternar<T extends string>({ value, opciones, onChange, label }: { value: T; opciones: [T, string][]; onChange: (v: T) => void; label: string }) {
+export function Alternar<T extends string>({ value, opciones, onChange, label }: { value: T; opciones: [T, string][]; onChange: (v: T) => void; label: string }) {
   return (
     <div role="group" aria-label={label} style={{ display: "inline-flex", border: `1px solid ${C.border}`, borderRadius: 4, overflow: "hidden" }}>
       {opciones.map(([v, t]) => (
@@ -601,12 +601,12 @@ function Alternar<T extends string>({ value, opciones, onChange, label }: { valu
   );
 }
 
-const PERIODOS: [TipoPeriodo, string][] = [
+export const PERIODOS: [TipoPeriodo, string][] = [
   ["mes", "Mensual"],
   ["semana", "Semanal"],
 ];
 
-function useExportar() {
+export function useExportar() {
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   async function exportar(fn: () => Promise<void>) {
@@ -623,7 +623,7 @@ function useExportar() {
   return { error, ocupado, exportar };
 }
 
-const compacto = new Intl.NumberFormat("es", { notation: "compact", maximumFractionDigits: 1 });
+export const compacto = new Intl.NumberFormat("es", { notation: "compact", maximumFractionDigits: 1 });
 
 export function CurvaSDialog({ res, doc, proyecto, onClose }: { res: Programado; doc: PresupuestoDoc; proyecto: string; onClose: () => void }) {
   const [tipo, setTipo] = useState<TipoPeriodo>("mes");

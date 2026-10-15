@@ -1,4 +1,5 @@
 // The budget's printable tables, shared by the Excel and PDF exports.
+import type { CurvaValorGanado, FilaControl } from "./avance";
 import { FilaInsumo, FilaPieCalculada, parcialGasto, SubpresupuestoCalculado, totalGastos, totalTituloGasto } from "./calc";
 import { fechaCorta } from "./calendario";
 import type { Tabla } from "./excel";
@@ -210,4 +211,81 @@ export function tablaCurvaS(cs: CurvaS, nombre: string, tipo: "semana" | "mes"):
     ],
     filas: cs.periodos.map((x, i) => ({ celdas: [x.etiqueta, fechaCorta(x.desde), fechaCorta(x.hasta), cs.montos[i], cs.acumulado[i], cs.porcentaje[i]] })),
   };
+}
+
+/** Earned value at a cut, row by row (titles add up their partidas), and the curve over time. */
+export function tablasValorGanado(
+  filas: FilaControl[],
+  curva: CurvaValorGanado,
+  fecha: string,
+  lineaBase: string,
+  tipo: "semana" | "mes"
+): Tabla[] {
+  const estados = { "sin-iniciar": "Sin iniciar", atrasada: "Atrasada", "al-dia": "Al día", adelantada: "Adelantada", terminada: "Terminada" } as const;
+  return [
+    {
+      titulo: `Valor ganado al ${fechaCorta(fecha)} · línea base: ${lineaBase}`,
+      hoja: "Valor ganado",
+      columnas: [
+        { header: "Item", width: 9 },
+        { header: "Descripción", width: 50 },
+        { header: "Inicio LB", width: 12, align: "center" },
+        { header: "Fin LB", width: 12, align: "center" },
+        { header: "Costo LB (BAC)", width: 16, decimales: 2 },
+        { header: "Valor planeado (PV)", width: 16, decimales: 2 },
+        { header: "Valor ganado (EV)", width: 16, decimales: 2 },
+        { header: "Costo real (AC)", width: 16, decimales: 2 },
+        { header: "% planeado", width: 11, decimales: 2 },
+        { header: "% real", width: 11, decimales: 2 },
+        { header: "SPI", width: 8, decimales: 3 },
+        { header: "CPI", width: 8, decimales: 3 },
+        { header: "Estado", width: 12 },
+      ],
+      filas: filas.map((f) => ({
+        celdas: [
+          f.tarea.tipo === "sp" ? "SP" : f.tarea.numero,
+          f.tarea.descripcion,
+          fechaCorta(f.tarea.inicio),
+          fechaCorta(f.tarea.fin),
+          f.bac,
+          f.pv,
+          f.ev,
+          f.ac,
+          f.pctPlaneado,
+          f.pctReal,
+          f.spi,
+          f.cpi,
+          estados[f.estado],
+        ],
+        negrita: f.tarea.tipo !== "partida",
+        nivel: f.tarea.nivel,
+      })),
+    },
+    {
+      titulo: `Curva S planeada y real (${tipo === "semana" ? "semanal" : "mensual"}) · línea base: ${lineaBase}`,
+      hoja: "Curva S real",
+      columnas: [
+        { header: "Periodo", width: 18 },
+        { header: "Desde", width: 12, align: "center" },
+        { header: "Hasta", width: 12, align: "center" },
+        { header: "Planeado acumulado (PV)", width: 18, decimales: 2 },
+        { header: "Ganado acumulado (EV)", width: 18, decimales: 2 },
+        { header: "Costo real acumulado (AC)", width: 18, decimales: 2 },
+        { header: "% planeado", width: 11, decimales: 2 },
+        { header: "% real", width: 11, decimales: 2 },
+      ],
+      filas: curva.puntos.map((p) => ({
+        celdas: [
+          p.periodo.etiqueta,
+          fechaCorta(p.periodo.desde),
+          fechaCorta(p.periodo.hasta),
+          p.pv,
+          p.ev,
+          p.ac,
+          curva.bac ? Math.round((p.pv / curva.bac) * 10000) / 100 : null,
+          curva.bac && p.ev !== null ? Math.round((p.ev / curva.bac) * 10000) / 100 : null,
+        ],
+      })),
+    },
+  ];
 }

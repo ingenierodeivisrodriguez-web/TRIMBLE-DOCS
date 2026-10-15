@@ -393,6 +393,111 @@ as $$
    group by tarea;
 $$;
 
+-- Control de avance (valor ganado). En el visor se marca el día en que se
+-- ejecutó cada elemento para una partida.
+alter table public.presupuesto_elementos add column if not exists ejecutado date;
+alter table public.presupuesto_elementos add column if not exists ejecutado_por text;
+
+-- Líneas base: la programación aprobada, congelada (fechas, duraciones y costos).
+-- Una sola vigente por proyecto; no se borran.
+create table if not exists public.presupuesto_lineas_base (
+  id         uuid        primary key,
+  project_id text        not null,
+  nombre     text        not null,
+  data       jsonb       not null,
+  inicio     date        not null,
+  fin        date        not null,
+  total      numeric(18,2) not null default 0,
+  partidas   integer     not null default 0,
+  vigente    boolean     not null default false,
+  creada     timestamptz not null default now(),
+  creada_por text
+);
+create index if not exists presupuesto_lineas_base_proyecto on public.presupuesto_lineas_base (project_id, creada);
+create unique index if not exists presupuesto_lineas_base_vigente on public.presupuesto_lineas_base (project_id) where vigente;
+
+-- Guarda una línea base nueva y la deja vigente.
+create or replace function public.presupuesto_crear_linea_base(
+  p_project_id text, p_id uuid, p_nombre text, p_data jsonb, p_inicio date, p_fin date, p_total numeric, p_partidas integer, p_user text)
+returns integer
+language plpgsql
+as $$
+begin
+  update public.presupuesto_lineas_base set vigente = false where project_id = p_project_id and vigente;
+  insert into public.presupuesto_lineas_base (id, project_id, nombre, data, inicio, fin, total, partidas, vigente, creada_por)
+  values (p_id, p_project_id, p_nombre, p_data, p_inicio, p_fin, p_total, p_partidas, true, p_user);
+  return 1;
+end;
+$$;
+
+-- Deja vigente otra línea base del proyecto (0 si no existe).
+create or replace function public.presupuesto_usar_linea_base(p_project_id text, p_id uuid)
+returns integer
+language plpgsql
+as $$
+begin
+  if not exists (select 1 from public.presupuesto_lineas_base where project_id = p_project_id and id = p_id) then
+    return 0;
+  end if;
+  update public.presupuesto_lineas_base set vigente = false where project_id = p_project_id and vigente and id <> p_id;
+  update public.presupuesto_lineas_base set vigente = true where project_id = p_project_id and id = p_id;
+  return 1;
+end;
+$$;
+
+-- Los cortes de avance de cada proyecto (jsonb: por fecha, el % acumulado y el costo real de cada partida).
+create table if not exists public.presupuesto_avance (
+  project_id text        primary key,
+  data       jsonb       not null,
+  version    integer     not null default 1,
+  updated_at timestamptz not null default now(),
+  updated_by text
+);
+
+-- Guarda los cortes si la versión coincide.
+create or replace function public.presupuesto_guardar_avance(p_project_id text, p_data jsonb, p_version integer, p_user text)
+returns integer
+language plpgsql
+as $$
+declare
+  v_version integer;
+begin
+  if p_version = 0 then
+    insert into public.presupuesto_avance (project_id, data, version, updated_by)
+    values (p_project_id, p_data, 1, p_user)
+    on conflict (project_id) do nothing;
+    if not found then
+      raise exception 'version-conflict';
+    end if;
+    return 1;
+  end if;
+  update public.presupuesto_avance
+     set data = p_data, version = version + 1, updated_at = now(), updated_by = p_user
+   where project_id = p_project_id and version = p_version
+  returning version into v_version;
+  if v_version is null then
+    raise exception 'version-conflict';
+  end if;
+  return v_version;
+end;
+$$;
+
+-- Por partida: elementos asociados y ejecutados hasta una fecha, con sus cantidades.
+create or replace function public.presupuesto_resumen_ejecucion(p_project_id text, p_hasta date)
+returns table (item_id text, elementos bigint, ejecutados bigint, suma double precision, suma_ejecutada double precision)
+language sql
+stable
+as $$
+  select item_id,
+         count(*),
+         count(*) filter (where ejecutado is not null and ejecutado <= p_hasta),
+         coalesce(sum(cantidad), 0),
+         coalesce(sum(cantidad) filter (where ejecutado is not null and ejecutado <= p_hasta), 0)
+    from public.presupuesto_elementos
+   where project_id = p_project_id
+   group by item_id;
+$$;
+
 -- RLS activado y sin políticas: solo el servidor (clave de servicio) lee y
 -- escribe. Las funciones se ejecutan con los permisos de quien las llama.
 alter table public.presupuesto_config enable row level security;
@@ -408,6 +513,8 @@ alter table public.presupuesto_programacion enable row level security;
 alter table public.presupuesto_ia_cupos enable row level security;
 alter table public.presupuesto_ia_uso enable row level security;
 alter table public.presupuesto_ia_borradores enable row level security;
+alter table public.presupuesto_lineas_base enable row level security;
+alter table public.presupuesto_avance enable row level security;
 revoke all on function public.presupuesto_guardar_insumos(text, jsonb, text) from public;
 revoke all on function public.presupuesto_guardar_partidas(text, jsonb, text) from public;
 revoke all on function public.presupuesto_guardar(text, jsonb, integer, text) from public;
@@ -416,6 +523,10 @@ revoke all on function public.presupuesto_ia_gasto(text, timestamptz, text) from
 revoke all on function public.presupuesto_ia_resumen(text) from public;
 revoke all on function public.presupuesto_ia_gasto_proyectos(timestamptz) from public;
 revoke all on function public.presupuesto_ia_resumen_tareas(text) from public;
+revoke all on function public.presupuesto_crear_linea_base(text, uuid, text, jsonb, date, date, numeric, integer, text) from public;
+revoke all on function public.presupuesto_usar_linea_base(text, uuid) from public;
+revoke all on function public.presupuesto_guardar_avance(text, jsonb, integer, text) from public;
+revoke all on function public.presupuesto_resumen_ejecucion(text, date) from public;
 do $$
 begin
   if exists (select 1 from pg_roles where rolname = 'service_role') then
@@ -427,6 +538,10 @@ begin
     grant execute on function public.presupuesto_ia_resumen(text) to service_role;
     grant execute on function public.presupuesto_ia_gasto_proyectos(timestamptz) to service_role;
     grant execute on function public.presupuesto_ia_resumen_tareas(text) to service_role;
+    grant execute on function public.presupuesto_crear_linea_base(text, uuid, text, jsonb, date, date, numeric, integer, text) to service_role;
+    grant execute on function public.presupuesto_usar_linea_base(text, uuid) to service_role;
+    grant execute on function public.presupuesto_guardar_avance(text, jsonb, integer, text) to service_role;
+    grant execute on function public.presupuesto_resumen_ejecucion(text, date) to service_role;
   end if;
 end;
 $$;
