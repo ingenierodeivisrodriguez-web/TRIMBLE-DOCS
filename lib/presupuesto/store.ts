@@ -35,6 +35,9 @@ export interface StoredConfig {
   memoriaColumnas?: ColumnaMemoria[];
 }
 
+/** A linked element with its quantity, its place (memoria) and the day it was built. */
+export type ElementoEjecucion = { itemId: string; ifcGuid: string; modelId: string; cantidad: number | null; memoria: Memoria | null; ejecutado: string | null };
+
 export interface StoredDocumento {
   data: unknown;
   version: number;
@@ -128,7 +131,7 @@ export interface PresupuestoStore {
   /** Marks elements of partidas as built on a date (null: not built); answers how many changed. */
   marcarEjecutados(projectId: string, marcas: MarcaEjecucion[], fecha: string | null, user: string): Promise<number>;
   /** Every element linked to a partida, with the day it was built. */
-  elementosEjecucion(projectId: string): Promise<{ itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[]>;
+  elementosEjecucion(projectId: string): Promise<ElementoEjecucion[]>;
 }
 
 // ---------------------------------------------------------------- Supabase
@@ -963,10 +966,10 @@ function supabaseStore(): PresupuestoStore | null {
     },
 
     async elementosEjecucion(projectId) {
-      const rows = await all<{ item_id: string; ifc_guid: string; model_id: string; ejecutado: string | null }>(
-        `/presupuesto_elementos?project_id=${eq(projectId)}&select=item_id,ifc_guid,model_id,ejecutado&order=id.asc`
+      const rows = await all<{ item_id: string; ifc_guid: string; model_id: string; cantidad: number | null; memoria: Memoria | null; ejecutado: string | null }>(
+        `/presupuesto_elementos?project_id=${eq(projectId)}&select=item_id,ifc_guid,model_id,cantidad,memoria,ejecutado&order=id.asc`
       );
-      return rows.map((r) => ({ itemId: r.item_id, ifcGuid: r.ifc_guid, modelId: r.model_id, ejecutado: r.ejecutado ?? null }));
+      return rows.map((r) => ({ itemId: r.item_id, ifcGuid: r.ifc_guid, modelId: r.model_id, cantidad: r.cantidad, memoria: r.memoria ?? null, ejecutado: r.ejecutado ?? null }));
     },
   };
 }
@@ -1290,7 +1293,9 @@ export function memoryStore(): PresupuestoStore {
       return n;
     },
     async elementosEjecucion(projectId) {
-      return [...elementos.values()].filter((e) => e.projectId === projectId).map((e) => ({ itemId: e.itemId, ifcGuid: e.ifcGuid, modelId: e.modelId, ejecutado: e.ejecutado ?? null }));
+      return [...elementos.values()]
+        .filter((e) => e.projectId === projectId)
+        .map((e) => ({ itemId: e.itemId, ifcGuid: e.ifcGuid, modelId: e.modelId, cantidad: e.cantidad, memoria: e.memoria, ejecutado: e.ejecutado ?? null }));
     },
   };
 }

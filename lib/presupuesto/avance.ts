@@ -4,34 +4,41 @@
 // come the planned value (PV), the earned value (EV) and the actual cost (AC),
 // and the indicators that tell whether the work is ahead or behind, in time
 // (SPI, earned schedule) and in cost (CPI).
-import { redondear } from "./calc";
+import { redondear, SubpresupuestoCalculado } from "./calc";
 import { Calendario, sumarDias } from "./calendario";
-import { periodos, Periodo, Programado, TipoPeriodo } from "./programacion";
-import type { CorteAvance, EjecucionItem, LineaBaseDatos, Programacion, TareaBase } from "./types";
+import { FilaGantt, periodos, Periodo, Programado, TipoPeriodo } from "./programacion";
+import type { CorteAvance, EjecucionItem, FiltroUbicacion, LineaBaseDatos, Memoria, PresupuestoDoc, Programacion, TareaBase } from "./types";
+import { SIN_DATO_UBICACION } from "./types";
 
 const EPS = 1e-9;
 
+/** A schedule row as a baseline row (what a task does of each partida, where, and who answers for a node). */
+export function tareaBaseDe(f: FilaGantt): TareaBase {
+  return {
+    id: f.id,
+    tipo: f.tipo,
+    spId: f.spId,
+    nivel: f.nivel,
+    numero: f.numero,
+    descripcion: f.descripcion,
+    unidad: f.unidad,
+    ancestros: f.ancestros,
+    metrado: f.metrado,
+    costo: redondear(f.parcial, 2),
+    es: redondear(f.es, 4),
+    ef: redondear(f.ef, 4),
+    inicio: f.inicio,
+    fin: f.fin,
+    duracion: f.duracion,
+    ...(f.tipo === "partida" ? { asignaciones: f.asignaciones.map((a) => ({ partida: a.partida, pct: a.pct, costo: a.parcial })) } : {}),
+    ...(f.responsable ? { responsable: f.responsable } : {}),
+    ...(f.tipo === "partida" && f.ubicacion.length ? { ubicacion: f.ubicacion } : {}),
+  };
+}
+
 /** The schedule on screen, frozen as a baseline. */
 export function lineaBaseDe(res: Programado, prog: Programacion): LineaBaseDatos {
-  const tareas: TareaBase[] = res.filas
-    .filter((f) => !f.vacia)
-    .map((f) => ({
-      id: f.id,
-      tipo: f.tipo,
-      spId: f.spId,
-      nivel: f.nivel,
-      numero: f.numero,
-      descripcion: f.descripcion,
-      unidad: f.unidad,
-      ancestros: f.ancestros,
-      metrado: f.metrado,
-      costo: redondear(f.parcial, 2),
-      es: redondear(f.es, 4),
-      ef: redondear(f.ef, 4),
-      inicio: f.inicio,
-      fin: f.fin,
-      duracion: f.duracion,
-    }));
+  const tareas = res.filas.filter((f) => !f.vacia).map(tareaBaseDe);
   const total = redondear(
     tareas.filter((t) => t.tipo === "partida").reduce((s, t) => s + t.costo, 0),
     2
@@ -371,27 +378,230 @@ export const ESTADO_ELEMENTO: Record<EstadoElemento, { texto: string; color: str
 };
 const PESO: Record<EstadoElemento, number> = { ejecutado: 0, pendiente: 1, "en-curso": 2, atrasado: 3 };
 
+/** What a baseline task does of each partida (a task of the budget's outline is its partida, all of it). */
+export function asignacionesDe(t: TareaBase): { partida: string; pct: number; costo: number }[] {
+  return t.asignaciones ?? (t.tipo === "partida" ? [{ partida: t.id, pct: 100, costo: t.costo }] : []);
+}
+
+const normal = (x: string) => x.trim().toUpperCase();
+
+/** Whether an element is in a place: each filter's column has its value ("(sin dato)": has none). */
+export function cumpleUbicacion(memoria: Memoria | null | undefined, filtros: FiltroUbicacion[] | undefined): boolean {
+  return (filtros ?? []).every((f) => {
+    const v = normal(memoria?.[f.columna] ?? "");
+    return f.valor === SIN_DATO_UBICACION ? v === "" : v === normal(f.valor);
+  });
+}
+
+export type ElementoAvance = { itemId: string; ifcGuid: string; modelId: string; cantidad?: number | null; ejecutado?: string | null; memoria?: Memoria | null };
+
 /**
- * Each element's state at a date: built for all its partidas, or pending, and
- * then late (its partida should have finished by then in the baseline), in
- * progress (its partida was planned to be under way) or not due yet. An
- * element of several partidas takes the worst of them.
+ * A task's % built by a date according to the viewer: for each partida it
+ * does, its elements in the task's place built by then (by measured
+ * quantity, or by count), weighted by the task's cost of each partida.
+ * null when none of its partidas has elements there.
  */
-export function estadoElementos(
-  elementos: { itemId: string; ifcGuid: string; modelId: string; ejecutado?: string | null }[],
-  fecha: string,
-  base: LineaBaseDatos | null
-): Map<string, { estado: EstadoElemento; modelId: string }> {
-  const plan = new Map((base?.tareas ?? []).filter((t) => t.tipo === "partida").map((t) => [t.id, t]));
+export function pctTareaDelModelo(t: TareaBase, porPartida: Map<string, ElementoAvance[]>, fecha: string): number | null {
+  let peso = 0;
+  let hecho = 0;
+  for (const a of asignacionesDe(t)) {
+    const els = (porPartida.get(a.partida) ?? []).filter((e) => cumpleUbicacion(e.memoria, t.ubicacion));
+    if (!els.length) continue;
+    const porCantidad = els.some((e) => (e.cantidad ?? 0) > 0);
+    let total = 0;
+    let ejecutado = 0;
+    for (const e of els) {
+      const w = porCantidad ? e.cantidad ?? 0 : 1;
+      total += w;
+      if (e.ejecutado && e.ejecutado <= fecha) ejecutado += w;
+    }
+    if (!(total > 0)) continue;
+    const w = a.costo > 0 ? a.costo : 1;
+    peso += w;
+    hecho += (w * ejecutado) / total;
+  }
+  return peso > 0 ? redondear(Math.min((hecho / peso) * 100, 100), 2) : null;
+}
+
+/**
+ * Each element's state at a date: built for all its partidas, or pending,
+ * and then late (the baseline task that does it there should have finished),
+ * in progress (that task was planned to be under way) or not due yet. The
+ * task is found by the element's partida and place. An element of several
+ * partidas takes the worst of them.
+ */
+export function estadoElementos(elementos: ElementoAvance[], fecha: string, base: LineaBaseDatos | null): Map<string, { estado: EstadoElemento; modelId: string }> {
+  const porPartida = new Map<string, TareaBase[]>();
+  for (const t of base?.tareas ?? []) {
+    if (t.tipo !== "partida") continue;
+    for (const a of asignacionesDe(t)) porPartida.set(a.partida, [...(porPartida.get(a.partida) ?? []), t]);
+  }
   const out = new Map<string, { estado: EstadoElemento; modelId: string }>();
   for (const e of elementos) {
     let estado: EstadoElemento = "ejecutado";
     if (!e.ejecutado || e.ejecutado > fecha) {
-      const t = plan.get(e.itemId);
-      estado = !t ? "pendiente" : t.fin <= fecha ? "atrasado" : t.inicio <= fecha ? "en-curso" : "pendiente";
+      estado = "pendiente";
+      for (const t of porPartida.get(e.itemId) ?? []) {
+        if (!cumpleUbicacion(e.memoria, t.ubicacion)) continue;
+        const x: EstadoElemento = t.fin <= fecha ? "atrasado" : t.inicio <= fecha ? "en-curso" : "pendiente";
+        if (PESO[x] > PESO[estado]) estado = x;
+      }
     }
     const antes = out.get(e.ifcGuid);
     if (!antes || PESO[estado] > PESO[antes.estado]) out.set(e.ifcGuid, { estado, modelId: e.modelId });
   }
   return out;
+}
+
+// ---------------------------------------------------------------- the same earned value, by the budget and by control account
+
+/** A row of the budget's outline (cost breakdown): a subpresupuesto, a title or a partida. */
+export interface FilaEstructura {
+  id: string;
+  tipo: "sp" | "titulo" | "partida";
+  numero: string;
+  descripcion: string;
+  nivel: number;
+  ancestros: string[];
+}
+
+/** The budget's outline as it is now, to show the earned value by its chapters. */
+export function estructuraPresupuesto(doc: PresupuestoDoc, calculados: Map<string, SubpresupuestoCalculado>): FilaEstructura[] {
+  const out: FilaEstructura[] = [];
+  for (const sp of doc.subpresupuestos) {
+    const spId = `sp:${sp.id}`;
+    out.push({ id: spId, tipo: "sp", numero: "", descripcion: sp.nombre, nivel: 0, ancestros: [] });
+    const abiertos: { id: string; nivel: number }[] = [];
+    for (const f of calculados.get(sp.id)?.filas ?? []) {
+      while (abiertos.length && abiertos[abiertos.length - 1].nivel >= f.item.nivel) abiertos.pop();
+      out.push({ id: f.item.id, tipo: f.item.tipo, numero: f.numero, descripcion: f.item.descripcion, nivel: f.item.nivel + 1, ancestros: [spId, ...abiertos.map((a) => a.id)] });
+      if (f.item.tipo === "titulo") abiertos.push({ id: f.item.id, nivel: f.item.nivel });
+    }
+  }
+  return out;
+}
+
+export interface FilaAgrupada {
+  id: string;
+  tipo: "sp" | "titulo" | "partida" | "cuenta";
+  numero: string;
+  descripcion: string;
+  nivel: number;
+  responsable: string;
+  bac: number;
+  pv: number;
+  ev: number;
+  ac: number | null;
+  pctPlaneado: number;
+  pctReal: number;
+  spi: number | null;
+  cpi: number | null;
+  estado: EstadoAvance;
+}
+
+type Suma = { bac: number; pv: number; ev: number; ac: number; evC: number; conCosto: number };
+const cero = (): Suma => ({ bac: 0, pv: 0, ev: 0, ac: 0, evC: 0, conCosto: 0 });
+function sumar(a: Suma, b: Suma) {
+  a.bac += b.bac;
+  a.pv += b.pv;
+  a.ev += b.ev;
+  a.ac += b.ac;
+  a.evC += b.evC;
+  a.conCosto += b.conCosto;
+}
+function cerrar(s: Suma) {
+  const pctPlaneado = s.bac > EPS ? redondear((s.pv / s.bac) * 100, 2) : 0;
+  const pctReal = s.bac > EPS ? redondear((s.ev / s.bac) * 100, 2) : 0;
+  return {
+    bac: redondear(s.bac, 2),
+    pv: redondear(s.pv, 2),
+    ev: redondear(s.ev, 2),
+    ac: s.conCosto ? redondear(s.ac, 2) : null,
+    pctPlaneado,
+    pctReal,
+    spi: s.pv > EPS ? redondear(s.ev / s.pv, 3) : null,
+    cpi: s.conCosto && s.ac > EPS ? redondear(s.evC / s.ac, 3) : null,
+    estado: estadoAvance(pctPlaneado, pctReal),
+  };
+}
+
+/** What each baseline task planned, earned and cost by the cut, split among the partidas it does (by its cost of each). */
+function porTarea(m: Medidor, corte: CorteAvance, cada: (t: TareaBase, s: Suma, partida: string | null) => void) {
+  const h = m.hora(corte.fecha);
+  for (const t of m.partidas) {
+    const a = corte.partidas[t.id];
+    const pct = (a?.pct ?? 0) / 100;
+    const frac = fraccionPlaneada(t, h);
+    const conCosto = a?.costo !== undefined;
+    const asign = asignacionesDe(t);
+    if (!asign.length) {
+      cada(t, { bac: t.costo, pv: t.costo * frac, ev: t.costo * pct, ac: a?.costo ?? 0, evC: conCosto ? t.costo * pct : 0, conCosto: conCosto ? 1 : 0 }, null);
+      continue;
+    }
+    const total = asign.reduce((x, y) => x + y.costo, 0);
+    for (const x of asign) {
+      const parte = total > EPS ? x.costo / total : 1 / asign.length;
+      cada(t, { bac: x.costo, pv: x.costo * frac, ev: x.costo * pct, ac: (a?.costo ?? 0) * parte, evC: conCosto ? x.costo * pct : 0, conCosto: conCosto ? 1 : 0 }, x.partida);
+    }
+  }
+}
+
+/**
+ * The earned value by the budget's outline (its chapters and partidas): each
+ * task's values go to the partidas it does. Partidas no longer in the budget
+ * show apart.
+ */
+export function controlPorPresupuesto(m: Medidor, corte: CorteAvance, estructura: FilaEstructura[]): FilaAgrupada[] {
+  const porPartida = new Map<string, Suma>();
+  porTarea(m, corte, (_t, s, partida) => {
+    if (!partida) return;
+    const x = porPartida.get(partida) ?? cero();
+    sumar(x, s);
+    porPartida.set(partida, x);
+  });
+  const sumas = new Map<string, Suma>();
+  const enEstructura = new Set<string>();
+  for (const f of estructura) {
+    if (f.tipo !== "partida") continue;
+    enEstructura.add(f.id);
+    const s = porPartida.get(f.id);
+    if (!s) continue;
+    for (const id of [f.id, ...f.ancestros]) {
+      const x = sumas.get(id) ?? cero();
+      sumar(x, s);
+      sumas.set(id, x);
+    }
+  }
+  const filas: FilaAgrupada[] = estructura.map((f) => ({ id: f.id, tipo: f.tipo, numero: f.numero, descripcion: f.descripcion, nivel: f.nivel, responsable: "", ...cerrar(sumas.get(f.id) ?? cero()) }));
+  const fuera = cero();
+  for (const [id, s] of porPartida) if (!enEstructura.has(id)) sumar(fuera, s);
+  if (fuera.bac > EPS || fuera.ev > EPS) filas.push({ id: "__fuera", tipo: "sp", numero: "", descripcion: "Partidas que ya no están en el presupuesto", nivel: 0, responsable: "", ...cerrar(fuera) });
+  return filas;
+}
+
+/**
+ * The earned value by control account: the EDT node with a person in charge
+ * nearest to each task (tasks with none go to "Sin responsable").
+ */
+export function controlPorCuenta(m: Medidor, corte: CorteAvance): FilaAgrupada[] {
+  const cuentas = new Map<string, Suma>();
+  porTarea(m, corte, (t, s) => {
+    let cuenta = "";
+    for (let i = t.ancestros.length - 1; i >= 0; i--) {
+      if (m.porId.get(t.ancestros[i])?.responsable) {
+        cuenta = t.ancestros[i];
+        break;
+      }
+    }
+    const x = cuentas.get(cuenta) ?? cero();
+    sumar(x, s);
+    cuentas.set(cuenta, x);
+  });
+  const ultimo = "\uffff";
+  return [...cuentas]
+    .map(([id, s]): FilaAgrupada => {
+      const n = id ? m.porId.get(id)! : null;
+      return { id: id || "__sin", tipo: "cuenta", numero: n?.numero ?? "", descripcion: n?.descripcion ?? "Sin responsable", nivel: 0, responsable: n?.responsable ?? "", ...cerrar(s) };
+    })
+    .sort((a, b) => (a.responsable || ultimo).localeCompare(b.responsable || ultimo, "es") || a.numero.localeCompare(b.numero, "es", { numeric: true }));
 }

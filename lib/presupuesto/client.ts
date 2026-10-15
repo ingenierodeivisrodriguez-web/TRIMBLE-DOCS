@@ -1,5 +1,7 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type {
+  ActividadProgramaIA,
+  BorradorProgramaIA,
   BorradorApuIA,
   BorradorEstructuraIA,
   BorradorIA,
@@ -23,6 +25,7 @@ import type {
   ResumenesIA,
 } from "./ia/tipos";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
+import type { ElementoEjecucion } from "./store";
 import {
   AvanceResponse,
   ControlAvance,
@@ -94,6 +97,8 @@ export interface PresupuestoApi {
   /** The analysis of a batch of partidas; with `evaluar`, nothing is saved (to compare with the catalog). */
   generarApuIA(p: { contexto: string; partidas: PartidaApuIA[]; catalogo: InsumoCatalogoIA[]; evaluar?: boolean }): Promise<GenerarApuResponse>;
   borradoresApuIA(): Promise<BorradorApuIA[]>;
+  /** Work packages and sequence of activities of the schedule, saved as a draft. */
+  generarProgramaIA(p: { contexto: string; alcance: string | null; actividades: ActividadProgramaIA[] }): Promise<{ borrador: BorradorProgramaIA; faltantes: string[]; costoCop: number; cupo: EstadoCupo }>;
   /** A question about the open budget, sent as text. */
   chatIA(p: { pregunta: string; contexto: string; historial: MensajeChatIA[] }): Promise<RespuestaChatIA>;
   getProgramacion(): Promise<ProgramacionResponse>;
@@ -111,7 +116,7 @@ export interface PresupuestoApi {
   /** Marks elements as built that day (null: not built); several requests when there are many. */
   marcarEjecutados(marcas: MarcaEjecucion[], fecha: string | null): Promise<number>;
   /** Every linked element with the day it was built. */
-  elementosEjecucion(): Promise<{ itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[]>;
+  elementosEjecucion(): Promise<ElementoEjecucion[]>;
   elementosDe(filter: { itemIds?: string[]; ifcGuids?: string[] }): Promise<ElementoVinculado[]>;
   guardarElementos(
     itemId: string,
@@ -183,6 +188,7 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     generarInsumosIA: (contexto, partidas, catalogo) => request("/ia/insumos", send("POST", { contexto, partidas, catalogo })),
     generarApuIA: (p) => request("/ia/apu", send("POST", p)),
     borradoresApuIA: () => request<{ borradores: BorradorApuIA[] }>("/ia/borradores?tarea=apu").then((r) => r.borradores),
+    generarProgramaIA: (p) => request("/ia/programa", send("POST", p)),
     chatIA: (p) => request("/ia/chat", send("POST", p)),
     decidirBorradoresIA: (decisiones) => request("/ia/borradores", send("PUT", { decisiones })),
     getProgramacion: () => request("/programacion"),
@@ -196,7 +202,7 @@ export function presupuestoApi(projectId: string, auth: TokenSource): Presupuest
     resumenEjecucion: (hasta) => request<{ items: EjecucionItem[] }>(`/elementos/ejecucion?hasta=${encodeURIComponent(hasta)}`).then((r) => r.items),
     marcarEjecutados: (marcas, fecha) =>
       inBatches(marcas, MAX_ELEMENTS_PER_REQUEST, (lote) => request<{ marcados: number }>("/elementos/ejecucion", send("PUT", { marcas: lote, fecha })).then((r) => r.marcados)),
-    elementosEjecucion: () => request<{ elementos: { itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[] }>("/elementos/avance").then((r) => r.elementos),
+    elementosEjecucion: () => request<{ elementos: ElementoEjecucion[] }>("/elementos/avance").then((r) => r.elementos),
     async elementosDe(filter) {
       const out: ElementoVinculado[] = [];
       const ask = async (body: { itemIds?: string[]; ifcGuids?: string[] }) =>

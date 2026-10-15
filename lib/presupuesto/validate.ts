@@ -6,6 +6,13 @@ import { DIAS_SEMANA, esFechaIso } from "./calendario";
 import { VARIABLE_RE } from "./formula";
 import { validarEsquema } from "./tree";
 import {
+  Actividad,
+  Asignacion,
+  FiltroUbicacion,
+  MAX_ASIGNACIONES,
+  MAX_FILTROS_UBICACION,
+  MAX_NODOS_EDT,
+  NodoEdt,
   AvancePartida,
   CalendarioLaboral,
   ControlAvance,
@@ -375,6 +382,70 @@ function validarTarea(value: unknown, what: string): TareaProgramada | null {
 
 const redondear2 = (n: number) => Math.round(n * 100) / 100;
 
+function validarFiltros(value: unknown, what: string): FiltroUbicacion[] {
+  return list(value ?? [], `${what}: ubicación`, MAX_FILTROS_UBICACION).map((v, i) => {
+    const f = obj(v, `${what}: ubicación ${i + 1}`);
+    return { columna: text(f.columna, `${what}: columna de la ubicación`, 64, true), valor: text(f.valor, `${what}: valor de la ubicación`, 120, true) };
+  });
+}
+
+function validarNodo(value: unknown, n: number): NodoEdt {
+  const o = obj(value, `Nodo ${n} de la EDT`);
+  const what = `Nodo ${n} de la EDT`;
+  return {
+    id: id(o.id, what),
+    padre: o.padre === null || o.padre === undefined ? null : id(o.padre, `${what}: padre`),
+    nombre: text(o.nombre, `${what}: nombre`, MAX_TEXT, true),
+    responsable: text(o.responsable, `${what}: responsable`, 120),
+    ubicacion: validarFiltros(o.ubicacion, what),
+  };
+}
+
+function validarActividad(value: unknown, n: number): Actividad {
+  const o = obj(value, `Actividad ${n}`);
+  const what = `Actividad ${n}`;
+  const partidas = new Set<string>();
+  const asignaciones: Asignacion[] = list(o.asignaciones ?? [], `${what}: partidas`, MAX_ASIGNACIONES).map((v) => {
+    const a = obj(v, `${what}: partida`);
+    const partida = id(a.partida, `${what}: partida`);
+    if (partidas.has(partida)) fail(`${what}: una partida está repetida; suma sus porcentajes en una sola.`);
+    partidas.add(partida);
+    const pct = Math.round(num(a.pct, `${what}: % de la partida`, { positive: true }) * 10000) / 10000;
+    if (pct > 100) fail(`${what}: una actividad no puede hacer más del 100 % de una partida.`);
+    return { partida, pct };
+  });
+  return {
+    ...(validarTarea(o, what) ?? {}),
+    id: id(o.id, what),
+    nodo: id(o.nodo, `${what}: paquete`),
+    nombre: text(o.nombre, `${what}: nombre`, MAX_TEXT, true),
+    asignaciones,
+  };
+}
+
+/** The schedule's own EDT: nodes in a tree, activities in existing nodes, ids not repeated. */
+function validarEdtProgramacion(edtRaw: unknown, actividadesRaw: unknown): { edt: NodoEdt[]; actividades: Actividad[] } {
+  const edt = list(edtRaw ?? [], "Nodos de la EDT", MAX_NODOS_EDT).map((v, i) => validarNodo(v, i + 1));
+  const actividades = list(actividadesRaw ?? [], "Actividades", MAX_ITEMS).map((v, i) => validarActividad(v, i + 1));
+  const ids = new Set<string>();
+  for (const x of [...edt, ...actividades]) {
+    if (ids.has(x.id)) fail(`El id ${x.id} está repetido en la EDT.`);
+    ids.add(x.id);
+  }
+  const nodos = new Map(edt.map((n) => [n.id, n]));
+  for (const n of edt) {
+    if (n.padre !== null && !nodos.has(n.padre)) fail(`El nodo «${n.nombre}» de la EDT está dentro de uno que no existe.`);
+    // Going up from each node must reach the top.
+    let x: NodoEdt | undefined = n;
+    for (let k = 0; x && x.padre !== null; k++) {
+      if (k > edt.length) fail(`El nodo «${n.nombre}» de la EDT está dentro de sí mismo.`);
+      x = nodos.get(x.padre);
+    }
+  }
+  for (const a of actividades) if (!nodos.has(a.nodo)) fail(`La actividad «${a.nombre}» está en un paquete que no existe.`);
+  return { edt, actividades };
+}
+
 export function validarProgramacion(value: unknown): Programacion {
   const o = obj(value, "Programación");
   const inicio = fechaIso(o.inicio, "Inicio del proyecto");
@@ -390,7 +461,8 @@ export function validarProgramacion(value: unknown): Programacion {
     const t = validarTarea(v, `Tarea ${id(k, "Tarea")}`);
     if (t) tareas[k] = t;
   }
-  return { inicio, finObjetivo, calendario: validarCalendario(o.calendario), redondeo, tareas };
+  const conEdt = o.edt !== undefined || o.actividades !== undefined ? validarEdtProgramacion(o.edt, o.actividades) : null;
+  return { inicio, finObjetivo, calendario: validarCalendario(o.calendario), redondeo, tareas, ...(conEdt ?? {}) };
 }
 
 // ---------------------------------------------------------------- baseline and progress
@@ -432,6 +504,18 @@ function validarTareaBase(value: unknown, n: number): TareaBase {
     inicio,
     fin,
     duracion: num(t.duracion, `${what}: duración`),
+    ...(t.asignaciones !== undefined
+      ? {
+          asignaciones: list(t.asignaciones, `${what}: partidas`, MAX_ASIGNACIONES).map((v) => {
+            const a = obj(v, `${what}: partida`);
+            const pct = num(a.pct, `${what}: % de la partida`);
+            if (pct > 100) fail(`${what}: más del 100 % de una partida.`);
+            return { partida: id(a.partida, `${what}: partida`), pct, costo: redondear2(num(a.costo, `${what}: costo de la partida`, { min: -1e13 })) };
+          }),
+        }
+      : {}),
+    ...(t.responsable ? { responsable: text(t.responsable, `${what}: responsable`, 120) } : {}),
+    ...(t.ubicacion !== undefined ? { ubicacion: validarFiltros(t.ubicacion, what) } : {}),
   };
 }
 

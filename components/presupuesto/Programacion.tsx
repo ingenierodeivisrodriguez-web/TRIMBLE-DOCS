@@ -5,11 +5,14 @@ import type { Resolver, SubpresupuestoCalculado } from "../../lib/presupuesto/ca
 import { fechaCorta } from "../../lib/presupuesto/calendario";
 import { exportarExcel, nombreSeguro } from "../../lib/presupuesto/excel";
 import { fecha, fmt } from "../../lib/presupuesto/format";
-import { calendarioInsumos, calendarioValorizado, cambiarEnlace, curvaS, enlazar, leerPredecesoras, programar } from "../../lib/presupuesto/programacion";
+import { calendarioInsumos, calendarioValorizado, cambiarEnlace, conTareas, curvaS, enlazar, leerPredecesoras, programar, tareasDe } from "../../lib/presupuesto/programacion";
 import { tablaCalendarioInsumos, tablaCalendarioValorizado, tablaCurvaS, tablaProgramacion } from "../../lib/presupuesto/reportes";
-import { MAX_DURACION_DIAS, PresupuestoDoc, TareaProgramada } from "../../lib/presupuesto/types";
+import { ColumnaMemoria, MAX_DURACION_DIAS, PresupuestoDoc, TareaProgramada } from "../../lib/presupuesto/types";
 import { indicadores, Medidor } from "../../lib/presupuesto/avance";
+import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { AvanceDialog, LineaBaseDialog, ValorGanadoDialog } from "./Avance";
+import { EdtDialog } from "./Edt";
+import { LineaBalanceDialog } from "./LineaBalance";
 import Gantt from "./Gantt";
 import { CalendarioDialog, CurvaSDialog, DependenciaDialog, EstimarDialog, FechaCampo, InsumosPeriodoDialog, TareaDialog, ValorizadoDialog } from "./ProgramacionDialogs";
 import { ConfirmDialog } from "./SimpleDialogs";
@@ -18,7 +21,7 @@ import type { useAvance } from "./useAvance";
 import type { useProgramacion } from "./useProgramacion";
 
 type Dialogo =
-  | { tipo: "calendario" | "estimar" | "curva" | "valorizado" | "insumos" | "recargar" | "lineaBase" | "avance" | "valorGanado" }
+  | { tipo: "calendario" | "estimar" | "curva" | "valorizado" | "insumos" | "recargar" | "lineaBase" | "avance" | "valorGanado" | "edt" | "balance" }
   | { tipo: "tarea"; id: string }
   | { tipo: "enlace"; de: string; a: string };
 
@@ -30,6 +33,9 @@ type Dialogo =
 export default function Programacion({
   p,
   av,
+  api,
+  projectId,
+  columnas,
   doc,
   calculados,
   resolver,
@@ -41,6 +47,10 @@ export default function Programacion({
   p: ReturnType<typeof useProgramacion>;
   /** The baselines and progress reports (valor ganado). */
   av: ReturnType<typeof useAvance>;
+  api: PresupuestoApi;
+  projectId: string;
+  /** The columns of the memoria de cantidades (where the elements are: the locations). */
+  columnas: ColumnaMemoria[];
   doc: PresupuestoDoc;
   calculados: Map<string, SubpresupuestoCalculado>;
   resolver: Resolver;
@@ -103,14 +113,15 @@ export default function Programacion({
     return () => window.removeEventListener("keydown", onKey);
   }, [canEdit, p]);
 
-  /** Changes a partida's settings; empty settings are dropped. */
+  /** Changes a task's settings (a partida's, or an activity's); empty settings are dropped. */
   function setTarea(id: string, cambio: (t: TareaProgramada) => TareaProgramada) {
     setProg((x) => {
-      const t = cambio({ ...(x.tareas[id] ?? {}) });
-      const tareas = { ...x.tareas };
+      const actuales = tareasDe(x);
+      const t = cambio({ ...(actuales[id] ?? {}) });
+      const tareas = { ...actuales };
       if (Object.keys(t).length) tareas[id] = t;
       else delete tareas[id];
-      return { ...x, tareas };
+      return conTareas(x, tareas);
     });
   }
 
@@ -148,6 +159,14 @@ export default function Programacion({
           {projectName}
           {!canEdit && " · solo consulta"}
         </span>
+        <HeadButton onClick={() => setDialogo({ tipo: "edt" })} disabled={!res} strong={res?.modo === "edt"}>
+          🗂 Estructura (EDT)
+        </HeadButton>
+        {res?.modo === "edt" && (
+          <HeadButton onClick={() => setDialogo({ tipo: "balance" })} disabled={!res}>
+            📐 Línea de balance
+          </HeadButton>
+        )}
         <HeadButton onClick={() => setDialogo({ tipo: "calendario" })} disabled={!prog}>
           Calendario laboral
         </HeadButton>
@@ -258,7 +277,7 @@ export default function Programacion({
         )}
         {critica && res && (
           <span style={{ color: "#d93025" }}>
-            Ruta crítica: {res.filas.filter((f) => f.tipo === "partida" && f.critica).length} partida(s) sin holgura.
+            Ruta crítica: {res.filas.filter((f) => f.tipo === "partida" && f.critica).length} tarea(s) sin holgura.
           </span>
         )}
       </div>
@@ -280,6 +299,7 @@ export default function Programacion({
       ) : (
         <Gantt
           res={res}
+          modo={res.modo}
           filas={visibles}
           selectedId={selectedId}
           onSelect={setSelectedId}
@@ -318,7 +338,7 @@ export default function Programacion({
             })
           }
           onPredecesoras={(id, texto) => {
-            const r = leerPredecesoras(texto, res, id, prog.tareas);
+            const r = leerPredecesoras(texto, res, id, tareasDe(prog));
             const fila = res.porId.get(id)?.fila;
             if ("error" in r) {
               setAviso(`Predecesoras de la fila ${fila}: ${r.error}`);
@@ -334,12 +354,12 @@ export default function Programacion({
           }}
           onOpen={(id) => setDialogo({ tipo: "tarea", id })}
           onEnlazar={(de, a) => {
-            const r = enlazar(prog.tareas, res, de, a);
+            const r = enlazar(tareasDe(prog), res, de, a);
             if ("error" in r) {
               setAviso(r.error);
               return;
             }
-            setProg((x) => ({ ...x, tareas: r.tareas }));
+            setProg((x) => conTareas(x, r.tareas));
             setAviso("");
             setSelectedId(a);
           }}
@@ -380,7 +400,7 @@ export default function Programacion({
             onClose={close}
             onAccept={(redondeo, reemplazar) => {
               setProg((x) => {
-                const tareas = { ...x.tareas };
+                const tareas = { ...tareasDe(x) };
                 if (reemplazar) {
                   for (const f of res.filas) {
                     if (f.tipo !== "partida" || f.estimacion === null || tareas[f.id]?.duracion === undefined) continue;
@@ -389,7 +409,7 @@ export default function Programacion({
                     else delete tareas[f.id];
                   }
                 }
-                return { ...x, redondeo, tareas };
+                return { ...conTareas(x, tareas), redondeo };
               });
               close();
             }}
@@ -424,11 +444,11 @@ export default function Programacion({
             editable={canEdit}
             onClose={close}
             onAccept={(cambio) => {
-              setProg((x) => ({ ...x, tareas: cambiarEnlace(x.tareas, de.id, a.id, cambio) }));
+              setProg((x) => conTareas(x, cambiarEnlace(tareasDe(x), de.id, a.id, cambio)));
               close();
             }}
             onEliminar={() => {
-              setProg((x) => ({ ...x, tareas: cambiarEnlace(x.tareas, de.id, a.id, null) }));
+              setProg((x) => conTareas(x, cambiarEnlace(tareasDe(x), de.id, a.id, null)));
               close();
             }}
           />
@@ -445,7 +465,11 @@ export default function Programacion({
       case "avance":
         return res ? <AvanceDialog av={av} res={res} canEdit={canEdit} onClose={close} /> : null;
       case "valorGanado":
-        return <ValorGanadoDialog av={av} proyecto={projectName} onClose={close} />;
+        return <ValorGanadoDialog av={av} proyecto={projectName} doc={doc} calculados={calculados} onClose={close} />;
+      case "edt":
+        return res ? <EdtDialog prog={prog} setProg={setProg} res={res} doc={doc} calculados={calculados} canEdit={canEdit} api={api} projectId={projectId} columnas={columnas} onClose={close} /> : null;
+      case "balance":
+        return res ? <LineaBalanceDialog res={res} avancePct={avancePct} onClose={close} /> : null;
       case "recargar":
         return (
           <ConfirmDialog

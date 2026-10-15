@@ -1359,6 +1359,75 @@ al presupuesto los cambios sin guardar se conservan y la barra lo avisa.
 - **Excel**: la programación, el calendario valorizado, el de insumos y la
   curva S en un libro; cada ventana exporta también lo suyo.
 
+### EDT de la programación: entregables, actividades y su enlace con el presupuesto
+
+Como pide el PMI, cada estructura tiene su uso y aquí quedan **enlazadas, no
+copiadas**:
+
+- **Presupuesto (estructura de costos):** cuánto cuesta, por capítulos y
+  partidas con su análisis de precios. No cambia.
+- **EDT de la programación (WBS):** qué se entrega, por entregables y ubicación
+  (torre, piso, zona). Sus nodos de abajo son los **paquetes de trabajo**, con
+  su **responsable** (la cuenta de control) y su **ubicación en el modelo**
+  (filtros sobre las columnas de la memoria de cantidades, por ejemplo Nivel =
+  PISO 3).
+- **Actividades:** cómo y cuándo. Cada una está en un paquete y hace un **% de
+  una o varias partidas** (sin partidas: un hito, un curado o un trámite, sin
+  costo). De ahí salen su **cantidad** (% del metrado), su **costo** (el
+  parcial de la partida se reparte al centavo entre sus actividades) y su
+  **duración estimada** (la suma de cantidad ÷ (rendimiento × cuadrillas) de
+  cada partida, como si la misma cuadrilla las hiciera una tras otra; si
+  trabajan en paralelo se escribe la duración).
+
+**🗂 Estructura (EDT)** en la barra de Programación. Al principio la
+programación sigue el presupuesto (cada partida es una tarea); **Crear la EDT
+de la programación** la convierte: cada subpresupuesto y título pasa a ser un
+nodo y cada partida una actividad del 100 % **con su mismo id**, sus enlaces y
+su duración, así que la línea base, los cortes de avance y las marcas del visor
+siguen sirviendo. En la ventana:
+
+- El **árbol** con los paquetes (responsable 👤, ubicación 📍, costo) y sus
+  actividades; a la derecha se edita lo elegido: nombre, responsable, dónde va,
+  filtros de ubicación, subir y bajar, agregar subpaquetes o actividades,
+  eliminar (lo que contiene pasa al paquete de arriba). En una actividad, las
+  partidas que hace con su %, su cantidad y su costo, y cuánto suma cada partida
+  entre todas sus actividades.
+- **Regla del 100 %:** cada partida debe quedar asignada completa y una sola vez.
+  Muestra las que les falta y las que tienen de más (también como aviso en la
+  barra de Programación) y crea actividades con lo que falta (en el paquete de
+  su título del presupuesto si existe, o en SIN CLASIFICAR).
+- **Dividir por ubicación** (fase 2): parte una o varias partidas en una
+  actividad por ubicación. Las ubicaciones salen **del modelo 3D** (los
+  elementos asociados a cada partida, agrupados por una columna de la memoria
+  de cantidades, con el % de cada una por cantidad medida o por conteo; los que
+  no tienen dato van a «(sin dato)»), o se **escriben a mano** (partes iguales).
+  Crea un paquete por ubicación con su filtro del modelo (o los pone en el
+  paquete elegido) y arma el **tren**: en cada piso una partida tras otra (fin a
+  comienzo) y cada partida de un piso al siguiente, con días de espera. Las
+  actividades que reemplaza entregan sus enlaces: lo que iba antes de ellas va
+  antes del tren, y lo que venía después, después de su última actividad. Se
+  puede invertir el orden (de arriba hacia abajo).
+- **🤖 Proponer paquetes y secuencia** (fase 4): para las actividades de un
+  alcance (hasta 150), el asistente propone el paquete de trabajo (una ruta
+  dentro del alcance) y las predecesoras (FC, CC o FF con desfase en días) con
+  la lógica constructiva colombiana. Se revisa fila por fila y se aplica lo
+  marcado: crea los paquetes que falten, mueve las actividades y agrega (o
+  reemplaza) las predecesoras, descartando las que cerrarían un ciclo. Queda
+  como borrador en la evaluación del asistente (tarea «Secuencia
+  (programación)»). Se envían nombre, unidad, cantidad, duración y paquete de
+  cada actividad, sin precios.
+
+**📐 Línea de balance** (fase 4): las ubicaciones hacia arriba (el primer piso
+abajo) y el tiempo hacia la derecha; cada tipo de trabajo (la partida que hacen
+sus actividades) es una banda que sube de piso en piso, con su avance del
+último corte. Si dos bandas se acercan o se cruzan, esas cuadrillas se van a
+estorbar. Se ven hasta 8 trabajos a la vez (cada uno conserva su color) y
+también como tabla.
+
+En el Gantt, la columna de la tarea se llama *EDT / actividad* y *Cantidad*; el
+calendario valorizado, la curva S y el de insumos se filtran por el primer
+nivel de la EDT y siguen a cada partida de cada actividad.
+
 ### Línea base y control de avance (valor ganado)
 
 Tres botones de la barra de Programación:
@@ -1395,6 +1464,16 @@ Tres botones de la barra de Programación:
   días hábiles y gasta más de lo previsto"), la **curva S planeada contra la
   real** (PV, EV y AC por semana o mes), la tabla de cortes y la tabla por
   capítulo. Se exporta a Excel.
+
+**Con la EDT de la programación** (fase 3): la línea base guarda, de cada
+actividad, qué % hace de cada partida con su costo, su ubicación en el modelo y
+el responsable de cada paquete. «Leer el avance del modelo 3D» calcula el % de
+cada actividad con los elementos de sus partidas **que están en su ubicación**
+(las columnas del piso 3 solo cuentan para la actividad del piso 3). En **📊
+Valor ganado**, «Ver por» muestra el mismo valor ganado **por la EDT** de la
+programación, **por los capítulos del presupuesto** (cada actividad reparte sus
+valores entre las partidas que hace) o **por responsable** (cuenta de control: el
+paquete con responsable más cercano a cada actividad).
 
 **En el visor 3D** (panel Presupuesto → *Avance de obra*): se seleccionan
 elementos y se marcan como **ejecutados** un día, en la partida elegida o en
@@ -1609,7 +1688,7 @@ ejecutar sin perder datos):
 | `presupuesto_modelos_usados` | Vista: modelos (archivos) de los elementos asociados y cuántos elementos tiene cada uno |
 | `presupuesto_guardar_insumos` / `_partidas` | Guardan lotes; una fila con el id de otro catálogo no se toca |
 | `presupuesto_guardar` | Guarda el presupuesto si la versión coincide y limpia los elementos de partidas borradas |
-| `presupuesto_programacion` | La programación (Gantt) de cada proyecto (jsonb: inicio, fecha fin, calendario, redondeo y, por partida, duración, cuadrillas, predecesoras y fecha fija) con su `version` |
+| `presupuesto_programacion` | La programación (Gantt) de cada proyecto (jsonb: inicio, fecha fin, calendario, redondeo y, por partida, duración, cuadrillas, predecesoras y fecha fija; o, con la EDT propia, sus nodos y sus actividades con sus asignaciones) con su `version` |
 | `presupuesto_guardar_programacion` | Guarda la programación si la versión coincide |
 | `presupuesto_lineas_base` | Las líneas base de cada proyecto (jsonb con las filas congeladas), una vigente; no se borran |
 | `presupuesto_crear_linea_base` / `presupuesto_usar_linea_base` | Guardan una línea base nueva (queda vigente) / cambian la vigente |
@@ -1650,6 +1729,7 @@ Todas las rutas usan `?projectId=` y el token del usuario
 | `POST /api/presupuesto/ia/estructura/partidas` | `{ descripcion, agrupacion, detalle, capitulo, otros, catalogo }`: las partidas de un capítulo, guardadas como borrador |
 | `POST /api/presupuesto/ia/insumos` | `{ contexto, partidas, catalogo }`: insumos de un lote; los que faltan quedan como borradores |
 | `POST /api/presupuesto/ia/apu` | `{ contexto, partidas, catalogo, evaluar? }` (hasta 6 partidas, cada una con hasta 3 parecidas): el análisis de precios de un lote, guardado como borrador (con `evaluar`, solo se responde) |
+| `POST /api/presupuesto/ia/programa` | `{ contexto, alcance, actividades }` (hasta 150): paquetes de trabajo y predecesoras propuestos, guardados como borrador |
 | `POST /api/presupuesto/ia/chat` | `{ pregunta, contexto, historial }`: responde una pregunta sobre el presupuesto (`{ respuesta, items }`, con los códigos de las partidas que menciona) |
 | `GET` / `PUT /api/presupuesto/ia/borradores` | Borradores pendientes de una tarea (`?tarea=edt\|estructura\|insumos\|apu`) / `{ decisiones: [{ id, estado, final? }] }` (`final` es lo que se aplicó; si difiere de la propuesta cuenta como editado) |
 | `GET` / `PUT /api/presupuesto/programacion` | Leer (`programacion: null` hasta el primer guardado) / guardar `{ programacion, version }` (solo quien edita; 409 `version-conflict`) |

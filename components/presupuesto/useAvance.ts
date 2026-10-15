@@ -123,5 +123,6 @@ export function useAvance(api: PresupuestoApi, abierta: boolean, usuario: string
     crearLineaBase,
     usarLineaBase,
     resumenEjecucion: api.resumenEjecucion,
+    elementosDe: api.elementosDe,
   };
 }

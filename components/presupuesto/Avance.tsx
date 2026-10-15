@@ -2,7 +2,15 @@
 
 import { CSSProperties, ReactNode, useMemo, useState } from "react";
 import { CartesianGrid, ComposedChart, Legend, Line, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { SubpresupuestoCalculado } from "../../lib/presupuesto/calc";
 import {
+  controlPorCuenta,
+  controlPorPresupuesto,
+  ElementoAvance,
+  estructuraPresupuesto,
+  FilaAgrupada,
+  pctTareaDelModelo,
+  tareaBaseDe,
   corteAnterior,
   curvaValorGanado,
   ESTADO_AVANCE,
@@ -15,14 +23,13 @@ import {
   lineaBaseDe,
   Medidor,
   nuevoCorte,
-  pctDelModelo,
 } from "../../lib/presupuesto/avance";
 import { diasEntre, fechaCorta } from "../../lib/presupuesto/calendario";
 import { exportarExcel, nombreSeguro } from "../../lib/presupuesto/excel";
 import { coincide, fecha, fmt } from "../../lib/presupuesto/format";
 import type { FilaGantt, Programado, TipoPeriodo } from "../../lib/presupuesto/programacion";
 import { tablasValorGanado } from "../../lib/presupuesto/reportes";
-import type { AvancePartida, CorteAvance, EjecucionItem, LineaBase, Programacion } from "../../lib/presupuesto/types";
+import type { AvancePartida, CorteAvance, LineaBase, PresupuestoDoc, Programacion } from "../../lib/presupuesto/types";
 import { todayIso } from "../../lib/propiedades/values";
 import { Alternar, compacto, FechaCampo, PERIODOS, useExportar } from "./ProgramacionDialogs";
 import { ConfirmDialog } from "./SimpleDialogs";
@@ -103,7 +110,7 @@ export function LineaBaseDialog({
             <div style={{ fontSize: 13.5, lineHeight: 1.7 }}>
               <strong>{vig.nombre}</strong>, guardada el {fecha(vig.creada)}
               {vig.creadaPor ? ` por ${vig.creadaPor}` : ""}.<br />
-              Del {fechaCorta(vig.inicio)} al {fechaCorta(vig.fin)} · {vig.partidas} partidas · costo {fmt(vig.total)}.
+              Del {fechaCorta(vig.inicio)} al {fechaCorta(vig.fin)} · {vig.partidas} tareas · costo {fmt(vig.total)}.
               <br />
               <span style={{ color: finDif || Math.abs(costoDif) >= 0.01 ? "#7a5300" : "var(--tc-gray-500)" }}>
                 La programación de hoy termina el {fechaCorta(res.fin)}
@@ -123,7 +130,7 @@ export function LineaBaseDialog({
               <input value={nombre} maxLength={120} onChange={(e) => setNombre(e.target.value)} style={{ ...baseInput, width: 320 }} aria-label="Nombre de la línea base" />
             </label>
             <span style={{ color: "var(--tc-gray-500)" }}>
-              {partidas} partidas · del {fechaCorta(datos.inicio)} al {fechaCorta(datos.fin)} · costo {fmt(datos.total)}
+              {partidas} tareas · del {fechaCorta(datos.inicio)} al {fechaCorta(datos.fin)} · costo {fmt(datos.total)}
             </span>
             <button
               type="button"
@@ -150,7 +157,7 @@ export function LineaBaseDialog({
                   <th style={th}>Inicio</th>
                   <th style={th}>Fin</th>
                   <th style={th}>Costo</th>
-                  <th style={th}>Partidas</th>
+                  <th style={th}>Tareas</th>
                   <th style={th} />
                 </tr>
               </thead>
@@ -221,7 +228,7 @@ export function AvanceDialog({ av, res, canEdit, onClose }: { av: Avance; res: P
   const [spId, setSpId] = useState<string | null>(null);
   const [texto, setTexto] = useState("");
   const [soloActivas, setSoloActivas] = useState(false);
-  const [modelo, setModelo] = useState<{ fecha: string; items: Map<string, EjecucionItem> } | null>(null);
+  const [modelo, setModelo] = useState<{ fecha: string; items: Map<string, number> } | null>(null);
   const [leyendo, setLeyendo] = useState(false);
   const [confirmar, setConfirmar] = useState<"eliminar" | "modelo" | null>(null);
   const corte = cortes.find((c) => c.id === corteId) ?? null;
@@ -303,12 +310,22 @@ export function AvanceDialog({ av, res, canEdit, onClose }: { av: Avance; res: P
   }
 
   async function leerModelo() {
-    if (!corte) return;
+    if (!corte || !m) return;
     setLeyendo(true);
     setError("");
     try {
-      const items = await av.resumenEjecucion(corte.fecha);
-      setModelo({ fecha: corte.fecha, items: new Map(items.map((x) => [x.itemId, x])) });
+      // Each task: its partidas' elements in its place built by the cut (activities split by floor take only theirs).
+      const tareas = [...m.partidas, ...nuevas.map(tareaBaseDe)];
+      const ids = [...new Set(tareas.flatMap((t) => (t.asignaciones ?? [{ partida: t.id }]).map((a) => a.partida)))];
+      const elementos = ids.length ? await av.elementosDe({ itemIds: ids }) : [];
+      const porPartida = new Map<string, ElementoAvance[]>();
+      for (const e of elementos) porPartida.set(e.itemId, [...(porPartida.get(e.itemId) ?? []), e]);
+      const items = new Map<string, number>();
+      for (const t of tareas) {
+        const pct = pctTareaDelModelo(t, porPartida, corte.fecha);
+        if (pct !== null) items.set(t.id, pct);
+      }
+      setModelo({ fecha: corte.fecha, items });
     } catch (err) {
       setError(message(err));
     } finally {
@@ -319,21 +336,19 @@ export function AvanceDialog({ av, res, canEdit, onClose }: { av: Avance; res: P
   // Partidas whose % differs from what the viewer says (only those with linked elements).
   const difierenDelModelo =
     modeloVigente && corte
-      ? [...m.porId.keys(), ...nuevas.map((f) => f.id)].filter((id) => {
-          const pm = pctDelModelo(modeloVigente.get(id));
-          return pm !== null && Math.abs(pm - (corte.partidas[id]?.pct ?? 0)) > 0.005;
-        })
+      ? [...modeloVigente].filter(([id, pm]) => Math.abs(pm - (corte.partidas[id]?.pct ?? 0)) > 0.005).map(([id]) => id)
       : [];
 
   function usarModelo(ids: string[]) {
     if (!modeloVigente) return;
     for (const id of ids) {
-      const pm = pctDelModelo(modeloVigente.get(id));
-      if (pm !== null) setPartida(id, (a) => ({ ...a, pct: pm }));
+      const pm = modeloVigente.get(id);
+      if (pm !== undefined) setPartida(id, (a) => ({ ...a, pct: pm }));
     }
   }
 
-  const spRows = base.datos.tareas.filter((t) => t.tipo === "sp");
+  // The groups at the top: subpresupuestos, or the EDT's first level.
+  const spRows = base.datos.tareas.filter((t) => t.tipo === "sp" || (t.tipo === "titulo" && t.nivel === 0 && t.ancestros.length === 0));
   return (
     <Modal
       title="Avance de obra"
@@ -448,7 +463,7 @@ export function AvanceDialog({ av, res, canEdit, onClose }: { av: Avance; res: P
               </button>
               {modeloVigente && editable && difierenDelModelo.length > 0 && (
                 <button type="button" style={{ ...botonSec, color: "#0b57d0" }} onClick={() => setConfirmar("modelo")}>
-                  Usar el % del modelo en {difierenDelModelo.length} partida(s)
+                  Usar el % del modelo en {difierenDelModelo.length} tarea(s)
                 </button>
               )}
               {modeloVigente && difierenDelModelo.length === 0 && <span style={{ color: "#1e6b2e" }}>El avance coincide con el modelo.</span>}
@@ -537,7 +552,7 @@ export function AvanceDialog({ av, res, canEdit, onClose }: { av: Avance; res: P
             setConfirmar(null);
           }}
         >
-          En {difierenDelModelo.length} partida(s) el % escrito en este corte es distinto del que dan sus elementos marcados como ejecutados en el visor. Se
+          En {difierenDelModelo.length} tarea(s) el % escrito en este corte es distinto del que dan sus elementos marcados como ejecutados en el visor. Se
           reemplazará por el del modelo; puedes revisarlo antes de guardar.
         </ConfirmDialog>
       )}
@@ -576,7 +591,7 @@ function FilaAvance({
   previo: CorteAvance | null;
   enPresupuesto: boolean;
   metradoHoy: number | null;
-  modelo: Map<string, EjecucionItem> | null;
+  modelo: Map<string, number> | null;
   editable: boolean;
   setPartida: (id: string, cambio: (a: AvancePartida) => AvancePartida) => void;
 }) {
@@ -589,7 +604,7 @@ function FilaAvance({
   const pct = a?.pct ?? 0;
   const antes = previo?.partidas[id]?.pct ?? 0;
   const metrado = metradoHoy ?? t?.metrado ?? n?.metrado ?? null;
-  const pm = esPartida && modelo ? pctDelModelo(modelo.get(id)) : null;
+  const pm = esPartida && modelo ? modelo.get(id) ?? null : null;
   const estado: EstadoAvance | null = c ? c.estado : null;
   const negrita = !esPartida;
   const nivel = t ? t.nivel : n!.nivel;
@@ -720,7 +735,21 @@ function Dato({ titulo, valor, color, grande }: { titulo: string; valor: string;
 // ---------------------------------------------------------------- earned value
 
 /** The planned S-curve against the earned one and the actual cost, with the indicators of a cut. */
-export function ValorGanadoDialog({ av, proyecto, onClose }: { av: Avance; proyecto: string; onClose: () => void }) {
+export function ValorGanadoDialog({
+  av,
+  proyecto,
+  doc,
+  calculados,
+  onClose,
+}: {
+  av: Avance;
+  proyecto: string;
+  /** Today's budget, to read the earned value by its chapters. */
+  doc: PresupuestoDoc;
+  calculados: Map<string, SubpresupuestoCalculado>;
+  onClose: () => void;
+}) {
+  const [agrupar, setAgrupar] = useState<"edt" | "presupuesto" | "cuenta">("edt");
   const base: LineaBase | null = av.lineaBase;
   const cortes = useMemo(() => av.avance?.cortes ?? [], [av.avance]);
   const [corteId, setCorteId] = useState<string | null>(cortes.length ? cortes[cortes.length - 1].id : null);
@@ -748,6 +777,13 @@ export function ValorGanadoDialog({ av, proyecto, onClose }: { av: Avance; proye
   const nombreAlcance = alcance ? m.porId.get(alcance)?.descripcion ?? "" : "Todo el presupuesto";
   const datos = curva.puntos.map((p) => ({ periodo: p.periodo.etiqueta, pv: p.pv, ev: p.ev, ac: p.ac }));
   const capitulos = filas.filter((f) => f.tarea.tipo !== "partida" && (!alcance || f.tarea.id === alcance || f.tarea.ancestros.includes(alcance)));
+  const agrupadas: FilaAgrupada[] = !corte
+    ? []
+    : agrupar === "presupuesto"
+      ? controlPorPresupuesto(m, corte, estructuraPresupuesto(doc, calculados)).filter((f) => f.tipo !== "partida")
+      : agrupar === "cuenta"
+        ? controlPorCuenta(m, corte)
+        : capitulos.map((f) => ({ id: f.tarea.id, tipo: f.tarea.tipo, numero: f.tarea.numero, descripcion: f.tarea.descripcion, nivel: f.tarea.nivel, responsable: f.tarea.responsable ?? "", ...f }));
   return (
     <Modal
       title="Valor ganado"
@@ -852,13 +888,29 @@ export function ValorGanadoDialog({ av, proyecto, onClose }: { av: Avance; proye
             ])}
           />
         )}
-        {corte && capitulos.length > 0 && (
+        {corte && (
+          <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+            <strong style={{ fontSize: 13.5 }}>Ver por:</strong>
+            <Alternar
+              label="Agrupar"
+              value={agrupar}
+              opciones={[
+                ["edt", "EDT de la programación"],
+                ["presupuesto", "Presupuesto (capítulos)"],
+                ["cuenta", "Responsable (cuenta de control)"],
+              ]}
+              onChange={setAgrupar}
+            />
+          </div>
+        )}
+        {corte && agrupadas.length > 0 && (
           <Tabla
-            titulo={`Por subpresupuesto y capítulo al ${fechaCorta(corte.fecha)}`}
-            cabeceras={["Capítulo", "Costo LB", "PV", "EV", "AC", "% planeado", "% real", "SPI", "CPI", "Estado"]}
-            filas={capitulos.map((f) => [
-              <span key="d" style={{ paddingLeft: f.tarea.nivel * 12, fontWeight: f.tarea.tipo === "sp" ? 700 : 600 }}>
-                {f.tarea.tipo === "sp" ? `SP: ${f.tarea.descripcion}` : `${f.tarea.numero} ${f.tarea.descripcion}`}
+            titulo={`${agrupar === "presupuesto" ? "Por capítulo del presupuesto" : agrupar === "cuenta" ? "Por cuenta de control" : "Por la EDT de la programación"} al ${fechaCorta(corte.fecha)}`}
+            cabeceras={[agrupar === "cuenta" ? "Responsable · paquete" : "Capítulo", "Costo LB", "PV", "EV", "AC", "% planeado", "% real", "SPI", "CPI", "Estado"]}
+            filas={agrupadas.map((f) => [
+              <span key="d" style={{ paddingLeft: f.nivel * 12, fontWeight: f.tipo === "sp" || f.tipo === "cuenta" ? 700 : 600 }}>
+                {f.tipo === "cuenta" ? `${f.responsable || "—"} · ${f.numero} ${f.descripcion}` : f.tipo === "sp" ? `SP: ${f.descripcion}` : `${f.numero} ${f.descripcion}`}
+                {agrupar === "edt" && f.responsable ? <span style={{ fontWeight: 400, color: "var(--tc-gray-500)" }}> · 👤 {f.responsable}</span> : null}
               </span>,
               fmt(f.bac),
               fmt(f.pv),

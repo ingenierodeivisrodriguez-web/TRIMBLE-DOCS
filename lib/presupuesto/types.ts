@@ -428,9 +428,60 @@ export interface Programacion {
   finObjetivo: string | null;
   calendario: CalendarioLaboral;
   redondeo: RedondeoDuracion;
-  /** By partida id. */
+  /** By partida id (while the schedule follows the budget outline: each partida is a task). */
   tareas: Record<string, TareaProgramada>;
+  /**
+   * The schedule's own work breakdown (EDT/WBS by deliverable and location). When it is set,
+   * the tasks are `actividades`, not the partidas, and `tareas` is not used.
+   */
+  edt?: NodoEdt[];
+  actividades?: Actividad[];
 }
+
+/** The elements whose column of the memoria de cantidades has this value (e.g. Nivel = PISO 3). */
+export interface FiltroUbicacion {
+  /** The column's id (see ColumnaMemoria). */
+  columna: string;
+  valor: string;
+}
+
+/**
+ * A node of the schedule's EDT (WBS): a deliverable, or a work package when it holds
+ * activities. In the order they are shown among their siblings.
+ */
+export interface NodoEdt {
+  id: string;
+  /** null at the top. */
+  padre: string | null;
+  nombre: string;
+  /** Who answers for it: its activities are its control account. */
+  responsable: string;
+  /** Where it is in the model: its activities only take the elements there (inherited by what it holds). */
+  ubicacion: FiltroUbicacion[];
+}
+
+/** The part of a partida an activity does: a % of its metrado (and of its cost). */
+export interface Asignacion {
+  partida: string;
+  pct: number;
+}
+
+/** A task of the schedule: what is done, of which partidas, in which work package. */
+export interface Actividad extends TareaProgramada {
+  id: string;
+  /** Its work package (EDT node). */
+  nodo: string;
+  nombre: string;
+  /** None: an activity without cost (a milestone, curing, a permit...). */
+  asignaciones: Asignacion[];
+}
+
+/** A location filter with this value takes the elements that have no value in that column. */
+export const SIN_DATO_UBICACION = "(sin dato)";
+
+export const MAX_NODOS_EDT = 3000;
+export const MAX_ASIGNACIONES = 30;
+export const MAX_FILTROS_UBICACION = 4;
 
 export interface ProgramacionResponse {
   /** null until the schedule is first saved. */
@@ -469,6 +520,12 @@ export interface TareaBase {
   fin: string;
   /** Working days. */
   duracion: number;
+  /** A task's part of each partida, with its planned cost (not set in baselines of the budget outline: the task is its partida). */
+  asignaciones?: { partida: string; pct: number; costo: number }[];
+  /** An EDT node's person in charge. */
+  responsable?: string;
+  /** Where a task is in the model (its node's and its ancestors' filters). */
+  ubicacion?: FiltroUbicacion[];
 }
 
 /** The approved schedule, frozen: dates, durations and planned costs. */

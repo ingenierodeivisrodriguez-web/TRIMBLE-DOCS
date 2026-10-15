@@ -11,6 +11,7 @@ import { TipoInsumo, TIPOS_INSUMO } from "../types";
 import { claveLinea, ESQUEMA_APU, leerApu, MAX_CUADRILLA, maxTokensApu, mensajeApu, SISTEMA_APU, VERSION_PROMPT_APU } from "./apu";
 import { ESQUEMA_CHAT, leerChat, mensajeChat, presupuestoComoDatos, SISTEMA_CHAT, VERSION_PROMPT_CHAT } from "./chat";
 import { errorDeIA, RespuestaIA } from "./claude";
+import { ESQUEMA_PROGRAMA, leerPrograma, maxTokensPrograma, mensajePrograma, SISTEMA_PROGRAMA, VERSION_PROMPT_PROGRAMA } from "./programa";
 import { aCop, costoUsd, disponibleCop, estadoCupo, estimarCostoCop, fmtCop, globalPorDefecto, inicioDeMes } from "./cupo";
 import { ESQUEMA_EDT, leerRespuestaEdt, maxTokensEdt, mensajeEdt, SISTEMA_EDT, VERSION_PROMPT_EDT } from "./edt";
 import {
@@ -29,6 +30,10 @@ import {
 } from "./estructura";
 import { catalogoInsumosTexto, ESQUEMA_INSUMOS, leerInsumos, maxTokensInsumos, mensajeInsumos, SISTEMA_INSUMOS, VERSION_PROMPT_INSUMOS } from "./insumos";
 import {
+  ActividadProgramaIA,
+  BorradorProgramaIA,
+  MAX_ACTIVIDADES_PROGRAMA_IA,
+  PropuestaPrograma,
   BorradorApuIA,
   BorradorEstructuraIA,
   BorradorGenerico,
@@ -644,6 +649,79 @@ export async function generarApuIA(ctx: Ctx, body: unknown): Promise<GenerarApuR
   return { borradores, propuestas, faltantes: resultado.faltantes, costoCop, cupo: await cupoActual(ctx) };
 }
 
+// ---------------------------------------------------------------- the schedule: work packages and sequence
+
+/**
+ * { contexto, alcance, actividades }: proposes the work package (a path
+ * inside the scope node) and the predecessors of a batch of activities,
+ * saved as a draft for review.
+ */
+export async function generarProgramaIA(ctx: Ctx, body: unknown): Promise<{ borrador: BorradorProgramaIA; faltantes: string[]; costoCop: number; cupo: EstadoCupo }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as Record<string, unknown>;
+  const contexto = texto(o.contexto, "Descripción del proyecto", MAX_CONTEXTO_IA);
+  const alcance = o.alcance === null || o.alcance === undefined ? null : idValido(o.alcance, "Alcance");
+  if (!Array.isArray(o.actividades) || o.actividades.length === 0) bad("No hay actividades para enviar.");
+  if (o.actividades.length > MAX_ACTIVIDADES_PROGRAMA_IA) bad(`Máximo ${MAX_ACTIVIDADES_PROGRAMA_IA} actividades por solicitud: elige un paquete más pequeño.`);
+  const ids = new Set<string>();
+  const actividades = o.actividades.map((v, i): ActividadProgramaIA => {
+    const a = (v ?? {}) as Record<string, unknown>;
+    const what = `Actividad ${i + 1}`;
+    const id = idValido(a.id, what);
+    if (ids.has(id)) bad(`${what}: está repetida.`);
+    ids.add(id);
+    return {
+      id,
+      nombre: texto(a.nombre, `${what}: nombre`, 300, true),
+      unidad: texto(a.unidad, `${what}: unidad`, 40),
+      cantidad: typeof a.cantidad === "number" && Number.isFinite(a.cantidad) ? redondear(a.cantidad, 4) : null,
+      duracion: cifra(a.duracion ?? 0, `${what}: duración`, 100_000)!,
+      ruta: texto(a.ruta, `${what}: paquete`, 600),
+    };
+  });
+  const { resultado, usoId, costoCop } = await llamar(ctx, {
+    tarea: "programa",
+    version: VERSION_PROMPT_PROGRAMA,
+    sistema: SISTEMA_PROGRAMA,
+    usuario: mensajePrograma(contexto, actividades),
+    esquema: ESQUEMA_PROGRAMA,
+    maxTokens: maxTokensPrograma(actividades.length),
+    esfuerzo: ESFUERZO,
+    items: actividades.length,
+    leer: (t) => leerPrograma(t, actividades),
+    resumen: (r) => `${r.propuestas.length} de ${actividades.length} actividades, ${r.propuestas.reduce((s, x) => s + x.predecesoras.length, 0)} enlaces${r.ciclos ? `, ${r.ciclos} enlace(s) descartados por ciclo` : ""}`,
+  });
+  const borrador = nuevoBorrador<BorradorProgramaIA>(ctx, {
+    tarea: "programa",
+    itemId: `programa:${alcance ?? "todo"}`,
+    referencia: `Paquetes y secuencia de ${resultado.propuestas.length} actividades`,
+    propuesta: { alcance, actividades: resultado.propuestas },
+    anterior: null,
+    usoId,
+  });
+  await ctx.store.guardarBorradoresIA(ctx.projectId, [borrador]);
+  return { borrador, faltantes: resultado.faltantes, costoCop, cupo: await cupoActual(ctx) };
+}
+
+/** What was applied of a sequence: for each activity, its package (or none: [] ) and some of its proposed predecessors. */
+function validarFinalPrograma(f: Record<string, unknown>, what: string, b: BorradorProgramaIA): PropuestaPrograma {
+  const lista = Array.isArray(f.actividades) ? f.actividades : bad(`${what}: faltan las actividades.`);
+  const propuestas = new Map(b.propuesta.actividades.map((a) => [a.id, a]));
+  const vistas = new Set<string>();
+  return {
+    alcance: b.propuesta.alcance,
+    actividades: lista.map((v, i) => {
+      const x = (v ?? {}) as Record<string, unknown>;
+      const p = typeof x.id === "string" ? propuestas.get(x.id) : undefined;
+      if (!p || vistas.has(p.id)) bad(`${what}: la actividad ${i + 1} no es de la propuesta.`);
+      vistas.add(p.id);
+      const paquete = Array.isArray(x.paquete) && x.paquete.length ? p.paquete : [];
+      const elegidas = new Set((Array.isArray(x.predecesoras) ? x.predecesoras : []).map((d) => (d as { id?: unknown })?.id));
+      return { id: p.id, paquete, predecesoras: p.predecesoras.filter((d) => elegidas.has(d.id)) };
+    }),
+  };
+}
+
 // ---------------------------------------------------------------- phase 5: questions about the budget
 
 function validarHistorial(value: unknown): MensajeChatIA[] {
@@ -802,6 +880,10 @@ export async function decidirBorradoresIA(ctx: Ctx, body: unknown): Promise<{ de
               ? f
                 ? validarFinalApu(f, what, b as BorradorApuIA)
                 : (b as BorradorApuIA).propuesta
+              : b.tarea === "programa"
+                ? f
+                  ? validarFinalPrograma(f, what, b as BorradorProgramaIA)
+                  : (b as BorradorProgramaIA).propuesta
               : f
                 ? validarFinalCapitulo(f, what, b as BorradorEstructuraIA)
                 : (b as BorradorEstructuraIA).propuesta;

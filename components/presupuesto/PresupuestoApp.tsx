@@ -29,6 +29,7 @@ import Programacion from "./Programacion";
 import { ConfirmDialog, TextoDialog } from "./SimpleDialogs";
 import { C, message, Notice } from "./ui";
 import { usePresupuesto } from "./usePresupuesto";
+import { columnasMemoria } from "../../lib/presupuesto/memoria";
 import { useAvance } from "./useAvance";
 import { useProgramacion } from "./useProgramacion";
 
@@ -427,6 +428,9 @@ export default function PresupuestoApp({
       <Programacion
         p={programacion}
         av={avance}
+        api={api}
+        projectId={projectId}
+        columnas={columnasMemoria(estado?.config.memoriaColumnas)}
         doc={doc}
         calculados={calculados}
         resolver={resolver}

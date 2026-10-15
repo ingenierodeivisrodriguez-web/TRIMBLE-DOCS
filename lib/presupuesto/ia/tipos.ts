@@ -1,23 +1,24 @@
 // The AI assistant of Presupuesto: its quota, its usage log and the drafts it
 // proposes (nothing it proposes reaches the budget until a person accepts it).
 
-import type { TipoInsumo } from "../types";
+import type { Dependencia, TipoInsumo } from "../types";
 
 /**
  * The tasks the assistant does: the EDT dictionary (phase 1), the resources (phase 2), the EDT
  * itself (phase 3), the unit cost analysis of the partidas (phase 4) and questions about the
  * budget (phase 5).
  */
-export type TareaIA = "edt" | "insumos" | "estructura" | "apu" | "chat";
+export type TareaIA = "edt" | "insumos" | "estructura" | "apu" | "chat" | "programa";
 export const TAREA_IA_NOMBRES: Record<TareaIA, string> = {
   edt: "Diccionario EDT",
   insumos: "Insumos",
   estructura: "Crear EDT",
   apu: "Análisis (APU)",
   chat: "Preguntas",
+  programa: "Secuencia (programación)",
 };
 /** The tasks whose drafts a person reviews. */
-export const TAREAS_CON_BORRADORES: TareaIA[] = ["estructura", "edt", "insumos", "apu"];
+export const TAREAS_CON_BORRADORES: TareaIA[] = ["estructura", "edt", "insumos", "apu", "programa"];
 
 /** Monthly quota of a project, set by the platform's administrators (the "gestor" project). */
 export interface CupoIA {
@@ -288,6 +289,42 @@ export interface GenerarApuResponse {
   costoCop: number;
   cupo: EstadoCupo;
 }
+
+// ---- the schedule: work packages and constructive sequence of the activities
+
+/** An activity as it is sent. */
+export interface ActividadProgramaIA {
+  id: string;
+  nombre: string;
+  unidad: string;
+  cantidad: number | null;
+  /** Working days. */
+  duracion: number;
+  /** Its work package now ("ESTRUCTURA > PISO 1"). */
+  ruta: string;
+}
+
+/** What the assistant proposes for an activity: its work package (path inside the scope) and its predecessors. */
+export interface PropuestaActividadIA {
+  id: string;
+  paquete: string[];
+  predecesoras: Dependencia[];
+}
+
+export interface PropuestaPrograma {
+  /** The EDT node the paths hang from (null: the top). */
+  alcance: string | null;
+  actividades: PropuestaActividadIA[];
+}
+
+export interface BorradorProgramaIA extends BorradorGenerico {
+  tarea: "programa";
+  propuesta: PropuestaPrograma;
+  anterior: null;
+  final: PropuestaPrograma | null;
+}
+
+export const MAX_ACTIVIDADES_PROGRAMA_IA = 150;
 
 // ---- phase 5: questions about the budget
 

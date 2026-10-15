@@ -394,7 +394,7 @@ describe("enlazar arrastrando en el diagrama", () => {
       return "error" in x ? x.error : "";
     };
     assert.match(error("p1", "p2"), /ya es predecesora/);
-    assert.match(error("t1", "p2"), /Solo se enlazan partidas/);
+    assert.match(error("t1", "p2"), /Solo se enlazan tareas/);
     assert.match(error("p2", "p2"), /propia/);
     assert.match(error("p3", "p1"), /ciclo/); // p1 -> p2 -> p3 -> p1
   });

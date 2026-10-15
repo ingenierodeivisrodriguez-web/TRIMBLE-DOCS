@@ -44,6 +44,8 @@ const COLOR = {
 
 export interface GanttProps {
   res: Programado;
+  /** Tasks are the budget's partidas, or the schedule's own activities. */
+  modo?: Programado["modo"];
   /** The rows shown (collapsed titles hide theirs). */
   filas: FilaGantt[];
   selectedId: string | null;
@@ -252,7 +254,7 @@ export default function Gantt(props: GanttProps) {
           <div style={{ position: "sticky", top: 0, zIndex: 3, display: "flex", height: HEAD_H, background: "#f3f4f6", borderBottom: `1px solid ${C.border}` }}>
             {COLUMNAS.map((c) => (
               <div key={c.key} title={c.title} style={{ ...celdaCabecera, width: c.ancho }}>
-                {c.titulo}
+                {c.key === "partida" && props.modo === "edt" ? "EDT / actividad" : c.key === "metrado" && props.modo === "edt" ? "Cantidad" : c.titulo}
               </div>
             ))}
           </div>

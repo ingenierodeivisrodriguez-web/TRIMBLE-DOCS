@@ -6,6 +6,7 @@ import { isIfcGuid } from "../propiedades/ifcGuid";
 import { ServiceError } from "../propiedades/service";
 import { esFechaIso, sumarDias } from "./calendario";
 import { Ctx, requireEdit } from "./service";
+import type { ElementoEjecucion } from "./store";
 import {
   AvanceResponse,
   ControlAvance,
@@ -137,6 +138,6 @@ export async function marcarEjecutados(ctx: Ctx, body: unknown): Promise<{ marca
 }
 
 /** Every linked element with the day it was built, to color the model. */
-export async function elementosEjecucion(ctx: Ctx): Promise<{ elementos: { itemId: string; ifcGuid: string; modelId: string; ejecutado: string | null }[] }> {
+export async function elementosEjecucion(ctx: Ctx): Promise<{ elementos: ElementoEjecucion[] }> {
   return { elementos: await ctx.store.elementosEjecucion(ctx.projectId) };
 }

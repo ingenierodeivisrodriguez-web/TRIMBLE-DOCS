@@ -12,10 +12,11 @@ import {
   calendarioValorizado,
   creaCiclo,
   curvaS,
-  estimarDuracion,
+  estimacionDe,
   FilaGantt,
   Programado,
   REDONDEO_NOMBRES,
+  tareasDe,
   TipoPeriodo,
 } from "../../lib/presupuesto/programacion";
 import { tablaCalendarioInsumos, tablaCalendarioValorizado, tablaCurvaS } from "../../lib/presupuesto/reportes";
@@ -278,7 +279,7 @@ export function EstimarDialog({
       res.filas
         .filter((f) => f.tipo === "partida")
         .map((f) => {
-          const est = estimarDuracion({ metrado: f.metrado, rendimiento: f.rendimiento ?? 0, jornada: f.item?.jornada ?? jornada }, f.cuadrillas, jornada, redondeo);
+          const est = estimacionDe(f, f.cuadrillas, jornada, redondeo);
           const queda = est === null || (!f.estimada && !reemplazar) ? f.duracion : est;
           return { f, est, queda };
         }),
@@ -409,19 +410,19 @@ export function TareaDialog({
   onAccept: (t: TareaProgramada) => void;
   onClose: () => void;
 }) {
-  const t0 = prog.tareas[fila.id] ?? {};
+  const t0 = tareasDe(prog)[fila.id] ?? {};
   const jornada = prog.calendario.jornada;
   const [usarEstimada, setUsarEstimada] = useState(t0.duracion === undefined);
   const [duracion, setDuracion] = useState<number>(t0.duracion ?? fila.duracion);
   const [cuadrillas, setCuadrillas] = useState(t0.cuadrillas ?? 1);
   const [inicio, setInicio] = useState<string | null>(t0.inicio ?? null);
   const [deps, setDeps] = useState<Dependencia[]>(t0.predecesoras ?? []);
-  const estimada = estimarDuracion({ metrado: fila.metrado, rendimiento: fila.rendimiento ?? 0, jornada: fila.item?.jornada ?? jornada }, cuadrillas, jornada, prog.redondeo);
+  const estimada = estimacionDe(fila, cuadrillas, jornada, prog.redondeo);
   const opciones = useMemo(() => res.filas.filter((x) => x.tipo === "partida" && x.id !== fila.id), [res, fila.id]);
   const sucesoras = res.filas.filter((x) => x.predecesoras.some((d) => d.id === fila.id));
   const repetida = deps.some((d, i) => deps.findIndex((e) => e.id === d.id) !== i);
-  const ciclo = creaCiclo(prog.tareas, fila.id, deps.map((d) => d.id));
-  const error = repetida ? "Hay una predecesora repetida." : ciclo ? "Esas predecesoras forman un ciclo: una de ellas ya depende de esta partida." : "";
+  const ciclo = creaCiclo(tareasDe(prog), fila.id, deps.map((d) => d.id));
+  const error = repetida ? "Hay una predecesora repetida." : ciclo ? "Esas predecesoras forman un ciclo: una de ellas ya depende de esta tarea." : "";
   const setDep = (i: number, cambio: Partial<Dependencia>) => setDeps((l) => l.map((d, k) => (k === i ? { ...d, ...cambio } : d)));
 
   return (
@@ -462,6 +463,14 @@ export function TareaDialog({
           <span>
             Parcial: <strong>{fmt(fila.parcial)}</strong>
           </span>
+          {fila.actividad && (
+            <span style={{ flexBasis: "100%" }}>
+              Hace:{" "}
+              {fila.asignaciones.length
+                ? fila.asignaciones.map((a) => `${a.item.descripcion} (${fmt(a.pct)} %: ${fmt(a.cantidad)} ${a.item.unidad})`).join(" · ")
+                : "ninguna partida (sin costo)"}
+            </span>
+          )}
           <span>
             Programada: <strong>{fechaCorta(fila.inicio)}</strong> → <strong>{fechaCorta(fila.fin)}</strong> · holgura {fmt(fila.holgura)} días
             {fila.critica && <strong style={{ color: "#d93025" }}> · ruta crítica</strong>}
@@ -567,21 +576,23 @@ export function TareaDialog({
 
 // ---------------------------------------------------------------- money over time
 
-function SelectorSp({ doc, value, onChange }: { doc: PresupuestoDoc; value: string | null; onChange: (id: string | null) => void }) {
+function SelectorSp({ res, value, onChange }: { res: Programado; value: string | null; onChange: (id: string | null) => void }) {
   return (
     <label style={{ display: "flex", alignItems: "center", gap: 6, fontWeight: 600 }}>
-      SP:
-      <select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)} style={{ ...baseInput, minWidth: 220 }} aria-label="Subpresupuesto">
-        <option value="">Todos los subpresupuestos</option>
-        {doc.subpresupuestos.map((sp) => (
-          <option key={sp.id} value={sp.id}>
-            {sp.nombre}
+      {res.modo === "edt" ? "EDT:" : "SP:"}
+      <select value={value ?? ""} onChange={(e) => onChange(e.target.value || null)} style={{ ...baseInput, minWidth: 220 }} aria-label={res.modo === "edt" ? "Grupo de la EDT" : "Subpresupuesto"}>
+        <option value="">{res.modo === "edt" ? "Toda la programación" : "Todos los subpresupuestos"}</option>
+        {res.alcances.map((a) => (
+          <option key={a.id} value={a.id}>
+            {a.nombre}
           </option>
         ))}
       </select>
     </label>
   );
 }
+
+const nombreAlcance = (res: Programado, id: string | null) => (id ? res.alcances.find((a) => a.id === id)?.nombre ?? "" : res.modo === "edt" ? "Toda la programación" : "Todos los subpresupuestos");
 
 export function Alternar<T extends string>({ value, opciones, onChange, label }: { value: T; opciones: [T, string][]; onChange: (v: T) => void; label: string }) {
   return (
@@ -631,7 +642,7 @@ export function CurvaSDialog({ res, doc, proyecto, onClose }: { res: Programado;
   const cs = useMemo(() => curvaS(res, tipo, spId), [res, tipo, spId]);
   const datos = cs.periodos.map((p, i) => ({ periodo: p.etiqueta, valor: cs.montos[i], acumulado: cs.porcentaje[i] }));
   const x = useExportar();
-  const nombre = spId ? doc.subpresupuestos.find((s) => s.id === spId)?.nombre ?? "" : "Todos los subpresupuestos";
+  const nombre = nombreAlcance(res, spId);
   return (
     <Modal
       title="Curva S"
@@ -640,7 +651,7 @@ export function CurvaSDialog({ res, doc, proyecto, onClose }: { res: Programado;
       height="90vh"
       toolbar={
         <>
-          <SelectorSp doc={doc} value={spId} onChange={setSpId} />
+          <SelectorSp res={res} value={spId} onChange={setSpId} />
           <Alternar label="Periodo" value={tipo} opciones={PERIODOS} onChange={setTipo} />
           <button type="button" style={botonSec} disabled={x.ocupado} onClick={() => x.exportar(() => exportarExcel([tablaCurvaS(cs, nombre, tipo)], `${nombreSeguro(`Curva S ${proyecto}`)}.xlsx`))}>
             Exportar a hoja de cálculo
@@ -702,10 +713,10 @@ export function CurvaSDialog({ res, doc, proyecto, onClose }: { res: Programado;
 
 export function ValorizadoDialog({ res, doc, proyecto, onClose }: { res: Programado; doc: PresupuestoDoc; proyecto: string; onClose: () => void }) {
   const [tipo, setTipo] = useState<TipoPeriodo>("mes");
-  const [spId, setSpId] = useState<string | null>(doc.subpresupuestos.length === 1 ? doc.subpresupuestos[0].id : null);
+  const [spId, setSpId] = useState<string | null>(res.alcances.length === 1 ? res.alcances[0].id : null);
   const cv = useMemo(() => calendarioValorizado(res, spId, tipo), [res, spId, tipo]);
   const x = useExportar();
-  const nombre = spId ? doc.subpresupuestos.find((s) => s.id === spId)?.nombre ?? "" : "Todos los subpresupuestos";
+  const nombre = nombreAlcance(res, spId);
   return (
     <Modal
       title="Calendario valorizado"
@@ -714,7 +725,7 @@ export function ValorizadoDialog({ res, doc, proyecto, onClose }: { res: Program
       height="92vh"
       toolbar={
         <>
-          <SelectorSp doc={doc} value={spId} onChange={setSpId} />
+          <SelectorSp res={res} value={spId} onChange={setSpId} />
           <Alternar label="Periodo" value={tipo} opciones={PERIODOS} onChange={setTipo} />
           <button type="button" style={botonSec} disabled={x.ocupado} onClick={() => x.exportar(() => exportarExcel([tablaCalendarioValorizado(cv, nombre)], `${nombreSeguro(`Calendario valorizado ${proyecto}`)}.xlsx`))}>
             Exportar a hoja de cálculo
@@ -749,10 +760,10 @@ export function ValorizadoDialog({ res, doc, proyecto, onClose }: { res: Program
 export function InsumosPeriodoDialog({ res, doc, resolver, proyecto, onClose }: { res: Programado; doc: PresupuestoDoc; resolver: Resolver; proyecto: string; onClose: () => void }) {
   const [tipo, setTipo] = useState<TipoPeriodo>("mes");
   const [modo, setModo] = useState<"costo" | "cantidad">("costo");
-  const [spId, setSpId] = useState<string | null>(doc.subpresupuestos.length === 1 ? doc.subpresupuestos[0].id : null);
+  const [spId, setSpId] = useState<string | null>(res.alcances.length === 1 ? res.alcances[0].id : null);
   const ci = useMemo(() => calendarioInsumos(res, resolver, spId, tipo), [res, resolver, spId, tipo]);
   const x = useExportar();
-  const nombre = spId ? doc.subpresupuestos.find((s) => s.id === spId)?.nombre ?? "" : "Todos los subpresupuestos";
+  const nombre = nombreAlcance(res, spId);
   return (
     <Modal
       title="Calendario de insumos"
@@ -761,7 +772,7 @@ export function InsumosPeriodoDialog({ res, doc, resolver, proyecto, onClose }: 
       height="92vh"
       toolbar={
         <>
-          <SelectorSp doc={doc} value={spId} onChange={setSpId} />
+          <SelectorSp res={res} value={spId} onChange={setSpId} />
           <Alternar label="Periodo" value={tipo} opciones={PERIODOS} onChange={setTipo} />
           <Alternar
             label="Ver"

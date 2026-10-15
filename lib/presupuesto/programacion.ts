@@ -1,13 +1,20 @@
-// The schedule (Gantt) built from the budget. Its outline (subpresupuestos,
-// titles and partidas) gives the tasks; a partida lasts metrado ÷ (rendimiento
-// × cuadrillas) days unless the user typed its duration, and everything is
-// scheduled with the critical path method, in working hours of the project's
-// calendar (so a 4-hour Saturday is half a day).
+// The schedule (Gantt) of the budget, in two ways. At first it follows the
+// budget's outline: subpresupuestos and titles group, and each partida is a
+// task. Then it can have its own work breakdown (EDT/WBS, by deliverable and
+// location) whose activities each do a part (%) of one or more partidas: the
+// budget says what it costs, the schedule what is done and when, and the
+// assignments link them (each partida must be 100 % assigned). A task lasts
+// quantity ÷ (rendimiento × cuadrillas) days unless the user typed its
+// duration, and everything is scheduled with the critical path method, in
+// working hours of the project's calendar (so a 4-hour Saturday is half a day).
 import { ApuCalculado, Consumo, consumoDeApu, redondear, Resolver, SubpresupuestoCalculado } from "./calc";
 import { Calendario, calendarioPorDefecto, diaSemana, fechaCorta, MESES_CORTOS, sumarDias } from "./calendario";
 import type {
+  Actividad,
   Dependencia,
+  FiltroUbicacion,
   ItemPartida,
+  NodoEdt,
   PresupuestoDoc,
   Programacion,
   RedondeoDuracion,
@@ -53,7 +60,47 @@ export function estimarDuracion(
   return redondearDuracion((metrado / (p.rendimiento * cuadrillas)) * (jornada / jornadaCalendario), redondeo);
 }
 
+/**
+ * Working days an activity takes doing these parts of partidas with the same
+ * crews, one after the other: the sum of quantity ÷ (rendimiento × cuadrillas)
+ * of each. null when none can be estimated.
+ */
+export function estimarAsignaciones(
+  asignaciones: Pick<AsignacionFila, "item" | "cantidad">[],
+  cuadrillas: number,
+  jornadaCalendario: number,
+  redondeo: RedondeoDuracion
+): number | null {
+  if (!(cuadrillas > 0) || !(jornadaCalendario > 0)) return null;
+  let dias = 0;
+  let alguna = false;
+  for (const a of asignaciones) {
+    if (!(a.cantidad > 0) || !(a.item.rendimiento > 0)) continue;
+    const jornada = a.item.jornada > 0 ? a.item.jornada : jornadaCalendario;
+    dias += (a.cantidad / (a.item.rendimiento * cuadrillas)) * (jornada / jornadaCalendario);
+    alguna = true;
+  }
+  return alguna ? redondearDuracion(dias, redondeo) : null;
+}
+
+/** A row's estimate with other crews or rounding (what the estimate dialogs preview). */
+export function estimacionDe(f: Pick<FilaGantt, "asignaciones">, cuadrillas: number, jornadaCalendario: number, redondeo: RedondeoDuracion): number | null {
+  return estimarAsignaciones(f.asignaciones, cuadrillas, jornadaCalendario, redondeo);
+}
+
 // ---------------------------------------------------------------- rows
+
+/** A task's part of a partida, as it is now. */
+export interface AsignacionFila {
+  partida: string;
+  item: ItemPartida;
+  /** % of the partida. */
+  pct: number;
+  /** That % of its metrado. */
+  cantidad: number;
+  /** That % of its amount (to cents: the parts of a partida add up to it). */
+  parcial: number;
+}
 
 export interface FilaGantt {
   /** The item's id; "sp:<id>" for a subpresupuesto. */
@@ -97,9 +144,21 @@ export interface FilaGantt {
   critica: boolean;
   /** A title or subpresupuesto without partidas. */
   vacia: boolean;
+  /** A task's parts of partidas (one, of 100 %, while the schedule follows the budget). */
+  asignaciones: AsignacionFila[];
+  /** A task that is an activity of the schedule's own EDT. */
+  actividad: boolean;
+  /** An EDT node's person in charge. */
+  responsable: string;
+  /** Where it is in the model: its node's location filters and its ancestors'. */
+  ubicacion: FiltroUbicacion[];
 }
 
 export interface Programado {
+  /** Following the budget's outline, or with the schedule's own EDT and activities. */
+  modo: "presupuesto" | "edt";
+  /** The groups at the top (subpresupuestos, or the EDT's first level), to look at one of them. */
+  alcances: { id: string; nombre: string }[];
   filas: FilaGantt[];
   porId: Map<string, FilaGantt>;
   cal: Calendario;
@@ -170,35 +229,93 @@ function componentes(nodos: string[], sucesores: Map<string, string[]>): string[
   return out;
 }
 
-export function programar(doc: PresupuestoDoc, calculados: Map<string, SubpresupuestoCalculado>, prog: Programacion): Programado {
-  const cal = new Calendario(prog.calendario, prog.inicio);
+// ---------------------------------------------------------------- the schedule's own EDT
+
+/** The tasks' settings (duration, crews, predecessors, start) by task id: the partidas' or the activities'. */
+export function tareasDe(prog: Programacion): Record<string, TareaProgramada> {
+  if (!prog.actividades) return prog.tareas;
+  const out: Record<string, TareaProgramada> = {};
+  for (const a of prog.actividades) {
+    const { id, nodo: _n, nombre: _x, asignaciones: _a, ...t } = a;
+    if (Object.keys(t).length) out[id] = t;
+  }
+  return out;
+}
+
+/** Writes the tasks' settings back where they belong. */
+export function conTareas(prog: Programacion, tareas: Record<string, TareaProgramada>): Programacion {
+  if (!prog.actividades) return { ...prog, tareas };
+  return {
+    ...prog,
+    actividades: prog.actividades.map((a) => {
+      const t = tareas[a.id] ?? {};
+      const out: Actividad = { id: a.id, nodo: a.nodo, nombre: a.nombre, asignaciones: a.asignaciones };
+      if (t.duracion !== undefined) out.duracion = t.duracion;
+      if (t.cuadrillas !== undefined) out.cuadrillas = t.cuadrillas;
+      if (t.predecesoras?.length) out.predecesoras = t.predecesoras;
+      if (t.inicio !== undefined) out.inicio = t.inicio;
+      return out;
+    }),
+  };
+}
+
+/** How much of a partida the activities do. */
+export interface EstadoAsignacion {
+  partida: string;
+  numero: string;
+  descripcion: string;
+  unidad: string;
+  metrado: number;
+  parcial: number;
+  /** % assigned, adding up its activities. */
+  pct: number;
+  /** The activities that have a part of it. */
+  actividades: string[];
+}
+
+/**
+ * The 100 % rule: each partida of the budget must be done, entirely and once,
+ * by the activities. Answers those with less than 100 % and those with more.
+ */
+export function reglaDel100(doc: PresupuestoDoc, calculados: Map<string, SubpresupuestoCalculado>, prog: Programacion): { faltan: EstadoAsignacion[]; sobran: EstadoAsignacion[] } {
+  const asignado = new Map<string, { pct: number; actividades: string[] }>();
+  for (const a of prog.actividades ?? []) {
+    for (const x of a.asignaciones) {
+      const e = asignado.get(x.partida) ?? { pct: 0, actividades: [] };
+      e.pct += x.pct;
+      e.actividades.push(a.id);
+      asignado.set(x.partida, e);
+    }
+  }
+  const faltan: EstadoAsignacion[] = [];
+  const sobran: EstadoAsignacion[] = [];
+  for (const sp of doc.subpresupuestos) {
+    for (const f of calculados.get(sp.id)?.filas ?? []) {
+      if (f.item.tipo !== "partida") continue;
+      const a = asignado.get(f.item.id);
+      const e: EstadoAsignacion = {
+        partida: f.item.id,
+        numero: f.numero,
+        descripcion: f.item.descripcion,
+        unidad: f.item.unidad,
+        metrado: f.metrado ?? 0,
+        parcial: f.parcial,
+        pct: redondear(a?.pct ?? 0, 4),
+        actividades: a?.actividades ?? [],
+      };
+      if (e.pct < 100 - 1e-6) faltan.push(e);
+      else if (e.pct > 100 + 1e-6) sobran.push(e);
+    }
+  }
+  return { faltan, sobran };
+}
+
+type Vacia = (o: Pick<FilaGantt, "id" | "tipo" | "spId" | "nivel" | "numero" | "descripcion" | "parcial" | "ancestros">) => FilaGantt;
+
+/** Rows following the budget's outline: subpresupuestos and titles, and each partida a task. */
+function filasPresupuesto(doc: PresupuestoDoc, calculados: Map<string, SubpresupuestoCalculado>, prog: Programacion, vacia: Vacia): FilaGantt[] {
   const jornada = prog.calendario.jornada;
   const filas: FilaGantt[] = [];
-  const vacia = (o: Pick<FilaGantt, "id" | "tipo" | "spId" | "nivel" | "numero" | "descripcion" | "parcial" | "ancestros">): FilaGantt => ({
-    ...o,
-    fila: 0,
-    unidad: "",
-    metrado: null,
-    rendimiento: null,
-    cu: null,
-    item: null,
-    duracion: 0,
-    estimada: false,
-    estimacion: null,
-    cuadrillas: 0,
-    predecesoras: [],
-    restriccion: null,
-    es: Infinity,
-    ef: -Infinity,
-    ls: Infinity,
-    lf: -Infinity,
-    inicio: prog.inicio,
-    fin: prog.inicio,
-    holgura: Infinity,
-    critica: false,
-    vacia: true,
-  });
-
   for (const sp of doc.subpresupuestos) {
     const calc = calculados.get(sp.id);
     const spFila = vacia({ id: `sp:${sp.id}`, tipo: "sp", spId: sp.id, nivel: 0, numero: "", descripcion: sp.nombre, parcial: calc?.cd ?? 0, ancestros: [] });
@@ -231,13 +348,180 @@ export function programar(doc: PresupuestoDoc, calculados: Map<string, Subpresup
         predecesoras: t.predecesoras ?? [],
         restriccion: t.inicio ?? null,
         vacia: false,
+        asignaciones: [{ partida: item.id, item, pct: 100, cantidad: f.metrado ?? 0, parcial: f.parcial }],
       });
+    }
+  }
+  return filas;
+}
+
+/** The budget's partidas as computed now, by id. */
+function partidasDe(calculados: Map<string, SubpresupuestoCalculado>) {
+  const out = new Map<string, { item: ItemPartida; metrado: number; parcial: number; cu: number; spId: string }>();
+  for (const [spId, calc] of calculados) {
+    for (const f of calc.filas) if (f.item.tipo === "partida") out.set(f.item.id, { item: f.item, metrado: f.metrado ?? 0, parcial: f.parcial, cu: f.cu ?? 0, spId });
+  }
+  return out;
+}
+
+/** The EDT's nodes by parent (a node whose parent is gone counts as a top one), keeping their order. */
+function hijosDe(nodos: NodoEdt[]): Map<string | null, NodoEdt[]> {
+  const ids = new Set(nodos.map((n) => n.id));
+  const out = new Map<string | null, NodoEdt[]>();
+  for (const n of nodos) {
+    const padre = n.padre && ids.has(n.padre) && n.padre !== n.id ? n.padre : null;
+    out.set(padre, [...(out.get(padre) ?? []), n]);
+  }
+  return out;
+}
+
+/**
+ * Rows of the schedule's own EDT: its nodes, and under each its activities,
+ * each with its parts of partidas (a partida's amount is split among its
+ * activities to cents).
+ */
+function filasEdt(calculados: Map<string, SubpresupuestoCalculado>, prog: Programacion, vacia: Vacia, avisos: string[]): FilaGantt[] {
+  const jornada = prog.calendario.jornada;
+  const partidas = partidasDe(calculados);
+  const actividades = prog.actividades ?? [];
+  const porPartida = new Map<string, { clave: string; pct: number }[]>();
+  let huerfanas = 0;
+  for (const a of actividades) {
+    a.asignaciones.forEach((x, k) => {
+      if (!partidas.has(x.partida)) {
+        huerfanas++;
+        return;
+      }
+      porPartida.set(x.partida, [...(porPartida.get(x.partida) ?? []), { clave: `${a.id}|${k}`, pct: x.pct }]);
+    });
+  }
+  const montos = new Map<string, number>();
+  for (const [id, lista] of porPartida) {
+    const parcial = partidas.get(id)!.parcial;
+    const suma = lista.reduce((s, x) => s + x.pct, 0);
+    const partes = Math.abs(suma - 100) < 1e-6 ? repartir(parcial, lista.map((x) => x.pct)) : lista.map((x) => redondear((parcial * x.pct) / 100, 2));
+    lista.forEach((x, i) => montos.set(x.clave, partes[i]));
+  }
+  if (huerfanas) avisos.push(`${huerfanas} asignación(es) son de partidas que ya no están en el presupuesto: no cuentan.`);
+
+  const hijos = hijosDe(prog.edt ?? []);
+  const actividadesDe = new Map<string, Actividad[]>();
+  for (const a of actividades) actividadesDe.set(a.nodo, [...(actividadesDe.get(a.nodo) ?? []), a]);
+  const filas: FilaGantt[] = [];
+  const visitados = new Set<string>();
+  const visitar = (n: NodoEdt, nivel: number, ancestros: string[], numero: string, heredada: FiltroUbicacion[], raiz: string) => {
+    if (visitados.has(n.id)) return;
+    visitados.add(n.id);
+    const ubicacion = [...heredada, ...n.ubicacion];
+    filas.push({ ...vacia({ id: n.id, tipo: "titulo", spId: raiz, nivel, numero, descripcion: n.nombre, parcial: 0, ancestros }), responsable: n.responsable, ubicacion });
+    const dentro = [...ancestros, n.id];
+    let k = 0;
+    for (const h of hijos.get(n.id) ?? []) visitar(h, nivel + 1, dentro, `${numero}.${++k}`, ubicacion, raiz);
+    for (const a of actividadesDe.get(n.id) ?? []) {
+      const asignaciones: AsignacionFila[] = a.asignaciones.flatMap((x, j) => {
+        const p = partidas.get(x.partida);
+        return p ? [{ partida: x.partida, item: p.item, pct: x.pct, cantidad: redondear((p.metrado * x.pct) / 100, 4), parcial: montos.get(`${a.id}|${j}`) ?? 0 }] : [];
+      });
+      const una = asignaciones.length === 1 ? asignaciones[0] : null;
+      const cuadrillas = a.cuadrillas && a.cuadrillas > 0 ? a.cuadrillas : 1;
+      const estimacion = estimarAsignaciones(asignaciones, cuadrillas, jornada, prog.redondeo);
+      const estimada = a.duracion === undefined;
+      filas.push({
+        ...vacia({
+          id: a.id,
+          tipo: "partida",
+          spId: raiz,
+          nivel: nivel + 1,
+          numero: `${numero}.${++k}`,
+          descripcion: a.nombre,
+          parcial: redondear(
+            asignaciones.reduce((s, x) => s + x.parcial, 0),
+            2
+          ),
+          ancestros: dentro,
+        }),
+        unidad: una?.item.unidad ?? "",
+        metrado: una ? una.cantidad : null,
+        rendimiento: una ? una.item.rendimiento : null,
+        cu: una ? partidas.get(una.partida)!.cu : null,
+        item: una?.item ?? null,
+        duracion: estimada ? estimacion ?? 1 : a.duracion!,
+        estimada,
+        estimacion,
+        cuadrillas,
+        predecesoras: a.predecesoras ?? [],
+        restriccion: a.inicio ?? null,
+        vacia: false,
+        asignaciones,
+        actividad: true,
+        ubicacion,
+      });
+    }
+  };
+  (hijos.get(null) ?? []).forEach((n, i) => visitar(n, 0, [], String(i + 1), [], n.id));
+  const perdidas = actividades.filter((a) => !visitados.has(a.nodo)).length;
+  if (perdidas) avisos.push(`${perdidas} actividad(es) son de un paquete que ya no existe: muévelas a otro en Estructura (EDT).`);
+  // A title's amount: what its activities add up (filled below with the dates).
+  const porId = new Map(filas.map((f) => [f.id, f]));
+  for (const f of filas) {
+    if (f.tipo !== "partida") continue;
+    for (const a of f.ancestros) {
+      const t = porId.get(a);
+      if (t) t.parcial = redondear(t.parcial + f.parcial, 2);
+    }
+  }
+  return filas;
+}
+
+export function programar(doc: PresupuestoDoc, calculados: Map<string, SubpresupuestoCalculado>, prog: Programacion): Programado {
+  const cal = new Calendario(prog.calendario, prog.inicio);
+  const jornada = prog.calendario.jornada;
+  const vacia: Vacia = (o) => ({
+    ...o,
+    fila: 0,
+    unidad: "",
+    metrado: null,
+    rendimiento: null,
+    cu: null,
+    item: null,
+    duracion: 0,
+    estimada: false,
+    estimacion: null,
+    cuadrillas: 0,
+    predecesoras: [],
+    restriccion: null,
+    es: Infinity,
+    ef: -Infinity,
+    ls: Infinity,
+    lf: -Infinity,
+    inicio: prog.inicio,
+    fin: prog.inicio,
+    holgura: Infinity,
+    critica: false,
+    vacia: true,
+    asignaciones: [],
+    actividad: false,
+    responsable: "",
+    ubicacion: [],
+  });
+  const avisos: string[] = [];
+  const modo: Programado["modo"] = prog.actividades ? "edt" : "presupuesto";
+  const filas = modo === "edt" ? filasEdt(calculados, prog, vacia, avisos) : filasPresupuesto(doc, calculados, prog, vacia);
+  const alcances =
+    modo === "edt"
+      ? filas.filter((f) => f.tipo === "titulo" && f.nivel === 0).map((f) => ({ id: f.id, nombre: f.descripcion }))
+      : doc.subpresupuestos.map((sp) => ({ id: sp.id, nombre: sp.nombre }));
+  if (modo === "edt") {
+    const r = reglaDel100(doc, calculados, prog);
+    if (r.faltan.length || r.sobran.length) {
+      avisos.push(
+        `Regla del 100 %: ${[r.faltan.length && `${r.faltan.length} partida(s) sin asignar completas`, r.sobran.length && `${r.sobran.length} asignada(s) de más`].filter(Boolean).join(" y ")}. Revísalo en Estructura (EDT).`
+      );
     }
   }
   filas.forEach((f, i) => (f.fila = i + 1));
   const porId = new Map(filas.map((f) => [f.id, f]));
   const partidas = filas.filter((f) => f.tipo === "partida");
-  const avisos: string[] = [];
 
   // ---- links between partidas (a predecessor that no longer exists is ignored)
   let perdidas = 0;
@@ -252,7 +536,7 @@ export function programar(doc: PresupuestoDoc, calculados: Map<string, Subpresup
       enlaces.push({ de: p.id, a: s.id, tipo: d.tipo, desfase: d.desfase * jornada });
     }
   }
-  if (perdidas) avisos.push(`${perdidas} predecesora(s) ya no existen en el presupuesto o no son partidas: se ignoran.`);
+  if (perdidas) avisos.push(`${perdidas} predecesora(s) ya no existen o no son ${modo === "edt" ? "actividades" : "partidas"}: se ignoran.`);
 
   // ---- loops: their links are ignored
   const sucesoresIds = new Map<string, string[]>();
@@ -360,7 +644,7 @@ export function programar(doc: PresupuestoDoc, calculados: Map<string, Subpresup
   if (prog.finObjetivo && fin > prog.finObjetivo) {
     avisos.push(`El proyecto termina el ${fechaCorta(fin)}, después de la fecha fin (${fechaCorta(prog.finObjetivo)}).`);
   }
-  return { filas, porId, cal, inicio, fin, horas: total, dias: redondear(total / jornada, 2), enCiclo, avisos };
+  return { modo, alcances, filas, porId, cal, inicio, fin, horas: total, dias: redondear(total / jornada, 2), enCiclo, avisos };
 }
 
 // ---------------------------------------------------------------- predecessors as text ("4; 6CC+2; 9FF-1")
@@ -436,8 +720,8 @@ export function leerPredecesoras(
     pos = re.lastIndex;
     const fila = p.filas[Number(m[1]) - 1];
     if (!fila) return { error: `No existe la fila ${m[1]}.` };
-    if (fila.tipo !== "partida") return { error: `La fila ${m[1]} es un ${fila.tipo === "sp" ? "subpresupuesto" : "título"}: enlaza una de sus partidas.` };
-    if (fila.id === itemId) return { error: "Una partida no puede ser su propia predecesora." };
+    if (fila.tipo !== "partida") return { error: `La fila ${m[1]} es un ${fila.tipo === "sp" ? "subpresupuesto" : "título o paquete"}: enlaza una de sus tareas.` };
+    if (fila.id === itemId) return { error: "Una tarea no puede ser su propia predecesora." };
     const tipo = m[2] ? TIPOS_TEXTO[m[2].toUpperCase()] : "FC";
     if (!tipo) return { error: `«${m[2]}» no es un tipo de enlace: usa FC, CC, FF o CF.` };
     const desfase = m[3] ? (m[3] === "-" ? -1 : 1) * Number(m[4].replace(",", ".")) : 0;
@@ -445,8 +729,8 @@ export function leerPredecesoras(
     if (deps.some((d) => d.id === fila.id)) return { error: `La fila ${m[1]} está repetida.` };
     deps.push({ id: fila.id, tipo, desfase: redondear(desfase, 2) });
   }
-  if (deps.length > MAX_PREDECESORAS) return { error: `Máximo ${MAX_PREDECESORAS} predecesoras por partida.` };
-  if (creaCiclo(tareas, itemId, deps.map((d) => d.id))) return { error: "Esas predecesoras forman un ciclo: una de ellas ya depende de esta partida." };
+  if (deps.length > MAX_PREDECESORAS) return { error: `Máximo ${MAX_PREDECESORAS} predecesoras por tarea.` };
+  if (creaCiclo(tareas, itemId, deps.map((d) => d.id))) return { error: "Esas predecesoras forman un ciclo: una de ellas ya depende de esta tarea." };
   return { deps };
 }
 
@@ -460,8 +744,8 @@ export function enlazar(
 ): { tareas: Record<string, TareaProgramada> } | { error: string } {
   const origen = p.porId.get(de);
   const destino = p.porId.get(a);
-  if (!origen || !destino || origen.tipo !== "partida" || destino.tipo !== "partida") return { error: "Solo se enlazan partidas (no títulos ni subpresupuestos)." };
-  if (de === a) return { error: "Una partida no puede ser su propia predecesora." };
+  if (!origen || !destino || origen.tipo !== "partida" || destino.tipo !== "partida") return { error: "Solo se enlazan tareas (partidas o actividades), no los títulos que las agrupan." };
+  if (de === a) return { error: "Una tarea no puede ser su propia predecesora." };
   const actuales = tareas[a]?.predecesoras ?? [];
   if (actuales.some((d) => d.id === de)) return { error: `La fila ${origen.fila} ya es predecesora de la fila ${destino.fila}: doble clic en la flecha para cambiar el enlace.` };
   if (actuales.length >= MAX_PREDECESORAS) return { error: `La fila ${destino.fila} ya tiene el máximo de ${MAX_PREDECESORAS} predecesoras.` };
@@ -640,11 +924,14 @@ export function calendarioInsumos(p: Programado, r: Resolver, spId: string | nul
     mapa.set(id, acc);
   };
   for (const f of p.filas) {
-    if (f.tipo !== "partida" || !f.item || !enAlcance(f, spId) || !f.metrado) continue;
+    if (f.tipo !== "partida" || !enAlcance(f, spId)) continue;
     const fr = fracciones(f, per);
-    const consumo: Consumo = consumoDeApu(f.item, f.metrado, r, cache);
-    for (const [id, q] of consumo.cantidades) sumar(cantidades, id, q, fr);
-    for (const [id, m] of consumo.montos) sumar(montos, id, m, fr);
+    for (const a of f.asignaciones) {
+      if (!a.cantidad) continue;
+      const consumo: Consumo = consumoDeApu(a.item, a.cantidad, r, cache);
+      for (const [id, q] of consumo.cantidades) sumar(cantidades, id, q, fr);
+      for (const [id, m] of consumo.montos) sumar(montos, id, m, fr);
+    }
   }
   const filas: FilaInsumoPeriodo[] = [];
   for (const [id, qs] of cantidades) {
