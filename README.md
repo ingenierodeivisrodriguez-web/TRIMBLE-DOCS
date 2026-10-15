@@ -1111,13 +1111,31 @@ La conexión con Trimble Connect (token, menú, visor) es común a las dos:
 - Una partida nueva se escribe o se **copia del catálogo** (con sus insumos y
   subpartidas). Es una copia: su APU se ajusta en el presupuesto sin cambiar
   el catálogo.
+- **📚 Al catálogo** (en la barra, y *Guardar en el catálogo* junto al análisis
+  de la partida elegida): el camino de vuelta. Guarda en el catálogo de
+  partidas la partida elegida, las de un título, las del subpresupuesto o todo
+  el presupuesto, con su análisis, para usarlas en otros proyectos (por
+  ejemplo las que creó el Asistente IA, que van solo al presupuesto). Los
+  insumos que el catálogo no tiene se crean con el precio del presupuesto (y
+  el mismo id); los que tiene conservan el precio del catálogo, y la ventana
+  muestra el CU que tendrá allá. Una partida repetida (en cada piso) se guarda
+  una vez, y las subpartidas que usa también pasan. Cada fila sale como
+  **nueva**, **ya igual** o **distinta** de la del catálogo (la de origen, o una
+  con la misma descripción y unidad): una distinta queda como está a menos que
+  se elija actualizarla (conserva su código, OmniClass y diccionario si el
+  presupuesto no los tiene) o guardarla como otra. Un código que ya usa otra
+  partida o insumo del catálogo se deja vacío, con aviso. Después, las filas
+  del presupuesto quedan enlazadas a esas partidas (hay que Guardar el
+  presupuesto). El responsable de la EDT no pasa al catálogo.
 - **Precios del presupuesto.** Al usarse por primera vez, cada insumo copia el
   precio del catálogo. Cambiar su PU (en un APU o en la Lista de insumos) lo
   cambia en todas las partidas de ese presupuesto. "Actualizar precios del
   catálogo" vuelve a traer los del catálogo.
 - **Cálculo** (igual que en la referencia, verificado con sus cifras):
   - cantidad de una línea con cuadrilla = cuadrilla × jornada ÷ rendimiento
-    (si escribes la cantidad, se recalcula la cuadrilla);
+    para los insumos por hora (HH, HM), y cuadrilla ÷ rendimiento para los
+    que se pagan por día o jornal (DIA, JR) (si escribes la cantidad, se
+    recalcula la cuadrilla);
   - parcial = cantidad × PU, redondeado a 2 decimales (cantidades a 4);
   - una línea %MO = su porcentaje de la mano de obra de la partida;
   - una subpartida aporta su CU por la cantidad;
@@ -1509,8 +1527,9 @@ durante la sesión del navegador.
 
 **Fase 4: análisis de precios** (pestaña *Análisis (APU)*). Para las partidas
 sin análisis (o todas) propone el **rendimiento**, las **cuadrillas** de mano
-de obra y equipos que se pagan por hora (la cantidad sale de cuadrilla ×
-jornada ÷ rendimiento, como en el editor de APU), las **cantidades** de
+de obra y equipos que se pagan por hora o por día (la cantidad sale de
+cuadrilla × jornada ÷ rendimiento, o cuadrilla ÷ rendimiento por día, como en
+el editor de APU), las **cantidades** de
 materiales y subcontratos con su desperdicio, y el % de la mano de obra para la
 herramienta menor (%MO). Usa los **insumos del catálogo** y, como ejemplo,
 hasta 3 **partidas parecidas del catálogo** que ya tienen análisis (por
@@ -1518,8 +1537,10 @@ palabras de la descripción y unidad), sin precios. Si falta un insumo
 indispensable, lo propone como **nuevo**. Lo que el servidor acepta: solo
 partidas pedidas, rendimiento mayor que 0, códigos del catálogo que se
 ofrecieron, un insumo "nuevo" que el catálogo ya tiene se toma del catálogo,
-la cuadrilla solo para MO y EQ por hora (HH, HM); para los pagados por día (DIA,
-JR) la cuadrilla se pasa a días por unidad; nada repetido; sin subpartidas (así
+la cuadrilla solo para MO y EQ por hora (HH, HM) o por día (DIA, JR), y si la
+IA da una cantidad en su lugar se pasa a la cuadrilla que significa (se
+descarta si da más de 100: era una cuadrilla escrita como cantidad); una
+unidad "%" es %MO; nada repetido; sin subpartidas (así
 no hay ciclos). El navegador envía lotes de 3 partidas. Cada análisis llega
 como borrador con su **confianza** y sus **supuestos**, y la revisión muestra
 cada línea con los precios del presupuesto (o del catálogo), el **costo

@@ -1,7 +1,7 @@
 "use client";
 
 import { CSSProperties, useCallback, useMemo, useState } from "react";
-import { ApuCalculado, calcularApu, cuadrillaPara, LineaApu, Resolver } from "../../lib/presupuesto/calc";
+import { ApuCalculado, calcularApu, cuadrillaPara, LineaApu, porDia, porHora, Resolver } from "../../lib/presupuesto/calc";
 import { fmt } from "../../lib/presupuesto/format";
 import { Apu, Componente, Insumo, Rubro, RUBRO_COLORS, RUBROS } from "../../lib/presupuesto/types";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
@@ -29,11 +29,9 @@ export interface OpcionSubpartida {
 }
 
 const ORDEN: Record<Rubro, number> = { MO: 0, MT: 1, EQ: 2, SC: 3, SP: 4 };
-const HORAS = /^(H-?H|H-?M|HH|HM|HR|HRS|HORA|HORAS|H)$/i;
-
-/** A new resource line: labor and equipment by the hour start with a crew of 1. */
+/** A new resource line: labor and equipment by the hour or by the day start with a crew of 1. */
 export function componenteNuevo(ins: Pick<Insumo, "tipo" | "unidad">, id: string): Componente {
-  const crew = (ins.tipo === "MO" || ins.tipo === "EQ") && HORAS.test(ins.unidad.replace(/\s+/g, ""));
+  const crew = (ins.tipo === "MO" || ins.tipo === "EQ") && (porHora(ins.unidad) || porDia(ins.unidad));
   return { tipo: "insumo", id, cuadrilla: crew ? 1 : null, cantidad: 0 };
 }
 
@@ -106,7 +104,7 @@ export default function ApuEditor({
 
   function cambiarCantidad(l: LineaApu, value: number | null) {
     if (value === null) return;
-    if (l.componente.cuadrilla !== null && !l.porcentajeMO) setComponente(l.index, { cantidad: value, cuadrilla: cuadrillaPara(value, apu) });
+    if (l.componente.cuadrilla !== null && !l.porcentajeMO) setComponente(l.index, { cantidad: value, cuadrilla: cuadrillaPara(value, apu, l.unidad) });
     else setComponente(l.index, { cantidad: value });
   }
 

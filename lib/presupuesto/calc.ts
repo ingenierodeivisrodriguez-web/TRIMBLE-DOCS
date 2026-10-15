@@ -2,6 +2,7 @@
 // decimals, amounts to 2, a unit cost is the sum of its rounded amounts, and
 // a partida's amount is its quantity (metrado) times its unit cost.
 import { evaluarFormula, FormulaError, VARIABLE_RE, VARIABLES_FIJAS } from "./formula";
+import { plegar } from "./format";
 import { numerar } from "./tree";
 import type {
   Apu,
@@ -77,15 +78,32 @@ export interface ApuCalculado {
   cu: number;
 }
 
-/** A line's quantity: from the crew when it has one (cuadrilla × jornada ÷ rendimiento), else as typed. */
-export function cantidadComponente(c: Componente, apu: Pick<Apu, "rendimiento" | "jornada">): number {
-  if (c.cuadrilla !== null && apu.rendimiento > 0) return redondear((c.cuadrilla * apu.jornada) / apu.rendimiento, 4);
+const sinSignos = (unidad: string) => plegar(unidad).replace(/[^a-z%]/g, "");
+
+/** Paid by the hour (HH, HM...). */
+export function porHora(unidad: string): boolean {
+  return ["hh", "hm", "h", "hr", "hrs", "hora", "horas", "hor"].includes(sinSignos(unidad));
+}
+
+/** Paid by the day (DIA, JR...). */
+export function porDia(unidad: string): boolean {
+  return ["dia", "dias", "dd", "jr", "jor", "jornal", "jornales", "jornada", "jornadas"].includes(sinSignos(unidad));
+}
+
+/**
+ * A line's quantity: from the crew when it has one, else as typed. A crew
+ * paid by the day works a day per `rendimiento` units (cuadrilla ÷
+ * rendimiento); any other, the hours of the day (cuadrilla × jornada ÷ rendimiento).
+ */
+export function cantidadComponente(c: Componente, apu: Pick<Apu, "rendimiento" | "jornada">, unidad = ""): number {
+  if (c.cuadrilla !== null && apu.rendimiento > 0) return redondear((c.cuadrilla * (porDia(unidad) ? 1 : apu.jornada)) / apu.rendimiento, 4);
   return redondear(c.cantidad, 4);
 }
 
 /** The crew that gives `cantidad` (for when the quantity of a crew line is typed). */
-export function cuadrillaPara(cantidad: number, apu: Pick<Apu, "rendimiento" | "jornada">): number {
-  return apu.jornada > 0 ? redondear((cantidad * apu.rendimiento) / apu.jornada, 4) : 0;
+export function cuadrillaPara(cantidad: number, apu: Pick<Apu, "rendimiento" | "jornada">, unidad = ""): number {
+  const horas = porDia(unidad) ? 1 : apu.jornada;
+  return horas > 0 ? redondear((cantidad * apu.rendimiento) / horas, 4) : 0;
 }
 
 export interface ApuOptions {
@@ -109,7 +127,7 @@ export function calcularApu(apu: Apu, r: Resolver, options: ApuOptions = {}): Ap
         // Amount set below, once the partida's labor is known.
         return { ...base, rubro: ins.tipo, descripcion: ins.descripcion, unidad: ins.unidad, cantidad: redondear(c.cantidad, 4), precio: 0, parcial: 0, porcentajeMO: true };
       }
-      const cantidad = cantidadComponente(c, apu);
+      const cantidad = cantidadComponente(c, apu, ins.unidad);
       return {
         ...base,
         rubro: ins.tipo,

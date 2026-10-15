@@ -54,7 +54,8 @@ export interface Insumo extends InsumoData {
 /**
  * A line of a unit cost analysis: a resource or a subpartida. For labor and
  * equipment, `cuadrilla` (crew size) sets the quantity: cuadrilla × jornada ÷
- * rendimiento; without it the quantity is typed directly.
+ * rendimiento by the hour, cuadrilla ÷ rendimiento by the day; without it the
+ * quantity is typed directly.
  */
 export interface Componente {
   tipo: "insumo" | "subpartida";

@@ -13,6 +13,7 @@ import { exportarPdf } from "../../lib/presupuesto/pdf";
 import { tablaGastos, tablaListaInsumos, tablaPresupuesto } from "../../lib/presupuesto/reportes";
 import { bajar, bloqueDe, desangrar, insertar, quitar, sangrar, subir } from "../../lib/presupuesto/tree";
 import { ElementoVinculado, Insumo, Item, ItemPartida, PartidaCatalogo } from "../../lib/presupuesto/types";
+import AlCatalogoDialog from "./AlCatalogo";
 import ApuDialog, { DatosPartida, partidaVacia } from "./ApuDialog";
 import AsistenteIA from "./AsistenteIA";
 import type { CambioApu } from "./AsistenteIAApu";
@@ -49,6 +50,7 @@ type Dialogo =
   | { tipo: "config" }
   | { tipo: "importar" }
   | { tipo: "ia" }
+  | { tipo: "al-catalogo" }
   | { tipo: "descartar" };
 
 /** The budget in the project's menu: subpresupuestos, titles and partidas with their APU, and the tools around them. */
@@ -497,6 +499,9 @@ export default function PresupuestoApp({
         <Tb onClick={() => selected && setDialogo({ tipo: "eliminar", itemId: selected.id })} disabled={dis || !selected} title="Eliminar">
           🗑
         </Tb>
+        <Tb onClick={() => setDialogo({ tipo: "al-catalogo" })} disabled={!catalogo} title="Guardar partidas de este presupuesto en el catálogo de partidas, con su análisis">
+          📚 Al catálogo
+        </Tb>
         <Sep />
         <Tb onClick={() => selected && setClipboard({ items: bloqueDe(items, selIndex), cut: false, spId: sp.id })} disabled={!selected || dis} title="Copiar">
           ⧉
@@ -647,7 +652,12 @@ export default function PresupuestoApp({
               {filaSel.metradoModelo ? ` · automático 3D (${filaSel.metradoModelo.elementos} elementos · ${filaSel.metradoModelo.campoLabel})` : " · manual"}
               {partidaSel.omniclass ? ` · OmniClass ${partidaSel.omniclass}` : ""}
             </span>
-            <button type="button" style={{ ...linkBtn, marginLeft: "auto" }} onClick={() => setApuVisible((v) => !v)}>
+            {catalogo && (
+              <button type="button" style={{ ...linkBtn, marginLeft: "auto" }} onClick={() => setDialogo({ tipo: "al-catalogo" })} title="Guardar esta partida con su análisis en el catálogo de partidas">
+                Guardar en el catálogo
+              </button>
+            )}
+            <button type="button" style={{ ...linkBtn, marginLeft: catalogo ? 0 : "auto" }} onClick={() => setApuVisible((v) => !v)}>
               {apuVisible ? "Ocultar análisis" : "Ver análisis de precios unitarios"}
             </button>
           </div>
@@ -860,6 +870,24 @@ export default function PresupuestoApp({
             onSaved={s.catalogoGuardado}
             onAgregar={canEdit ? agregarDesdeCatalogo : undefined}
             onInsumoCreado={(ins) => s.catalogoGuardado({ insumos: [ins] })}
+            onClose={close}
+          />
+        ) : null;
+      case "al-catalogo":
+        return catalogo ? (
+          <AlCatalogoDialog
+            api={api}
+            doc={doc}
+            setDoc={setDoc}
+            calculados={calculados}
+            catalogo={catalogo}
+            spId={sp.id}
+            itemId={selected?.id ?? null}
+            canEdit={estado.canEditBase}
+            readOnlyNote={readOnlyBase}
+            catalogoDe={estado.esBasePropia ? "" : estado.config.baseProjectName || estado.config.baseProjectId}
+            usuario={estado.user.name}
+            onGuardado={s.catalogoGuardado}
             onClose={close}
           />
         ) : null;

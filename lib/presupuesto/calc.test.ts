@@ -85,6 +85,18 @@ describe("análisis de precios unitarios", () => {
     assert.equal(cuadrillaPara(0.64, TRAZO), 4);
   });
 
+  it("una cuadrilla que se paga por día trabaja un día cada «rendimiento» unidades: cuadrilla ÷ rendimiento", () => {
+    // Localización y replanteo: 250 M2/día, a topography crew paid at 160,000 a day.
+    const replanteo = { rendimiento: 250, jornada: 8 };
+    assert.equal(cantidadComponente(crew("x", 1), replanteo, "DIA"), 0.004);
+    assert.equal(cantidadComponente(crew("x", 2), replanteo, "Jornal"), 0.008);
+    assert.equal(cantidadComponente(crew("x", 1), replanteo, "HH"), 0.032); // by the hour: 1 × 8 ÷ 250
+    assert.equal(cuadrillaPara(0.004, replanteo, "día"), 1);
+    const topografia: Record<string, InsumoRef> = { cuadrilla: { descripcion: "CUADRILLA DE TOPOGRAFIA", unidad: "DIA", tipo: "MO", precio: 160_000 } };
+    const apu = calcularApu({ ...replanteo, componentes: [crew("cuadrilla", 1)] }, { insumo: (id) => topografia[id] ?? null, subpartida: () => null });
+    assert.deepEqual([apu.lineas[0].cantidad, apu.lineas[0].parcial, apu.cu], [0.004, 640, 640]);
+  });
+
   it("reproduce el CU de Trazo y replanteo: MO 16.83, MT 0.71, EQ 3.75, CU 21.29", () => {
     const apu = calcularApu(TRAZO, resolver());
     assert.deepEqual(apu.rubros, { MO: 16.83, MT: 0.71, EQ: 3.75, SC: 0, SP: 0 });

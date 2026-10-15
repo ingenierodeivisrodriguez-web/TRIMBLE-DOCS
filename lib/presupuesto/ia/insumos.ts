@@ -7,13 +7,14 @@ import { PresupuestoDoc, TIPOS_INSUMO, TipoInsumo } from "../types";
 import { partidasParaEdt } from "./edt";
 import type { InsumoCatalogoIA, PartidaInsumosIA } from "./tipos";
 
-export const VERSION_PROMPT_INSUMOS = "insumos-co-1";
+export const VERSION_PROMPT_INSUMOS = "insumos-co-2";
 
 export const SISTEMA_INSUMOS = `Eres ingeniero de costos de obra en Colombia. Identificas los insumos que necesita cada partida de un presupuesto de construcción para su análisis de precios unitarios (APU): mano de obra (MO), materiales (MT), equipos y herramientas (EQ) y subcontratos (SC).
 
 Reglas:
 - Usa primero los insumos del catálogo: si uno corresponde, devuelve su código en "catalogo" (por ejemplo "I7") y copia su descripción, unidad y tipo.
 - Si falta un insumo, propónlo nuevo con "catalogo": null, con descripción en MAYÚSCULAS al estilo del catálogo, la unidad de compra habitual en Colombia (BLS, KG, M3, M2, ML, UN, GL, HH para mano de obra, HM para equipos, DÍA, MES) y su tipo. Usa nombres genéricos, sin marcas comerciales.
+- La herramienta menor va como un insumo de tipo EQ con unidad %MO: se cobra como porcentaje de la mano de obra.
 - Lista los insumos principales de cada partida, sin inventar detalles que la partida no permite deducir.
 - En "partidas" pon los id de las partidas que usan cada insumo.
 - No incluyas precios ni cantidades.
@@ -81,6 +82,11 @@ export interface InsumosLeidos {
   nuevos: Map<string, { descripcion: string; unidad: string; tipo: TipoInsumo; partidas: Set<string> }>;
 }
 
+/** A "%" alone is the share of the labor (herramienta menor): the unit that computes it is %MO. */
+export function normalizarUnidad(unidad: string): string {
+  return plegar(unidad).replace(/[^a-z%]/g, "") === "%" ? "%MO" : unidad;
+}
+
 /** The key that tells two resources apart: their folded description and unit. */
 export function claveInsumo(descripcion: string, unidad: string): string {
   const n = (t: string) => plegar(t).replace(/\s+/g, " ").trim();
@@ -111,7 +117,7 @@ export function leerInsumos(texto: string, partidas: PartidaInsumosIA[], catalog
     if (!usan.length) continue;
     const m = typeof o.catalogo === "string" ? /^I(\d+)$/i.exec(o.catalogo.trim()) : null;
     const descripcion = limpio(o.descripcion, 300).toUpperCase();
-    const unidad = limpio(o.unidad, 12).toUpperCase();
+    const unidad = normalizarUnidad(limpio(o.unidad, 12).toUpperCase());
     const del = (m ? catalogo[Number(m[1]) - 1] : undefined) ?? porClave.get(claveInsumo(descripcion, unidad));
     if (del) {
       const s = out.delCatalogo.get(del.id) ?? new Set<string>();

@@ -3,11 +3,11 @@
 // quantities, using the catalog's resources and similar catalog partidas as
 // examples; prices always come from the catalog or the budget, never from the
 // model. Only resources: it doesn't use subpartidas (so no loops).
-import { ApuCalculado, calcularApu, cuadrillaPara, esPorcentajeMO, InsumoRef, redondear } from "../calc";
+import { ApuCalculado, calcularApu, cuadrillaPara, esPorcentajeMO, InsumoRef, porDia, porHora, redondear } from "../calc";
 import { JORNADA } from "../doc";
 import { plegar } from "../format";
 import { Apu, Insumo, PartidaCatalogo, PresupuestoDoc, TIPOS_INSUMO, TipoInsumo } from "../types";
-import { candidatos, claveInsumo, partidasParaInsumos } from "./insumos";
+import { candidatos, claveInsumo, normalizarUnidad, partidasParaInsumos } from "./insumos";
 import {
   Confianza,
   InsumoCatalogoIA,
@@ -19,7 +19,7 @@ import {
   ReferenciaApuIA,
 } from "./tipos";
 
-export const VERSION_PROMPT_APU = "apu-co-1";
+export const VERSION_PROMPT_APU = "apu-co-2";
 
 /** Most people (or machines) a crew line can have. */
 export const MAX_CUADRILLA = 100;
@@ -31,10 +31,9 @@ Para cada partida:
 - "lineas": los insumos del análisis.
   - Usa los insumos del catálogo: pon su código en "catalogo" (por ejemplo "I7") y copia su descripción, unidad y tipo.
   - Si falta uno indispensable, propónlo con "catalogo": null, descripción en MAYÚSCULAS al estilo del catálogo, unidad colombiana y tipo (MO, MT, EQ, SC). Sin marcas comerciales.
-  - Mano de obra y equipos que se miden por hora (HH, HM): en "cuadrilla" pon cuántas personas o equipos trabajan a la vez (1 oficial y 2 ayudantes son dos líneas, con cuadrilla 1 y 2) y deja "cantidad" en null. El sistema calcula la cantidad: cuadrilla × jornada ÷ rendimiento.
-  - Mano de obra o equipos medidos por día o jornal (DIA, JR): "cantidad" por unidad de la partida (cuadrilla ÷ rendimiento) y "cuadrilla" en null.
+  - Mano de obra y equipos que se pagan por tiempo, por hora (HH, HM) o por día o jornal (DIA, JR): en "cuadrilla" pon cuántas personas, cuadrillas o equipos trabajan a la vez (1 oficial y 2 ayudantes son dos líneas, con cuadrilla 1 y 2) y deja "cantidad" en null. El sistema calcula la cantidad: por hora, cuadrilla × jornada ÷ rendimiento; por día, cuadrilla ÷ rendimiento.
   - Materiales, subcontratos y lo demás: "cantidad" por unidad de la partida, con el desperdicio habitual incluido, y "cuadrilla" en null.
-  - Insumos con unidad %MO (herramienta menor): "cantidad" es el porcentaje de la mano de obra (por ejemplo 5) y "cuadrilla" en null.
+  - Herramienta menor: usa un insumo con unidad %MO; "cantidad" es el porcentaje de la mano de obra (por ejemplo 5) y "cuadrilla" en null.
 - "supuestos": una oración con lo que supusiste (dosificación, espesor, desperdicio, tipo de equipo...).
 - "confianza": "alta" si la partida es clara, "media" si tuviste que suponer algo, "baja" si conviene que una persona la revise con cuidado.
 
@@ -134,15 +133,7 @@ function limpio(text: unknown, max: number): string {
 const numero = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : Number.NaN);
 const sinSignos = (unidad: string) => plegar(unidad).replace(/[^a-z%]/g, "");
 
-/** Paid by the hour (HH, HM...): its quantity comes from the crew. */
-export function porHora(unidad: string): boolean {
-  return ["hh", "hm", "h", "hr", "hrs", "hora", "horas", "hor"].includes(sinSignos(unidad));
-}
-
-/** Paid by the day (DIA, JR...): a crew becomes days per unit (cuadrilla ÷ rendimiento). */
-export function porDia(unidad: string): boolean {
-  return ["dia", "dias", "dd", "jr", "jor", "jornal", "jornales", "jornada", "jornadas"].includes(sinSignos(unidad));
-}
+export { porDia, porHora };
 
 /** What tells two lines of an analysis apart: the catalog resource, or a new one's description and unit. */
 export function claveLinea(l: Pick<LineaApuIA, "insumoId" | "descripcion" | "unidad">): string {
@@ -158,7 +149,7 @@ function leerLinea(
   const o = (x ?? {}) as Record<string, unknown>;
   const m = typeof o.catalogo === "string" ? /^I(\d+)$/i.exec(o.catalogo.trim()) : null;
   const descripcionIA = limpio(o.descripcion, 300).toUpperCase();
-  const unidadIA = limpio(o.unidad, 12).toUpperCase();
+  const unidadIA = normalizarUnidad(limpio(o.unidad, 12).toUpperCase());
   // A "new" resource the catalog already has (same description and unit) is the catalog's.
   const del = (m ? catalogo[Number(m[1]) - 1] : undefined) ?? (descripcionIA ? porClave.get(claveInsumo(descripcionIA, unidadIA)) : undefined);
   const tipo: TipoInsumo | null = del ? del.tipo : TIPOS_INSUMO.includes(o.tipo as TipoInsumo) ? (o.tipo as TipoInsumo) : null;
@@ -172,11 +163,12 @@ function leerLinea(
     const pct = redondear(cantidad, 4);
     return pct > 0 && pct <= 100 ? { ...base, cuadrilla: null, cantidad: pct } : null;
   }
-  if ((tipo === "MO" || tipo === "EQ") && porHora(unidad)) {
-    const c = redondear(cuadrilla > 0 ? cuadrilla : cantidad > 0 ? cuadrillaPara(cantidad, apu) : 0, 4);
+  if ((tipo === "MO" || tipo === "EQ") && (porHora(unidad) || porDia(unidad))) {
+    // A quantity given instead becomes the crew it means (one too big to be a crew is dropped).
+    const c = redondear(cuadrilla > 0 ? cuadrilla : cantidad > 0 ? cuadrillaPara(cantidad, apu, unidad) : 0, 4);
     return c > 0 && c <= MAX_CUADRILLA ? { ...base, cuadrilla: c, cantidad: 0 } : null;
   }
-  const q = redondear(cantidad > 0 ? cantidad : cuadrilla > 0 && porDia(unidad) ? cuadrilla / apu.rendimiento : 0, 4);
+  const q = redondear(cantidad > 0 ? cantidad : 0, 4);
   return q > 0 && q <= 1_000_000 ? { ...base, cuadrilla: null, cantidad: q } : null;
 }
 

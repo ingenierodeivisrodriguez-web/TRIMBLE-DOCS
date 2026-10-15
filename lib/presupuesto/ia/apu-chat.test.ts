@@ -110,7 +110,7 @@ const RESPUESTA_P1 = {
     { catalogo: "I4", descripcion: "", unidad: "", tipo: "MT", cuadrilla: null, cantidad: 0.025 },
     { catalogo: "I4", descripcion: "", unidad: "", tipo: "MT", cuadrilla: null, cantidad: 0.03 }, // repeated
     { catalogo: "I5", descripcion: "", unidad: "", tipo: "EQ", cuadrilla: null, cantidad: 5 }, // 5 % of the labor
-    { catalogo: "I6", descripcion: "", unidad: "", tipo: "MO", cuadrilla: 2, cantidad: null }, // paid by the day: 2 ÷ 16 days per unit
+    { catalogo: "I6", descripcion: "", unidad: "", tipo: "MO", cuadrilla: 2, cantidad: null }, // paid by the day: a crew of 2, 2 ÷ 16 days per unit
     { catalogo: null, descripcion: "Agua", unidad: "m3", tipo: "MT", cuadrilla: null, cantidad: 0.005 }, // new
     { catalogo: null, descripcion: "Andamio", unidad: "dia", tipo: "XX", cuadrilla: null, cantidad: 1 }, // not a kind
     { catalogo: "I99", descripcion: "", unidad: "", tipo: "MT", cuadrilla: null, cantidad: 1 }, // unknown code, no description
@@ -120,7 +120,7 @@ const RESPUESTA_P1 = {
 };
 
 describe("fase 4: análisis de precios unitarios (lo que se acepta de la IA)", () => {
-  it("toma los insumos del catálogo, cuadrillas solo por hora, y descarta lo que no sirve", () => {
+  it("toma los insumos del catálogo, cuadrillas por hora y por día, y descarta lo que no sirve", () => {
     const texto = JSON.stringify({
       partidas: [RESPUESTA_P1, { id: "p2", rendimiento: 0, lineas: RESPUESTA_P1.lineas, supuestos: "", confianza: "alta" }, { id: "intrusa", rendimiento: 5, lineas: RESPUESTA_P1.lineas }],
     });
@@ -134,7 +134,7 @@ describe("fase 4: análisis de precios unitarios (lo que se acepta de la IA)", (
       { insumoId: "cem", descripcion: "CEMENTO GRIS 50 KG", unidad: "BLS", tipo: "MT", cuadrilla: null, cantidad: 0.18 },
       { insumoId: "are", descripcion: "ARENA DE PEGA", unidad: "M3", tipo: "MT", cuadrilla: null, cantidad: 0.025 },
       { insumoId: "her", descripcion: "HERRAMIENTA MENOR", unidad: "%MO", tipo: "EQ", cuadrilla: null, cantidad: 5 },
-      { insumoId: "ofd", descripcion: "OFICIAL JORNAL", unidad: "DIA", tipo: "MO", cuadrilla: null, cantidad: 0.125 },
+      { insumoId: "ofd", descripcion: "OFICIAL JORNAL", unidad: "DIA", tipo: "MO", cuadrilla: 2, cantidad: 0 },
       { insumoId: null, descripcion: "AGUA", unidad: "M3", tipo: "MT", cuadrilla: null, cantidad: 0.005 },
     ]);
     assert.deepEqual([p.supuestos, p.confianza], ["Mortero 1:4, espesor 1,5 cm, desperdicio 5 %.", "alta"]);
@@ -142,6 +142,22 @@ describe("fase 4: análisis de precios unitarios (lo que se acepta de la IA)", (
     assert.throws(() => leerApu("no es json", [pedida("p1")], CATALOGO), /no se pudo leer/);
     // Without any usable line the partida stays to ask again.
     assert.deepEqual(leerApu(JSON.stringify({ partidas: [{ id: "p1", rendimiento: 10, lineas: [{ catalogo: "I3", cantidad: 0 }] }] }), [pedida("p1")], CATALOGO).faltantes, ["p1"]);
+  });
+
+  it("la herramienta menor en % es %MO, y una cantidad por día se vuelve su cuadrilla (si cabe)", () => {
+    const lineas = [
+      { catalogo: null, descripcion: "Herramienta menor", unidad: "%", tipo: "EQ", cuadrilla: null, cantidad: 5 },
+      { catalogo: null, descripcion: "Cuadrilla de topografía", unidad: "DIA", tipo: "MO", cuadrilla: null, cantidad: 0.004 }, // 1 crew at 250 M2/day
+      { catalogo: null, descripcion: "Comisión de topografía", unidad: "DIA", tipo: "MO", cuadrilla: null, cantidad: 1 }, // "1 crew" as a quantity: 250 crews, not real
+    ];
+    const r = leerApu(JSON.stringify({ partidas: [{ id: "p1", rendimiento: 250, lineas, supuestos: "", confianza: "media" }] }), [pedida("p1")], CATALOGO);
+    assert.deepEqual(
+      r.propuestas.get("p1")!.lineas.map((l) => [l.descripcion, l.unidad, l.cuadrilla, l.cantidad]),
+      [
+        ["HERRAMIENTA MENOR", "%MO", null, 5],
+        ["CUADRILLA DE TOPOGRAFÍA", "DIA", 1, 0],
+      ]
+    );
   });
 
   it("reconoce las unidades por hora y por día", () => {
@@ -265,7 +281,7 @@ describe("fase 4: el servicio de análisis", () => {
     assert.equal(r.borradores[0].referencia, "1.1 PAÑETE LISO MUROS 1:4");
     assert.equal((await listarBorradoresIA(ctx(store, admin), "apu")).borradores.length, 1);
     const uso = (await getEstadoIA(ctx(store, admin))).usos[0];
-    assert.deepEqual([uso.tarea, uso.versionPrompt, uso.detalle], ["apu", "apu-co-1", "1 de 1 análisis, 1 insumo(s) nuevo(s)"]);
+    assert.deepEqual([uso.tarea, uso.versionPrompt, uso.detalle], ["apu", "apu-co-2", "1 de 1 análisis, 1 insumo(s) nuevo(s)"]);
   });
 
   it("al evaluar no guarda nada, pero registra el uso", async () => {
