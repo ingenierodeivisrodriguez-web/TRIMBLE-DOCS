@@ -1,7 +1,7 @@
 // Task 5 of the assistant: questions about the open budget. The browser
 // writes the budget as text (with what it costs, as computed on screen) and
 // the model answers from it; it only reads, it never changes the budget.
-import { calcularPie, FilaInsumo, factorGastos, redondear, SubpresupuestoCalculado, totalGastos } from "../calc";
+import { calcularPie, esPorcentajeMO, FilaInsumo, factorGastos, redondear, SubpresupuestoCalculado, totalGastos } from "../calc";
 import type { PresupuestoDoc } from "../types";
 import { MAX_CONTEXTO_CHAT, MAX_HISTORIAL_CHAT, MensajeChatIA } from "./tipos";
 
@@ -73,7 +73,7 @@ export function contextoPresupuesto(
       if (!f.item.componentes.length) notas.push("sin análisis");
       if (!f.metrado) notas.push("sin metrado");
       if (f.metradoModelo) notas.push(`metrado del modelo 3D (${f.metradoModelo.elementos} elementos)`);
-      const sinPrecio = f.apu?.lineas.filter((l) => !l.porcentajeMO && !l.error && l.precio === 0).length ?? 0;
+      const sinPrecio = f.apu?.lineas.filter((l) => !l.porcentaje && !l.error && l.precio === 0).length ?? 0;
       if (sinPrecio) notas.push(`${sinPrecio} insumo(s) sin precio`);
       const r = f.rubros;
       return {
@@ -97,7 +97,7 @@ export function contextoPresupuesto(
   // The resources: the largest amounts first, in at most a quarter of the space.
   const filasInsumos = [...insumos]
     .sort((a, b) => b.parcial - a.parcial)
-    .map((i) => `${i.tipo} | ${t(i.descripcion)} | ${t(i.unidad)} | ${i.porcentajeMO ? "% de la MO" : n(i.cantidad)} | ${i.porcentajeMO ? "" : n(i.precio)} | ${n(i.parcial)}`);
+    .map((i) => `${i.tipo} | ${t(i.descripcion)} | ${t(i.unidad)} | ${i.porcentaje ? (esPorcentajeMO(i.unidad) ? "% de la MO" : "% de la partida") : n(i.cantidad)} | ${i.porcentaje ? "" : n(i.precio)} | ${n(i.parcial)}`);
   let espacioInsumos = Math.floor(max / 4);
   let incluidos = 0;
   for (const f of filasInsumos) {

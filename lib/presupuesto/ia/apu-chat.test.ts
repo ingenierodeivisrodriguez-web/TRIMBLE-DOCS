@@ -144,7 +144,7 @@ describe("fase 4: análisis de precios unitarios (lo que se acepta de la IA)", (
     assert.deepEqual(leerApu(JSON.stringify({ partidas: [{ id: "p1", rendimiento: 10, lineas: [{ catalogo: "I3", cantidad: 0 }] }] }), [pedida("p1")], CATALOGO).faltantes, ["p1"]);
   });
 
-  it("la herramienta menor en % es %MO, y una cantidad por día se vuelve su cuadrilla (si cabe)", () => {
+  it("un insumo en % lleva su porcentaje, y una cantidad por día se vuelve su cuadrilla (si cabe)", () => {
     const lineas = [
       { catalogo: null, descripcion: "Herramienta menor", unidad: "%", tipo: "EQ", cuadrilla: null, cantidad: 5 },
       { catalogo: null, descripcion: "Cuadrilla de topografía", unidad: "DIA", tipo: "MO", cuadrilla: null, cantidad: 0.004 }, // 1 crew at 250 M2/day
@@ -154,7 +154,7 @@ describe("fase 4: análisis de precios unitarios (lo que se acepta de la IA)", (
     assert.deepEqual(
       r.propuestas.get("p1")!.lineas.map((l) => [l.descripcion, l.unidad, l.cuadrilla, l.cantidad]),
       [
-        ["HERRAMIENTA MENOR", "%MO", null, 5],
+        ["HERRAMIENTA MENOR", "%", null, 5],
         ["CUADRILLA DE TOPOGRAFÍA", "DIA", 1, 0],
       ]
     );
@@ -281,7 +281,7 @@ describe("fase 4: el servicio de análisis", () => {
     assert.equal(r.borradores[0].referencia, "1.1 PAÑETE LISO MUROS 1:4");
     assert.equal((await listarBorradoresIA(ctx(store, admin), "apu")).borradores.length, 1);
     const uso = (await getEstadoIA(ctx(store, admin))).usos[0];
-    assert.deepEqual([uso.tarea, uso.versionPrompt, uso.detalle], ["apu", "apu-co-2", "1 de 1 análisis, 1 insumo(s) nuevo(s)"]);
+    assert.deepEqual([uso.tarea, uso.versionPrompt, uso.detalle], ["apu", "apu-co-3", "1 de 1 análisis, 1 insumo(s) nuevo(s)"]);
   });
 
   it("al evaluar no guarda nada, pero registra el uso", async () => {

@@ -302,7 +302,7 @@ describe("valores en el tiempo", () => {
     );
     assert.deepEqual([por.get("OFICIAL")!.cantidad, por.get("OFICIAL")!.cantidades, por.get("OFICIAL")!.montos], [80, [24, 56], [288_000, 672_000]]);
     assert.deepEqual(por.get("CEMENTO")!.montos, [60_000, 140_000]);
-    assert.deepEqual([por.get("HERRAMIENTAS MANUALES")!.porcentajeMO, por.get("HERRAMIENTAS MANUALES")!.montos], [true, [14_400, 33_600]]);
+    assert.deepEqual([por.get("HERRAMIENTAS MANUALES")!.porcentaje, por.get("HERRAMIENTAS MANUALES")!.montos], [true, [14_400, 33_600]]);
     assert.equal(ci.total, 1_208_000);
   });
 

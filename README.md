@@ -1081,8 +1081,9 @@ La conexión con Trimble Connect (token, menú, visor) es común a las dos:
 - **Insumos**: código, descripción, unidad, precio, tipo (**MO** mano de obra,
   **MT** materiales, **EQ** equipos y herramientas, **SC** subcontratos), IU
   (índice unificado) y código OmniClass (p. ej. Tabla 23 Productos, 41
-  Materiales o 34 Roles). Las herramientas que se cobran como porcentaje de
-  la mano de obra usan la unidad **%MO**.
+  Materiales o 34 Roles). Lo que se cobra como porcentaje usa la unidad
+  **%MO** (de la mano de obra de la partida, lo usual para la herramienta
+  menor) o **%** (de la suma de las demás líneas de la partida).
 - **Partidas**: código, descripción, unidad, rendimiento (unidades por día),
   jornada (horas), código OmniClass de la **Tabla 22 (Resultados de trabajo)**
   y su APU: insumos y subpartidas (otras partidas del catálogo) con cuadrilla o
@@ -1137,7 +1138,10 @@ La conexión con Trimble Connect (token, menú, visor) es común a las dos:
     que se pagan por día o jornal (DIA, JR) (si escribes la cantidad, se
     recalcula la cuadrilla);
   - parcial = cantidad × PU, redondeado a 2 decimales (cantidades a 4);
-  - una línea %MO = su porcentaje de la mano de obra de la partida;
+  - una línea %MO = su porcentaje de la mano de obra de la partida, y una
+    línea % = su porcentaje de la suma de las demás líneas (MO, MT, EQ, SC y
+    SP, sin otras de porcentaje); su PU se calcula solo y su cantidad es el
+    porcentaje;
   - una subpartida aporta su CU por la cantidad;
   - CU = MO + MT + EQ + SC + SP;
   - el parcial de una partida es metrado × CU, y un título suma sus partidas
@@ -1530,8 +1534,9 @@ sin análisis (o todas) propone el **rendimiento**, las **cuadrillas** de mano
 de obra y equipos que se pagan por hora o por día (la cantidad sale de
 cuadrilla × jornada ÷ rendimiento, o cuadrilla ÷ rendimiento por día, como en
 el editor de APU), las **cantidades** de
-materiales y subcontratos con su desperdicio, y el % de la mano de obra para la
-herramienta menor (%MO). Usa los **insumos del catálogo** y, como ejemplo,
+materiales y subcontratos con su desperdicio, y el porcentaje de lo que se cobra así
+(%MO de la mano de obra, lo usual para la herramienta menor, o % de la
+partida). Usa los **insumos del catálogo** y, como ejemplo,
 hasta 3 **partidas parecidas del catálogo** que ya tienen análisis (por
 palabras de la descripción y unidad), sin precios. Si falta un insumo
 indispensable, lo propone como **nuevo**. Lo que el servidor acepta: solo
@@ -1539,8 +1544,8 @@ partidas pedidas, rendimiento mayor que 0, códigos del catálogo que se
 ofrecieron, un insumo "nuevo" que el catálogo ya tiene se toma del catálogo,
 la cuadrilla solo para MO y EQ por hora (HH, HM) o por día (DIA, JR), y si la
 IA da una cantidad en su lugar se pasa a la cuadrilla que significa (se
-descarta si da más de 100: era una cuadrilla escrita como cantidad); una
-unidad "%" es %MO; nada repetido; sin subpartidas (así
+descarta si da más de 100: era una cuadrilla escrita como cantidad); en
+%MO o % la cantidad es el porcentaje (hasta 100); nada repetido; sin subpartidas (así
 no hay ciclos). El navegador envía lotes de 3 partidas. Cada análisis llega
 como borrador con su **confianza** y sus **supuestos**, y la revisión muestra
 cada línea con los precios del presupuesto (o del catálogo), el **costo

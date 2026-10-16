@@ -82,11 +82,6 @@ export interface InsumosLeidos {
   nuevos: Map<string, { descripcion: string; unidad: string; tipo: TipoInsumo; partidas: Set<string> }>;
 }
 
-/** A "%" alone is the share of the labor (herramienta menor): the unit that computes it is %MO. */
-export function normalizarUnidad(unidad: string): string {
-  return plegar(unidad).replace(/[^a-z%]/g, "") === "%" ? "%MO" : unidad;
-}
-
 /** The key that tells two resources apart: their folded description and unit. */
 export function claveInsumo(descripcion: string, unidad: string): string {
   const n = (t: string) => plegar(t).replace(/\s+/g, " ").trim();
@@ -117,7 +112,7 @@ export function leerInsumos(texto: string, partidas: PartidaInsumosIA[], catalog
     if (!usan.length) continue;
     const m = typeof o.catalogo === "string" ? /^I(\d+)$/i.exec(o.catalogo.trim()) : null;
     const descripcion = limpio(o.descripcion, 300).toUpperCase();
-    const unidad = normalizarUnidad(limpio(o.unidad, 12).toUpperCase());
+    const unidad = limpio(o.unidad, 12).toUpperCase();
     const del = (m ? catalogo[Number(m[1]) - 1] : undefined) ?? porClave.get(claveInsumo(descripcion, unidad));
     if (del) {
       const s = out.delCatalogo.get(del.id) ?? new Set<string>();

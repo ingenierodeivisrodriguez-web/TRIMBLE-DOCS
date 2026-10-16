@@ -51,7 +51,7 @@ const INSTRUCCIONES = [
   "",
   "Hoja Insumos: un insumo por fila. Tipo: MO (mano de obra), MT (materiales), EQ (equipos y herramientas) o SC (subcontratos).",
   "  Los insumos se reconocen por su Código; sin código, por Descripción + Unidad. Si ya existen se actualizan, si no se crean.",
-  "  Herramientas que se cobran como % de la mano de obra: unidad %MO (en el APU, su cantidad es el porcentaje).",
+  "  Lo que se cobra como porcentaje: unidad %MO (de la mano de obra de la partida) o % (de la suma de sus demás líneas); en el APU, su cantidad es el porcentaje.",
   "Hoja Partidas: una partida por fila, con su Rendimiento (unidades por día) y Jornada (horas), y los datos de su diccionario EDT:",
   "  Descripción del trabajo, Criterios de aceptación y Responsable (opcionales; si las columnas están, lo que dejes en blanco borra el dato guardado).",
   "  Las partidas necesitan Código para poder llevar insumos.",

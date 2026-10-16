@@ -796,9 +796,9 @@ export function InsumosPeriodoDialog({ res, doc, resolver, proyecto, onClose }: 
         periodos={ci.periodos.map((p, i) => ({ clave: p.desde, titulo: p.etiqueta, sub: modo === "costo" && ci.total ? `${fmt((ci.totales[i] / ci.total) * 100, 3)}%` : "" }))}
         filas={ci.filas.map((f) => ({
           clave: f.id,
-          celdas: [<Square key="t" rubro={f.tipo} />, f.descripcion, f.unidad, f.porcentajeMO ? "" : fmt(f.cantidad, 3), f.porcentajeMO ? "" : fmt(f.precio), fmt(f.parcial)],
-          montos: modo === "costo" || f.porcentajeMO ? f.montos : f.cantidades,
-          decimales: modo === "costo" || f.porcentajeMO ? 2 : 3,
+          celdas: [<Square key="t" rubro={f.tipo} />, f.descripcion, f.unidad, f.porcentaje ? "" : fmt(f.cantidad, 3), f.porcentaje ? "" : fmt(f.precio), fmt(f.parcial)],
+          montos: modo === "costo" || f.porcentaje ? f.montos : f.cantidades,
+          decimales: modo === "costo" || f.porcentaje ? 2 : 3,
         }))}
         total={modo === "costo" ? { etiqueta: "TOTAL", valor: ci.total, montos: ci.totales } : undefined}
       />

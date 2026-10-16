@@ -142,9 +142,9 @@ export default function ListaInsumos({
                 </td>
                 <td style={td}>{f.descripcion}</td>
                 <td style={{ ...td, textAlign: "center" }}>{f.unidad}</td>
-                <td style={tdNum}>{f.porcentajeMO ? "—" : fmt(f.cantidad, 3)}</td>
+                <td style={tdNum}>{f.porcentaje ? "—" : fmt(f.cantidad, 3)}</td>
                 <td style={tdNum}>
-                  {f.porcentajeMO ? (
+                  {f.porcentaje ? (
                     "—"
                   ) : canEdit ? (
                     <NumInput value={f.precio} decimals={2} onCommit={(v) => v !== null && setInsumo(f.id, { precio: v })} style={{ width: "100%", padding: "2px 4px" }} ariaLabel={`PU de ${f.descripcion}`} />

@@ -104,7 +104,9 @@ export default function ApuEditor({
 
   function cambiarCantidad(l: LineaApu, value: number | null) {
     if (value === null) return;
-    if (l.componente.cuadrilla !== null && !l.porcentajeMO) setComponente(l.index, { cantidad: value, cuadrilla: cuadrillaPara(value, apu, l.unidad) });
+    // A percentage line has no crew (one typed while it had another unit is dropped).
+    if (l.porcentaje) setComponente(l.index, { cantidad: value, cuadrilla: null });
+    else if (l.componente.cuadrilla !== null) setComponente(l.index, { cantidad: value, cuadrilla: cuadrillaPara(value, apu, l.unidad) });
     else setComponente(l.index, { cantidad: value });
   }
 
@@ -196,7 +198,7 @@ export default function ApuEditor({
           </thead>
           <tbody>
             {lineas.map((l) => {
-              const crewEditable = editable && !l.porcentajeMO && l.componente.tipo === "insumo" && (l.rubro === "MO" || l.rubro === "EQ");
+              const crewEditable = editable && !l.porcentaje && l.componente.tipo === "insumo" && (l.rubro === "MO" || l.rubro === "EQ");
               return (
                 <tr key={`${l.index}-${l.componente.id}`} style={{ background: l.error ? "#fdecea" : "#fff" }}>
                   <td style={{ ...td, textAlign: "center" }}>
@@ -230,7 +232,7 @@ export default function ApuEditor({
                     )}
                   </td>
                   <td style={tdNum}>
-                    {onPrecio && l.componente.tipo === "insumo" && !l.porcentajeMO && !l.error ? (
+                    {onPrecio && l.componente.tipo === "insumo" && !l.porcentaje && !l.error ? (
                       <NumInput value={l.precio} decimals={2} onCommit={(v) => v !== null && onPrecio(l.componente.id, v)} style={numCell} ariaLabel={`Precio de ${l.descripcion}`} />
                     ) : (
                       fmt(l.precio)

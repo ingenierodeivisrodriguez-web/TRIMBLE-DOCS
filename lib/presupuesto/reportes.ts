@@ -56,7 +56,7 @@ export function tablaListaInsumos(nombre: string, filas: FilaInsumo[], ius: Reco
     ],
     filas: [
       ...filas.map((f) => ({
-        celdas: [f.tipo, f.descripcion, f.unidad, f.porcentajeMO ? null : f.cantidad, f.porcentajeMO ? null : f.precio, f.parcial, ius[f.id] ?? ""],
+        celdas: [f.tipo, f.descripcion, f.unidad, f.porcentaje ? null : f.cantidad, f.porcentaje ? null : f.precio, f.parcial, ius[f.id] ?? ""],
       })),
       { celdas: ["", "TOTAL", "", null, null, Math.round(total * 100) / 100, ""], negrita: true },
     ],
@@ -186,10 +186,10 @@ export function tablaCalendarioInsumos(c: { periodos: Periodo[]; filas: FilaInsu
           f.tipo,
           f.descripcion,
           f.unidad,
-          f.porcentajeMO ? null : f.cantidad,
-          f.porcentajeMO ? null : f.precio,
+          f.porcentaje ? null : f.cantidad,
+          f.porcentaje ? null : f.precio,
           f.parcial,
-          ...(modo === "costo" ? f.montos : f.porcentajeMO ? f.montos : f.cantidades),
+          ...(modo === "costo" ? f.montos : f.porcentaje ? f.montos : f.cantidades),
         ],
       })),
       ...(modo === "costo" ? [{ celdas: ["", "TOTAL", "", null, null, c.total, ...c.totales], negrita: true }] : []),

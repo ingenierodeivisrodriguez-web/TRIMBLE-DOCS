@@ -97,6 +97,25 @@ describe("análisis de precios unitarios", () => {
     assert.deepEqual([apu.lineas[0].cantidad, apu.lineas[0].parcial, apu.cu], [0.004, 640, 640]);
   });
 
+  it("un insumo en % toma su porcentaje de la suma de las demás líneas; en %MO, solo de la mano de obra", () => {
+    const refs: Record<string, InsumoRef> = {
+      topo: { descripcion: "CUADRILLA DE TOPOGRAFIA", unidad: "DIA", tipo: "MO", precio: 160_000 },
+      equipo: { descripcion: "EQUIPO DE TOPOGRAFIA", unidad: "HM", tipo: "EQ", precio: 50_000 },
+      estacas: { descripcion: "ESTACAS", unidad: "UN", tipo: "MT", precio: 1_000 },
+      herramienta: { descripcion: "HERRAMIENTA MENOR", unidad: "%", tipo: "EQ", precio: 0 },
+      herramientaMo: { descripcion: "HERRAMIENTA MENOR", unidad: "% MO", tipo: "EQ", precio: 0 },
+    };
+    const r: Resolver = { insumo: (id) => refs[id] ?? null, subpartida: () => null };
+    const lineas = [crew("topo", 1), crew("equipo", 1), qty("estacas", 0.1)]; // 640 + 1,600 + 100 = 2,340
+    const pct = calcularApu({ rendimiento: 250, jornada: 8, componentes: [...lineas, { tipo: "insumo", id: "herramienta", cuadrilla: 5, cantidad: 5 }] }, r);
+    const h = pct.lineas[3];
+    // The crew typed on it doesn't count: the quantity is the percentage, and its price is computed.
+    assert.deepEqual([h.porcentaje, h.cuadrilla, h.cantidad, h.precio, h.parcial], [true, null, 5, 2_340, 117]);
+    assert.equal(pct.cu, 2_457);
+    const mo = calcularApu({ rendimiento: 250, jornada: 8, componentes: [...lineas, qty("herramientaMo", 5)] }, r);
+    assert.deepEqual([mo.lineas[3].precio, mo.lineas[3].parcial], [640, 32]);
+  });
+
   it("reproduce el CU de Trazo y replanteo: MO 16.83, MT 0.71, EQ 3.75, CU 21.29", () => {
     const apu = calcularApu(TRAZO, resolver());
     assert.deepEqual(apu.rubros, { MO: 16.83, MT: 0.71, EQ: 3.75, SC: 0, SP: 0 });
@@ -187,7 +206,7 @@ describe("presupuesto", () => {
     const peon = lista.find((f) => f.id === "peon")!;
     assert.equal(peon.cantidad, 227.2); // 355 × 0.64
     const herramientas = lista.find((f) => f.id === "herramientas")!;
-    assert.ok(herramientas.porcentajeMO);
+    assert.ok(herramientas.porcentaje);
     assert.equal(herramientas.parcial, 298.2); // 355 × 0.84
     assert.deepEqual([...new Set(lista.map((f) => f.tipo))], ["MO", "MT", "EQ", "SC"]);
   });

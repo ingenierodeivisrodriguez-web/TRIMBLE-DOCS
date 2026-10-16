@@ -902,7 +902,7 @@ export interface FilaInsumoPeriodo {
   unidad: string;
   tipo: TipoInsumo;
   /** A "%MO" resource: its amounts are money, not quantities. */
-  porcentajeMO: boolean;
+  porcentaje: boolean;
   cantidad: number;
   precio: number;
   parcial: number;
@@ -947,7 +947,7 @@ export function calendarioInsumos(p: Programado, r: Resolver, spId: string | nul
       descripcion: ins.descripcion,
       unidad: ins.unidad,
       tipo: ins.tipo,
-      porcentajeMO: false,
+      porcentaje: false,
       cantidad,
       precio: ins.precio,
       parcial,
@@ -962,7 +962,7 @@ export function calendarioInsumos(p: Programado, r: Resolver, spId: string | nul
       ms.reduce((a, b) => a + b, 0),
       2
     );
-    filas.push({ id, descripcion: ins.descripcion, unidad: ins.unidad, tipo: ins.tipo, porcentajeMO: true, cantidad: 0, precio: 0, parcial, cantidades: per.map(() => 0), montos: repartir(parcial, ms) });
+    filas.push({ id, descripcion: ins.descripcion, unidad: ins.unidad, tipo: ins.tipo, porcentaje: true, cantidad: 0, precio: 0, parcial, cantidades: per.map(() => 0), montos: repartir(parcial, ms) });
   }
   filas.sort((a, b) => ORDEN_TIPO[a.tipo] - ORDEN_TIPO[b.tipo] || a.descripcion.localeCompare(b.descripcion, "es", { sensitivity: "base" }));
   const totales = per.map((_, i) => redondear(filas.reduce((sum, f) => sum + f.montos[i], 0), 2));

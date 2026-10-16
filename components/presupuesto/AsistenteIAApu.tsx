@@ -2,7 +2,7 @@
 
 import { CSSProperties, useEffect, useMemo, useRef, useState } from "react";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
-import { calcularApu, InsumoRef, Resolver } from "../../lib/presupuesto/calc";
+import { calcularApu, esPorcentajeMO, InsumoRef, Resolver } from "../../lib/presupuesto/calc";
 import { JORNADA, resolverCatalogo } from "../../lib/presupuesto/doc";
 import { fmt } from "../../lib/presupuesto/format";
 import {
@@ -466,7 +466,7 @@ function TarjetaApu({
                     fmt(c?.cantidad ?? 0, 4)
                   )}
                 </td>
-                <td style={{ ...tdNum, color: c && !c.porcentajeMO && c.precio === 0 ? "#8a1c14" : undefined }}>{c?.porcentajeMO ? "% MO" : c && c.precio === 0 ? "sin precio" : fmt(c?.precio ?? 0)}</td>
+                <td style={{ ...tdNum, color: c && !c.porcentaje && c.precio === 0 ? "#8a1c14" : undefined }}>{c?.porcentaje ? (esPorcentajeMO(c.unidad) ? "% MO" : "% partida") : c && c.precio === 0 ? "sin precio" : fmt(c?.precio ?? 0)}</td>
                 <td style={tdNum}>{fmt(c?.parcial ?? 0)}</td>
                 <td style={{ ...td, textAlign: "center" }}>
                   <button type="button" title="Quitar esta línea" aria-label={`Quitar ${l.descripcion}`} disabled={p.lineas.length <= 1} onClick={() => onEditar({ ...p, lineas: p.lineas.filter((_, k) => k !== i) })} style={quitar}>

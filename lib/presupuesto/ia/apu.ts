@@ -3,11 +3,11 @@
 // quantities, using the catalog's resources and similar catalog partidas as
 // examples; prices always come from the catalog or the budget, never from the
 // model. Only resources: it doesn't use subpartidas (so no loops).
-import { ApuCalculado, calcularApu, cuadrillaPara, esPorcentajeMO, InsumoRef, porDia, porHora, redondear } from "../calc";
+import { ApuCalculado, calcularApu, cuadrillaPara, esPorcentaje, InsumoRef, porDia, porHora, redondear } from "../calc";
 import { JORNADA } from "../doc";
 import { plegar } from "../format";
 import { Apu, Insumo, PartidaCatalogo, PresupuestoDoc, TIPOS_INSUMO, TipoInsumo } from "../types";
-import { candidatos, claveInsumo, normalizarUnidad, partidasParaInsumos } from "./insumos";
+import { candidatos, claveInsumo, partidasParaInsumos } from "./insumos";
 import {
   Confianza,
   InsumoCatalogoIA,
@@ -19,7 +19,7 @@ import {
   ReferenciaApuIA,
 } from "./tipos";
 
-export const VERSION_PROMPT_APU = "apu-co-2";
+export const VERSION_PROMPT_APU = "apu-co-3";
 
 /** Most people (or machines) a crew line can have. */
 export const MAX_CUADRILLA = 100;
@@ -33,7 +33,7 @@ Para cada partida:
   - Si falta uno indispensable, propónlo con "catalogo": null, descripción en MAYÚSCULAS al estilo del catálogo, unidad colombiana y tipo (MO, MT, EQ, SC). Sin marcas comerciales.
   - Mano de obra y equipos que se pagan por tiempo, por hora (HH, HM) o por día o jornal (DIA, JR): en "cuadrilla" pon cuántas personas, cuadrillas o equipos trabajan a la vez (1 oficial y 2 ayudantes son dos líneas, con cuadrilla 1 y 2) y deja "cantidad" en null. El sistema calcula la cantidad: por hora, cuadrilla × jornada ÷ rendimiento; por día, cuadrilla ÷ rendimiento.
   - Materiales, subcontratos y lo demás: "cantidad" por unidad de la partida, con el desperdicio habitual incluido, y "cuadrilla" en null.
-  - Herramienta menor: usa un insumo con unidad %MO; "cantidad" es el porcentaje de la mano de obra (por ejemplo 5) y "cuadrilla" en null.
+  - Insumos que se cobran como porcentaje: unidad %MO (de la mano de obra de la partida, lo usual para la herramienta menor) o % (de la suma de los demás insumos de la partida). "cantidad" es el porcentaje (por ejemplo 5) y "cuadrilla" en null.
 - "supuestos": una oración con lo que supusiste (dosificación, espesor, desperdicio, tipo de equipo...).
 - "confianza": "alta" si la partida es clara, "media" si tuviste que suponer algo, "baja" si conviene que una persona la revise con cuidado.
 
@@ -149,7 +149,7 @@ function leerLinea(
   const o = (x ?? {}) as Record<string, unknown>;
   const m = typeof o.catalogo === "string" ? /^I(\d+)$/i.exec(o.catalogo.trim()) : null;
   const descripcionIA = limpio(o.descripcion, 300).toUpperCase();
-  const unidadIA = normalizarUnidad(limpio(o.unidad, 12).toUpperCase());
+  const unidadIA = limpio(o.unidad, 12).toUpperCase();
   // A "new" resource the catalog already has (same description and unit) is the catalog's.
   const del = (m ? catalogo[Number(m[1]) - 1] : undefined) ?? (descripcionIA ? porClave.get(claveInsumo(descripcionIA, unidadIA)) : undefined);
   const tipo: TipoInsumo | null = del ? del.tipo : TIPOS_INSUMO.includes(o.tipo as TipoInsumo) ? (o.tipo as TipoInsumo) : null;
@@ -159,7 +159,7 @@ function leerLinea(
   const base = { insumoId: del?.id ?? null, descripcion, unidad, tipo };
   const cuadrilla = numero(o.cuadrilla);
   const cantidad = numero(o.cantidad);
-  if (esPorcentajeMO(unidad)) {
+  if (esPorcentaje(unidad)) {
     const pct = redondear(cantidad, 4);
     return pct > 0 && pct <= 100 ? { ...base, cuadrilla: null, cantidad: pct } : null;
   }
@@ -322,7 +322,7 @@ export function calcularPropuesta(p: PropuestaApu, jornada: number, insumo: (id:
 
 /** Lines whose resource has no price yet (new ones, or catalog ones at 0). */
 export function sinPrecio(calc: ApuCalculado): number {
-  return calc.lineas.filter((l) => !l.porcentajeMO && !l.error && l.precio === 0).length;
+  return calc.lineas.filter((l) => !l.porcentaje && !l.error && l.precio === 0).length;
 }
 
 /** Outside what similar partidas cost: below 75 % of the cheapest or above 125 % of the dearest. */

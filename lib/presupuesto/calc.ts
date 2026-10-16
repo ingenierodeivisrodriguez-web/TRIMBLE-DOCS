@@ -31,6 +31,16 @@ export function esPorcentajeMO(unidad: string): boolean {
   return unidad.replace(/\s+/g, "").toUpperCase() === "%MO";
 }
 
+/**
+ * Resources measured as a percentage: "%MO" of the partida's labor, "%" of
+ * the sum of its other lines. Their quantity is the percentage and their
+ * price is computed.
+ */
+export function esPorcentaje(unidad: string): boolean {
+  const u = unidad.replace(/\s+/g, "");
+  return u === "%" || esPorcentajeMO(u);
+}
+
 export function rubrosVacios(): Record<Rubro, number> {
   return { MO: 0, MT: 0, EQ: 0, SC: 0, SP: 0 };
 }
@@ -66,8 +76,8 @@ export interface LineaApu {
   cantidad: number;
   precio: number;
   parcial: number;
-  /** A "%MO" line: `cantidad` is a percentage and `precio` the partida's labor. */
-  porcentajeMO: boolean;
+  /** A percentage line ("%MO" or "%"): `cantidad` is the percentage and `precio` what it is taken of. */
+  porcentaje: boolean;
   error: string | null;
 }
 
@@ -117,15 +127,15 @@ export function calcularApu(apu: Apu, r: Resolver, options: ApuOptions = {}): Ap
   const cache = options.cache ?? new Map<string, ApuCalculado>();
   const stack = options.stack ?? [];
   const lineas: LineaApu[] = apu.componentes.map((c, index) => {
-    const base = { index, componente: c, cuadrilla: null, porcentajeMO: false, error: null };
+    const base = { index, componente: c, cuadrilla: null, porcentaje: false, error: null };
     if (c.tipo === "insumo") {
       const ins = r.insumo(c.id);
       if (!ins) {
         return { ...base, rubro: "MT", descripcion: "(insumo no encontrado)", unidad: "", cantidad: redondear(c.cantidad, 4), precio: 0, parcial: 0, error: "El insumo ya no existe." };
       }
-      if (esPorcentajeMO(ins.unidad)) {
-        // Amount set below, once the partida's labor is known.
-        return { ...base, rubro: ins.tipo, descripcion: ins.descripcion, unidad: ins.unidad, cantidad: redondear(c.cantidad, 4), precio: 0, parcial: 0, porcentajeMO: true };
+      if (esPorcentaje(ins.unidad)) {
+        // Amount set below, once what it is taken of is known.
+        return { ...base, rubro: ins.tipo, descripcion: ins.descripcion, unidad: ins.unidad, cantidad: redondear(c.cantidad, 4), precio: 0, parcial: 0, porcentaje: true };
       }
       const cantidad = cantidadComponente(c, apu, ins.unidad);
       return {
@@ -155,14 +165,14 @@ export function calcularApu(apu: Apu, r: Resolver, options: ApuOptions = {}): Ap
     return { ...base, rubro: "SP", descripcion: sub.descripcion, unidad: sub.unidad, cantidad, precio: calculada.cu, parcial: redondear(cantidad * calculada.cu, 2) };
   });
 
-  const manoDeObra = redondear(
-    lineas.filter((l) => l.rubro === "MO" && !l.porcentajeMO && !l.error).reduce((sum, l) => sum + l.parcial, 0),
-    2
-  );
+  // What the percentages are taken of: the labor (%MO) or every other line (%), never another percentage.
+  const fijas = lineas.filter((l) => !l.porcentaje && !l.error);
+  const manoDeObra = redondear(fijas.filter((l) => l.rubro === "MO").reduce((sum, l) => sum + l.parcial, 0), 2);
+  const todas = redondear(fijas.reduce((sum, l) => sum + l.parcial, 0), 2);
   for (const l of lineas) {
-    if (!l.porcentajeMO) continue;
-    l.precio = manoDeObra;
-    l.parcial = redondear((l.cantidad / 100) * manoDeObra, 2);
+    if (!l.porcentaje) continue;
+    l.precio = esPorcentajeMO(l.unidad) ? manoDeObra : todas;
+    l.parcial = redondear((l.cantidad / 100) * l.precio, 2);
   }
 
   const rubros = rubrosVacios();
@@ -258,12 +268,12 @@ export interface FilaInsumo {
   cantidad: number;
   precio: number;
   parcial: number;
-  porcentajeMO: boolean;
+  porcentaje: boolean;
 }
 
 const ORDEN_TIPO: Record<TipoInsumo, number> = { MO: 0, MT: 1, EQ: 2, SC: 3 };
 
-/** Resources used: quantities by resource id, and the money of "%MO" resources. */
+/** Resources used: quantities by resource id, and the money of percentage resources ("%MO", "%"). */
 export interface Consumo {
   cantidades: Map<string, number>;
   montos: Map<string, number>;
@@ -289,7 +299,7 @@ export function consumoDeApu(
     if (c.tipo === "subpartida") {
       const sub = r.subpartida(c.id);
       if (sub) consumoDeApu(sub, factor * l.cantidad, r, cache, out, [...stack, c.id]);
-    } else if (l.porcentajeMO) {
+    } else if (l.porcentaje) {
       out.montos.set(c.id, (out.montos.get(c.id) ?? 0) + factor * l.parcial);
     } else {
       out.cantidades.set(c.id, (out.cantidades.get(c.id) ?? 0) + factor * l.cantidad);
@@ -323,12 +333,12 @@ export function listaInsumos(
     const ins = r.insumo(id);
     if (!ins) continue;
     const q = redondear(cantidad, 4);
-    filas.push({ id, descripcion: ins.descripcion, unidad: ins.unidad, tipo: ins.tipo, cantidad: q, precio: ins.precio, parcial: redondear(q * ins.precio, 2), porcentajeMO: false });
+    filas.push({ id, descripcion: ins.descripcion, unidad: ins.unidad, tipo: ins.tipo, cantidad: q, precio: ins.precio, parcial: redondear(q * ins.precio, 2), porcentaje: false });
   }
   for (const [id, monto] of montos) {
     const ins = r.insumo(id);
     if (!ins) continue;
-    filas.push({ id, descripcion: ins.descripcion, unidad: ins.unidad, tipo: ins.tipo, cantidad: 0, precio: 0, parcial: redondear(monto, 2), porcentajeMO: true });
+    filas.push({ id, descripcion: ins.descripcion, unidad: ins.unidad, tipo: ins.tipo, cantidad: 0, precio: 0, parcial: redondear(monto, 2), porcentaje: true });
   }
   return filas.sort(
     (a, b) => ORDEN_TIPO[a.tipo] - ORDEN_TIPO[b.tipo] || a.descripcion.localeCompare(b.descripcion, "es", { sensitivity: "base" })

@@ -262,7 +262,7 @@ function InsumoForm({
         </label>
         <label>
           <span style={labelStyle}>Unidad</span>
-          <input value={data.unidad} maxLength={20} onChange={(e) => setData({ ...data, unidad: e.target.value })} style={f} placeholder="HH, KG, M3, %MO..." />
+          <input value={data.unidad} maxLength={20} onChange={(e) => setData({ ...data, unidad: e.target.value })} style={f} placeholder="HH, KG, M3, %MO, %..." />
         </label>
         <label>
           <span style={labelStyle}>Precio</span>
@@ -300,7 +300,8 @@ function InsumoForm({
           {data.omniclass && <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", marginLeft: 8 }}>{catalogo.titulos.get(data.omniclass) ?? ""}</span>}
         </label>
         <p style={{ gridColumn: "1 / -1", margin: 0, fontSize: 12.5, color: "var(--tc-gray-500)" }}>
-          Para herramientas que se cobran como porcentaje de la mano de obra, usa la unidad <strong>%MO</strong>: en la partida, su cantidad es el porcentaje.
+          Para lo que se cobra como porcentaje usa la unidad <strong>%MO</strong> (de la mano de obra de la partida, lo usual para la herramienta menor) o{" "}
+          <strong>%</strong> (de la suma de las demás líneas de la partida): en la partida, su cantidad es el porcentaje y su precio se calcula solo.
         </p>
       </div>
     </Modal>
