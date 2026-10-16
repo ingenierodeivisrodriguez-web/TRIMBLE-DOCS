@@ -2,7 +2,7 @@
 
 import { CSSProperties, useCallback, useMemo, useState } from "react";
 import { ApuCalculado, calcularApu, cuadrillaPara, LineaApu, porDia, porHora, Resolver } from "../../lib/presupuesto/calc";
-import { fmt } from "../../lib/presupuesto/format";
+import { editable as numero, fmt } from "../../lib/presupuesto/format";
 import { Apu, Componente, Insumo, Rubro, RUBRO_COLORS, RUBROS } from "../../lib/presupuesto/types";
 import type { PresupuestoApi } from "../../lib/presupuesto/client";
 import { InsumoNuevoDialog } from "./CatalogoInsumos";
@@ -33,6 +33,22 @@ const ORDEN: Record<Rubro, number> = { MO: 0, MT: 1, EQ: 2, SC: 3, SP: 4 };
 export function componenteNuevo(ins: Pick<Insumo, "tipo" | "unidad">, id: string): Componente {
   const crew = (ins.tipo === "MO" || ins.tipo === "EQ") && (porHora(ins.unidad) || porDia(ins.unidad));
   return { tipo: "insumo", id, cuadrilla: crew ? 1 : null, cantidad: 0 };
+}
+
+/** Labor or equipment paid by time (HH, HM, DIA, JR): with a crew, its quantity follows the yield and the day. */
+export function esPorTiempo(l: Pick<LineaApu, "componente" | "porcentaje" | "rubro" | "unidad">): boolean {
+  return l.componente.tipo === "insumo" && !l.porcentaje && (l.rubro === "MO" || l.rubro === "EQ") && (porHora(l.unidad) || porDia(l.unidad));
+}
+
+/** More people or machines than this at once is most likely a quantity typed as a crew. */
+const CUADRILLA_GRANDE = 20;
+
+/** How a crew line's quantity comes out, with its numbers. */
+function formulaCantidad(l: LineaApu, apu: Apu): string {
+  const n = (x: number) => numero(x, 4);
+  return porDia(l.unidad)
+    ? `Calculada: cuadrilla ${n(l.cuadrilla ?? 0)} ÷ rendimiento ${n(apu.rendimiento)} = ${n(l.cantidad)} ${l.unidad} por unidad`
+    : `Calculada: cuadrilla ${n(l.cuadrilla ?? 0)} × jornada ${n(apu.jornada)} h ÷ rendimiento ${n(apu.rendimiento)} = ${n(l.cantidad)} ${l.unidad} por unidad`;
 }
 
 export function insumoLabel(i: Pick<Insumo, "descripcion" | "unidad">): string {
@@ -104,10 +120,21 @@ export default function ApuEditor({
 
   function cambiarCantidad(l: LineaApu, value: number | null) {
     if (value === null) return;
-    // A percentage line has no crew (one typed while it had another unit is dropped).
+    // A percentage line has no crew (one typed while it had another unit is dropped); labor and
+    // equipment by time keep the crew that gives the quantity, so they follow the yield and the day.
     if (l.porcentaje) setComponente(l.index, { cantidad: value, cuadrilla: null });
-    else if (l.componente.cuadrilla !== null) setComponente(l.index, { cantidad: value, cuadrilla: cuadrillaPara(value, apu, l.unidad) });
+    else if (l.componente.cuadrilla !== null || esPorTiempo(l)) setComponente(l.index, { cantidad: value, cuadrilla: cuadrillaPara(value, apu, l.unidad) });
     else setComponente(l.index, { cantidad: value });
+  }
+
+  /** Lines of labor or equipment by time with their quantity typed: they don't follow the yield or the day. */
+  const aMano = editable ? result.lineas.filter((l) => !l.error && esPorTiempo(l) && l.componente.cuadrilla === null) : [];
+
+  /** Turns them into crews that give the same quantity (a crew of 1 when there was none). */
+  function calcularConCuadrilla() {
+    if (!onChange) return;
+    const cuadrillas = new Map(aMano.map((l) => [l.index, l.cantidad > 0 ? cuadrillaPara(l.cantidad, apu, l.unidad) : 1]));
+    onChange({ ...apu, componentes: apu.componentes.map((c, i) => (cuadrillas.has(i) ? { ...c, cuadrilla: cuadrillas.get(i)!, cantidad: 0 } : c)) });
   }
 
   function cambiarCuadrilla(l: LineaApu, value: number | null) {
@@ -152,7 +179,10 @@ export default function ApuEditor({
             ariaLabel="Rendimiento"
           />
         </label>
-        <label style={{ display: "flex", flexDirection: "column", fontSize: 12, color: "var(--tc-gray-500)" }}>
+        <label
+          style={{ display: "flex", flexDirection: "column", fontSize: 12, color: "var(--tc-gray-500)" }}
+          title="Horas del día de trabajo. Cambia la cantidad de la mano de obra y los equipos por hora (HH, HM) con cuadrilla; los que se pagan por día solo dependen del rendimiento."
+        >
           Jornada (h)
           <NumInput
             value={apu.jornada}
@@ -169,6 +199,18 @@ export default function ApuEditor({
           <RubroChip label="CU" value={result.cu} color="#2b2b2b" strong />
         </div>
       </div>
+
+      {aMano.length > 0 && (
+        <div style={{ display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "5px 10px", background: "#fff6e0", borderBottom: `1px solid ${C.border}`, fontSize: 13 }}>
+          <span>
+            {aMano.length === 1 ? `«${aMano[0].descripcion}» tiene` : `${aMano.length} líneas de mano de obra o equipo tienen`} la cantidad escrita a mano: no
+            cambia{aMano.length === 1 ? "" : "n"} con el rendimiento ni con la jornada.
+          </span>
+          <button type="button" onClick={calcularConCuadrilla} style={{ ...linkLike, fontWeight: 600 }} title="Pasa cada una a la cuadrilla que da su cantidad de hoy; desde ahí se calcula sola">
+            Calcular con cuadrilla
+          </button>
+        </div>
+      )}
 
       <div style={{ overflow: "auto", maxHeight, flex: 1, minHeight: 0 }}>
         <table style={{ borderCollapse: "collapse", width: "100%", minWidth: 760, fontSize: 13.5, tableLayout: "fixed" }}>
@@ -187,8 +229,15 @@ export default function ApuEditor({
               <th style={th} />
               <th style={th}>Insumo</th>
               <th style={th}>Unidad</th>
-              <th style={th}>Cuadrilla</th>
-              <th style={th}>Cantidad</th>
+              <th
+                style={th}
+                title="Cuántas personas o equipos trabajan a la vez (1 oficial y 2 ayudantes son dos líneas, con 1 y 2). Con ella la cantidad se calcula sola: por hora, cuadrilla × jornada ÷ rendimiento; por día, cuadrilla ÷ rendimiento."
+              >
+                Cuadrilla
+              </th>
+              <th style={th} title="Por unidad de la partida. En las líneas con cuadrilla se calcula sola; en las de %, es el porcentaje.">
+                Cantidad
+              </th>
               <th style={th}>PU</th>
               <th style={th}>Parcial</th>
               <th style={th} aria-label="Quitar">
@@ -199,6 +248,8 @@ export default function ApuEditor({
           <tbody>
             {lineas.map((l) => {
               const crewEditable = editable && !l.porcentaje && l.componente.tipo === "insumo" && (l.rubro === "MO" || l.rubro === "EQ");
+              const conCuadrilla = l.cuadrilla !== null && !l.error;
+              const grande = conCuadrilla && l.cuadrilla! > CUADRILLA_GRANDE;
               return (
                 <tr key={`${l.index}-${l.componente.id}`} style={{ background: l.error ? "#fdecea" : "#fff" }}>
                   <td style={{ ...td, textAlign: "center" }}>
@@ -215,18 +266,34 @@ export default function ApuEditor({
                     {l.error && <span style={{ color: "#8a1c14", fontSize: 12 }}> · {l.error}</span>}
                   </td>
                   <td style={{ ...td, textAlign: "center" }}>{l.unidad}</td>
-                  <td style={tdNum}>
+                  <td
+                    style={tdNum}
+                    title={grande ? `¿${numero(l.cuadrilla ?? 0, 4)} personas o equipos a la vez? Si es una sola cuadrilla, escribe 1: la cantidad se calcula sola.` : undefined}
+                  >
                     {crewEditable ? (
-                      <NumInput value={l.cuadrilla} decimals={4} allowEmpty onCommit={(v) => cambiarCuadrilla(l, v)} style={numCell} ariaLabel={`Cuadrilla de ${l.descripcion}`} />
+                      <NumInput
+                        value={l.cuadrilla}
+                        decimals={4}
+                        allowEmpty
+                        onCommit={(v) => cambiarCuadrilla(l, v)}
+                        style={{ ...numCell, ...(grande ? { background: "#fff1c2", border: "1px solid #d9a400" } : {}) }}
+                        ariaLabel={`Cuadrilla de ${l.descripcion}`}
+                      />
                     ) : l.cuadrilla !== null ? (
                       fmt(l.cuadrilla, 4)
                     ) : (
                       ""
                     )}
                   </td>
-                  <td style={tdNum}>
+                  <td style={tdNum} title={conCuadrilla ? formulaCantidad(l, apu) : undefined}>
                     {editable && !l.error ? (
-                      <NumInput value={l.cantidad} decimals={4} onCommit={(v) => cambiarCantidad(l, v)} style={numCell} ariaLabel={`Cantidad de ${l.descripcion}`} />
+                      <NumInput
+                        value={l.cantidad}
+                        decimals={4}
+                        onCommit={(v) => cambiarCantidad(l, v)}
+                        style={{ ...numCell, ...(conCuadrilla ? { background: "#f1f4f8", color: "var(--tc-gray-700)" } : {}) }}
+                        ariaLabel={`Cantidad de ${l.descripcion}`}
+                      />
                     ) : (
                       fmt(l.cantidad, 4)
                     )}

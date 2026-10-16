@@ -1154,6 +1154,17 @@ La conexión con Trimble Connect (token, menú, visor) es común a las dos:
   con el nombre ya escrito y, al aceptar, lo agrega a la partida), agregar subpartida (del
   presupuesto o del catálogo) o crear una nueva. Se impide una subpartida que
   se contenga a sí misma.
+- **La mano de obra y los equipos por tiempo** (HH, HM, DIA, JR) se calculan
+  solos con el rendimiento y la jornada: basta la **cuadrilla** (1 al
+  agregarlos), y su cantidad aparece en gris, calculada, con la cuenta al
+  pasar el mouse. Si se escribe la cantidad, se guarda la cuadrilla que la da,
+  así sigue cambiando con el rendimiento y la jornada. Las líneas que tienen la
+  cantidad escrita a mano (sin cuadrilla, por ejemplo de un Excel o de una
+  versión anterior) se señalan con un aviso y **Calcular con cuadrilla** las
+  pasa a la cuadrilla que da su cantidad de hoy; una cuadrilla de más de 20 se
+  marca en amarillo (casi siempre es una cantidad escrita como cuadrilla). La
+  jornada cambia lo que se paga por hora; lo que se paga por día depende solo
+  del rendimiento.
 - **Guardar** guarda el presupuesto entero (también con Ctrl+S). Si otra
   persona guardó entre tanto, no se pisa su versión: aparece un aviso para
   recargar (409 `version-conflict`). Al cerrar la página con cambios sin
