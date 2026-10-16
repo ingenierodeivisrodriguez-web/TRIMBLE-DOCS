@@ -16,6 +16,12 @@ export const C = {
   grid: "#e8ecf1",
 };
 
+/** The cell being edited, lit in yellow so it is clear where one is typing. */
+export const celdaActiva: CSSProperties = { background: "#fff7a8", border: "1px solid #d4b106", outline: "none" };
+
+/** How a cell was left: Enter (commits and may go on), Escape (cancels) or elsewhere (commits). */
+export type Salida = "enter" | "escape" | "blur";
+
 export const baseInput: CSSProperties = {
   border: "1px solid var(--tc-gray-300)",
   borderRadius: 4,
@@ -95,6 +101,7 @@ export function NumInput({
   ariaLabel,
   allowEmpty,
   autoFocus,
+  onLeave,
 }: {
   value: number | null;
   decimals?: number;
@@ -104,9 +111,13 @@ export function NumInput({
   ariaLabel?: string;
   allowEmpty?: boolean;
   autoFocus?: boolean;
+  /** After leaving the field (and committing, unless with Escape). */
+  onLeave?: (how: Salida) => void;
 }) {
   const [text, setText] = useState<string | null>(null);
+  const salida = useRef<Salida | null>(null);
   const shown = text ?? (value === null ? "" : fmt(value, decimals));
+  const editando = text !== null;
   function commit() {
     if (text === null) return;
     const parsed = text.trim() === "" ? null : parseNumberInput(text);
@@ -129,13 +140,17 @@ export function NumInput({
         requestAnimationFrame(() => e.target.select());
       }}
       onChange={(e) => setText(e.target.value)}
-      onBlur={commit}
+      onBlur={() => {
+        const how = salida.current ?? "blur";
+        salida.current = null;
+        if (how === "escape") setText(null);
+        else commit();
+        onLeave?.(how);
+      }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        if (e.key === "Escape") {
-          setText(null);
-          (e.target as HTMLInputElement).blur();
-        }
+        if (e.key !== "Enter" && e.key !== "Escape") return;
+        salida.current = e.key === "Enter" ? "enter" : "escape";
+        (e.target as HTMLInputElement).blur();
       }}
       style={{
         ...baseInput,
@@ -143,6 +158,7 @@ export function NumInput({
         background: readOnly || !onCommit ? "transparent" : "var(--tc-white)",
         border: readOnly || !onCommit ? "1px solid transparent" : baseInput.border,
         ...style,
+        ...(editando ? celdaActiva : {}),
       }}
     />
   );
@@ -157,6 +173,7 @@ export function TextCommit({
   autoFocus,
   placeholder,
   maxLength = 300,
+  onLeave,
 }: {
   value: string;
   onCommit: (value: string) => void;
@@ -165,9 +182,12 @@ export function TextCommit({
   autoFocus?: boolean;
   placeholder?: string;
   maxLength?: number;
+  /** After leaving the field (and committing, unless with Escape). */
+  onLeave?: (how: Salida) => void;
 }) {
   const [text, setText] = useState(value);
-  const cancelled = useRef(false);
+  const [foco, setFoco] = useState(false);
+  const salida = useRef<Salida | null>(null);
   useEffect(() => setText(value), [value]);
   return (
     <input
@@ -178,19 +198,21 @@ export function TextCommit({
       placeholder={placeholder}
       maxLength={maxLength}
       onChange={(e) => setText(e.target.value)}
-      onFocus={() => (cancelled.current = false)}
+      onFocus={() => setFoco(true)}
       onBlur={() => {
-        if (!cancelled.current && text !== value) onCommit(text);
+        const how = salida.current ?? "blur";
+        salida.current = null;
+        setFoco(false);
+        if (how === "escape") setText(value);
+        else if (text !== value) onCommit(text);
+        onLeave?.(how);
       }}
       onKeyDown={(e) => {
-        if (e.key === "Enter") (e.target as HTMLInputElement).blur();
-        if (e.key === "Escape") {
-          cancelled.current = true;
-          setText(value);
-          (e.target as HTMLInputElement).blur();
-        }
+        if (e.key !== "Enter" && e.key !== "Escape") return;
+        salida.current = e.key === "Enter" ? "enter" : "escape";
+        (e.target as HTMLInputElement).blur();
       }}
-      style={{ ...baseInput, ...style }}
+      style={{ ...baseInput, ...style, ...(foco ? celdaActiva : {}) }}
     />
   );
 }

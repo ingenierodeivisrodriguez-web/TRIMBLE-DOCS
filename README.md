@@ -1107,8 +1107,12 @@ La conexión con Trimble Connect (token, menú, visor) es común a las dos:
   reproduce la herramienta de referencia: Guardar, + Título, + Partida,
   editar, eliminar, copiar, cortar y pegar, ← → (sacar del título o meterlo
   en el de arriba), ↑ ↓, y el selector de SP con nuevo, renombrar y eliminar.
-  Los títulos se contraen con ▼ y la descripción, la unidad y el metrado se
-  editan con doble clic.
+  Los títulos se contraen con ▼; la descripción y la unidad se editan con
+  doble clic, y el **metrado con un clic** (Enter lo guarda y pasa al de la
+  partida siguiente, como en una hoja de cálculo; Escape cancela). El metrado
+  que sale del modelo 3D se cambia a manual desde la partida (✎). La celda que
+  se está escribiendo, aquí y en el análisis de precios, se ilumina en
+  amarillo.
 - Una partida nueva se escribe o se **copia del catálogo** (con sus insumos y
   subpartidas). Es una copia: su APU se ajusta en el presupuesto sin cambiar
   el catálogo.

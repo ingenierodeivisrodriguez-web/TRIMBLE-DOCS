@@ -6,7 +6,7 @@ import { fmt } from "../../lib/presupuesto/format";
 import { Rubro, RUBRO_NOMBRES } from "../../lib/presupuesto/types";
 import MemoriaCantidad, { alturaMemoria } from "./MemoriaCantidad";
 import type { ColumnaMemoria, ElementoVinculado } from "../../lib/presupuesto/types";
-import { C, NumInput, TextCommit, useVirtual } from "./ui";
+import { C, NumInput, Salida, TextCommit, useVirtual } from "./ui";
 
 const ROW = 34;
 const HEADER = 50;
@@ -122,6 +122,18 @@ export default function BudgetGrid({
     setEditing(null);
     if (value !== null) onEdit(f.item.id, field, value);
   };
+  const metradoEditable = (f: FilaPresupuesto) => editable && f.item.tipo === "partida" && !f.metradoModelo;
+
+  /** Like a spreadsheet: Enter in a metrado goes on to the next partida's that can be typed. */
+  function salirDeMetrado(f: FilaPresupuesto, how: Salida) {
+    setEditing(null);
+    if (how !== "enter") return;
+    const i = visibles.findIndex((x) => x.item.id === f.item.id);
+    const siguiente = visibles.slice(i + 1).find(metradoEditable);
+    if (!siguiente) return;
+    onSelect(siguiente.item.id);
+    setEditing({ id: siguiente.item.id, field: "metrado" });
+  }
 
   return (
     <div
@@ -200,6 +212,7 @@ export default function BudgetGrid({
                     value={f.item.descripcion}
                     autoFocus
                     onCommit={(v) => finish(f, "descripcion", v.trim() || null)}
+                    onLeave={() => setEditing(null)}
                     style={{ width: "100%", padding: "2px 6px", fontWeight: titulo ? 700 : 400 }}
                     ariaLabel="Descripción"
                   />
@@ -229,15 +242,41 @@ export default function BudgetGrid({
               <div style={{ ...cell, justifyContent: "center" }} onDoubleClick={() => startEdit(f, "unidad")}>
                 {f.item.tipo === "partida" &&
                   (isEditing(f, "unidad") ? (
-                    <TextCommit value={f.item.unidad} autoFocus maxLength={20} onCommit={(v) => finish(f, "unidad", v.trim())} style={{ width: "100%", padding: "2px 4px", textAlign: "center" }} ariaLabel="Unidad" />
+                    <TextCommit
+                      value={f.item.unidad}
+                      autoFocus
+                      maxLength={20}
+                      onCommit={(v) => finish(f, "unidad", v.trim())}
+                      onLeave={() => setEditing(null)}
+                      style={{ width: "100%", padding: "2px 4px", textAlign: "center" }}
+                      ariaLabel="Unidad"
+                    />
                   ) : (
                     f.item.unidad
                   ))}
               </div>
-              <div style={{ ...numCellStyle, fontWeight: 700 }} onDoubleClick={() => startEdit(f, "metrado")}>
+              <div
+                style={{ ...numCellStyle, fontWeight: 700, cursor: metradoEditable(f) ? "text" : "default" }}
+                onClick={() => startEdit(f, "metrado")}
+                title={
+                  metradoEditable(f)
+                    ? "Clic para escribir el metrado (Enter pasa a la partida siguiente)"
+                    : f.metradoModelo
+                      ? "El metrado sale del modelo 3D. Para escribirlo a mano, abre la partida (✎) y cambia el metrado a manual."
+                      : undefined
+                }
+              >
                 {f.metrado !== null &&
                   (isEditing(f, "metrado") ? (
-                    <NumInput value={f.metrado} decimals={2} autoFocus onCommit={(v) => finish(f, "metrado", v)} style={{ width: "100%", padding: "2px 4px" }} ariaLabel="Metrado" />
+                    <NumInput
+                      value={f.metrado}
+                      decimals={2}
+                      autoFocus
+                      onCommit={(v) => finish(f, "metrado", v)}
+                      onLeave={(how) => salirDeMetrado(f, how)}
+                      style={{ width: "100%", padding: "2px 4px" }}
+                      ariaLabel="Metrado"
+                    />
                   ) : (
                     <>
                       {f.metradoModelo ? (
