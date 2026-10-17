@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/compras",
+  "title": "Compras y Contratación",
+  "description": "Abastecimiento de la obra a partir de los insumos del presupuesto: requisiciones, cotizaciones, proveedores, órdenes y contratos, documentación en el CDE del proyecto y recepción en obra, con accesos por rol y auditoría.",
+  "icon": "https://trimble-docs.vercel.app/icon-compras.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project"],
+  "enabled": true
+}

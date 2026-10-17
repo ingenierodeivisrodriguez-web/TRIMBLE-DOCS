@@ -12,6 +12,7 @@ ambos lugares** para Trimble Connect:
 | **Propiedades** — atributos propios asignados por IFCGUID a los elementos de los modelos | Menú lateral del proyecto (catálogo) **y** panel del visor 3D (asignación) | `/propiedades` | `/manifest-propiedades.json` |
 | **Presupuesto** — presupuesto con catálogos de insumos y partidas (APU) bajo OmniClass, asociado a los modelos por IFCGUID | Menú lateral del proyecto (presupuesto) **y** panel del visor 3D (asociar elementos) | `/presupuesto` | `/manifest-presupuesto.json` |
 | **Manuales** — los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT para las personas que autorice su administrador | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
+| **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -37,6 +38,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Propiedades (proyecto + visor 3D)](#propiedades-proyecto--visor-3d)
 - [Presupuesto (proyecto + visor 3D)](#presupuesto-proyecto--visor-3d)
 - [Manuales (proyecto)](#manuales-proyecto)
+- [Compras y Contratación (proyecto)](#compras-y-contratación-proyecto)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -2047,6 +2049,152 @@ Códigos de error:
 
 ---
 
+## Compras y Contratación (proyecto)
+
+Abastecimiento de la obra a partir de los insumos planificados en
+Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
+contratos, documentos en el CDE del proyecto y recepción en obra. Se
+construye por fases; esta primera versión trae **el acceso por rol y la
+auditoría**, que van antes que todo lo demás. Aparece en el menú lateral del
+proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
+
+Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
+Compras solo los lee y nunca escribe en las tablas `presupuesto_*`.
+
+### Quién entra
+
+- La identidad es la del usuario de Trimble Connect, comprobada en el
+  servidor con su token (igual que en Presupuesto; no hay Supabase Auth).
+  Ser miembro del proyecto **no basta**: hace falta un acceso a Compras
+  vigente en ese proyecto. Sin él, la página solo dice a quién pedírselo.
+- **Activar Compras.** En un proyecto sin administrador de Compras, un
+  administrador del proyecto en Trimble Connect ve el botón "Activar Compras
+  en este proyecto". Queda como **Administrador de plataforma** (todos los
+  permisos, desde hoy y sin fecha final) y se crean los 9 roles iniciales.
+  Desde ese momento el botón desaparece y los demás administradores de
+  Trimble también necesitan que se les dé acceso. No hay claves ni listas de
+  personas en el código.
+- Cada acceso es **un rol por persona**, con fecha de inicio y, si se
+  quiere, fecha final (ambas incluidas, en hora de Colombia). Revocar no
+  borra el registro: queda "Revocada" y se puede reactivar.
+- La autorización se lee de la base en **cada solicitud**, sin caché: un
+  acceso revocado deja de servir en la siguiente acción, aunque la página
+  siga abierta. (La pertenencia al proyecto en Trimble se recuerda 2
+  minutos, como en las demás extensiones.)
+
+### Roles y matriz de permisos
+
+Un permiso es un módulo con una acción. Los módulos son todos los de la
+herramienta, aunque algunos lleguen en fases siguientes: Accesos y roles,
+Auditoría, Insumos del presupuesto, Requisiciones, Proveedores, Cotizaciones
+y comparativos, Órdenes de compra, Contratos, Documentos (CDE), Recepción en
+obra y Panel y trazabilidad. Las acciones: ver, crear, editar,
+aprobar/rechazar, anular, cargar/descargar documentos y administrar (dar
+accesos; en Documentos, preparar las carpetas y los tipos de documento).
+Solo se ofrecen las combinaciones que tienen sentido: 42 permisos.
+
+| Rol inicial | Para qué |
+|---|---|
+| Administrador de plataforma | Todo, incluido dar y revocar accesos. Su matriz no se puede cambiar |
+| Director | Ve todo y aprueba requisiciones, comparativos, órdenes, contratos y recepciones |
+| Residente | Pide insumos (requisiciones) y registra lo que llega a la obra |
+| Compras | Proveedores, cotizaciones, comparativos y órdenes de compra |
+| Presupuesto y costos | Revisa que lo pedido quepa en el presupuesto y aprueba requisiciones |
+| Jurídica | Documentación legal de proveedores y contratos |
+| Almacén | Recepción en obra: recibido, aceptado, rechazado o devuelto, con su acta |
+| Finanzas | Aprueba órdenes y contratos desde lo financiero |
+| Auditor | Consulta todo, incluida la auditoría, sin cambiar nada |
+
+Al principio solo el Administrador de plataforma administra accesos. En
+**Accesos y roles → Roles y permisos** se ajusta la matriz de cada rol con
+casillas (la celda cambiada se ilumina en amarillo hasta guardar) y se crean
+roles nuevos. Los roles no se borran: los creados se desactivan (quien lo
+tenga deja de entrar) y los iniciales no se desactivan.
+
+### Reglas que nadie se salta
+
+Se revisan en el servidor y otra vez en PostgreSQL (funciones
+`compras_guardar_usuario` y `compras_guardar_rol`), con un candado por
+proyecto para que dos cambios al mismo tiempo no se crucen:
+
+- **Se niega por defecto**: sin acceso vigente o sin el permiso, la
+  respuesta es 403 y el intento queda en la auditoría.
+- Nadie cambia su propio acceso ni el rol que tiene asignado.
+- Nadie da un rol, edita un rol ni cambia el acceso de otra persona si eso
+  supone permisos que no tiene: así nadie se sube de nivel ni baja a quien
+  está por encima.
+- La matriz del Administrador de plataforma no cambia: siempre tiene todo.
+- Siempre queda al menos un Administrador de plataforma vigente y sin fecha
+  final.
+- Solo se da acceso a personas del equipo del proyecto en Trimble Connect
+  (revocar sí funciona con quien ya salió del proyecto).
+- Guardar sobre un cambio de otra persona responde 409 `version-conflict` y
+  la pantalla vuelve a cargar los accesos.
+
+### Auditoría
+
+Pestaña **Auditoría** (permiso Auditoría: ver). Cada fila dice quién, a
+quién, qué, en qué proyecto, cuándo (DD-MM-AAAA y hora de Colombia) y el
+resultado (hecho, negado o error), con el detalle: rol y fechas antes →
+después, permisos agregados o quitados, o el motivo de la negación. Se
+registran todos los cambios y todos los intentos negados, incluido entrar
+sin acceso. Es **solo inserción**: un trigger rechaza cualquier cambio,
+borrado o vaciado de la tabla, y al rol de servicio se le quitaron esos
+permisos. Se filtra por fechas, resultado y módulo, de 200 en 200.
+
+### Esquema de la base de datos
+
+[`supabase/compras.sql`](supabase/compras.sql) (se puede volver a ejecutar
+sin perder datos). RLS activado sin políticas en todas las tablas: solo el
+servidor (clave de servicio) lee y escribe, y las funciones no las puede
+ejecutar nadie más (`revoke` a `public`, `anon` y `authenticated`).
+
+| Tabla / función | Contenido |
+|---|---|
+| `compras_roles` | Roles de cada proyecto con sus permisos (`text[]`, solo los válidos) y versión |
+| `compras_usuarios` | Un acceso por persona y proyecto: rol, desde, hasta, activo, quién lo dio, versión |
+| `compras_auditoria` | El registro de solo inserción |
+| `compras_permisos_validos()` | La lista de los 42 permisos (la misma de `lib/compras/types.ts`; una prueba lo verifica) |
+| `compras_permisos_de(proyecto, persona)` | Los permisos vigentes hoy de una persona |
+| `compras_activar(...)` | Activa Compras si el proyecto no tiene administrador vigente |
+| `compras_guardar_usuario(...)` / `compras_guardar_rol(...)` | Dan, cambian o revocan con todas las reglas de arriba y su fila de auditoría |
+
+### API
+
+Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
+(`Authorization: Bearer`). Cada una revisa el permiso en cada llamada.
+
+| Ruta | Qué hace | Permiso |
+|---|---|---|
+| `GET estado` | Quién eres, tu acceso y permisos, si se puede activar y a quién pedir acceso | Ninguno (sin acceso deja registro) |
+| `POST activar` | Activa Compras en el proyecto | Administrador del proyecto en Trimble, sin administrador de Compras |
+| `GET accesos` | Roles y personas | Accesos y roles: ver |
+| `PUT accesos/usuarios` | Da, cambia o revoca un acceso | Accesos y roles: administrar |
+| `PUT accesos/roles` | Crea o cambia un rol | Accesos y roles: administrar |
+| `GET contactos` | Equipo del proyecto en Trimble (solo personas) | Accesos y roles: administrar |
+| `GET auditoria` | La auditoría con filtros | Auditoría: ver |
+
+Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
+`rol-protegido`, `no-admin-trimble`, `no-miembro` (403/400); `ultimo-admin`,
+`ya-activo`, `nombre-repetido`, `version-conflict` (409); `datos`,
+`rol-no-valido` (400); `trimble-session` (401: recargar Trimble Connect).
+
+El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
+reglas puras, `validate`, `store` con Supabase o memoria, `service`,
+`routes`, `client`, `formato`, cada uno con sus pruebas) y
+`components/compras/`.
+
+### Lo que sigue
+
+En este orden: consulta de los insumos del presupuesto (planificado,
+solicitado, aprobado, comprometido, recibido, pendiente), requisiciones,
+proveedores y cotizaciones, órdenes y contratos, documentos en el CDE de
+Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
+confirma la carga), recepción en obra, y el panel con la trazabilidad de cada
+insumo.
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -2255,6 +2403,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Propiedades | `https://trimble-docs.vercel.app/manifest-propiedades.json` |
    | Presupuesto | `https://trimble-docs.vercel.app/manifest-presupuesto.json` |
    | Manuales | `https://trimble-docs.vercel.app/manifest-manuales.json` |
+   | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
