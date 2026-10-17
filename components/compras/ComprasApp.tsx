@@ -13,10 +13,11 @@ import Requisiciones from "./Requisiciones";
 import Proveedores from "./Proveedores";
 import Cotizaciones from "./Cotizaciones";
 import Ordenes from "./Ordenes";
+import Recepciones from "./Recepciones";
 import DocumentosCde from "./DocumentosCde";
 import { botonSecundario, card, linkBtn, texto, titulo } from "./estilos";
 
-type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "documentos" | "accesos" | "auditoria";
+type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "recepciones" | "documentos" | "accesos" | "auditoria";
 
 /** "Compras y Contratación" in the project menu: who you are, your access, and what your role lets you open. */
 export default function ComprasApp({ api, projectId, projectName }: { api: ComprasApi; projectId: string; projectName: string }) {
@@ -53,6 +54,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
     ...(puede("requisiciones.ver") ? [{ id: "requisiciones" as const, nombre: "Requisiciones" }] : []),
     ...(puede("cotizaciones.ver") ? [{ id: "cotizaciones" as const, nombre: "Cotizaciones" }] : []),
     ...(puede("ordenes.ver") || puede("contratos.ver") ? [{ id: "ordenes" as const, nombre: "Órdenes y contratos" }] : []),
+    ...(puede("recepciones.ver") ? [{ id: "recepciones" as const, nombre: "Recepción en obra" }] : []),
     ...(puede("proveedores.ver") ? [{ id: "proveedores" as const, nombre: "Proveedores" }] : []),
     ...(puede("documentos.ver") ? [{ id: "documentos" as const, nombre: "Documentos (CDE)" }] : []),
     ...(puede("accesos.ver") ? [{ id: "accesos" as const, nombre: "Accesos y roles" }] : []),
@@ -104,6 +106,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
             {actual === "cotizaciones" && <Cotizaciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "proveedores" && <Proveedores api={api} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "ordenes" && <Ordenes api={api} yo={estado.user.id} permisos={permisos} proyecto={projectName || projectId} onSinAcceso={onSinAcceso} />}
+            {actual === "recepciones" && <Recepciones api={api} yo={estado.user.id} permisos={permisos} proyecto={projectName || projectId} onSinAcceso={onSinAcceso} />}
             {actual === "documentos" && <DocumentosCde api={api} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "accesos" && <Accesos api={api} yo={estado.user.id} onSinAcceso={onSinAcceso} />}
             {actual === "auditoria" && <Auditoria api={api} onSinAcceso={onSinAcceso} />}
@@ -235,7 +238,7 @@ function Inicio({ estado }: { estado: EstadoResponse }) {
         <h2 style={titulo}>En construcción</h2>
         <p style={texto}>
           Ya están los accesos por rol, la auditoría, los insumos del presupuesto, las requisiciones, los proveedores y las cotizaciones con su
-          comparativo, las órdenes de compra y contratos, y sus documentos en el CDE del proyecto. Siguen, en este orden: recepción en obra y el panel con la trazabilidad de cada insumo.
+          comparativo, las órdenes de compra y contratos, sus documentos en el CDE del proyecto y la recepción en obra. Sigue el panel con la trazabilidad de cada insumo.
         </p>
       </section>
     </div>

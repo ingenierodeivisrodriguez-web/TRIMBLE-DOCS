@@ -8,7 +8,8 @@ import type { AccionOrden, AccionSobreOrden, CambioOrden, Comparativo, Cotizacio
  * ordered of a requisition line, adding every order and contract not
  * cancelled (drafts included), never passes what was approved nor what the
  * chosen supplier quoted. supabase/compras.sql checks it again under a lock
- * and with a deferred trigger.
+ * and with a deferred trigger. Once something is received, an order can
+ * not be cancelled nor brought below what was accepted.
  */
 
 export function numeroOrden(tipo: TipoOrden, n: number): string {
@@ -76,7 +77,9 @@ export function revisarOrden(
   r: Requisicion | undefined,
   comparativo: Comparativo | undefined,
   cotizacion: Cotizacion | undefined,
-  ordenes: Orden[]
+  ordenes: Orden[],
+  /** Accepted of this order by requisition line, in receptions not cancelled. */
+  aceptado: Map<string, number> = new Map()
 ): MotivoRechazo | null {
   const m = TIPO_ORDEN[c.tipo].modulo;
   if (antes) {
@@ -98,6 +101,9 @@ export function revisarOrden(
     if (!(l.cantidad > 0)) return "cantidad-no-valida";
     if (l.cantidad > maximoLinea(rl, cl.cantidad, otros.get(l.requisicionLineaId) ?? 0)) return "doble-compromiso";
   }
+  for (const [rl, cantidad] of aceptado) {
+    if (cantidad > 0 && (c.lineas.find((l) => l.requisicionLineaId === rl)?.cantidad ?? 0) < cantidad) return "bajo-lo-recibido";
+  }
   if ((antes?.version ?? 0) !== c.version) return "version-conflict";
   return null;
 }
@@ -113,7 +119,7 @@ export function puedeAccionOrden(ctx: Pick<ContextoOrdenes, "actorId" | "permiso
 }
 
 /** Why `a` can't be done to the order now (null: it can). */
-export function revisarAccionOrden(ctx: ContextoOrdenes, o: Orden, a: AccionSobreOrden): MotivoRechazo | null {
+export function revisarAccionOrden(ctx: ContextoOrdenes, o: Orden, a: AccionSobreOrden, conRecepciones = false): MotivoRechazo | null {
   if (!TRANSICIONES_ORDEN[a.accion].desde.includes(o.estado)) return "estado-no-valido";
   const m = TIPO_ORDEN[o.tipo].modulo;
   const permitido =
@@ -126,6 +132,7 @@ export function revisarAccionOrden(ctx: ContextoOrdenes, o: Orden, a: AccionSobr
   if ((a.accion === "aprobar" || a.accion === "devolver") && o.elaboradoPorId === ctx.actorId) return "auto-aprobacion";
   if (CON_MOTIVO.includes(a.accion) && !a.motivo.trim()) return "motivo-requerido";
   if (o.version !== a.version) return "version-conflict";
+  if (a.accion === "anular" && conRecepciones) return "con-recepciones";
   if (a.accion === "enviar") {
     if (!o.lineas.length) return "sin-lineas";
     if (o.tipo === "contrato" && !o.objeto.trim()) return "objeto-requerido";

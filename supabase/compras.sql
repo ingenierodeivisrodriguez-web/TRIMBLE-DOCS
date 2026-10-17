@@ -1367,6 +1367,17 @@ begin
     from jsonb_to_recordset(p_lineas) as x(requisicion_linea_id uuid, cantidad numeric, precio_unitario numeric, descuento_pct numeric, iva_pct numeric)
     join public.compras_requisicion_lineas rl on rl.id = x.requisicion_linea_id;
 
+  -- A modification never leaves a line (nor removes it) below what was already accepted on site.
+  if exists (select 1
+               from public.compras_recepcion_lineas l
+               join public.compras_recepciones r on r.id = l.recepcion_id
+              where r.orden_id = p_id and r.estado <> 'anulada'
+              group by l.requisicion_linea_id
+             having sum(l.aceptado) > coalesce((select ol.cantidad from public.compras_orden_lineas ol
+                                                 where ol.orden_id = p_id and ol.requisicion_linea_id = l.requisicion_linea_id), 0)) then
+    raise exception 'compras:bajo-lo-recibido';
+  end if;
+
   insert into public.compras_auditoria (project_id, actor_id, actor_nombre, accion, modulo, objeto_tipo, objeto_id, sujeto_id, sujeto_nombre, resultado, detalle)
   values (p_project_id, p_actor_id, p_actor_nombre, v_modulo || case when v_existia then '.editar' else '.crear' end, v_modulo, v_tipo, p_id::text, null,
           case v_tipo when 'orden' then 'OC-' else 'CT-' end || lpad(v_numero::text, 4, '0'), 'ok',
@@ -1438,6 +1449,9 @@ begin
   elsif p_accion = 'devolver' then
     update public.compras_ordenes set estado = 'borrador', motivo = btrim(p_motivo) where id = p_id;
   elsif p_accion = 'anular' then
+    if exists (select 1 from public.compras_recepciones where orden_id = p_id and estado <> 'anulada') then
+      raise exception 'compras:con-recepciones';
+    end if;
     update public.compras_ordenes set estado = 'anulada', motivo = btrim(p_motivo) where id = p_id;
   else
     -- Keep how it was, then reopen it as the next revision prepared by whoever modifies it.
@@ -1561,6 +1575,348 @@ create trigger compras_sync_historial_sin_cambios
   before update or delete on public.compras_sync_historial
   for each row execute function public.compras_auditoria_inmutable();
 
+-- ================================================================ recepción en obra
+
+-- Recepciones (REC) contra órdenes y contratos emitidos: borrador → enviada → aprobada ; devuelta: borrador ; anulada.
+create table if not exists public.compras_recepciones (
+  id               uuid        primary key,
+  project_id       text        not null,
+  numero           integer     not null,
+  orden_id         uuid        not null,
+  estado           text        not null default 'borrador' check (estado in ('borrador', 'enviada', 'aprobada', 'anulada')),
+  fecha            date        not null,
+  remision         text        not null default '' check (char_length(remision) <= 100),
+  observaciones    text        not null default '' check (char_length(observaciones) <= 1000),
+  elaborado_por_id text        not null,
+  elaborado_por    text        not null default '',
+  motivo           text        not null default '' check (char_length(motivo) <= 1000),
+  enviada          timestamptz,
+  aprobada         timestamptz,
+  aprobada_por     text,
+  version          integer     not null default 1,
+  creada           timestamptz not null default now(),
+  actualizado      timestamptz not null default now(),
+  actualizado_por  text,
+  unique (project_id, numero),
+  unique (project_id, id),
+  foreign key (project_id, orden_id) references public.compras_ordenes (project_id, id)
+);
+create index if not exists compras_recepciones_orden on public.compras_recepciones (orden_id);
+
+-- Líneas: por línea de la orden (su línea de requisición, estable entre revisiones de la orden).
+create table if not exists public.compras_recepcion_lineas (
+  id                   uuid          primary key,
+  project_id           text          not null,
+  recepcion_id         uuid          not null,
+  requisicion_linea_id uuid          not null references public.compras_requisicion_lineas (id),
+  insumo_id            text          not null,
+  codigo               text          not null default '',
+  descripcion          text          not null default '',
+  unidad               text          not null default '',
+  tipo                 text          not null check (tipo in ('MO', 'MT', 'EQ', 'SC')),
+  recibido             numeric(18,4) not null check (recibido > 0),
+  aceptado             numeric(18,4) not null check (aceptado >= 0),
+  rechazado            numeric(18,4) not null default 0 check (rechazado >= 0),
+  devuelto             numeric(18,4) not null default 0 check (devuelto >= 0),
+  motivo               text          not null default '' check (char_length(motivo) <= 500),
+  unique (recepcion_id, requisicion_linea_id),
+  foreign key (project_id, recepcion_id) references public.compras_recepciones (project_id, id),
+  constraint compras_recepcion_cuadra check (aceptado + rechazado = recibido),
+  constraint compras_recepcion_devuelto check (devuelto <= rechazado),
+  constraint compras_recepcion_motivo check (rechazado = 0 or btrim(motivo) <> '')
+);
+create index if not exists compras_recepcion_lineas_req on public.compras_recepcion_lineas (requisicion_linea_id);
+
+-- Lo aceptado de una línea de una orden en recepciones no anuladas (borradores incluidos).
+create or replace function public.compras_recibido(p_orden_id uuid, p_requisicion_linea_id uuid, p_excluir uuid)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select coalesce(sum(l.aceptado), 0)
+    from public.compras_recepcion_lineas l
+    join public.compras_recepciones r on r.id = l.recepcion_id
+   where r.orden_id = p_orden_id and l.requisicion_linea_id = p_requisicion_linea_id and r.estado <> 'anulada' and r.id <> p_excluir
+$$;
+
+-- Respaldo en la base: al terminar cada transacción, ninguna línea de una orden tiene aceptado más de
+-- lo ordenado (ni recibido algo que la orden ya no tiene), aunque alguien escriba directo en las tablas.
+create or replace function public.compras_recepcion_cabe(p_orden_id uuid, p_requisicion_linea_id uuid)
+returns void
+language plpgsql
+set search_path = public
+as $$
+begin
+  if public.compras_recibido(p_orden_id, p_requisicion_linea_id, '00000000-0000-0000-0000-000000000000'::uuid)
+     > coalesce((select cantidad from public.compras_orden_lineas where orden_id = p_orden_id and requisicion_linea_id = p_requisicion_linea_id), 0) then
+    raise exception 'compras:recepcion-excedida';
+  end if;
+end;
+$$;
+
+create or replace function public.compras_recepcion_lineas_sin_exceso()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  perform public.compras_recepcion_cabe((select orden_id from public.compras_recepciones where id = new.recepcion_id), new.requisicion_linea_id);
+  return null;
+end;
+$$;
+drop trigger if exists compras_recepcion_lineas_sin_exceso on public.compras_recepcion_lineas;
+create constraint trigger compras_recepcion_lineas_sin_exceso
+  after insert or update on public.compras_recepcion_lineas
+  deferrable initially deferred
+  for each row execute function public.compras_recepcion_lineas_sin_exceso();
+
+-- Una recepción que vuelve a contar (por ejemplo, si alguien la "desanula") también debe caber.
+create or replace function public.compras_recepciones_sin_exceso()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_rl uuid;
+begin
+  if new.estado <> 'anulada' then
+    for v_rl in select requisicion_linea_id from public.compras_recepcion_lineas where recepcion_id = new.id loop
+      perform public.compras_recepcion_cabe(new.orden_id, v_rl);
+    end loop;
+  end if;
+  return null;
+end;
+$$;
+drop trigger if exists compras_recepciones_sin_exceso on public.compras_recepciones;
+create constraint trigger compras_recepciones_sin_exceso
+  after update on public.compras_recepciones
+  deferrable initially deferred
+  for each row execute function public.compras_recepciones_sin_exceso();
+
+-- Y del lado de la orden: una línea no queda (ni se quita) por debajo de lo aceptado, y una orden con
+-- recepciones vigentes no se anula.
+create or replace function public.compras_orden_lineas_sobre_lo_recibido()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if tg_op = 'DELETE' then
+    perform public.compras_recepcion_cabe(old.orden_id, old.requisicion_linea_id);
+  else
+    perform public.compras_recepcion_cabe(new.orden_id, new.requisicion_linea_id);
+  end if;
+  return null;
+exception when raise_exception then
+  if sqlerrm = 'compras:recepcion-excedida' then
+    raise exception 'compras:bajo-lo-recibido';
+  end if;
+  raise;
+end;
+$$;
+drop trigger if exists compras_orden_lineas_sobre_lo_recibido on public.compras_orden_lineas;
+create constraint trigger compras_orden_lineas_sobre_lo_recibido
+  after insert or update or delete on public.compras_orden_lineas
+  deferrable initially deferred
+  for each row execute function public.compras_orden_lineas_sobre_lo_recibido();
+
+create or replace function public.compras_ordenes_con_recepciones()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.estado = 'anulada' and old.estado <> 'anulada'
+     and exists (select 1 from public.compras_recepciones where orden_id = new.id and estado <> 'anulada') then
+    raise exception 'compras:con-recepciones';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists compras_ordenes_con_recepciones on public.compras_ordenes;
+create trigger compras_ordenes_con_recepciones
+  before update on public.compras_ordenes
+  for each row execute function public.compras_ordenes_con_recepciones();
+
+-- Crea (p_version 0) o cambia el borrador de una recepción y reemplaza sus líneas
+-- (p_lineas: [{requisicion_linea_id, recibido, rechazado, devuelto, motivo}]; aceptado = recibido - rechazado).
+create or replace function public.compras_guardar_recepcion(p_project_id text, p_actor_id text, p_actor_nombre text, p_id uuid, p_datos jsonb, p_lineas jsonb, p_version integer)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_mios text[];
+  v_antes public.compras_recepciones%rowtype;
+  v_existia boolean;
+  v_o public.compras_ordenes%rowtype;
+  v_fecha date := (p_datos ->> 'fecha')::date;
+  v_numero integer;
+  v_version integer;
+  v_fila record;
+begin
+  -- The same lock as orders: receiving and modifying an order never cross.
+  perform pg_advisory_xact_lock(hashtext('compras-ordenes:' || p_project_id));
+  v_mios := public.compras_permisos_de(p_project_id, p_actor_id);
+  select * into v_antes from public.compras_recepciones where project_id = p_project_id and id = p_id for update;
+  v_existia := found;
+  if v_existia then
+    if v_antes.orden_id <> (p_datos ->> 'orden_id')::uuid then
+      raise exception 'compras:datos';
+    end if;
+    if v_antes.estado <> 'borrador' then
+      raise exception 'compras:estado-no-valido';
+    end if;
+    if not ('recepciones.editar' = any (v_mios) or (v_antes.elaborado_por_id = p_actor_id and 'recepciones.crear' = any (v_mios))) then
+      raise exception 'compras:sin-permiso';
+    end if;
+  elsif not ('recepciones.crear' = any (v_mios)) then
+    raise exception 'compras:sin-permiso';
+  end if;
+
+  select * into v_o from public.compras_ordenes where project_id = p_project_id and id = (p_datos ->> 'orden_id')::uuid;
+  if not found then
+    raise exception 'compras:no-existe';
+  end if;
+  if v_o.estado <> 'aprobada' then
+    raise exception 'compras:orden-no-emitida';
+  end if;
+  if v_fecha is null or v_fecha > public.compras_hoy() then
+    raise exception 'compras:fecha-futura';
+  end if;
+  if jsonb_array_length(coalesce(p_lineas, '[]'::jsonb)) = 0 then
+    raise exception 'compras:sin-lineas';
+  end if;
+
+  for v_fila in
+    select x.requisicion_linea_id, x.recibido, coalesce(x.rechazado, 0) as rechazado, coalesce(x.devuelto, 0) as devuelto, coalesce(x.motivo, '') as motivo,
+           ol.cantidad as ordenado, ol.id as ol_id
+      from jsonb_to_recordset(p_lineas) as x(requisicion_linea_id uuid, recibido numeric, rechazado numeric, devuelto numeric, motivo text)
+      left join public.compras_orden_lineas ol on ol.orden_id = v_o.id and ol.requisicion_linea_id = x.requisicion_linea_id
+  loop
+    if v_fila.ol_id is null then
+      raise exception 'compras:datos';
+    end if;
+    if coalesce(v_fila.recibido, 0) <= 0 then
+      raise exception 'compras:cantidad-no-valida';
+    end if;
+    if v_fila.rechazado < 0 or v_fila.rechazado > v_fila.recibido or v_fila.devuelto < 0 or v_fila.devuelto > v_fila.rechazado
+       or (v_fila.rechazado > 0 and btrim(v_fila.motivo) = '') then
+      raise exception 'compras:rechazo-no-valido';
+    end if;
+    if public.compras_recibido(v_o.id, v_fila.requisicion_linea_id, p_id) + (v_fila.recibido - v_fila.rechazado) > v_fila.ordenado then
+      raise exception 'compras:recepcion-excedida';
+    end if;
+  end loop;
+
+  if not v_existia then
+    if p_version <> 0 then
+      raise exception 'version-conflict';
+    end if;
+    insert into public.compras_consecutivos (project_id, tipo, ultimo) values (p_project_id, 'recepcion', 1)
+    on conflict (project_id, tipo) do update set ultimo = public.compras_consecutivos.ultimo + 1
+    returning ultimo into v_numero;
+    insert into public.compras_recepciones (id, project_id, numero, orden_id, fecha, remision, observaciones, elaborado_por_id, elaborado_por, actualizado_por)
+    values (p_id, p_project_id, v_numero, v_o.id, v_fecha, coalesce(p_datos ->> 'remision', ''), coalesce(p_datos ->> 'observaciones', ''), p_actor_id, p_actor_nombre, p_actor_nombre);
+    v_version := 1;
+  else
+    update public.compras_recepciones
+       set fecha = v_fecha, remision = coalesce(p_datos ->> 'remision', ''), observaciones = coalesce(p_datos ->> 'observaciones', ''),
+           version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre
+     where id = p_id and version = p_version
+    returning version, numero into v_version, v_numero;
+    if v_version is null then
+      raise exception 'version-conflict';
+    end if;
+    delete from public.compras_recepcion_lineas where recepcion_id = p_id;
+  end if;
+
+  insert into public.compras_recepcion_lineas (id, project_id, recepcion_id, requisicion_linea_id, insumo_id, codigo, descripcion, unidad, tipo, recibido, aceptado, rechazado, devuelto, motivo)
+  select gen_random_uuid(), p_project_id, p_id, ol.requisicion_linea_id, ol.insumo_id, ol.codigo, ol.descripcion, ol.unidad, ol.tipo,
+         x.recibido, x.recibido - coalesce(x.rechazado, 0), coalesce(x.rechazado, 0), coalesce(x.devuelto, 0), btrim(coalesce(x.motivo, ''))
+    from jsonb_to_recordset(p_lineas) as x(requisicion_linea_id uuid, recibido numeric, rechazado numeric, devuelto numeric, motivo text)
+    join public.compras_orden_lineas ol on ol.orden_id = v_o.id and ol.requisicion_linea_id = x.requisicion_linea_id;
+
+  insert into public.compras_auditoria (project_id, actor_id, actor_nombre, accion, modulo, objeto_tipo, objeto_id, sujeto_id, sujeto_nombre, resultado, detalle)
+  values (p_project_id, p_actor_id, p_actor_nombre, 'recepciones' || case when v_existia then '.editar' else '.crear' end, 'recepciones', 'recepcion', p_id::text, null,
+          'REC-' || lpad(v_numero::text, 4, '0'), 'ok',
+          jsonb_build_object('orden', case v_o.tipo when 'orden' then 'OC-' else 'CT-' end || lpad(v_o.numero::text, 4, '0'), 'lineas', jsonb_array_length(p_lineas),
+                             'remision', coalesce(p_datos ->> 'remision', '')));
+  return v_version;
+end;
+$$;
+
+-- Envía, aprueba, devuelve o anula una recepción.
+create or replace function public.compras_accion_recepcion(p_project_id text, p_actor_id text, p_actor_nombre text, p_id uuid, p_accion text, p_motivo text, p_version integer)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_mios text[];
+  v_r public.compras_recepciones%rowtype;
+  v_orden_estado text;
+  v_version integer;
+begin
+  perform pg_advisory_xact_lock(hashtext('compras-ordenes:' || p_project_id));
+  v_mios := public.compras_permisos_de(p_project_id, p_actor_id);
+  select * into v_r from public.compras_recepciones where project_id = p_project_id and id = p_id for update;
+  if not found then
+    raise exception 'compras:no-existe';
+  end if;
+  if not ((p_accion = 'enviar' and v_r.estado = 'borrador')
+       or (p_accion in ('aprobar', 'devolver') and v_r.estado = 'enviada')
+       or (p_accion = 'anular' and v_r.estado in ('borrador', 'enviada', 'aprobada'))) then
+    raise exception 'compras:%', case when p_accion in ('enviar', 'aprobar', 'devolver', 'anular') then 'estado-no-valido' else 'datos' end;
+  end if;
+  if p_accion = 'enviar' then
+    if not ('recepciones.editar' = any (v_mios) or (v_r.elaborado_por_id = p_actor_id and 'recepciones.crear' = any (v_mios))) then
+      raise exception 'compras:sin-permiso';
+    end if;
+  elsif p_accion in ('aprobar', 'devolver') then
+    if not ('recepciones.aprobar' = any (v_mios)) then
+      raise exception 'compras:sin-permiso';
+    end if;
+    if v_r.elaborado_por_id = p_actor_id then
+      raise exception 'compras:auto-aprobacion';
+    end if;
+  elsif not ('recepciones.anular' = any (v_mios)) then
+    raise exception 'compras:sin-permiso';
+  end if;
+  if p_accion in ('devolver', 'anular') and btrim(coalesce(p_motivo, '')) = '' then
+    raise exception 'compras:motivo-requerido';
+  end if;
+  if v_r.version <> p_version then
+    raise exception 'version-conflict';
+  end if;
+  if p_accion in ('enviar', 'aprobar') then
+    select estado into v_orden_estado from public.compras_ordenes where id = v_r.orden_id;
+    if v_orden_estado <> 'aprobada' then
+      raise exception 'compras:orden-no-emitida';
+    end if;
+  end if;
+
+  if p_accion = 'enviar' then
+    update public.compras_recepciones set estado = 'enviada', enviada = now(), motivo = '' where id = p_id;
+  elsif p_accion = 'aprobar' then
+    update public.compras_recepciones set estado = 'aprobada', aprobada = now(), aprobada_por = p_actor_nombre, motivo = coalesce(btrim(p_motivo), '') where id = p_id;
+  elsif p_accion = 'devolver' then
+    update public.compras_recepciones set estado = 'borrador', motivo = btrim(p_motivo) where id = p_id;
+  else
+    update public.compras_recepciones set estado = 'anulada', motivo = btrim(p_motivo) where id = p_id;
+  end if;
+  update public.compras_recepciones set version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre where id = p_id
+  returning version into v_version;
+
+  insert into public.compras_auditoria (project_id, actor_id, actor_nombre, accion, modulo, objeto_tipo, objeto_id, sujeto_id, sujeto_nombre, resultado, detalle)
+  values (p_project_id, p_actor_id, p_actor_nombre, 'recepciones.' || p_accion, 'recepciones', 'recepcion', p_id::text, v_r.elaborado_por_id,
+          'REC-' || lpad(v_r.numero::text, 4, '0'), 'ok',
+          jsonb_build_object('de', v_r.estado, 'motivo', coalesce(btrim(p_motivo), '')));
+  return v_version;
+end;
+$$;
+
 -- If the list of permissions grew, the administrators' role gets the new ones.
 update public.compras_roles
    set permisos = public.compras_permisos_validos()
@@ -1583,6 +1939,8 @@ alter table public.compras_orden_revisiones enable row level security;
 alter table public.compras_cde_carpetas enable row level security;
 alter table public.compras_documentos enable row level security;
 alter table public.compras_sync_historial enable row level security;
+alter table public.compras_recepciones enable row level security;
+alter table public.compras_recepcion_lineas enable row level security;
 
 -- Only the app's server (service role) uses these tables and functions.
 revoke all on table public.compras_roles, public.compras_usuarios, public.compras_auditoria from anon, authenticated;
@@ -1601,6 +1959,9 @@ revoke all on table public.compras_cde_carpetas, public.compras_documentos, publ
 grant select, insert, update on table public.compras_cde_carpetas, public.compras_documentos to service_role;
 revoke update, delete, truncate on table public.compras_sync_historial from public, anon, authenticated, service_role;
 grant select, insert on table public.compras_sync_historial to service_role;
+revoke all on table public.compras_recepciones, public.compras_recepcion_lineas from anon, authenticated;
+grant select, insert, update on table public.compras_recepciones to service_role;
+grant select, insert, update, delete on table public.compras_recepcion_lineas to service_role;
 revoke update, delete, truncate on table public.compras_auditoria from public, anon, authenticated, service_role;
 grant select, insert on table public.compras_auditoria to service_role;
 grant select, insert, update on table public.compras_roles, public.compras_usuarios to service_role;
@@ -1645,4 +2006,15 @@ revoke all on function public.compras_accion_orden(text, text, text, uuid, text,
 grant execute on function public.compras_comprometido(uuid, uuid) to service_role;
 grant execute on function public.compras_guardar_orden(text, text, text, uuid, jsonb, jsonb, integer) to service_role;
 grant execute on function public.compras_accion_orden(text, text, text, uuid, text, text, integer) to service_role;
+revoke all on function public.compras_recibido(uuid, uuid, uuid) from public, anon, authenticated;
+revoke all on function public.compras_recepcion_cabe(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.compras_recepcion_lineas_sin_exceso() from public, anon, authenticated;
+revoke all on function public.compras_recepciones_sin_exceso() from public, anon, authenticated;
+revoke all on function public.compras_orden_lineas_sobre_lo_recibido() from public, anon, authenticated;
+revoke all on function public.compras_ordenes_con_recepciones() from public, anon, authenticated;
+revoke all on function public.compras_guardar_recepcion(text, text, text, uuid, jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.compras_accion_recepcion(text, text, text, uuid, text, text, integer) from public, anon, authenticated;
+grant execute on function public.compras_recibido(uuid, uuid, uuid) to service_role;
+grant execute on function public.compras_guardar_recepcion(text, text, text, uuid, jsonb, jsonb, integer) to service_role;
+grant execute on function public.compras_accion_recepcion(text, text, text, uuid, text, text, integer) to service_role;
 revoke all on function public.compras_documentos_estable() from public, anon, authenticated;

@@ -47,7 +47,13 @@ export type MotivoRechazo =
   | "carpetas-sin-preparar"
   | "archivo-grande"
   | "documento-duplicado"
-  | "archivo-distinto";
+  | "archivo-distinto"
+  | "orden-no-emitida"
+  | "recepcion-excedida"
+  | "rechazo-no-valido"
+  | "fecha-futura"
+  | "con-recepciones"
+  | "bajo-lo-recibido";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Compras en este proyecto. Pídeselo a un administrador de Compras.",
@@ -65,7 +71,7 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "version-conflict": "Otra persona cambió esto mientras lo editabas. Se recargó: revisa y vuelve a guardar.",
   "no-existe": "No existe en este proyecto.",
   "estado-no-valido": "En su estado actual no se puede hacer eso.",
-  "auto-aprobacion": "Quien hizo la requisición no puede aprobarla, rechazarla ni devolverla: lo decide otra persona.",
+  "auto-aprobacion": "Quien elaboró el registro no puede aprobarlo, rechazarlo ni devolverlo: lo decide otra persona.",
   "cantidad-excedida": "La cantidad pasa lo que queda del presupuesto: escribe la justificación del exceso en esa línea.",
   "exceso-sin-permiso": "Aprobar por encima del presupuesto requiere el permiso “Aprobar sobre el presupuesto”.",
   "cantidad-no-valida": "La cantidad aprobada debe estar entre 0 y la pedida, y al menos una línea debe aprobarse.",
@@ -89,6 +95,12 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "archivo-grande": "El archivo pasa el tamaño permitido.",
   "documento-duplicado": "Ya hay un documento con ese nombre en esa carpeta.",
   "archivo-distinto": "El archivo no es el mismo que se registró (su huella no coincide): elige el archivo original.",
+  "orden-no-emitida": "Solo se recibe contra órdenes y contratos emitidos (no en borrador, por aprobar, en modificación ni anulados).",
+  "recepcion-excedida": "Lo aceptado pasa lo que queda por recibir de esa línea de la orden: recházalo o pide una modificación de la orden.",
+  "rechazo-no-valido": "Lo rechazado no puede pasar lo recibido, ni lo devuelto lo rechazado; y lo rechazado necesita su motivo.",
+  "fecha-futura": "La fecha de recibo no puede ser posterior a hoy.",
+  "con-recepciones": "La orden ya tiene recepciones vigentes: no se anula (anula primero sus recepciones, si fueron un error).",
+  "bajo-lo-recibido": "No se puede dejar una línea por debajo de lo ya recibido y aceptado (ni quitarla).",
 };
 
 /** The HTTP status of each refusal. */
@@ -132,6 +144,12 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "archivo-grande": 400,
   "documento-duplicado": 409,
   "archivo-distinto": 400,
+  "orden-no-emitida": 409,
+  "recepcion-excedida": 409,
+  "rechazo-no-valido": 400,
+  "fecha-futura": 400,
+  "con-recepciones": 409,
+  "bajo-lo-recibido": 409,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {

@@ -4,6 +4,9 @@ import type { TipoInsumo } from "../presupuesto/types";
 import { leerNit } from "./proveedores";
 import { esPermisoValido } from "./roles";
 import {
+  AccionRecepcion,
+  AccionSobreRecepcion,
+  CambioRecepcion,
   AccionOrden,
   AccionSobreOrden,
   CambioOrden,
@@ -343,6 +346,45 @@ export function leerCambioOrden(body: unknown): CambioOrden {
     lineas,
     version: version(o.version),
   };
+}
+
+// ---------------------------------------------------------------- receptions
+
+const ACCION_RECEPCION_RE = /^(enviar|aprobar|devolver|anular)$/;
+
+export function leerCambioRecepcion(body: unknown): CambioRecepcion {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (o.id !== undefined && (typeof o.id !== "string" || !UUID_RE.test(o.id))) bad("Recepción no válida.");
+  if (typeof o.ordenId !== "string" || !UUID_RE.test(o.ordenId)) bad("Orden no válida.");
+  if (!Array.isArray(o.lineas) || !o.lineas.length) bad("La recepción necesita al menos un insumo recibido.");
+  if (o.lineas.length > MAX_LINEAS_REQUISICION) bad(`Máximo ${MAX_LINEAS_REQUISICION} líneas.`);
+  const lineas = o.lineas.map((x, i) => {
+    const l = (x ?? {}) as Record<string, unknown>;
+    if (typeof l.requisicionLineaId !== "string" || !UUID_RE.test(l.requisicionLineaId)) bad(`Línea ${i + 1}: no válida.`);
+    return {
+      requisicionLineaId: l.requisicionLineaId,
+      recibido: cantidad(l.recibido, `Línea ${i + 1}: recibido`),
+      rechazado: cantidad(l.rechazado ?? 0, `Línea ${i + 1}: rechazado`),
+      devuelto: cantidad(l.devuelto ?? 0, `Línea ${i + 1}: devuelto`),
+      motivo: texto(l.motivo ?? "", `Línea ${i + 1}: motivo`, 500).trim(),
+    };
+  });
+  if (new Set(lineas.map((l) => l.requisicionLineaId)).size !== lineas.length) bad("Una línea de la orden está dos veces.");
+  return {
+    ...(o.id ? { id: o.id as string } : {}),
+    ordenId: o.ordenId,
+    fecha: fecha(o.fecha, "Fecha de recibo"),
+    remision: texto(o.remision ?? "", "Remisión", 100).trim(),
+    observaciones: texto(o.observaciones ?? "", "Observaciones", 1000).trim(),
+    lineas,
+    version: version(o.version),
+  };
+}
+
+export function leerAccionRecepcion(body: unknown): AccionSobreRecepcion {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (typeof o.accion !== "string" || !ACCION_RECEPCION_RE.test(o.accion)) bad("Acción no válida.");
+  return { accion: o.accion as AccionRecepcion, motivo: texto(o.motivo ?? "", "Motivo", 1000).trim(), version: version(o.version) };
 }
 
 export function leerAccionOrden(body: unknown): AccionSobreOrden {

@@ -2056,7 +2056,7 @@ Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
 construye por fases; ya están **el acceso por rol, la auditoría, la consulta
 de los insumos del presupuesto, las requisiciones, los proveedores, las
-cotizaciones con su comparativo, las órdenes de compra y contratos y sus documentos en el CDE**. Aparece en el menú lateral del
+cotizaciones con su comparativo, las órdenes de compra y contratos, sus documentos en el CDE y la recepción en obra**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2170,7 +2170,7 @@ presupuesto se leyó y quién la guardó.
 - Columnas **Solicitado** (requisiciones enviadas con lo pedido, y aprobadas
   con lo aprobado), **Aprobado**, **Comprometido** (órdenes y contratos
   emitidos) y **Por solicitar** (planificado menos solicitado; en rojo si se
-  pasó). Lo recibido llega con la recepción en obra.
+  pasó) y **Recibido** (aceptado en obra, en recepciones aprobadas).
 
 ### Requisiciones
 
@@ -2323,6 +2323,52 @@ Reglas (`lib/compras/ordenes.ts` con pruebas, y en PostgreSQL):
 - Todo queda en la auditoría: crear, editar, enviar, aprobar, devolver,
   anular y modificar, con la revisión y el motivo.
 
+### Recepción en obra
+
+Pestaña **Recepción en obra** (permiso Recepción en obra: ver). Arriba están
+las órdenes y contratos emitidos con su avance de recibo (**Sin recibir**,
+**Parcial** con su porcentaje o **Completa**) y, con **Ordenado vs.
+recibido**, la tabla de diferencias por insumo: ordenado, aceptado (en
+recepciones aprobadas), en trámite (en borrador o por aprobar), rechazado,
+devuelto y pendiente. Quien la ve no ve precios: solo cantidades.
+
+**Registrar recepción** (Recepción en obra: crear; por ejemplo el
+residente) abre la recepción REC-0001 de esa orden: fecha de recibo (no
+posterior a hoy), remisión del proveedor, observaciones y, por insumo, lo
+**recibido**, lo **rechazado** con su motivo y lo **devuelto** al
+proveedor. Lo **aceptado** es recibido menos rechazado. Se admiten entregas
+parciales: cada entrega es una recepción.
+
+Reglas (en el servicio y otra vez en PostgreSQL, bajo el mismo bloqueo que
+las órdenes):
+
+- Aceptado + rechazado = recibido; lo devuelto no pasa lo rechazado; un
+  rechazo necesita su motivo.
+- Lo aceptado de una línea, sumando todas las recepciones no anuladas
+  (borradores incluidos), no pasa lo ordenado. Si llegó de más, el
+  excedente se rechaza. Un trigger diferido lo vuelve a revisar aunque
+  alguien escriba directo en la tabla.
+- Solo se recibe contra órdenes y contratos **emitidos** (no en borrador,
+  por aprobar, en modificación ni anulados).
+- Borrador → **Enviar a aprobación** → **Aprobar** (Recepción en obra:
+  aprobar; por ejemplo almacén o el director). Quien la registró no la
+  aprueba ni la devuelve. Devolver y anular piden motivo. Una recepción
+  aprobada se puede anular (Recepción en obra: anular) y deja de contar.
+- Al aprobarse, lo aceptado aparece como **Recibido** en Insumos del
+  presupuesto y en el avance de la orden.
+
+**La orden respeta lo recibido:** una orden o contrato con recepciones
+vigentes no se anula (`con-recepciones`), y una modificación no puede dejar
+una línea, ni quitarla, por debajo de lo ya aceptado (`bajo-lo-recibido`).
+Ambas cosas las revisan también triggers en la base.
+
+**Acta y soportes:** cada recepción tiene su sección de documentos (en
+"Actas y recepciones" del CDE): la remisión del proveedor, fotos o soportes
+y, cuando está aprobada, **Guardar el acta en el CDE**, que genera el acta
+en PDF (orden, proveedor, fecha, remisión, ordenado, recibido, aceptado,
+rechazado, devuelto, motivos del rechazo y firmas de quien recibió y quien
+aprobó). El acta es reproducible, como el PDF de la orden.
+
 ### Documentos en el CDE
 
 Los archivos de Compras viven en las carpetas del proyecto en Trimble
@@ -2467,6 +2513,10 @@ ejecutar nadie más (`revoke` a `public`, `anon` y `authenticated`).
 | `compras_documentos` | Referencias a los archivos del CDE: registro al que pertenece, tipo, título, nombre original y en Trimble, carpeta, tamaño, huella, vencimiento, estado (pendiente, respaldado, error, anulado), id de subida, de archivo y de versión, revisión, intentos, último error, motivo de anulación, versión. Nombre único por carpeta; restricciones: respaldado exige archivo, versión y confirmación; anulado exige motivo |
 | trigger `compras_documentos_sin_retroceso` | Un documento respaldado no vuelve a pendiente ni cambia de archivo; uno anulado no cambia |
 | `compras_sync_historial` | Cada paso de cada carga con Trimble (solo inserción) |
+| `compras_recepciones` / `compras_recepcion_lineas` | Recepciones (REC) contra una orden o contrato: estado, fecha, remisión, quién registró y aprobó; líneas por línea de la orden con recibido, aceptado, rechazado, devuelto y motivo (restricciones: aceptado + rechazado = recibido, devuelto ≤ rechazado, rechazo con motivo) |
+| `compras_recibido(orden, línea, excluir)` + triggers `compras_recepcion_lineas_sin_exceso` y `compras_recepciones_sin_exceso` | Lo aceptado de una línea de la orden; los triggers diferidos impiden pasar lo ordenado |
+| triggers `compras_orden_lineas_sobre_lo_recibido` y `compras_ordenes_con_recepciones` | Una orden no baja de lo aceptado ni se anula con recepciones vigentes |
+| `compras_guardar_recepcion` / `compras_accion_recepcion` | Guardan y cambian de estado con permisos, cantidades y auditoría |
 
 ### API
 
@@ -2503,6 +2553,8 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `GET documentos/{id}/historial` | Los pasos de la carga con Trimble | Ver del módulo |
 | `PUT documentos/tipos` | Tipos de documentos legales de proveedores | Documentos: administrar |
 | `POST cde/prueba` | Un paso de la prueba de escritura en el CDE | Documentos: administrar |
+| `GET recepciones` / `PUT recepciones` | Recepciones y órdenes emitidas con lo pendiente (sin precios) / registrar o editar un borrador | Recepción en obra: ver / crear o editar |
+| `POST recepciones/{id}/estado` | Enviar, aprobar, devolver o anular | Según la acción |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
@@ -2518,21 +2570,22 @@ Proveedores y cotizaciones: `nit-repetido`, `proveedor-no-activo`,
 `requisicion-no-aprobada` (409). Órdenes: `doble-compromiso`,
 `sin-proveedor-elegido`, `con-ordenes` (409); `objeto-requerido` (400).
 Documentos: `carpetas-sin-preparar`, `documento-duplicado` (409);
-`archivo-grande`, `archivo-distinto` (400).
+`archivo-grande`, `archivo-distinto` (400). Recepciones: `orden-no-emitida`,
+`recepcion-excedida`, `con-recepciones`, `bajo-lo-recibido` (409);
+`rechazo-no-valido`, `fecha-futura` (400).
 
 El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
 reglas puras, `validate`, `store` con Supabase o memoria, `service`,
 `routes`, `client`, `formato`, `planificado`, `presupuestoLectura`,
 `requisiciones`, `proveedores`, `cotizaciones`, `ordenes`, `cde` (la API de
 Trimble), `documentos` (carpetas, nombres, expediente), `subida` (el lado del
-navegador) y `pdfOrden`, con sus pruebas; `pruebas/trimbleFalso` es un
+navegador), `pdfOrden`, `recepciones` y `pdfRecepcion`, con sus pruebas; `pruebas/trimbleFalso` es un
 Trimble Connect falso que se comporta como su API) y `components/compras/`.
 
 ### Lo que sigue
 
-En este orden: recepción en obra contra lo ordenado (con sus actas en el
-CDE; una orden no se podrá anular ni bajar por debajo de lo recibido), y el
-panel con la trazabilidad de cada insumo.
+El panel con la trazabilidad de cada insumo: presupuesto → requisición →
+cotización → proveedor → orden o contrato → recepción, con sus documentos.
 
 ---
 

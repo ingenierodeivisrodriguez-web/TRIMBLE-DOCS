@@ -12,12 +12,15 @@ import { numeroCotizacion } from "./cotizaciones";
 import { evaluar, razonesJustificacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
 import { fechaHora } from "./formato";
 import { comprometidoPorInsumo, comprometidoPorLinea, maximoLinea, numeroOrden, revisarAccionOrden, revisarOrden } from "./ordenes";
+import { aceptadoDeOrden, numeroRecepcion, ordenesPorRecibir, recibidoPorInsumo, revisarAccionRecepcion, revisarRecepcion, tieneRecepciones } from "./recepciones";
 import { excesos, limite, numeroRequisicion, puedeEditar, revisarAccion, solicitadoPorInsumo } from "./requisiciones";
 import { ROLES_INICIALES } from "./roles";
 import type { Actor, ComprasStore, LineaGuardada, OrdenGuardada } from "./store";
 import {
   leerAccionOrden,
+  leerAccionRecepcion,
   leerCambioOrden,
+  leerCambioRecepcion,
   leerAccionComparativo,
   leerAccionRequisicion,
   leerAnulacion,
@@ -42,6 +45,7 @@ import {
   InsumosResponse,
   Modulo,
   OrdenesResponse,
+  RecepcionesResponse,
   PasoPruebaCde,
   Permiso,
   PruebaCdeResponse,
@@ -276,12 +280,18 @@ async function planActual(ctx: Ctx): Promise<{ presupuesto: InsumosResponse["pre
 /** The resources planned in the project's budget (Presupuesto), with where each one is used and what was asked of each. */
 export async function getInsumos(ctx: Ctx): Promise<InsumosResponse> {
   await requerir(ctx, "insumos", "ver", "insumos.consultar");
-  const [plan, requisiciones, ordenes] = await Promise.all([planActual(ctx), ctx.store.listRequisiciones(ctx.projectId), ctx.store.listOrdenes(ctx.projectId)]);
+  const [plan, requisiciones, ordenes, recepciones] = await Promise.all([
+    planActual(ctx),
+    ctx.store.listRequisiciones(ctx.projectId),
+    ctx.store.listOrdenes(ctx.projectId),
+    ctx.store.listRecepciones(ctx.projectId),
+  ]);
   const pedidos = solicitadoPorInsumo(requisiciones);
   const comprometido = comprometidoPorInsumo(ordenes);
+  const recibido = recibidoPorInsumo(recepciones);
   return {
     ...plan,
-    insumos: plan.insumos.map((i) => ({ ...i, solicitado: pedidos.get(i.id)?.solicitado ?? 0, aprobado: pedidos.get(i.id)?.aprobado ?? 0, comprometido: comprometido.get(i.id) ?? 0 })),
+    insumos: plan.insumos.map((i) => ({ ...i, solicitado: pedidos.get(i.id)?.solicitado ?? 0, aprobado: pedidos.get(i.id)?.aprobado ?? 0, comprometido: comprometido.get(i.id) ?? 0, recibido: recibido.get(i.id) ?? 0 })),
   };
 }
 
@@ -573,18 +583,19 @@ export async function guardarOrden(ctx: Ctx, body: unknown): Promise<OrdenesResp
   const c = leerCambioOrden(body);
   const m = TIPO_ORDEN[c.tipo].modulo;
   const a = await requerir(ctx, m, "ver", `${m}.guardar`);
-  const [ordenes, requisiciones, comparativos, cotizaciones] = await Promise.all([
+  const [ordenes, requisiciones, comparativos, cotizaciones, recepciones] = await Promise.all([
     ctx.store.listOrdenes(ctx.projectId),
     ctx.store.listRequisiciones(ctx.projectId),
     ctx.store.listComparativos(ctx.projectId),
     ctx.store.listCotizaciones(ctx.projectId),
+    ctx.store.listRecepciones(ctx.projectId),
   ]);
   const antes = c.id ? ordenes.find((o) => o.id === c.id) ?? null : null;
   const r = requisiciones.find((x) => x.id === c.requisicionId);
   const comp = comparativos.find((x) => x.requisicionId === c.requisicionId);
   const cot = cotizaciones.find((x) => x.id === comp?.cotizacionElegidaId);
   const audit = { objetoTipo: c.tipo, objetoId: c.id ?? "", sujetoNombre: antes ? numeroOrden(antes.tipo, antes.numero) : r ? numeroRequisicion(r.numero) : "" };
-  const motivo = revisarOrden({ actorId: ctx.caller.id, permisos: a.permisos, hoy: ctx.hoy }, c, antes, r, comp, cot, ordenes);
+  const motivo = revisarOrden({ actorId: ctx.caller.id, permisos: a.permisos, hoy: ctx.hoy }, c, antes, r, comp, cot, ordenes, antes ? aceptadoDeOrden(recepciones, antes.id) : new Map());
   if (motivo === "sin-permiso") return denegar(ctx, `${m}.guardar`, m, motivo, audit);
   if (motivo) throw rechazo(motivo);
   // Prices come from the chosen quotation; only a modification (revision 1 or more) can change them.
@@ -619,7 +630,8 @@ export async function accionOrden(ctx: Ctx, id: string, body: unknown): Promise<
   const m = TIPO_ORDEN[o.tipo].modulo;
   const acc = await requerir(ctx, m, "ver", `${m}.${a.accion}`);
   const audit = { objetoTipo: o.tipo, objetoId: o.id, sujetoId: o.elaboradoPorId, sujetoNombre: numeroOrden(o.tipo, o.numero) };
-  const motivo = revisarAccionOrden({ actorId: ctx.caller.id, permisos: acc.permisos, hoy: ctx.hoy }, o, a);
+  const recepciones = a.accion === "anular" ? await ctx.store.listRecepciones(ctx.projectId) : [];
+  const motivo = revisarAccionOrden({ actorId: ctx.caller.id, permisos: acc.permisos, hoy: ctx.hoy }, o, a, tieneRecepciones(recepciones, o.id));
   if (motivo && DENEGACIONES.has(motivo)) return denegar(ctx, `${m}.${a.accion}`, m, motivo, audit);
   if (motivo) throw rechazo(motivo);
   try {
@@ -630,6 +642,59 @@ export async function accionOrden(ctx: Ctx, id: string, body: unknown): Promise<
     throw e;
   }
   return getOrdenes(ctx);
+}
+
+// ---------------------------------------------------------------- receptions on site
+
+/** Receptions, and the issued orders and contracts with what is still to receive (no prices). Recepciones: ver. */
+export async function getRecepciones(ctx: Ctx): Promise<RecepcionesResponse> {
+  await requerir(ctx, "recepciones", "ver", "recepciones.consultar");
+  const [recepciones, ordenes, proveedores] = await Promise.all([
+    ctx.store.listRecepciones(ctx.projectId),
+    ctx.store.listOrdenes(ctx.projectId),
+    ctx.store.listProveedores(ctx.projectId),
+  ]);
+  return { recepciones, ordenes: ordenesPorRecibir(ordenes, recepciones, proveedores), hoy: ctx.hoy };
+}
+
+/** Creates or changes a draft reception of an issued order or contract. */
+export async function guardarRecepcion(ctx: Ctx, body: unknown): Promise<RecepcionesResponse> {
+  const c = leerCambioRecepcion(body);
+  const a = await requerir(ctx, "recepciones", "ver", "recepciones.guardar");
+  const [recepciones, ordenes] = await Promise.all([ctx.store.listRecepciones(ctx.projectId), ctx.store.listOrdenes(ctx.projectId)]);
+  const antes = c.id ? recepciones.find((r) => r.id === c.id) ?? null : null;
+  const orden = ordenes.find((o) => o.id === c.ordenId);
+  const audit = { objetoTipo: "recepcion", objetoId: c.id ?? "", sujetoNombre: antes ? numeroRecepcion(antes.numero) : orden ? numeroOrden(orden.tipo, orden.numero) : "" };
+  const motivo = revisarRecepcion({ actorId: ctx.caller.id, permisos: a.permisos, hoy: ctx.hoy }, c, antes, orden, recepciones);
+  if (motivo === "sin-permiso") return denegar(ctx, "recepciones.guardar", "recepciones", motivo, audit);
+  if (motivo) throw rechazo(motivo);
+  try {
+    await ctx.store.guardarRecepcion(ctx.projectId, actor(ctx), c.id ?? globalThis.crypto.randomUUID(), c);
+  } catch (err) {
+    throw traducir(err);
+  }
+  return getRecepciones(ctx);
+}
+
+/** Sends, approves, returns or cancels a reception. */
+export async function accionRecepcion(ctx: Ctx, id: string, body: unknown): Promise<RecepcionesResponse> {
+  const a = leerAccionRecepcion(body);
+  const [recepciones, ordenes] = await Promise.all([ctx.store.listRecepciones(ctx.projectId), ctx.store.listOrdenes(ctx.projectId)]);
+  const r = recepciones.find((x) => x.id === id);
+  if (!r) throw rechazo("no-existe");
+  const acc = await requerir(ctx, "recepciones", "ver", `recepciones.${a.accion}`);
+  const audit = { objetoTipo: "recepcion", objetoId: r.id, sujetoId: r.elaboradoPorId, sujetoNombre: numeroRecepcion(r.numero) };
+  const motivo = revisarAccionRecepcion({ actorId: ctx.caller.id, permisos: acc.permisos, hoy: ctx.hoy }, r, a, ordenes.find((o) => o.id === r.ordenId));
+  if (motivo && DENEGACIONES.has(motivo)) return denegar(ctx, `recepciones.${a.accion}`, "recepciones", motivo, audit);
+  if (motivo) throw rechazo(motivo);
+  try {
+    await ctx.store.accionRecepcion(ctx.projectId, actor(ctx), id, a);
+  } catch (err) {
+    const e = traducir(err);
+    if (e instanceof ServiceError && e.code && DENEGACIONES.has(e.code as MotivoRechazo)) await denegar(ctx, `recepciones.${a.accion}`, "recepciones", e.code as MotivoRechazo, audit);
+    throw e;
+  }
+  return getRecepciones(ctx);
 }
 
 // ---------------------------------------------------------------- CDE write test
@@ -846,6 +911,9 @@ async function registroDe(ctx: Ctx, tipo: EntidadDocumento, id: string): Promise
   } else if (tipo === "orden" || tipo === "contrato") {
     const o = (await ctx.store.listOrdenes(ctx.projectId)).find((x) => x.id === id && x.tipo === tipo);
     if (o) return { prefijo: `${numeroOrden(o.tipo, o.numero)}${o.revision ? ` rev${o.revision}` : ""}` };
+  } else if (tipo === "recepcion") {
+    const r = (await ctx.store.listRecepciones(ctx.projectId)).find((x) => x.id === id);
+    if (r) return { prefijo: numeroRecepcion(r.numero) };
   } else if (tipo === "proveedor") {
     const p = (await ctx.store.listProveedores(ctx.projectId)).find((x) => x.id === id);
     if (p) return { prefijo: nitConDv(p.nit, p.dv), proveedor: { nit: nitConDv(p.nit, p.dv), razonSocial: p.razonSocial } };

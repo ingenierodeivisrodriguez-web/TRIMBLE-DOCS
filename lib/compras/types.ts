@@ -206,6 +206,8 @@ export interface InsumoPlanificado {
   aprobado: number;
   /** In approved purchase orders and contracts. */
   comprometido: number;
+  /** Accepted on site, in approved receptions. */
+  recibido: number;
 }
 
 export interface InsumosResponse {
@@ -586,6 +588,109 @@ export interface RequisicionesResponse {
 }
 
 export const MAX_LINEAS_REQUISICION = 200;
+
+// ---------------------------------------------------------------- receptions on site
+
+export type EstadoRecepcion = "borrador" | "enviada" | "aprobada" | "anulada";
+export type AccionRecepcion = "enviar" | "aprobar" | "devolver" | "anular";
+
+/** One line of a reception: what arrived of an order line, accepted plus rejected equals received. */
+export interface LineaRecepcion {
+  id: string;
+  /** The order line, by its requisition line (stable across the order's revisions). */
+  requisicionLineaId: string;
+  insumoId: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  recibido: number;
+  aceptado: number;
+  rechazado: number;
+  /** Of what was rejected, what went back to the supplier. */
+  devuelto: number;
+  /** Why it was rejected (required when something was). */
+  motivo: string;
+}
+
+export interface Recepcion {
+  id: string;
+  /** REC-0001, per project. */
+  numero: number;
+  ordenId: string;
+  estado: EstadoRecepcion;
+  /** YYYY-MM-DD: when it arrived (never in the future). */
+  fecha: string;
+  /** The supplier's delivery note. */
+  remision: string;
+  observaciones: string;
+  elaboradoPorId: string;
+  elaboradoPor: string;
+  /** Last reason (returned, cancelled) or the approver's note. */
+  motivo: string;
+  enviada: string | null;
+  aprobada: string | null;
+  aprobadaPor: string | null;
+  lineas: LineaRecepcion[];
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+export interface CambioRecepcion {
+  id?: string;
+  ordenId: string;
+  fecha: string;
+  remision: string;
+  observaciones: string;
+  /** Accepted is received less rejected. */
+  lineas: { requisicionLineaId: string; recibido: number; rechazado: number; devuelto: number; motivo: string }[];
+  version: number;
+}
+
+export interface AccionSobreRecepcion {
+  accion: AccionRecepcion;
+  motivo: string;
+  version: number;
+}
+
+/** An issued order or contract as the people who receive see it (no prices). */
+export interface OrdenPorRecibir {
+  id: string;
+  tipo: TipoOrden;
+  numero: number;
+  revision: number;
+  estado: EstadoOrden;
+  proveedor: string;
+  nit: string;
+  fechaEntrega: string;
+  lugarEntrega: string;
+  lineas: {
+    requisicionLineaId: string;
+    insumoId: string;
+    codigo: string;
+    descripcion: string;
+    unidad: string;
+    tipo: TipoInsumo;
+    ordenado: number;
+    /** Accepted in approved receptions. */
+    aceptado: number;
+    /** Accepted in receptions still in draft or sent. */
+    enTramite: number;
+    rechazado: number;
+    devuelto: number;
+    /** Ordered less accepted (approved or in process). */
+    pendiente: number;
+  }[];
+}
+
+export interface RecepcionesResponse {
+  recepciones: Recepcion[];
+  /** Issued orders and contracts (and those with receptions), with what is still to receive. */
+  ordenes: OrdenPorRecibir[];
+  hoy: string;
+}
 
 // ---------------------------------------------------------------- API responses
 

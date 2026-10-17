@@ -3,10 +3,15 @@ import { hoyIso } from "../manuales/licencia";
 import { esMotivo, ESTADO_HTTP, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
 import { evaluar, numeroCotizacion, revisarComparativo, revisarCotizacion, totalesCotizacion } from "./cotizaciones";
 import { numeroOrden, revisarAccionOrden, revisarOrden, TRANSICIONES_ORDEN } from "./ordenes";
+import { aceptadoDeOrden, numeroRecepcion, revisarAccionRecepcion, revisarRecepcion, tieneRecepciones, TRANSICIONES_RECEPCION } from "./recepciones";
 import { numeroRequisicion, puedeEditar, revisarAccion, TRANSICIONES } from "./requisiciones";
 import type { RolInicial } from "./roles";
 import { clienteSupabase, eq, faltaTabla } from "./supabase";
 import {
+  AccionSobreRecepcion,
+  CambioRecepcion,
+  LineaRecepcion,
+  Recepcion,
   CarpetaCde,
   Documento,
   SyncEntrada,
@@ -102,6 +107,12 @@ export interface ComprasStore {
   /** Creates (version 0) or changes a draft; lines come with the prices to save (the quotation's, in revision 0). */
   guardarOrden(projectId: string, actor: Actor, id: string, cambio: OrdenGuardada): Promise<number>;
   accionOrden(projectId: string, actor: Actor, id: string, a: AccionSobreOrden): Promise<number>;
+
+  /** Every reception of the project with its lines, newest first. */
+  listRecepciones(projectId: string): Promise<Recepcion[]>;
+  /** Creates (version 0) or changes a draft reception, replacing its lines (accepted = received - rejected). */
+  guardarRecepcion(projectId: string, actor: Actor, id: string, cambio: CambioRecepcion): Promise<number>;
+  accionRecepcion(projectId: string, actor: Actor, id: string, a: AccionSobreRecepcion): Promise<number>;
 
   listCarpetasCde(projectId: string): Promise<CarpetaCde[]>;
   guardarCarpetaCde(projectId: string, carpeta: CarpetaCde): Promise<void>;
@@ -534,6 +545,34 @@ function supabaseStore(): ComprasStore | null {
 
     accionOrden: (projectId, actor, id, a) =>
       rpc<number>("compras_accion_orden", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_accion: a.accion, p_motivo: a.motivo, p_version: a.version }),
+
+    async listRecepciones(projectId) {
+      const [recs, lineas] = await Promise.all([
+        all<RecepcionRow>(
+          `/compras_recepciones?project_id=${eq(projectId)}&select=id,numero,orden_id,estado,fecha,remision,observaciones,elaborado_por_id,elaborado_por,motivo,enviada,aprobada,aprobada_por,version,creada,actualizado,actualizado_por&order=creada.desc`
+        ),
+        all<RecepcionLineaRow>(
+          `/compras_recepcion_lineas?project_id=${eq(projectId)}&select=id,recepcion_id,requisicion_linea_id,insumo_id,codigo,descripcion,unidad,tipo,recibido,aceptado,rechazado,devuelto,motivo&order=recepcion_id.asc`
+        ),
+      ]);
+      const porRecepcion = new Map<string, LineaRecepcion[]>();
+      for (const l of lineas) porRecepcion.set(l.recepcion_id, [...(porRecepcion.get(l.recepcion_id) ?? []), lineaRecepcionDeFila(l)]);
+      return recs.map((r) => recepcionDeFila(r, porRecepcion.get(r.id) ?? []));
+    },
+
+    guardarRecepcion: (projectId, actor, id, c) =>
+      rpc<number>("compras_guardar_recepcion", {
+        p_project_id: projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_id: id,
+        p_datos: { orden_id: c.ordenId, fecha: c.fecha, remision: c.remision, observaciones: c.observaciones },
+        p_lineas: c.lineas.map((l) => ({ requisicion_linea_id: l.requisicionLineaId, recibido: l.recibido, rechazado: l.rechazado, devuelto: l.devuelto, motivo: l.motivo })),
+        p_version: c.version,
+      }),
+
+    accionRecepcion: (projectId, actor, id, a) =>
+      rpc<number>("compras_accion_recepcion", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_accion: a.accion, p_motivo: a.motivo, p_version: a.version }),
 
     async listCarpetasCde(projectId) {
       const rows = await all<{ clave: string; nombre: string; folder_id: string; ruta: string; creada: string; creada_por: string }>(
@@ -977,6 +1016,82 @@ function ordenDeFila(o: OrdenRow, lineas: LineaOrden[]): Orden {
   };
 }
 
+interface RecepcionRow {
+  id: string;
+  numero: number;
+  orden_id: string;
+  estado: Recepcion["estado"];
+  fecha: string;
+  remision: string;
+  observaciones: string;
+  elaborado_por_id: string;
+  elaborado_por: string;
+  motivo: string;
+  enviada: string | null;
+  aprobada: string | null;
+  aprobada_por: string | null;
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizado_por: string | null;
+}
+
+interface RecepcionLineaRow {
+  id: string;
+  recepcion_id: string;
+  requisicion_linea_id: string;
+  insumo_id: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: LineaRecepcion["tipo"];
+  recibido: number | string;
+  aceptado: number | string;
+  rechazado: number | string;
+  devuelto: number | string;
+  motivo: string;
+}
+
+function lineaRecepcionDeFila(l: RecepcionLineaRow): LineaRecepcion {
+  return {
+    id: l.id,
+    requisicionLineaId: l.requisicion_linea_id,
+    insumoId: l.insumo_id,
+    codigo: l.codigo,
+    descripcion: l.descripcion,
+    unidad: l.unidad,
+    tipo: l.tipo,
+    recibido: Number(l.recibido),
+    aceptado: Number(l.aceptado),
+    rechazado: Number(l.rechazado),
+    devuelto: Number(l.devuelto),
+    motivo: l.motivo,
+  };
+}
+
+function recepcionDeFila(r: RecepcionRow, lineas: LineaRecepcion[]): Recepcion {
+  return {
+    id: r.id,
+    numero: r.numero,
+    ordenId: r.orden_id,
+    estado: r.estado,
+    fecha: r.fecha,
+    remision: r.remision,
+    observaciones: r.observaciones,
+    elaboradoPorId: r.elaborado_por_id,
+    elaboradoPor: r.elaborado_por,
+    motivo: r.motivo,
+    enviada: r.enviada,
+    aprobada: r.aprobada,
+    aprobadaPor: r.aprobada_por,
+    lineas,
+    version: r.version,
+    creada: r.creada,
+    actualizado: r.actualizado,
+    actualizadoPor: r.actualizado_por,
+  };
+}
+
 /** A saved revision: the order as it was (from its JSON in the database). */
 function revisionDeFila(r: { orden_id: string; revision: number; creada: string; por: string; motivo: string; anterior: Record<string, unknown> }): RevisionOrden {
   const a = r.anterior;
@@ -1111,6 +1226,8 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
   const ordenes = new Map<string, Orden & { projectId: string }>();
   const revisiones: (RevisionOrden & { projectId: string })[] = [];
   const ordsDe = (projectId: string): Orden[] => [...ordenes.values()].filter((o) => o.projectId === projectId).map(sinProyecto);
+  const recepciones = new Map<string, Recepcion & { projectId: string }>();
+  const recsDe = (projectId: string): Recepcion[] => [...recepciones.values()].filter((r) => r.projectId === projectId).map(sinProyecto);
   const carpetasCde = new Map<string, CarpetaCde & { projectId: string }>();
   const tiposDoc = new Map<string, TipoDocumentoLegal[]>();
   const documentos = new Map<string, Documento & { projectId: string }>();
@@ -1366,7 +1483,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
       const r = reqsDe(projectId).find((x) => x.id === c.requisicionId);
       const comp = compsDe(projectId).find((x) => x.requisicionId === c.requisicionId);
       const cot = cotsDe(projectId).find((x) => x.id === comp?.cotizacionElegidaId);
-      const motivo = revisarOrden({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, c, antes ? sinProyecto(antes) : null, r, comp, cot, ordsDe(projectId));
+      const motivo = revisarOrden({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, c, antes ? sinProyecto(antes) : null, r, comp, cot, ordsDe(projectId), aceptadoDeOrden(recsDe(projectId), id));
       if (motivo) throw rechazo(motivo);
       const revision = antes?.revision ?? 0;
       const lineas: LineaOrden[] = c.lineas.map((l) => {
@@ -1392,7 +1509,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
     async accionOrden(projectId, actor, id, a) {
       const o = ordenes.get(id);
       if (!o || o.projectId !== projectId) throw rechazo("no-existe");
-      const motivo = revisarAccionOrden({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, sinProyecto(o), a);
+      const motivo = revisarAccionOrden({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, sinProyecto(o), a, tieneRecepciones(recsDe(projectId), id));
       if (motivo) throw rechazo(motivo);
       const de = o.estado;
       const revisionAntes = o.revision;
@@ -1420,6 +1537,54 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
         detalle: { de, revision: revisionAntes, motivo: a.motivo.trim() },
       });
       return o.version;
+    },
+    async listRecepciones(projectId) {
+      return recsDe(projectId).sort((a, b) => b.creada.localeCompare(a.creada));
+    },
+    async guardarRecepcion(projectId, actor, id, c) {
+      const antes = recepciones.get(id);
+      if (antes && antes.projectId !== projectId) throw rechazo("no-existe");
+      const o = ordsDe(projectId).find((x) => x.id === c.ordenId);
+      const motivo = revisarRecepcion({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, c, antes ? sinProyecto(antes) : null, o, recsDe(projectId));
+      if (motivo) throw rechazo(motivo);
+      const lineas: LineaRecepcion[] = c.lineas.map((l) => {
+        const ol = o!.lineas.find((x) => x.requisicionLineaId === l.requisicionLineaId)!;
+        return {
+          id: globalThis.crypto.randomUUID(), requisicionLineaId: ol.requisicionLineaId, insumoId: ol.insumoId, codigo: ol.codigo, descripcion: ol.descripcion, unidad: ol.unidad, tipo: ol.tipo,
+          recibido: l.recibido, aceptado: Math.round((l.recibido - l.rechazado) * 10_000) / 10_000, rechazado: l.rechazado, devuelto: l.devuelto, motivo: l.motivo.trim(),
+        };
+      });
+      const numero = antes?.numero ?? siguiente(projectId, "recepcion");
+      const ahoraIso = ahora();
+      recepciones.set(id, {
+        ...(antes ?? { estado: "borrador", elaboradoPorId: actor.id, elaboradoPor: actor.nombre, motivo: "", enviada: null, aprobada: null, aprobadaPor: null, creada: ahoraIso }),
+        projectId, id, numero, ordenId: c.ordenId, fecha: c.fecha, remision: c.remision, observaciones: c.observaciones, lineas, version: c.version + 1, actualizado: ahoraIso, actualizadoPor: actor.nombre,
+      } as Recepcion & { projectId: string });
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: `recepciones.${antes ? "editar" : "crear"}`, modulo: "recepciones", objetoTipo: "recepcion", objetoId: id, sujetoId: null,
+        sujetoNombre: numeroRecepcion(numero), resultado: "ok", detalle: { orden: numeroOrden(o!.tipo, o!.numero), lineas: lineas.length, remision: c.remision },
+      });
+      return c.version + 1;
+    },
+    async accionRecepcion(projectId, actor, id, a) {
+      const r = recepciones.get(id);
+      if (!r || r.projectId !== projectId) throw rechazo("no-existe");
+      const o = ordsDe(projectId).find((x) => x.id === r.ordenId);
+      const motivo = revisarAccionRecepcion({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, sinProyecto(r), a, o);
+      if (motivo) throw rechazo(motivo);
+      const de = r.estado;
+      const ahoraIso = ahora();
+      if (a.accion === "enviar") Object.assign(r, { enviada: ahoraIso, motivo: "" });
+      if (a.accion === "aprobar") Object.assign(r, { aprobada: ahoraIso, aprobadaPor: actor.nombre, motivo: a.motivo.trim() });
+      if (a.accion === "devolver" || a.accion === "anular") r.motivo = a.motivo.trim();
+      r.estado = TRANSICIONES_RECEPCION[a.accion].hacia;
+      r.version += 1;
+      Object.assign(r, { actualizado: ahoraIso, actualizadoPor: actor.nombre });
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: `recepciones.${a.accion}`, modulo: "recepciones", objetoTipo: "recepcion", objetoId: id, sujetoId: r.elaboradoPorId,
+        sujetoNombre: numeroRecepcion(r.numero), resultado: "ok", detalle: { de, motivo: a.motivo.trim() },
+      });
+      return r.version;
     },
     async listCarpetasCde(projectId) {
       return [...carpetasCde.values()].filter((c) => c.projectId === projectId).map(sinProyecto);

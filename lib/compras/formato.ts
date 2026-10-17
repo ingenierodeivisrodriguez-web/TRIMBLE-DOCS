@@ -91,6 +91,14 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "documentos.abrir": "Abrir documento",
   "documentos.anular": "Anular documento",
   "documentos.tipos": "Cambiar los documentos legales de proveedores",
+  "recepciones.consultar": "Consultar recepciones",
+  "recepciones.guardar": "Guardar una recepción",
+  "recepciones.crear": "Registrar recepción",
+  "recepciones.editar": "Editar recepción",
+  "recepciones.enviar": "Enviar recepción a aprobación",
+  "recepciones.aprobar": "Aprobar recepción",
+  "recepciones.devolver": "Devolver recepción",
+  "recepciones.anular": "Anular recepción",
 };
 
 export function nombreAccion(accion: string): string {
@@ -106,6 +114,7 @@ export function nombrePermiso(p: string): string {
 }
 
 const ESTADO_ORDEN_TEXTO: Record<string, string> = { borrador: "Desde borrador", enviada: "Desde por aprobar", aprobada: "Desde emitida", anulada: "Desde anulada" };
+const ESTADO_RECEPCION_TEXTO: Record<string, string> = { borrador: "Desde borrador", enviada: "Desde por aprobar", aprobada: "Desde aprobada" };
 const ESTADO_PROVEEDOR: Record<string, string> = { activo: "Activo", inactivo: "Inactivo", bloqueado: "Bloqueado" };
 const ESTADO_TEXTO: Record<string, string> = { borrador: "Borrador", enviada: "Por aprobar", aprobada: "Aprobada", rechazada: "Rechazada", anulada: "Anulada" };
 
@@ -163,6 +172,8 @@ export function detalleEntrada(e: EntradaAuditoria): string {
     if (d.motivo) partes.push(`motivo: ${String(d.motivo)}`);
     return partes.join(". ");
   }
+  if (e.accion === "recepciones.crear" || e.accion === "recepciones.editar") return `${String(d.orden ?? "")}, ${String(d.lineas ?? 0)} línea(s)${d.remision ? `, remisión ${String(d.remision)}` : ""}`;
+  if (e.accion.startsWith("recepciones.")) return `${ESTADO_RECEPCION_TEXTO[String(d.de)] ?? String(d.de ?? "")}${d.motivo ? `. motivo: ${String(d.motivo)}` : ""}`;
   if (e.accion === "cde.prueba") return `${String(d.paso ?? "")}: ${String(d.mensaje ?? d.motivo ?? "")}`;
   if (e.accion === "cde.carpetas") {
     const creadas = Array.isArray(d.creadas) ? (d.creadas as string[]) : [];

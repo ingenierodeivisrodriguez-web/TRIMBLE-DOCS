@@ -1,6 +1,9 @@
 import { ApiError, createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts } from "../propiedades/types";
 import type {
+  AccionSobreRecepcion,
+  CambioRecepcion,
+  RecepcionesResponse,
   Documento,
   DocumentosResponse,
   EntidadDocumento,
@@ -57,6 +60,9 @@ export interface ComprasApi {
   getOrdenes(): Promise<OrdenesResponse>;
   guardarOrden(cambio: CambioOrden): Promise<OrdenesResponse>;
   accionOrden(id: string, accion: AccionSobreOrden): Promise<OrdenesResponse>;
+  getRecepciones(): Promise<RecepcionesResponse>;
+  guardarRecepcion(cambio: CambioRecepcion): Promise<RecepcionesResponse>;
+  accionRecepcion(id: string, accion: AccionSobreRecepcion): Promise<RecepcionesResponse>;
   pruebaCde(paso: PasoPruebaCde, datos?: { carpetaId?: string; uploadId?: string }): Promise<PruebaCdeResponse>;
   getDocumentos(filtro?: { entidadTipo?: EntidadDocumento; entidadId?: string }): Promise<DocumentosResponse>;
   crearDocumento(nuevo: NuevoDocumento & { id: string }): Promise<SubidaDocumento>;
@@ -92,6 +98,9 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     guardarCotizacion: (cambio) => request<CotizacionesResponse>("/cotizaciones", { method: "PUT", body: JSON.stringify(cambio) }),
     anularCotizacion: (id, motivo, version) => request<CotizacionesResponse>(`/cotizaciones/${encodeURIComponent(id)}/anular`, { method: "POST", body: JSON.stringify({ motivo, version }) }),
     getOrdenes: () => request<OrdenesResponse>("/ordenes"),
+    getRecepciones: () => request<RecepcionesResponse>("/recepciones"),
+    guardarRecepcion: (cambio) => request<RecepcionesResponse>("/recepciones", { method: "PUT", body: JSON.stringify(cambio) }),
+    accionRecepcion: (id, accion) => request<RecepcionesResponse>(`/recepciones/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(accion) }),
     getDocumentos: (filtro = {}) => {
       const q = new URLSearchParams();
       if (filtro.entidadTipo) q.set("entidadTipo", filtro.entidadTipo);

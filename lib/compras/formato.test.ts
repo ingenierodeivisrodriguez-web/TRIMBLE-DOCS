@@ -58,3 +58,11 @@ describe("auditoría de los documentos", () => {
     assert.equal(detalleEntrada(entrada({ accion: "cde.carpetas", detalle: { creadas: [], existentes: ["x"] } })), "Ya existían todas; solo se registraron");
   });
 });
+
+describe("auditoría de las recepciones", () => {
+  it("dice contra qué orden, cuántas líneas y desde qué estado", () => {
+    assert.equal(nombreAccion("recepciones.aprobar"), "Aprobar recepción");
+    assert.equal(detalleEntrada(entrada({ accion: "recepciones.crear", detalle: { orden: "OC-0001", lineas: 2, remision: "R-881" } })), "OC-0001, 2 línea(s), remisión R-881");
+    assert.equal(detalleEntrada(entrada({ accion: "recepciones.anular", detalle: { de: "aprobada", motivo: "Duplicada" } })), "Desde aprobada. motivo: Duplicada");
+  });
+});
