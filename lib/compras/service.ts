@@ -2,16 +2,20 @@ import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import type { ProjectContacts } from "../propiedades/types";
 import { esMotivo, ESTADO_HTTP, estadoAsignacion, MENSAJES, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
+import { esDocumento, insumosPlanificados, metradosDelModelo } from "./planificado";
+import type { LecturaPresupuesto } from "./presupuestoLectura";
 import { ROLES_INICIALES } from "./roles";
 import type { Actor, ComprasStore } from "./store";
 import { leerCambioAsignacion, leerCambioRol, leerFiltroAuditoria } from "./validate";
-import { AccesosResponse, Accion, Asignacion, EntradaAuditoria, EstadoResponse, Modulo, Permiso, Rol, ROL_ADMIN } from "./types";
+import { AccesosResponse, Accion, Asignacion, EntradaAuditoria, EstadoResponse, InsumosResponse, Modulo, Permiso, Rol, ROL_ADMIN } from "./types";
 
 /** Everything an operation needs: who calls, in which project, and today (Colombia). */
 export interface Ctx {
   projectId: string;
   caller: Caller;
   store: ComprasStore;
+  /** The budget of Presupuesto, read only. */
+  presupuesto: LecturaPresupuesto;
   /** YYYY-MM-DD in Colombia. */
   hoy: string;
   deps: {
@@ -191,4 +195,23 @@ export async function getAuditoria(ctx: Ctx, params: URLSearchParams): Promise<{
   const filtro = leerFiltroAuditoria(params);
   await requerir(ctx, "auditoria", "ver", "auditoria.consultar");
   return { entradas: await ctx.store.listAuditoria(ctx.projectId, filtro) };
+}
+
+// ---------------------------------------------------------------- planned resources
+
+/** The resources planned in the project's budget (Presupuesto), with where each one is used. */
+export async function getInsumos(ctx: Ctx): Promise<InsumosResponse> {
+  await requerir(ctx, "insumos", "ver", "insumos.consultar");
+  const [documento, mediciones, resumen] = await Promise.all([
+    ctx.presupuesto.documento(ctx.projectId),
+    ctx.presupuesto.mediciones(ctx.projectId),
+    ctx.presupuesto.resumenElementos(ctx.projectId),
+  ]);
+  if (!documento) return { presupuesto: null, insumos: [], porcentaje: [] };
+  if (!esDocumento(documento.data)) throw new ServiceError("El presupuesto guardado no se pudo leer. Ábrelo en Presupuesto y vuelve a guardarlo.", 500);
+  const doc = documento.data;
+  return {
+    presupuesto: { version: documento.version, actualizado: documento.updatedAt, actualizadoPor: documento.updatedBy },
+    ...insumosPlanificados(doc, metradosDelModelo(doc, mediciones, resumen)),
+  };
 }

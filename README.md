@@ -2054,8 +2054,8 @@ Códigos de error:
 Abastecimiento de la obra a partir de los insumos planificados en
 Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
-construye por fases; esta primera versión trae **el acceso por rol y la
-auditoría**, que van antes que todo lo demás. Aparece en el menú lateral del
+construye por fases; ya están **el acceso por rol, la auditoría y la consulta
+de los insumos del presupuesto**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2142,6 +2142,32 @@ sin acceso. Es **solo inserción**: un trigger rechaza cualquier cambio,
 borrado o vaciado de la tabla, y al rol de servicio se le quitaron esos
 permisos. Se filtra por fechas, resultado y módulo, de 200 en 200.
 
+### Insumos del presupuesto
+
+Pestaña **Insumos del presupuesto** (permiso Insumos: ver). Lista los insumos
+planificados del proyecto con su código, unidad, tipo, precio, cantidad y
+monto planificados, y con un clic las partidas que usan cada uno (ítem,
+metrado, si el metrado viene del modelo "3D" y cuánto del insumo pide cada
+una). Se filtra por texto, tipo y forma de compra, y dice qué versión del
+presupuesto se leyó y quién la guardó.
+
+- Las cantidades son **las mismas de la "Lista de insumos" de Presupuesto**
+  (todos los subpresupuestos, entrando en las subpartidas): Compras usa las
+  mismas funciones de cálculo (`listaInsumos`, `consumoDeApu`) y una prueba
+  compara el resultado. El metrado del modelo cuenta igual que en Presupuesto:
+  la suma de los elementos (o cuántos son, si se cuentan), salvo en las
+  partidas puestas en "manual".
+- Un insumo se identifica por su clave en el presupuesto (el id del insumo
+  del catálogo); las requisiciones guardarán además una copia de sus datos.
+- Forma de compra: materiales y equipos por **orden de compra**;
+  subcontratos y mano de obra por **contrato**. Los insumos en porcentaje
+  (herramienta menor, "%MO") no se compran: se listan aparte con su valor.
+- Es solo lectura: `lib/compras/presupuestoLectura.ts` solo hace consultas
+  GET a `presupuesto_documentos`, `presupuesto_mediciones` y la vista
+  `presupuesto_resumen_elementos` (una prueba lo verifica). Lo solicitado,
+  aprobado, comprometido, recibido y pendiente llegan con las requisiciones y
+  las órdenes.
+
 ### Esquema de la base de datos
 
 [`supabase/compras.sql`](supabase/compras.sql) (se puede volver a ejecutar
@@ -2172,6 +2198,7 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `PUT accesos/usuarios` | Da, cambia o revoca un acceso | Accesos y roles: administrar |
 | `PUT accesos/roles` | Crea o cambia un rol | Accesos y roles: administrar |
 | `GET contactos` | Equipo del proyecto en Trimble (solo personas) | Accesos y roles: administrar |
+| `GET insumos` | Insumos planificados del presupuesto, con las partidas que los usan | Insumos: ver |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
@@ -2181,15 +2208,15 @@ Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
 
 El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
 reglas puras, `validate`, `store` con Supabase o memoria, `service`,
-`routes`, `client`, `formato`, cada uno con sus pruebas) y
+`routes`, `client`, `formato`, `planificado` y `presupuestoLectura`, con sus
+pruebas) y
 `components/compras/`.
 
 ### Lo que sigue
 
-En este orden: consulta de los insumos del presupuesto (planificado,
-solicitado, aprobado, comprometido, recibido, pendiente), requisiciones,
-proveedores y cotizaciones, órdenes y contratos, documentos en el CDE de
-Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
+En este orden: requisiciones (y con ellas lo solicitado y aprobado de cada
+insumo), proveedores y cotizaciones, órdenes y contratos, documentos en el
+CDE de Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
 confirma la carga), recepción en obra, y el panel con la trazabilidad de cada
 insumo.
 

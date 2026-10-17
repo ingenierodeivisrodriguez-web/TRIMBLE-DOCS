@@ -1,6 +1,6 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts } from "../propiedades/types";
-import type { AccesosResponse, CambioAsignacion, CambioRol, EntradaAuditoria, EstadoResponse, FiltroAuditoria } from "./types";
+import type { AccesosResponse, CambioAsignacion, CambioRol, EntradaAuditoria, EstadoResponse, FiltroAuditoria, InsumosResponse } from "./types";
 
 /** What the Compras screen needs from the data service. */
 export interface ComprasApi {
@@ -11,6 +11,7 @@ export interface ComprasApi {
   guardarUsuario(cambio: CambioAsignacion): Promise<AccesosResponse>;
   guardarRol(cambio: CambioRol): Promise<AccesosResponse>;
   getAuditoria(filtro: FiltroAuditoria): Promise<EntradaAuditoria[]>;
+  getInsumos(): Promise<InsumosResponse>;
 }
 
 /** The HTTP client for /api/compras, authenticated with the user's Trimble token. */
@@ -21,6 +22,7 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     activar: () => request<EstadoResponse>("/activar", { method: "POST" }),
     getAccesos: () => request<AccesosResponse>("/accesos"),
     getContactos: () => request<ProjectContacts>("/contactos"),
+    getInsumos: () => request<InsumosResponse>("/insumos"),
     guardarUsuario: (cambio) => request<AccesosResponse>("/accesos/usuarios", { method: "PUT", body: JSON.stringify(cambio) }),
     guardarRol: (cambio) => request<AccesosResponse>("/accesos/roles", { method: "PUT", body: JSON.stringify(cambio) }),
     async getAuditoria(f) {

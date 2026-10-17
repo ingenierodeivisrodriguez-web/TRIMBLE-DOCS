@@ -2,7 +2,8 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { Caller, ServiceError } from "../propiedades/service";
 import type { ProjectContacts } from "../propiedades/types";
-import { activar, Ctx, getAccesos, getAuditoria, getContactos, getEstado, guardarRol, guardarUsuario } from "./service";
+import { activar, Ctx, getAccesos, getAuditoria, getContactos, getEstado, getInsumos, guardarRol, guardarUsuario } from "./service";
+import { LecturaPresupuesto, memoriaLectura } from "./presupuestoLectura";
 import { ComprasStore, memoryStore } from "./store";
 import { PERMISOS_VALIDOS, Rol } from "./types";
 
@@ -24,8 +25,8 @@ const EQUIPO: ProjectContacts = {
   groups: [{ id: "g1", name: "Obra", usersCount: 4 }],
 };
 
-function ctx(store: ComprasStore, caller: Caller, projectId = OBRA): Ctx {
-  return { projectId, caller, store, hoy: HOY, deps: { contactos: async () => EQUIPO } };
+function ctx(store: ComprasStore, caller: Caller, projectId = OBRA, presupuesto: LecturaPresupuesto = memoriaLectura()): Ctx {
+  return { projectId, caller, store, presupuesto, hoy: HOY, deps: { contactos: async () => EQUIPO } };
 }
 
 async function rejects(promise: Promise<unknown>, status: number, code?: string) {
@@ -182,5 +183,56 @@ describe("roles", () => {
     assert.ok((await getEstado(ctx(store, luis))).acceso);
     await guardarRol(ctx(store, ana), { id: visitante.id, nombre: "Visitante", descripcion: "", permisos: ["insumos.ver"], activo: false, version: 1 });
     assert.equal((await getEstado(ctx(store, luis))).acceso, null);
+  });
+});
+
+describe("insumos del presupuesto", () => {
+  const documento = {
+    data: {
+      subpresupuestos: [
+        {
+          id: "sp1",
+          nombre: "ESTRUCTURA",
+          pie: [],
+          items: [
+            { id: "p1", tipo: "partida", nivel: 0, codigo: "", descripcion: "MURO", unidad: "M2", omniclass: "", rendimiento: 10, jornada: 8, metrado: 50, origenId: null, componentes: [{ tipo: "insumo", id: "blq", cuadrilla: null, cantidad: 12.5 }] },
+          ],
+        },
+      ],
+      insumos: { blq: { codigo: "MT-04", descripcion: "BLOQUE No. 5", unidad: "UND", precio: 2_100, tipo: "MT", iu: "", omniclass: "" } },
+      subpartidas: {},
+      gastos: { fijos: [], variables: [] },
+    },
+    version: 7,
+    updatedAt: "2026-10-15T15:00:00Z",
+    updatedBy: "Ana Gómez",
+  };
+  const lectura = memoriaLectura({ [OBRA]: { documento, mediciones: [{ itemId: "p1", campo: "Area", campoLabel: "Área", unidad: "M2" }], resumen: [{ itemId: "p1", elementos: 2, suma: 60 }] } });
+
+  it("quien tiene Insumos: ver los consulta con el metrado del modelo y la versión del presupuesto", async () => {
+    const { store, dar } = await activado();
+    await dar(ana, "luis", "residente");
+    const r = await getInsumos(ctx(store, luis, OBRA, lectura));
+    assert.deepEqual(r.presupuesto, { version: 7, actualizado: "2026-10-15T15:00:00Z", actualizadoPor: "Ana Gómez" });
+    assert.equal(r.insumos.length, 1);
+    assert.equal(r.insumos[0].cantidad, 750); // 60 m2 from the model × 12.5
+    assert.equal(r.insumos[0].monto, 1_575_000);
+    assert.equal(r.insumos[0].via, "orden");
+  });
+
+  it("sin el permiso se niega y queda en la auditoría", async () => {
+    const { store, dar } = await activado();
+    await dar(ana, "luis", "juridica");
+    await rejects(getInsumos(ctx(store, luis, OBRA, lectura)), 403, "sin-permiso");
+    const ultima = (await getAuditoria(ctx(store, ana), new URLSearchParams())).entradas[0];
+    assert.equal(ultima.accion, "insumos.consultar");
+    assert.equal(ultima.resultado, "denegado");
+  });
+
+  it("un proyecto sin presupuesto guardado no tiene insumos", async () => {
+    const { store } = await activado();
+    const r = await getInsumos(ctx(store, ana, OBRA, memoriaLectura()));
+    assert.equal(r.presupuesto, null);
+    assert.deepEqual(r.insumos, []);
   });
 });

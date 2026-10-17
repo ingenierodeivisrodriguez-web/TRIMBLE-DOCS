@@ -1,4 +1,5 @@
 // Shared by the API and the "Compras y Contratación" screen (project menu).
+import type { TipoInsumo } from "../presupuesto/types";
 
 // ---------------------------------------------------------------- permissions matrix
 
@@ -160,6 +161,53 @@ export interface FiltroAuditoria {
 }
 
 export const MAX_AUDITORIA = 200;
+
+// ---------------------------------------------------------------- planned resources (from Presupuesto)
+
+/** How a resource is bought: by purchase order (materials, equipment) or by contract (subcontracts, labor). */
+export type ViaCompra = "orden" | "contrato";
+
+export const VIA_COMPRA: Record<ViaCompra, string> = { orden: "Orden de compra", contrato: "Contrato" };
+
+/** Where a planned resource is used: one partida of the budget. */
+export interface UsoInsumo {
+  /** The budget row's id (stable while the partida exists). */
+  itemId: string;
+  subpresupuesto: string;
+  /** "1.2.3" */
+  numero: string;
+  descripcion: string;
+  unidad: string;
+  /** The partida's effective quantity (typed, or from the model). */
+  metrado: number;
+  desdeModelo: boolean;
+  /** How much of the resource this partida needs (going into subpartidas). */
+  cantidad: number;
+}
+
+export interface InsumoPlanificado {
+  /** The key in the budget's resources (the catalog resource's id). */
+  id: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  /** Unit price in the budget. */
+  precio: number;
+  /** Planned quantity: the same as Presupuesto's "Lista de insumos" (all its subpresupuestos). */
+  cantidad: number;
+  monto: number;
+  via: ViaCompra;
+  usos: UsoInsumo[];
+}
+
+export interface InsumosResponse {
+  /** The budget read (null: the project has no saved budget). */
+  presupuesto: { version: number; actualizado: string | null; actualizadoPor: string | null } | null;
+  insumos: InsumoPlanificado[];
+  /** Resources given as a percentage ("%MO", "%"): money, not quantities; they aren't bought. */
+  porcentaje: { id: string; descripcion: string; monto: number }[];
+}
 
 // ---------------------------------------------------------------- API responses
 

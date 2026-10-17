@@ -8,9 +8,10 @@ import { ApiError } from "../../lib/propiedades/client";
 import { acceptButton, C, message, Modal, Notice } from "../presupuesto/ui";
 import Accesos from "./Accesos";
 import Auditoria from "./Auditoria";
+import Insumos from "./Insumos";
 import { botonSecundario, card, linkBtn, texto, titulo } from "./estilos";
 
-type Pestana = "inicio" | "accesos" | "auditoria";
+type Pestana = "inicio" | "insumos" | "accesos" | "auditoria";
 
 /** "Compras y Contratación" in the project menu: who you are, your access, and what your role lets you open. */
 export default function ComprasApp({ api, projectId, projectName }: { api: ComprasApi; projectId: string; projectName: string }) {
@@ -43,6 +44,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
   const puede = (p: Permiso) => permisos.includes(p);
   const pestanas: { id: Pestana; nombre: string }[] = [
     { id: "inicio", nombre: "Inicio" },
+    ...(puede("insumos.ver") ? [{ id: "insumos" as const, nombre: "Insumos del presupuesto" }] : []),
     ...(puede("accesos.ver") ? [{ id: "accesos" as const, nombre: "Accesos y roles" }] : []),
     ...(puede("auditoria.ver") ? [{ id: "auditoria" as const, nombre: "Auditoría" }] : []),
   ];
@@ -87,6 +89,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
           </nav>
           <main style={{ flex: 1, minHeight: 0, padding: 16 }}>
             {actual === "inicio" && <Inicio estado={estado} />}
+            {actual === "insumos" && <Insumos api={api} onSinAcceso={onSinAcceso} />}
             {actual === "accesos" && <Accesos api={api} yo={estado.user.id} onSinAcceso={onSinAcceso} />}
             {actual === "auditoria" && <Auditoria api={api} onSinAcceso={onSinAcceso} />}
           </main>
@@ -216,7 +219,7 @@ function Inicio({ estado }: { estado: EstadoResponse }) {
       <section style={card}>
         <h2 style={titulo}>En construcción</h2>
         <p style={texto}>
-          Esta primera versión trae los accesos por rol y la auditoría. Siguen, en este orden: insumos del presupuesto, requisiciones, proveedores y
+          Ya están los accesos por rol, la auditoría y la consulta de los insumos del presupuesto. Siguen, en este orden: requisiciones, proveedores y
           cotizaciones, órdenes y contratos, documentos en el CDE del proyecto, recepción en obra y el panel con la trazabilidad de cada insumo.
         </p>
       </section>

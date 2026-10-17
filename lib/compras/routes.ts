@@ -6,6 +6,7 @@ import { ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import { TrimbleApiError } from "../trimbleApi";
 import { Ctx, traducir } from "./service";
+import { lecturaPresupuesto } from "./presupuestoLectura";
 import { comprasStore } from "./store";
 
 export interface RouteContext extends Ctx {
@@ -34,6 +35,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       projectId,
       caller,
       store: comprasStore(),
+      presupuesto: lecturaPresupuesto(),
       hoy: hoyIso(),
       accessToken,
       deps: { contactos: () => projectContacts(accessToken, projectId) },

@@ -2,6 +2,7 @@ import { StoreError } from "../propiedades/store";
 import { hoyIso } from "../manuales/licencia";
 import { esMotivo, ESTADO_HTTP, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol } from "./accesos";
 import type { RolInicial } from "./roles";
+import { clienteSupabase, eq, faltaTabla } from "./supabase";
 import { Asignacion, CambioAsignacion, CambioRol, EntradaAuditoria, FiltroAuditoria, MAX_AUDITORIA, Permiso, PERMISOS_VALIDOS, Rol, ROL_ADMIN } from "./types";
 
 /**
@@ -53,11 +54,6 @@ function diaSiguiente(iso: string): string {
 const inicioDia = (iso: string) => `${iso}T00:00:00-05:00`;
 
 // ---------------------------------------------------------------- Supabase
-
-const REQUEST_TIMEOUT_MS = 20_000;
-const LENTA = "La base de datos (Supabase) tardó demasiado en responder. Intenta de nuevo en un momento.";
-const esTiempo = (err: unknown) => err instanceof Error && (err.name === "TimeoutError" || err.name === "AbortError");
-const PAGE = 1000;
 
 const SETUP_HINT =
   "Faltan las tablas de Compras en Supabase: abre Supabase → SQL Editor y ejecuta una vez el archivo supabase/compras.sql del repositorio.";
@@ -154,73 +150,18 @@ function entradaDeFila(r: AuditoriaRow): EntradaAuditoria {
 }
 
 function supabaseStore(): ComprasStore | null {
-  const rawUrl = process.env.SUPABASE_URL ?? process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY ?? process.env.SUPABASE_SECRET_KEY;
-  if (!rawUrl || !key) return null;
-
-  const rest = `${rawUrl.replace(/\/+$/, "")}/rest/v1`;
-  const headers: Record<string, string> = { apikey: key, "Content-Type": "application/json" };
-  // Legacy service_role keys are JWTs; the newer "sb_secret_…" keys only go as `apikey`.
-  if (!key.startsWith("sb_")) headers.Authorization = `Bearer ${key}`;
-
-  async function call(path: string, init: RequestInit = {}): Promise<Response> {
-    let res: Response;
-    try {
-      res = await fetch(`${rest}${path}`, {
-        ...init,
-        headers: { ...headers, ...(init.headers as Record<string, string> | undefined) },
-        signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
-        cache: "no-store",
-      });
-    } catch (err) {
-      if (esTiempo(err) && init.method && init.method !== "GET") throw new StoreError(LENTA, 504);
-      throw err;
-    }
-    if (res.ok) return res;
-    const body = await res.text().catch(() => "");
-    let detail: { code?: string; message?: string } = {};
-    try {
-      detail = JSON.parse(body);
-    } catch {
-      // not JSON
-    }
+  const db = clienteSupabase((_status, body, detail) => {
     // The SQL functions refuse with "compras:<reason>".
     const motivo = /compras:([a-z-]+)/.exec(detail.message ?? body)?.[1];
-    if (motivo && esMotivo(motivo)) throw rechazo(motivo);
-    if (/version-conflict/.test(body)) throw rechazo("version-conflict");
-    if (detail.code === "23505") throw rechazo("nombre-repetido");
-    if (/PGRST20[25]|42P01|42883|Could not find the (table|function)|does not exist/i.test(body)) throw new StoreError(SETUP_HINT);
-    if (res.status === 401 || res.status === 403) {
-      throw new StoreError("Supabase rechazó la clave del servidor (SUPABASE_SERVICE_ROLE_KEY). Revisa la integración en Vercel.");
-    }
-    if (detail.code && /^(22\w{3}|23\w{3})$/.test(detail.code)) throw rechazo("datos");
-    throw new StoreError(`Supabase respondió ${res.status}${detail.message ? `: ${detail.message}` : ""}`);
-  }
-
-  /** The answer as JSON. A read that runs out of time is tried once more. */
-  async function json<T>(path: string, init?: RequestInit): Promise<T> {
-    const lectura = !init?.method || init.method === "GET";
-    for (let intento = 0; ; intento++) {
-      try {
-        return (await (await call(path, init)).json()) as T;
-      } catch (err) {
-        if (!esTiempo(err)) throw err;
-        if (lectura && intento === 0) continue;
-        throw new StoreError(LENTA, 504);
-      }
-    }
-  }
-
-  async function all<T>(path: string): Promise<T[]> {
-    const out: T[] = [];
-    for (let offset = 0; ; offset += PAGE) {
-      const page = await json<T[]>(`${path}&limit=${PAGE}&offset=${offset}`);
-      out.push(...page);
-      if (page.length < PAGE) return out;
-    }
-  }
-
-  const eq = (value: string) => `eq.${encodeURIComponent(value)}`;
+    if (motivo && esMotivo(motivo)) return rechazo(motivo);
+    if (/version-conflict/.test(body)) return rechazo("version-conflict");
+    if (detail.code === "23505") return rechazo("nombre-repetido");
+    if (faltaTabla(body)) return new StoreError(SETUP_HINT);
+    if (detail.code && /^(22\w{3}|23\w{3})$/.test(detail.code)) return rechazo("datos");
+    return null;
+  });
+  if (!db) return null;
+  const { call, json, all } = db;
   const rpc = <T>(fn: string, body: unknown) => json<T>(`/rpc/${fn}`, { method: "POST", body: JSON.stringify(body) });
 
   return {
