@@ -1,11 +1,18 @@
 import { StoreError } from "../propiedades/store";
 import { hoyIso } from "../manuales/licencia";
 import { esMotivo, ESTADO_HTTP, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
-import { evaluar, numeroCotizacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
+import { evaluar, numeroCotizacion, revisarComparativo, revisarCotizacion, totalesCotizacion } from "./cotizaciones";
+import { numeroOrden, revisarAccionOrden, revisarOrden, TRANSICIONES_ORDEN } from "./ordenes";
 import { numeroRequisicion, puedeEditar, revisarAccion, TRANSICIONES } from "./requisiciones";
 import type { RolInicial } from "./roles";
 import { clienteSupabase, eq, faltaTabla } from "./supabase";
 import {
+  AccionSobreOrden,
+  CambioOrden,
+  LineaOrden,
+  Orden,
+  RevisionOrden,
+  TIPO_ORDEN,
   AccionSobreComparativo,
   AccionSobreRequisicion,
   CambioCotizacion,
@@ -84,6 +91,14 @@ export interface ComprasStore {
   /** `requiereJustificacion`: what the scores say (the database also checks the minimum of quotations). */
   accionComparativo(projectId: string, actor: Actor, requisicionId: string, a: AccionSobreComparativo, requiereJustificacion: boolean): Promise<number>;
 
+  /** Every purchase order and contract of the project with its lines. */
+  listOrdenes(projectId: string): Promise<Orden[]>;
+  /** What each approved order looked like before its modifications. */
+  listRevisiones(projectId: string): Promise<RevisionOrden[]>;
+  /** Creates (version 0) or changes a draft; lines come with the prices to save (the quotation's, in revision 0). */
+  guardarOrden(projectId: string, actor: Actor, id: string, cambio: OrdenGuardada): Promise<number>;
+  accionOrden(projectId: string, actor: Actor, id: string, a: AccionSobreOrden): Promise<number>;
+
   /** Every requisition of the project with its lines, newest first. */
   listRequisiciones(projectId: string): Promise<Requisicion[]>;
   /** Creates (version 0) or changes a draft, replacing its lines; returns its new version. */
@@ -106,6 +121,9 @@ export interface DatosRequisicion {
 }
 
 /** A line as saved: the resource's data comes from the budget. */
+/** A draft of an order as saved, with the prices of each line. */
+export type OrdenGuardada = Omit<CambioOrden, "lineas"> & { lineas: { requisicionLineaId: string; cantidad: number; precioUnitario: number; descuentoPct: number; ivaPct: number }[] };
+
 export type LineaGuardada = Omit<LineaRequisicion, "cantidadAprobada" | "planificado">;
 
 function rechazo(motivo: MotivoRechazo): StoreError {
@@ -447,6 +465,59 @@ function supabaseStore(): ComprasStore | null {
         p_version: a.version,
       }),
 
+    async listOrdenes(projectId) {
+      const [ords, lineas] = await Promise.all([
+        all<OrdenRow>(
+          `/compras_ordenes?project_id=${eq(projectId)}&select=id,tipo,numero,requisicion_id,cotizacion_id,proveedor_id,estado,revision,elaborado_por_id,elaborado_por,fecha_entrega,lugar_entrega,forma_pago,dias_pago,anticipo_pct,retencion_garantia_pct,objeto,polizas,observaciones,motivo,enviada,aprobada,aprobada_por,version,creada,actualizado,actualizado_por&order=creada.desc`
+        ),
+        all<OrdenLineaRow>(
+          `/compras_orden_lineas?project_id=${eq(projectId)}&select=id,orden_id,requisicion_linea_id,insumo_id,codigo,descripcion,unidad,tipo,cantidad,precio_unitario,descuento_pct,iva_pct&order=orden_id.asc`
+        ),
+      ]);
+      const porOrden = new Map<string, LineaOrden[]>();
+      for (const l of lineas) porOrden.set(l.orden_id, [...(porOrden.get(l.orden_id) ?? []), lineaOrdenDeFila(l)]);
+      return ords.map((o) => ordenDeFila(o, porOrden.get(o.id) ?? []));
+    },
+
+    async listRevisiones(projectId) {
+      const rows = await all<{ orden_id: string; revision: number; creada: string; por: string; motivo: string; anterior: Record<string, unknown> }>(
+        `/compras_orden_revisiones?project_id=${eq(projectId)}&select=orden_id,revision,creada,por,motivo,anterior&order=orden_id.asc,revision.asc`
+      );
+      return rows.map((r) => revisionDeFila(r));
+    },
+
+    guardarOrden: (projectId, actor, id, c) =>
+      rpc<number>("compras_guardar_orden", {
+        p_project_id: projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_id: id,
+        p_datos: {
+          tipo: c.tipo,
+          requisicion_id: c.requisicionId,
+          fecha_entrega: c.fechaEntrega,
+          lugar_entrega: c.lugarEntrega,
+          forma_pago: c.formaPago,
+          dias_pago: c.diasPago,
+          anticipo_pct: c.anticipoPct,
+          retencion_garantia_pct: c.retencionGarantiaPct,
+          objeto: c.objeto,
+          polizas: c.polizas,
+          observaciones: c.observaciones,
+        },
+        p_lineas: c.lineas.map((l) => ({
+          requisicion_linea_id: l.requisicionLineaId,
+          cantidad: l.cantidad,
+          precio_unitario: l.precioUnitario,
+          descuento_pct: l.descuentoPct,
+          iva_pct: l.ivaPct,
+        })),
+        p_version: c.version,
+      }),
+
+    accionOrden: (projectId, actor, id, a) =>
+      rpc<number>("compras_accion_orden", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_accion: a.accion, p_motivo: a.motivo, p_version: a.version }),
+
     async listRequisiciones(projectId) {
       const [reqs, lineas] = await Promise.all([
         all<RequisicionRow>(
@@ -643,6 +714,137 @@ function comparativoDeFila(r: ComparativoRow): Comparativo {
   };
 }
 
+interface OrdenRow {
+  id: string;
+  tipo: Orden["tipo"];
+  numero: number;
+  requisicion_id: string;
+  cotizacion_id: string;
+  proveedor_id: string;
+  estado: Orden["estado"];
+  revision: number;
+  elaborado_por_id: string;
+  elaborado_por: string;
+  fecha_entrega: string;
+  lugar_entrega: string;
+  forma_pago: string;
+  dias_pago: number;
+  anticipo_pct: number | string;
+  retencion_garantia_pct: number | string;
+  objeto: string;
+  polizas: string;
+  observaciones: string;
+  motivo: string;
+  enviada: string | null;
+  aprobada: string | null;
+  aprobada_por: string | null;
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizado_por: string | null;
+}
+
+interface OrdenLineaRow {
+  id: string;
+  orden_id: string;
+  requisicion_linea_id: string;
+  insumo_id: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: LineaOrden["tipo"];
+  cantidad: number | string;
+  precio_unitario: number | string;
+  descuento_pct: number | string;
+  iva_pct: number | string;
+}
+
+function lineaOrdenDeFila(l: OrdenLineaRow): LineaOrden {
+  return {
+    id: l.id,
+    requisicionLineaId: l.requisicion_linea_id,
+    insumoId: l.insumo_id,
+    codigo: l.codigo,
+    descripcion: l.descripcion,
+    unidad: l.unidad,
+    tipo: l.tipo,
+    cantidad: Number(l.cantidad),
+    precioUnitario: Number(l.precio_unitario),
+    descuentoPct: Number(l.descuento_pct),
+    ivaPct: Number(l.iva_pct),
+  };
+}
+
+function ordenDeFila(o: OrdenRow, lineas: LineaOrden[]): Orden {
+  return {
+    id: o.id,
+    tipo: o.tipo,
+    numero: o.numero,
+    requisicionId: o.requisicion_id,
+    cotizacionId: o.cotizacion_id,
+    proveedorId: o.proveedor_id,
+    estado: o.estado,
+    revision: o.revision,
+    elaboradoPorId: o.elaborado_por_id,
+    elaboradoPor: o.elaborado_por,
+    fechaEntrega: o.fecha_entrega,
+    lugarEntrega: o.lugar_entrega,
+    formaPago: o.forma_pago,
+    diasPago: o.dias_pago,
+    anticipoPct: Number(o.anticipo_pct),
+    retencionGarantiaPct: Number(o.retencion_garantia_pct),
+    objeto: o.objeto,
+    polizas: o.polizas,
+    observaciones: o.observaciones,
+    motivo: o.motivo,
+    enviada: o.enviada,
+    aprobada: o.aprobada,
+    aprobadaPor: o.aprobada_por,
+    lineas,
+    version: o.version,
+    creada: o.creada,
+    actualizado: o.actualizado,
+    actualizadoPor: o.actualizado_por,
+  };
+}
+
+/** A saved revision: the order as it was (from its JSON in the database). */
+function revisionDeFila(r: { orden_id: string; revision: number; creada: string; por: string; motivo: string; anterior: Record<string, unknown> }): RevisionOrden {
+  const a = r.anterior;
+  const lineas = (Array.isArray(a.lineas) ? (a.lineas as Record<string, unknown>[]) : []).map((l, i) => ({
+    id: `${r.orden_id}-r${r.revision}-${i}`,
+    requisicionLineaId: String(l.requisicion_linea_id ?? ""),
+    insumoId: String(l.insumo_id ?? ""),
+    codigo: String(l.codigo ?? ""),
+    descripcion: String(l.descripcion ?? ""),
+    unidad: String(l.unidad ?? ""),
+    tipo: (l.tipo ?? "MT") as LineaOrden["tipo"],
+    cantidad: Number(l.cantidad ?? 0),
+    precioUnitario: Number(l.precio_unitario ?? 0),
+    descuentoPct: Number(l.descuento_pct ?? 0),
+    ivaPct: Number(l.iva_pct ?? 0),
+  }));
+  return {
+    ordenId: r.orden_id,
+    revision: r.revision,
+    creada: r.creada,
+    por: r.por,
+    motivo: r.motivo,
+    anterior: {
+      fechaEntrega: String(a.fecha_entrega ?? ""),
+      lugarEntrega: String(a.lugar_entrega ?? ""),
+      formaPago: String(a.forma_pago ?? ""),
+      diasPago: Number(a.dias_pago ?? 0),
+      anticipoPct: Number(a.anticipo_pct ?? 0),
+      retencionGarantiaPct: Number(a.retencion_garantia_pct ?? 0),
+      objeto: String(a.objeto ?? ""),
+      polizas: String(a.polizas ?? ""),
+      lineas,
+      total: totalesCotizacion({ lineas }).total,
+    },
+  };
+}
+
 interface RequisicionRow {
   id: string;
   numero: number;
@@ -737,6 +939,9 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
   const proveedores = new Map<string, Proveedor & { projectId: string }>();
   const cotizaciones = new Map<string, Cotizacion & { projectId: string }>();
   const comparativos = new Map<string, Comparativo & { projectId: string }>();
+  const ordenes = new Map<string, Orden & { projectId: string }>();
+  const revisiones: (RevisionOrden & { projectId: string })[] = [];
+  const ordsDe = (projectId: string): Orden[] => [...ordenes.values()].filter((o) => o.projectId === projectId).map(sinProyecto);
   const siguiente = (projectId: string, tipo: string) => {
     const n = (consecutivos.get(`${projectId}|${tipo}`) ?? 0) + 1;
     consecutivos.set(`${projectId}|${tipo}`, n);
@@ -976,6 +1181,73 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
       });
       return c.version;
     },
+    async listOrdenes(projectId) {
+      return ordsDe(projectId).sort((a, b) => b.creada.localeCompare(a.creada));
+    },
+    async listRevisiones(projectId) {
+      return revisiones.filter((r) => r.projectId === projectId).map(sinProyecto);
+    },
+    async guardarOrden(projectId, actor, id, c) {
+      const antes = ordenes.get(id);
+      if (antes && antes.projectId !== projectId) throw rechazo("no-existe");
+      const r = reqsDe(projectId).find((x) => x.id === c.requisicionId);
+      const comp = compsDe(projectId).find((x) => x.requisicionId === c.requisicionId);
+      const cot = cotsDe(projectId).find((x) => x.id === comp?.cotizacionElegidaId);
+      const motivo = revisarOrden({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, c, antes ? sinProyecto(antes) : null, r, comp, cot, ordsDe(projectId));
+      if (motivo) throw rechazo(motivo);
+      const revision = antes?.revision ?? 0;
+      const lineas: LineaOrden[] = c.lineas.map((l) => {
+        const rl = r!.lineas.find((x) => x.id === l.requisicionLineaId)!;
+        const cl = cot!.lineas.find((x) => x.requisicionLineaId === l.requisicionLineaId)!;
+        if (revision === 0 && (l.precioUnitario !== cl.precioUnitario || l.descuentoPct !== cl.descuentoPct || l.ivaPct !== cl.ivaPct)) throw rechazo("datos");
+        return { id: globalThis.crypto.randomUUID(), requisicionLineaId: rl.id, insumoId: rl.insumoId, codigo: rl.codigo, descripcion: rl.descripcion, unidad: rl.unidad, tipo: rl.tipo, cantidad: l.cantidad, precioUnitario: l.precioUnitario, descuentoPct: l.descuentoPct, ivaPct: l.ivaPct };
+      });
+      const numero = antes?.numero ?? siguiente(projectId, c.tipo);
+      const ahoraIso = ahora();
+      const { lineas: _, version: __, id: ___, ...datos } = c;
+      ordenes.set(id, {
+        ...(antes ?? { estado: "borrador", revision: 0, elaboradoPorId: actor.id, elaboradoPor: actor.nombre, motivo: "", enviada: null, aprobada: null, aprobadaPor: null, creada: ahoraIso }),
+        ...datos, projectId, id, numero, cotizacionId: cot!.id, proveedorId: cot!.proveedorId, lineas, version: c.version + 1, actualizado: ahoraIso, actualizadoPor: actor.nombre,
+      } as Orden & { projectId: string });
+      const m = TIPO_ORDEN[c.tipo].modulo;
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: `${m}.${antes ? "editar" : "crear"}`, modulo: m, objetoTipo: c.tipo, objetoId: id, sujetoId: null, sujetoNombre: numeroOrden(c.tipo, numero), resultado: "ok",
+        detalle: { requisicion: numeroRequisicion(r!.numero), lineas: lineas.length, revision },
+      });
+      return c.version + 1;
+    },
+    async accionOrden(projectId, actor, id, a) {
+      const o = ordenes.get(id);
+      if (!o || o.projectId !== projectId) throw rechazo("no-existe");
+      const motivo = revisarAccionOrden({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy() }, sinProyecto(o), a);
+      if (motivo) throw rechazo(motivo);
+      const de = o.estado;
+      const revisionAntes = o.revision;
+      const elaboradoAntes = o.elaboradoPorId;
+      const ahoraIso = ahora();
+      if (a.accion === "enviar") Object.assign(o, { enviada: ahoraIso, motivo: "" });
+      if (a.accion === "aprobar") Object.assign(o, { aprobada: ahoraIso, aprobadaPor: actor.nombre, motivo: a.motivo.trim() });
+      if (a.accion === "devolver" || a.accion === "anular") o.motivo = a.motivo.trim();
+      if (a.accion === "modificar") {
+        revisiones.push({
+          projectId, ordenId: id, revision: o.revision, creada: ahoraIso, por: actor.nombre, motivo: a.motivo.trim(),
+          anterior: {
+            fechaEntrega: o.fechaEntrega, lugarEntrega: o.lugarEntrega, formaPago: o.formaPago, diasPago: o.diasPago, anticipoPct: o.anticipoPct,
+            retencionGarantiaPct: o.retencionGarantiaPct, objeto: o.objeto, polizas: o.polizas, lineas: structuredClone(o.lineas), total: totalesCotizacion(o).total,
+          },
+        });
+        Object.assign(o, { revision: o.revision + 1, elaboradoPorId: actor.id, elaboradoPor: actor.nombre, motivo: a.motivo.trim(), enviada: null, aprobada: null, aprobadaPor: null });
+      }
+      o.estado = TRANSICIONES_ORDEN[a.accion].hacia;
+      o.version += 1;
+      Object.assign(o, { actualizado: ahoraIso, actualizadoPor: actor.nombre });
+      const m = TIPO_ORDEN[o.tipo].modulo;
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: `${m}.${a.accion}`, modulo: m, objetoTipo: o.tipo, objetoId: id, sujetoId: elaboradoAntes, sujetoNombre: numeroOrden(o.tipo, o.numero), resultado: "ok",
+        detalle: { de, revision: revisionAntes, motivo: a.motivo.trim() },
+      });
+      return o.version;
+    },
     async listRequisiciones(projectId) {
       return reqsDe(projectId).sort((a, b) => b.numero - a.numero);
     },
@@ -1029,6 +1301,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
       const planificados = new Map(Object.entries(limites).map(([k, v]) => [k, v.limite]));
       const motivo = revisarAccion({ actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy(), toleranciaPct: 0, planificados, requisiciones: reqsDe(projectId) }, r, a);
       if (motivo) throw rechazo(motivo);
+      if (a.accion === "anular" && ordsDe(projectId).some((o) => o.requisicionId === id && o.estado !== "anulada")) throw rechazo("con-ordenes");
       const de = r.estado;
       const ahoraIso = ahora();
       if (a.accion === "enviar") {

@@ -2,6 +2,9 @@ import { createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts } from "../propiedades/types";
 import type {
   AccesosResponse,
+  AccionSobreOrden,
+  CambioOrden,
+  OrdenesResponse,
   AccionSobreComparativo,
   CambioCotizacion,
   CambioEstadoProveedor,
@@ -41,6 +44,9 @@ export interface ComprasApi {
   guardarCotizacion(cambio: CambioCotizacion): Promise<CotizacionesResponse>;
   anularCotizacion(id: string, motivo: string, version: number): Promise<CotizacionesResponse>;
   accionComparativo(requisicionId: string, accion: AccionSobreComparativo): Promise<CotizacionesResponse>;
+  getOrdenes(): Promise<OrdenesResponse>;
+  guardarOrden(cambio: CambioOrden): Promise<OrdenesResponse>;
+  accionOrden(id: string, accion: AccionSobreOrden): Promise<OrdenesResponse>;
 }
 
 /** The HTTP client for /api/compras, authenticated with the user's Trimble token. */
@@ -62,6 +68,9 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     getCotizaciones: () => request<CotizacionesResponse>("/cotizaciones"),
     guardarCotizacion: (cambio) => request<CotizacionesResponse>("/cotizaciones", { method: "PUT", body: JSON.stringify(cambio) }),
     anularCotizacion: (id, motivo, version) => request<CotizacionesResponse>(`/cotizaciones/${encodeURIComponent(id)}/anular`, { method: "POST", body: JSON.stringify({ motivo, version }) }),
+    getOrdenes: () => request<OrdenesResponse>("/ordenes"),
+    guardarOrden: (cambio) => request<OrdenesResponse>("/ordenes", { method: "PUT", body: JSON.stringify(cambio) }),
+    accionOrden: (id, accion) => request<OrdenesResponse>(`/ordenes/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(accion) }),
     accionComparativo: (requisicionId, accion) => request<CotizacionesResponse>(`/comparativos/${encodeURIComponent(requisicionId)}`, { method: "POST", body: JSON.stringify(accion) }),
     guardarUsuario: (cambio) => request<AccesosResponse>("/accesos/usuarios", { method: "PUT", body: JSON.stringify(cambio) }),
     guardarRol: (cambio) => request<AccesosResponse>("/accesos/roles", { method: "PUT", body: JSON.stringify(cambio) }),

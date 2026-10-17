@@ -113,6 +113,9 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
                   Solicitado
                 </th>
                 <th style={{ ...th, textAlign: "right" }}>Aprobado</th>
+                <th style={{ ...th, textAlign: "right" }} title="En órdenes de compra y contratos emitidos">
+                  Comprometido
+                </th>
                 <th style={{ ...th, textAlign: "right" }} title="Planificado menos solicitado">
                   Por solicitar
                 </th>
@@ -139,6 +142,7 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
                       <td style={num}>{fmt(i.cantidad, 4)}</td>
                       <td style={num}>{i.solicitado ? fmt(i.solicitado, 4) : "—"}</td>
                       <td style={num}>{i.aprobado ? fmt(i.aprobado, 4) : "—"}</td>
+                      <td style={num}>{i.comprometido ? fmt(i.comprometido, 4) : "—"}</td>
                       <td style={{ ...num, color: i.cantidad - i.solicitado < 0 ? "#b3261e" : undefined, fontWeight: i.cantidad - i.solicitado < 0 ? 600 : undefined }}>
                         {fmt(i.cantidad - i.solicitado, 4)}
                       </td>
@@ -152,7 +156,7 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
                     </tr>
                     {abierto && (
                       <tr>
-                        <td colSpan={12} style={{ ...td, background: "#f7f9fc", padding: "6px 12px 10px 40px" }}>
+                        <td colSpan={13} style={{ ...td, background: "#f7f9fc", padding: "6px 12px 10px 40px" }}>
                           <table style={{ borderCollapse: "collapse", width: "100%" }}>
                             <thead>
                               <tr>
@@ -186,7 +190,7 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
               })}
               {visibles.length === 0 && (
                 <tr>
-                  <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={12}>
+                  <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={13}>
                     {datos.insumos.length ? "Ningún insumo coincide con los filtros." : "El presupuesto no tiene insumos con cantidad."}
                   </td>
                 </tr>
@@ -202,8 +206,8 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
         </p>
       )}
       <p style={{ ...texto, margin: 0, fontSize: 12.5, color: "var(--tc-gray-500)" }}>
-        Solicitado cuenta las requisiciones enviadas (lo pedido) y las aprobadas (lo aprobado); los borradores, rechazadas y anuladas no cuentan. Lo
-        comprometido y lo recibido aparecerán con las órdenes y la recepción.
+        Solicitado cuenta las requisiciones enviadas (lo pedido) y las aprobadas (lo aprobado); los borradores, rechazadas y anuladas no cuentan. Comprometido
+        cuenta las órdenes de compra y contratos emitidos. Lo recibido aparecerá con la recepción en obra.
       </p>
     </div>
   );

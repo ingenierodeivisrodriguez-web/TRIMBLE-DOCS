@@ -4,6 +4,9 @@ import type { TipoInsumo } from "../presupuesto/types";
 import { leerNit } from "./proveedores";
 import { esPermisoValido } from "./roles";
 import {
+  AccionOrden,
+  AccionSobreOrden,
+  CambioOrden,
   AccionComparativo,
   AccionSobreComparativo,
   CambioCotizacion,
@@ -295,4 +298,55 @@ export function leerAccionComparativo(body: unknown): AccionSobreComparativo {
     motivo: texto(o.motivo ?? "", "Motivo", 1000).trim(),
     version: version(o.version),
   };
+}
+
+// ---------------------------------------------------------------- orders and contracts
+
+const ACCION_ORDEN_RE = /^(enviar|aprobar|devolver|anular|modificar)$/;
+
+export function leerCambioOrden(body: unknown): CambioOrden {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (o.id !== undefined && (typeof o.id !== "string" || !UUID_RE.test(o.id))) bad("Orden no válida.");
+  if (o.tipo !== "orden" && o.tipo !== "contrato") bad("Tipo no válido: orden de compra o contrato.");
+  if (typeof o.requisicionId !== "string" || !UUID_RE.test(o.requisicionId)) bad("Requisición no válida.");
+  if (!Array.isArray(o.lineas) || !o.lineas.length) bad("La orden necesita al menos un insumo.");
+  if (o.lineas.length > MAX_LINEAS_REQUISICION) bad(`Máximo ${MAX_LINEAS_REQUISICION} líneas.`);
+  const lineas = o.lineas.map((x, i) => {
+    const l = (x ?? {}) as Record<string, unknown>;
+    if (typeof l.requisicionLineaId !== "string" || !UUID_RE.test(l.requisicionLineaId)) bad(`Línea ${i + 1}: no válida.`);
+    const c = cantidad(l.cantidad, `Línea ${i + 1}`);
+    if (c <= 0) bad(`Línea ${i + 1}: la cantidad debe ser mayor que cero.`);
+    const precio = l.precioUnitario;
+    if (precio !== undefined && (typeof precio !== "number" || !Number.isFinite(precio) || precio < 0 || precio > 1e13)) bad(`Línea ${i + 1}: precio no válido.`);
+    return {
+      requisicionLineaId: l.requisicionLineaId,
+      cantidad: c,
+      ...(precio !== undefined ? { precioUnitario: Math.round((precio as number) * 100) / 100 } : {}),
+      ...(l.descuentoPct !== undefined ? { descuentoPct: porcentaje(l.descuentoPct, `Línea ${i + 1}: descuento`) } : {}),
+      ...(l.ivaPct !== undefined ? { ivaPct: porcentaje(l.ivaPct, `Línea ${i + 1}: IVA`) } : {}),
+    };
+  });
+  if (new Set(lineas.map((l) => l.requisicionLineaId)).size !== lineas.length) bad("Una línea de la requisición está dos veces.");
+  return {
+    ...(o.id ? { id: o.id as string } : {}),
+    tipo: o.tipo,
+    requisicionId: o.requisicionId,
+    fechaEntrega: fecha(o.fechaEntrega, o.tipo === "contrato" ? "Fecha de terminación" : "Fecha de entrega"),
+    lugarEntrega: texto(o.lugarEntrega ?? "", "Lugar de entrega", 200).trim(),
+    formaPago: texto(o.formaPago ?? "", "Forma de pago", 200).trim(),
+    diasPago: entero(o.diasPago ?? 0, "Días de pago", 3650),
+    anticipoPct: porcentaje(o.anticipoPct ?? 0, "Anticipo"),
+    retencionGarantiaPct: porcentaje(o.retencionGarantiaPct ?? 0, "Retención de garantía"),
+    objeto: texto(o.objeto ?? "", "Objeto", 2000).trim(),
+    polizas: texto(o.polizas ?? "", "Pólizas", 1000).trim(),
+    observaciones: texto(o.observaciones ?? "", "Observaciones", 1000).trim(),
+    lineas,
+    version: version(o.version),
+  };
+}
+
+export function leerAccionOrden(body: unknown): AccionSobreOrden {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (typeof o.accion !== "string" || !ACCION_ORDEN_RE.test(o.accion)) bad("Acción no válida.");
+  return { accion: o.accion as AccionOrden, motivo: texto(o.motivo ?? "", "Motivo", 1000).trim(), version: version(o.version) };
 }

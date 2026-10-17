@@ -85,6 +85,7 @@ export function insumosPlanificados(doc: PresupuestoDoc, metrados: Map<string, M
       usos: usos.get(f.id) ?? [],
       solicitado: 0,
       aprobado: 0,
+      comprometido: 0,
     }));
   const porcentaje = filas.filter((f) => f.porcentaje).map((f) => ({ id: f.id, descripcion: f.descripcion, monto: f.parcial }));
   return { insumos, porcentaje };

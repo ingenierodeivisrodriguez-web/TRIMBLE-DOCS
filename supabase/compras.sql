@@ -588,6 +588,10 @@ begin
   if p_accion in ('rechazar', 'devolver', 'anular') and btrim(coalesce(p_motivo, '')) = '' then
     raise exception 'compras:motivo-requerido';
   end if;
+  -- A requisition with orders or contracts in force is not cancelled (cancel them first).
+  if p_accion = 'anular' and exists (select 1 from public.compras_ordenes where requisicion_id = p_id and estado <> 'anulada') then
+    raise exception 'compras:con-ordenes';
+  end if;
   if v_req.version <> p_version then
     raise exception 'version-conflict';
   end if;
@@ -1136,6 +1140,332 @@ begin
 end;
 $$;
 
+-- ================================================================ órdenes de compra y contratos
+
+-- Órdenes de compra (OC) y contratos (CT) a partir del proveedor elegido en el comparativo.
+-- borrador → enviada → aprobada (emitida) ; devuelta: borrador ; modificada: borrador con revisión + 1 ; anulada.
+create table if not exists public.compras_ordenes (
+  id                     uuid          primary key,
+  project_id             text          not null,
+  tipo                   text          not null check (tipo in ('orden', 'contrato')),
+  numero                 integer       not null,
+  requisicion_id         uuid          not null,
+  cotizacion_id          uuid          not null,
+  proveedor_id           uuid          not null,
+  estado                 text          not null default 'borrador' check (estado in ('borrador', 'enviada', 'aprobada', 'anulada')),
+  revision               integer       not null default 0 check (revision >= 0),
+  elaborado_por_id       text          not null,
+  elaborado_por          text          not null default '',
+  fecha_entrega          date          not null,
+  lugar_entrega          text          not null default '' check (char_length(lugar_entrega) <= 200),
+  forma_pago             text          not null default '' check (char_length(forma_pago) <= 200),
+  dias_pago              integer       not null default 0 check (dias_pago between 0 and 3650),
+  anticipo_pct           numeric(5,2)  not null default 0 check (anticipo_pct between 0 and 100),
+  retencion_garantia_pct numeric(5,2)  not null default 0 check (retencion_garantia_pct between 0 and 100),
+  objeto                 text          not null default '' check (char_length(objeto) <= 2000),
+  polizas                text          not null default '' check (char_length(polizas) <= 1000),
+  observaciones          text          not null default '' check (char_length(observaciones) <= 1000),
+  motivo                 text          not null default '' check (char_length(motivo) <= 1000),
+  enviada                timestamptz,
+  aprobada               timestamptz,
+  aprobada_por           text,
+  version                integer       not null default 1,
+  creada                 timestamptz   not null default now(),
+  actualizado            timestamptz   not null default now(),
+  actualizado_por        text,
+  unique (project_id, tipo, numero),
+  unique (project_id, id),
+  foreign key (project_id, requisicion_id) references public.compras_requisiciones (project_id, id),
+  foreign key (project_id, cotizacion_id) references public.compras_cotizaciones (project_id, id),
+  foreign key (project_id, proveedor_id) references public.compras_proveedores (project_id, id)
+);
+create index if not exists compras_ordenes_requisicion on public.compras_ordenes (requisicion_id);
+
+create table if not exists public.compras_orden_lineas (
+  id                   uuid          primary key,
+  project_id           text          not null,
+  orden_id             uuid          not null,
+  requisicion_linea_id uuid          not null references public.compras_requisicion_lineas (id),
+  insumo_id            text          not null,
+  codigo               text          not null default '',
+  descripcion          text          not null default '',
+  unidad               text          not null default '',
+  tipo                 text          not null check (tipo in ('MO', 'MT', 'EQ', 'SC')),
+  cantidad             numeric(18,4) not null check (cantidad > 0),
+  precio_unitario      numeric(18,2) not null check (precio_unitario >= 0),
+  descuento_pct        numeric(5,2)  not null default 0 check (descuento_pct between 0 and 100),
+  iva_pct              numeric(5,2)  not null default 0 check (iva_pct between 0 and 100),
+  unique (orden_id, requisicion_linea_id),
+  foreign key (project_id, orden_id) references public.compras_ordenes (project_id, id)
+);
+create index if not exists compras_orden_lineas_req on public.compras_orden_lineas (requisicion_linea_id);
+
+-- Cómo era una orden emitida antes de cada modificación (otrosí en contratos). Solo inserción.
+create table if not exists public.compras_orden_revisiones (
+  id         bigint      generated always as identity primary key,
+  project_id text        not null,
+  orden_id   uuid        not null,
+  revision   integer     not null,
+  creada     timestamptz not null default now(),
+  por        text        not null default '',
+  motivo     text        not null check (char_length(btrim(motivo)) between 1 and 1000),
+  anterior   jsonb       not null check (jsonb_typeof(anterior) = 'object'),
+  unique (orden_id, revision),
+  foreign key (project_id, orden_id) references public.compras_ordenes (project_id, id)
+);
+drop trigger if exists compras_orden_revisiones_sin_cambios on public.compras_orden_revisiones;
+create trigger compras_orden_revisiones_sin_cambios
+  before update or delete on public.compras_orden_revisiones
+  for each row execute function public.compras_auditoria_inmutable();
+
+-- Lo ordenado de una línea de requisición en órdenes y contratos no anulados (borradores incluidos).
+create or replace function public.compras_comprometido(p_requisicion_linea_id uuid, p_excluir uuid)
+returns numeric
+language sql
+stable
+set search_path = public
+as $$
+  select coalesce(sum(l.cantidad), 0)
+    from public.compras_orden_lineas l
+    join public.compras_ordenes o on o.id = l.orden_id
+   where l.requisicion_linea_id = p_requisicion_linea_id and o.estado <> 'anulada' and o.id <> p_excluir
+$$;
+
+-- Respaldo en la base: al terminar cada transacción, ninguna línea de requisición queda ordenada por
+-- encima de lo aprobado, aunque alguien escriba directo en la tabla.
+create or replace function public.compras_ordenes_sin_doble_compromiso()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if public.compras_comprometido(new.requisicion_linea_id, '00000000-0000-0000-0000-000000000000'::uuid)
+     > (select coalesce(cantidad_aprobada, 0) from public.compras_requisicion_lineas where id = new.requisicion_linea_id) then
+    raise exception 'compras:doble-compromiso';
+  end if;
+  return null;
+end;
+$$;
+drop trigger if exists compras_orden_lineas_sin_doble on public.compras_orden_lineas;
+create constraint trigger compras_orden_lineas_sin_doble
+  after insert or update on public.compras_orden_lineas
+  deferrable initially deferred
+  for each row execute function public.compras_ordenes_sin_doble_compromiso();
+
+-- Crea (p_version 0) o cambia el borrador de una orden o contrato y reemplaza sus líneas
+-- (p_lineas: [{id, requisicion_linea_id, cantidad, precio_unitario, descuento_pct, iva_pct}]). En la revisión 0
+-- los precios deben ser los de la cotización elegida; en una modificación pueden cambiar.
+create or replace function public.compras_guardar_orden(p_project_id text, p_actor_id text, p_actor_nombre text, p_id uuid, p_datos jsonb, p_lineas jsonb, p_version integer)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_mios text[];
+  v_tipo text := p_datos ->> 'tipo';
+  v_modulo text;
+  v_antes public.compras_ordenes%rowtype;
+  v_existia boolean;
+  v_req public.compras_requisiciones%rowtype;
+  v_cot public.compras_cotizaciones%rowtype;
+  v_numero integer;
+  v_version integer;
+  v_fila record;
+begin
+  perform pg_advisory_xact_lock(hashtext('compras-ordenes:' || p_project_id));
+  if v_tipo not in ('orden', 'contrato') then
+    raise exception 'compras:datos';
+  end if;
+  v_modulo := case v_tipo when 'orden' then 'ordenes' else 'contratos' end;
+  v_mios := public.compras_permisos_de(p_project_id, p_actor_id);
+  select * into v_antes from public.compras_ordenes where project_id = p_project_id and id = p_id for update;
+  v_existia := found;
+  if v_existia then
+    if v_antes.tipo <> v_tipo or v_antes.requisicion_id <> (p_datos ->> 'requisicion_id')::uuid then
+      raise exception 'compras:datos';
+    end if;
+    if v_antes.estado <> 'borrador' then
+      raise exception 'compras:estado-no-valido';
+    end if;
+    if not ((v_modulo || '.editar') = any (v_mios) or (v_antes.elaborado_por_id = p_actor_id and (v_modulo || '.crear') = any (v_mios))) then
+      raise exception 'compras:sin-permiso';
+    end if;
+  elsif not ((v_modulo || '.crear') = any (v_mios)) then
+    raise exception 'compras:sin-permiso';
+  end if;
+
+  select * into v_req from public.compras_requisiciones where project_id = p_project_id and id = (p_datos ->> 'requisicion_id')::uuid;
+  if not found then
+    raise exception 'compras:no-existe';
+  end if;
+  if v_req.estado <> 'aprobada' then
+    raise exception 'compras:requisicion-no-aprobada';
+  end if;
+  select c.* into v_cot
+    from public.compras_comparativos k
+    join public.compras_cotizaciones c on c.id = k.cotizacion_elegida_id
+   where k.requisicion_id = v_req.id and k.estado = 'aprobado';
+  if not found then
+    raise exception 'compras:sin-proveedor-elegido';
+  end if;
+  if jsonb_array_length(coalesce(p_lineas, '[]'::jsonb)) = 0 then
+    raise exception 'compras:sin-lineas';
+  end if;
+
+  -- Each line: of this requisition, quoted by the chosen supplier, within what is left, at the quoted
+  -- price unless this is a modification.
+  for v_fila in
+    select x.requisicion_linea_id, x.cantidad, x.precio_unitario, x.descuento_pct, x.iva_pct, rl.cantidad_aprobada, cl.cantidad as cotizado,
+           cl.precio_unitario as precio_cot, cl.descuento_pct as desc_cot, cl.iva_pct as iva_cot, rl.id as rl_id, cl.id as cl_id
+      from jsonb_to_recordset(p_lineas) as x(requisicion_linea_id uuid, cantidad numeric, precio_unitario numeric, descuento_pct numeric, iva_pct numeric)
+      left join public.compras_requisicion_lineas rl on rl.id = x.requisicion_linea_id and rl.requisicion_id = v_req.id
+      left join public.compras_cotizacion_lineas cl on cl.cotizacion_id = v_cot.id and cl.requisicion_linea_id = x.requisicion_linea_id
+  loop
+    if v_fila.rl_id is null or v_fila.cl_id is null or coalesce(v_fila.cantidad_aprobada, 0) <= 0 then
+      raise exception 'compras:datos';
+    end if;
+    if public.compras_comprometido(v_fila.requisicion_linea_id, p_id) + v_fila.cantidad > least(v_fila.cantidad_aprobada, v_fila.cotizado) then
+      raise exception 'compras:doble-compromiso';
+    end if;
+    if coalesce(v_antes.revision, 0) = 0
+       and (v_fila.precio_unitario <> v_fila.precio_cot or v_fila.descuento_pct <> v_fila.desc_cot or v_fila.iva_pct <> v_fila.iva_cot) then
+      raise exception 'compras:datos';
+    end if;
+  end loop;
+
+  if not v_existia then
+    if p_version <> 0 then
+      raise exception 'version-conflict';
+    end if;
+    insert into public.compras_consecutivos (project_id, tipo, ultimo) values (p_project_id, v_tipo, 1)
+    on conflict (project_id, tipo) do update set ultimo = public.compras_consecutivos.ultimo + 1
+    returning ultimo into v_numero;
+    insert into public.compras_ordenes (id, project_id, tipo, numero, requisicion_id, cotizacion_id, proveedor_id, elaborado_por_id, elaborado_por,
+                                        fecha_entrega, lugar_entrega, forma_pago, dias_pago, anticipo_pct, retencion_garantia_pct, objeto, polizas, observaciones, actualizado_por)
+    values (p_id, p_project_id, v_tipo, v_numero, v_req.id, v_cot.id, v_cot.proveedor_id, p_actor_id, p_actor_nombre,
+            (p_datos ->> 'fecha_entrega')::date, coalesce(p_datos ->> 'lugar_entrega', ''), coalesce(p_datos ->> 'forma_pago', ''), coalesce((p_datos ->> 'dias_pago')::integer, 0),
+            coalesce((p_datos ->> 'anticipo_pct')::numeric, 0), coalesce((p_datos ->> 'retencion_garantia_pct')::numeric, 0), coalesce(p_datos ->> 'objeto', ''),
+            coalesce(p_datos ->> 'polizas', ''), coalesce(p_datos ->> 'observaciones', ''), p_actor_nombre);
+    v_version := 1;
+  else
+    update public.compras_ordenes
+       set fecha_entrega = (p_datos ->> 'fecha_entrega')::date, lugar_entrega = coalesce(p_datos ->> 'lugar_entrega', ''), forma_pago = coalesce(p_datos ->> 'forma_pago', ''),
+           dias_pago = coalesce((p_datos ->> 'dias_pago')::integer, 0), anticipo_pct = coalesce((p_datos ->> 'anticipo_pct')::numeric, 0),
+           retencion_garantia_pct = coalesce((p_datos ->> 'retencion_garantia_pct')::numeric, 0), objeto = coalesce(p_datos ->> 'objeto', ''),
+           polizas = coalesce(p_datos ->> 'polizas', ''), observaciones = coalesce(p_datos ->> 'observaciones', ''),
+           version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre
+     where id = p_id and version = p_version
+    returning version, numero into v_version, v_numero;
+    if v_version is null then
+      raise exception 'version-conflict';
+    end if;
+    delete from public.compras_orden_lineas where orden_id = p_id;
+  end if;
+
+  insert into public.compras_orden_lineas (id, project_id, orden_id, requisicion_linea_id, insumo_id, codigo, descripcion, unidad, tipo, cantidad, precio_unitario, descuento_pct, iva_pct)
+  select gen_random_uuid(), p_project_id, p_id, rl.id, rl.insumo_id, rl.codigo, rl.descripcion, rl.unidad, rl.tipo, x.cantidad, x.precio_unitario, x.descuento_pct, x.iva_pct
+    from jsonb_to_recordset(p_lineas) as x(requisicion_linea_id uuid, cantidad numeric, precio_unitario numeric, descuento_pct numeric, iva_pct numeric)
+    join public.compras_requisicion_lineas rl on rl.id = x.requisicion_linea_id;
+
+  insert into public.compras_auditoria (project_id, actor_id, actor_nombre, accion, modulo, objeto_tipo, objeto_id, sujeto_id, sujeto_nombre, resultado, detalle)
+  values (p_project_id, p_actor_id, p_actor_nombre, v_modulo || case when v_existia then '.editar' else '.crear' end, v_modulo, v_tipo, p_id::text, null,
+          case v_tipo when 'orden' then 'OC-' else 'CT-' end || lpad(v_numero::text, 4, '0'), 'ok',
+          jsonb_build_object('requisicion', 'REQ-' || lpad(v_req.numero::text, 4, '0'), 'lineas', jsonb_array_length(p_lineas),
+                             'revision', coalesce(v_antes.revision, 0)));
+  return v_version;
+end;
+$$;
+
+-- Envía, aprueba (emite), devuelve, anula o modifica una orden o contrato.
+create or replace function public.compras_accion_orden(p_project_id text, p_actor_id text, p_actor_nombre text, p_id uuid, p_accion text, p_motivo text, p_version integer)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  v_mios text[];
+  v_o public.compras_ordenes%rowtype;
+  v_modulo text;
+  v_version integer;
+begin
+  perform pg_advisory_xact_lock(hashtext('compras-ordenes:' || p_project_id));
+  v_mios := public.compras_permisos_de(p_project_id, p_actor_id);
+  select * into v_o from public.compras_ordenes where project_id = p_project_id and id = p_id for update;
+  if not found then
+    raise exception 'compras:no-existe';
+  end if;
+  v_modulo := case v_o.tipo when 'orden' then 'ordenes' else 'contratos' end;
+  if not ((p_accion = 'enviar' and v_o.estado = 'borrador')
+       or (p_accion in ('aprobar', 'devolver') and v_o.estado = 'enviada')
+       or (p_accion = 'anular' and v_o.estado in ('borrador', 'enviada', 'aprobada'))
+       or (p_accion = 'modificar' and v_o.estado = 'aprobada')) then
+    raise exception 'compras:%', case when p_accion in ('enviar', 'aprobar', 'devolver', 'anular', 'modificar') then 'estado-no-valido' else 'datos' end;
+  end if;
+  if p_accion = 'enviar' then
+    if not ((v_modulo || '.editar') = any (v_mios) or (v_o.elaborado_por_id = p_actor_id and (v_modulo || '.crear') = any (v_mios))) then
+      raise exception 'compras:sin-permiso';
+    end if;
+  elsif p_accion in ('aprobar', 'devolver') then
+    if not ((v_modulo || '.aprobar') = any (v_mios)) then
+      raise exception 'compras:sin-permiso';
+    end if;
+    if v_o.elaborado_por_id = p_actor_id then
+      raise exception 'compras:auto-aprobacion';
+    end if;
+  elsif not ((v_modulo || case p_accion when 'modificar' then '.editar' else '.anular' end) = any (v_mios)) then
+    raise exception 'compras:sin-permiso';
+  end if;
+  if p_accion in ('devolver', 'anular', 'modificar') and btrim(coalesce(p_motivo, '')) = '' then
+    raise exception 'compras:motivo-requerido';
+  end if;
+  if v_o.version <> p_version then
+    raise exception 'version-conflict';
+  end if;
+
+  if p_accion = 'enviar' then
+    if not exists (select 1 from public.compras_orden_lineas where orden_id = p_id) then
+      raise exception 'compras:sin-lineas';
+    end if;
+    if v_o.tipo = 'contrato' and btrim(v_o.objeto) = '' then
+      raise exception 'compras:objeto-requerido';
+    end if;
+    if v_o.fecha_entrega < public.compras_hoy() then
+      raise exception 'compras:fecha-pasada';
+    end if;
+    update public.compras_ordenes set estado = 'enviada', enviada = now(), motivo = '' where id = p_id;
+  elsif p_accion = 'aprobar' then
+    update public.compras_ordenes set estado = 'aprobada', aprobada = now(), aprobada_por = p_actor_nombre, motivo = coalesce(btrim(p_motivo), '') where id = p_id;
+  elsif p_accion = 'devolver' then
+    update public.compras_ordenes set estado = 'borrador', motivo = btrim(p_motivo) where id = p_id;
+  elsif p_accion = 'anular' then
+    update public.compras_ordenes set estado = 'anulada', motivo = btrim(p_motivo) where id = p_id;
+  else
+    -- Keep how it was, then reopen it as the next revision prepared by whoever modifies it.
+    insert into public.compras_orden_revisiones (project_id, orden_id, revision, por, motivo, anterior)
+    values (p_project_id, p_id, v_o.revision, p_actor_nombre, btrim(p_motivo), jsonb_build_object(
+      'fecha_entrega', v_o.fecha_entrega, 'lugar_entrega', v_o.lugar_entrega, 'forma_pago', v_o.forma_pago, 'dias_pago', v_o.dias_pago,
+      'anticipo_pct', v_o.anticipo_pct, 'retencion_garantia_pct', v_o.retencion_garantia_pct, 'objeto', v_o.objeto, 'polizas', v_o.polizas,
+      'aprobada', v_o.aprobada, 'aprobada_por', v_o.aprobada_por,
+      'lineas', (select coalesce(jsonb_agg(jsonb_build_object('requisicion_linea_id', l.requisicion_linea_id, 'insumo_id', l.insumo_id, 'codigo', l.codigo,
+                                                            'descripcion', l.descripcion, 'unidad', l.unidad, 'tipo', l.tipo, 'cantidad', l.cantidad,
+                                                            'precio_unitario', l.precio_unitario, 'descuento_pct', l.descuento_pct, 'iva_pct', l.iva_pct)), '[]'::jsonb)
+                   from public.compras_orden_lineas l where l.orden_id = p_id)));
+    update public.compras_ordenes
+       set estado = 'borrador', revision = revision + 1, elaborado_por_id = p_actor_id, elaborado_por = p_actor_nombre, motivo = btrim(p_motivo),
+           enviada = null, aprobada = null, aprobada_por = null
+     where id = p_id;
+  end if;
+  update public.compras_ordenes set version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre where id = p_id
+  returning version into v_version;
+
+  insert into public.compras_auditoria (project_id, actor_id, actor_nombre, accion, modulo, objeto_tipo, objeto_id, sujeto_id, sujeto_nombre, resultado, detalle)
+  values (p_project_id, p_actor_id, p_actor_nombre, v_modulo || '.' || p_accion, v_modulo, v_o.tipo, p_id::text, v_o.elaborado_por_id,
+          case v_o.tipo when 'orden' then 'OC-' else 'CT-' end || lpad(v_o.numero::text, 4, '0'), 'ok',
+          jsonb_build_object('de', v_o.estado, 'revision', v_o.revision, 'motivo', coalesce(btrim(p_motivo), '')));
+  return v_version;
+end;
+$$;
+
 -- If the list of permissions grew, the administrators' role gets the new ones.
 update public.compras_roles
    set permisos = public.compras_permisos_validos()
@@ -1152,6 +1482,9 @@ alter table public.compras_proveedores enable row level security;
 alter table public.compras_cotizaciones enable row level security;
 alter table public.compras_cotizacion_lineas enable row level security;
 alter table public.compras_comparativos enable row level security;
+alter table public.compras_ordenes enable row level security;
+alter table public.compras_orden_lineas enable row level security;
+alter table public.compras_orden_revisiones enable row level security;
 
 -- Only the app's server (service role) uses these tables and functions.
 revoke all on table public.compras_roles, public.compras_usuarios, public.compras_auditoria from anon, authenticated;
@@ -1161,6 +1494,11 @@ grant select, insert, update, delete on table public.compras_requisicion_lineas 
 revoke all on table public.compras_proveedores, public.compras_cotizaciones, public.compras_cotizacion_lineas, public.compras_comparativos from anon, authenticated;
 grant select, insert, update on table public.compras_proveedores, public.compras_cotizaciones, public.compras_comparativos to service_role;
 grant select, insert, update, delete on table public.compras_cotizacion_lineas to service_role;
+revoke all on table public.compras_ordenes, public.compras_orden_lineas, public.compras_orden_revisiones from anon, authenticated;
+grant select, insert, update on table public.compras_ordenes to service_role;
+grant select, insert, update, delete on table public.compras_orden_lineas to service_role;
+revoke update, delete, truncate on table public.compras_orden_revisiones from public, anon, authenticated, service_role;
+grant select, insert on table public.compras_orden_revisiones to service_role;
 revoke update, delete, truncate on table public.compras_auditoria from public, anon, authenticated, service_role;
 grant select, insert on table public.compras_auditoria to service_role;
 grant select, insert, update on table public.compras_roles, public.compras_usuarios to service_role;
@@ -1198,3 +1536,10 @@ grant execute on function public.compras_estado_proveedor(text, text, text, uuid
 grant execute on function public.compras_guardar_cotizacion(text, text, text, uuid, jsonb, jsonb, integer) to service_role;
 grant execute on function public.compras_anular_cotizacion(text, text, text, uuid, text, integer) to service_role;
 grant execute on function public.compras_accion_comparativo(text, text, text, uuid, text, jsonb, uuid, text, text, boolean, integer) to service_role;
+revoke all on function public.compras_comprometido(uuid, uuid) from public, anon, authenticated;
+revoke all on function public.compras_ordenes_sin_doble_compromiso() from public, anon, authenticated;
+revoke all on function public.compras_guardar_orden(text, text, text, uuid, jsonb, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.compras_accion_orden(text, text, text, uuid, text, text, integer) from public, anon, authenticated;
+grant execute on function public.compras_comprometido(uuid, uuid) to service_role;
+grant execute on function public.compras_guardar_orden(text, text, text, uuid, jsonb, jsonb, integer) to service_role;
+grant execute on function public.compras_accion_orden(text, text, text, uuid, text, text, integer) to service_role;

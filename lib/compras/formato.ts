@@ -66,6 +66,23 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "comparativos.proponer": "Proponer proveedor",
   "comparativos.aprobar": "Aprobar proveedor elegido",
   "comparativos.devolver": "Devolver comparativo",
+  "ordenes.consultar": "Consultar órdenes",
+  "ordenes.guardar": "Guardar una orden",
+  "ordenes.crear": "Crear orden de compra",
+  "ordenes.editar": "Editar orden de compra",
+  "ordenes.enviar": "Enviar orden a aprobación",
+  "ordenes.aprobar": "Aprobar y emitir orden",
+  "ordenes.devolver": "Devolver orden",
+  "ordenes.anular": "Anular orden",
+  "ordenes.modificar": "Modificar orden emitida",
+  "contratos.guardar": "Guardar un contrato",
+  "contratos.crear": "Crear contrato",
+  "contratos.editar": "Editar contrato",
+  "contratos.enviar": "Enviar contrato a aprobación",
+  "contratos.aprobar": "Aprobar y emitir contrato",
+  "contratos.devolver": "Devolver contrato",
+  "contratos.anular": "Anular contrato",
+  "contratos.modificar": "Modificar contrato (otrosí)",
 };
 
 export function nombreAccion(accion: string): string {
@@ -80,6 +97,7 @@ export function nombrePermiso(p: string): string {
   return `${modulo}: ${accion}`;
 }
 
+const ESTADO_ORDEN_TEXTO: Record<string, string> = { borrador: "Desde borrador", enviada: "Desde por aprobar", aprobada: "Desde emitida", anulada: "Desde anulada" };
 const ESTADO_PROVEEDOR: Record<string, string> = { activo: "Activo", inactivo: "Inactivo", bloqueado: "Bloqueado" };
 const ESTADO_TEXTO: Record<string, string> = { borrador: "Borrador", enviada: "Por aprobar", aprobada: "Aprobada", rechazada: "Rechazada", anulada: "Anulada" };
 
@@ -130,6 +148,12 @@ export function detalleEntrada(e: EntradaAuditoria): string {
   if (e.accion === "proveedores.estado") return `${ESTADO_PROVEEDOR[String(d.de)] ?? String(d.de)} → ${ESTADO_PROVEEDOR[String(d.a)] ?? String(d.a)}${d.motivo ? `. motivo: ${String(d.motivo)}` : ""}`;
   if (e.accion === "cotizaciones.registrar" || e.accion === "cotizaciones.editar") return `${String(d.requisicion ?? "")}, ${String(d.proveedor ?? "")}, ${String(d.lineas ?? 0)} línea(s)`;
   if (e.accion === "cotizaciones.anular") return `motivo: ${String(d.motivo ?? "")}`;
+  if (/^(ordenes|contratos).(crear|editar)$/.test(e.accion)) return `${String(d.requisicion ?? "")}, ${String(d.lineas ?? 0)} línea(s)${Number(d.revision) ? `, revisión ${String(d.revision)}` : ""}`;
+  if (/^(ordenes|contratos)./.test(e.accion)) {
+    const partes = [`${ESTADO_ORDEN_TEXTO[String(d.de)] ?? String(d.de ?? "")}${Number(d.revision) ? ` (revisión ${String(d.revision)})` : ""}`];
+    if (d.motivo) partes.push(`motivo: ${String(d.motivo)}`);
+    return partes.join(". ");
+  }
   if (e.accion.startsWith("comparativos.")) {
     const partes: string[] = [];
     if (d.elegida) partes.push(`elegida: ${String(d.elegida)}`);

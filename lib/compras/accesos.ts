@@ -39,7 +39,11 @@ export type MotivoRechazo =
   | "proveedor-no-activo"
   | "cotizacion-duplicada"
   | "cotizacion-no-elegible"
-  | "nit-repetido";
+  | "nit-repetido"
+  | "sin-proveedor-elegido"
+  | "doble-compromiso"
+  | "objeto-requerido"
+  | "con-ordenes";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Compras en este proyecto. Pídeselo a un administrador de Compras.",
@@ -73,6 +77,10 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "cotizacion-duplicada": "Ese proveedor ya tiene una cotización para esta requisición: corrígela en vez de registrar otra.",
   "cotizacion-no-elegible": "La cotización elegida está vencida, anulada, es de un proveedor no activo o no es de esta requisición.",
   "nit-repetido": "Ya hay un proveedor con ese NIT en este proyecto.",
+  "sin-proveedor-elegido": "La requisición todavía no tiene un proveedor elegido y aprobado en su comparativo.",
+  "doble-compromiso": "Esa cantidad ya está comprometida en otra orden o contrato: no se puede ordenar más de lo aprobado y cotizado.",
+  "objeto-requerido": "El contrato necesita su objeto (qué se contrata) antes de enviarlo.",
+  "con-ordenes": "La requisición tiene órdenes o contratos vigentes: anúlalos primero.",
 };
 
 /** The HTTP status of each refusal. */
@@ -108,6 +116,10 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "cotizacion-duplicada": 409,
   "cotizacion-no-elegible": 409,
   "nit-repetido": 409,
+  "sin-proveedor-elegido": 409,
+  "doble-compromiso": 409,
+  "objeto-requerido": 400,
+  "con-ordenes": 409,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {

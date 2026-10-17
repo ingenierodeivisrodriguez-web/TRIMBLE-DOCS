@@ -204,6 +204,8 @@ export interface InsumoPlanificado {
   solicitado: number;
   /** Approved in requisitions. */
   aprobado: number;
+  /** In approved purchase orders and contracts. */
+  comprometido: number;
 }
 
 export interface InsumosResponse {
@@ -454,6 +456,119 @@ export interface CotizacionesResponse {
   comparativos: Comparativo[];
   proveedores: Proveedor[];
   config: ConfigCompras;
+  hoy: string;
+}
+
+// ---------------------------------------------------------------- purchase orders and contracts
+
+export type TipoOrden = "orden" | "contrato";
+export type EstadoOrden = "borrador" | "enviada" | "aprobada" | "anulada";
+export type AccionOrden = "enviar" | "aprobar" | "devolver" | "anular" | "modificar";
+
+export const TIPO_ORDEN: Record<TipoOrden, { nombre: string; prefijo: string; modulo: Modulo }> = {
+  orden: { nombre: "Orden de compra", prefijo: "OC", modulo: "ordenes" },
+  contrato: { nombre: "Contrato", prefijo: "CT", modulo: "contratos" },
+};
+
+export interface LineaOrden {
+  id: string;
+  requisicionLineaId: string;
+  /** Copy of the resource as in the requisition. */
+  insumoId: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  cantidad: number;
+  precioUnitario: number;
+  descuentoPct: number;
+  ivaPct: number;
+}
+
+export interface DatosOrden {
+  /** YYYY-MM-DD: delivery (orders) or end (contracts). */
+  fechaEntrega: string;
+  lugarEntrega: string;
+  formaPago: string;
+  diasPago: number;
+  anticipoPct: number;
+  /** Contracts: retention kept until the work is received. */
+  retencionGarantiaPct: number;
+  /** Contracts: what is contracted (required to send). */
+  objeto: string;
+  /** Contracts: required insurance policies. */
+  polizas: string;
+  observaciones: string;
+}
+
+export interface Orden extends DatosOrden {
+  id: string;
+  tipo: TipoOrden;
+  /** OC-0001 / CT-0001, per type. */
+  numero: number;
+  requisicionId: string;
+  cotizacionId: string;
+  proveedorId: string;
+  estado: EstadoOrden;
+  /** 0 the original; each modification of an approved one adds 1 (otrosí, in contracts). */
+  revision: number;
+  elaboradoPorId: string;
+  elaboradoPor: string;
+  /** Last reason (returned, cancelled, modified) or the approver's note. */
+  motivo: string;
+  enviada: string | null;
+  aprobada: string | null;
+  aprobadaPor: string | null;
+  lineas: LineaOrden[];
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+/** What an approved order looked like before a modification (kept, never changed). */
+export interface RevisionOrden {
+  ordenId: string;
+  revision: number;
+  creada: string;
+  por: string;
+  motivo: string;
+  /** The order and its lines before the change. */
+  anterior: Pick<Orden, "fechaEntrega" | "lugarEntrega" | "formaPago" | "diasPago" | "anticipoPct" | "retencionGarantiaPct" | "objeto" | "polizas" | "lineas"> & {
+    total: number;
+  };
+}
+
+export interface CambioOrden extends DatosOrden {
+  id?: string;
+  tipo: TipoOrden;
+  requisicionId: string;
+  /** Quantity (and, in a modification, price) by requisition line; prices come from the chosen quotation. */
+  lineas: { requisicionLineaId: string; cantidad: number; precioUnitario?: number; descuentoPct?: number; ivaPct?: number }[];
+  version: number;
+}
+
+export interface AccionSobreOrden {
+  accion: AccionOrden;
+  motivo: string;
+  version: number;
+}
+
+/** A chosen supplier still to order: the approved comparison of a requisition. */
+export interface PorOrdenar {
+  requisicion: Requisicion;
+  cotizacion: Cotizacion;
+  proveedor: Proveedor;
+  /** What can still be ordered of each requisition line, counting every order and contract (seen or not). */
+  pendientes: Record<string, number>;
+}
+
+export interface OrdenesResponse {
+  ordenes: Orden[];
+  revisiones: RevisionOrden[];
+  /** Approved comparisons with what is left to order of each line. */
+  porOrdenar: PorOrdenar[];
+  proveedores: Proveedor[];
   hoy: string;
 }
 

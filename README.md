@@ -2055,8 +2055,8 @@ Abastecimiento de la obra a partir de los insumos planificados en
 Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
 construye por fases; ya están **el acceso por rol, la auditoría, la consulta
-de los insumos del presupuesto, las requisiciones, los proveedores y las
-cotizaciones con su comparativo**. Aparece en el menú lateral del
+de los insumos del presupuesto, las requisiciones, los proveedores, las
+cotizaciones con su comparativo y las órdenes de compra y contratos**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2168,9 +2168,9 @@ presupuesto se leyó y quién la guardó.
   GET a `presupuesto_documentos`, `presupuesto_mediciones` y la vista
   `presupuesto_resumen_elementos` (una prueba lo verifica).
 - Columnas **Solicitado** (requisiciones enviadas con lo pedido, y aprobadas
-  con lo aprobado), **Aprobado** y **Por solicitar** (planificado menos
-  solicitado; en rojo si se pasó). Lo comprometido y lo recibido llegan con
-  las órdenes y la recepción.
+  con lo aprobado), **Aprobado**, **Comprometido** (órdenes y contratos
+  emitidos) y **Por solicitar** (planificado menos solicitado; en rojo si se
+  pasó). Lo recibido llega con la recepción en obra.
 
 ### Requisiciones
 
@@ -2280,6 +2280,49 @@ Reglas (`lib/compras/cotizaciones.ts` con pruebas, y en PostgreSQL):
   cotizaciones registradas, corregidas y anuladas; comparativos guardados,
   propuestos (con la elegida y la justificación), aprobados y devueltos.
 
+### Órdenes de compra y contratos
+
+Pestaña **Órdenes y contratos** (permiso Órdenes: ver o Contratos: ver; cada
+quien ve los tipos que su rol le deja). Arriba, **Por ordenar**: las
+requisiciones con proveedor elegido y aprobado que aún tienen cantidades
+pendientes, con su valor; desde ahí **Crear orden de compra** (permiso
+Órdenes: crear, rol Compras) o **Crear contrato** (Contratos: crear, rol
+Jurídica). Abajo, la lista con número (OC-0001 y CT-0001, cada tipo con su
+consecutivo), proveedor, requisición, fecha de entrega o terminación, estado
+(con "rev. N" si se modificó), total y quién la elaboró.
+
+**Cómo se usa:** fecha de entrega (o de terminación del contrato), lugar,
+forma de pago, días de pago y anticipo (vienen de la cotización); en
+contratos además objeto, pólizas exigidas y retención de garantía (5 % de
+entrada). Cada insumo de la cotización elegida se incluye o no, con la
+cantidad que se ordena (propone lo pendiente). Los precios, descuentos e IVA
+son los de la cotización. **Guardar borrador** o **Enviar a aprobación**;
+otra persona con el permiso de aprobar (Director o Finanzas) la **aprueba y
+emite** o la **devuelve**. Una emitida se puede **Modificar** (en contratos,
+otrosí) con el motivo: la versión vigente queda guardada sin cambios
+posibles, la orden vuelve a borrador como revisión siguiente, ahí sí se
+pueden ajustar precios y cantidades, y vuelve a aprobación. **Anular** pide
+motivo, no borra y libera lo comprometido.
+
+Reglas (`lib/compras/ordenes.ts` con pruebas, y en PostgreSQL):
+
+- **No se compromete dos veces la misma cantidad**: lo ordenado de cada
+  línea de la requisición, sumando todas las órdenes y contratos no anulados
+  (también los borradores), no pasa lo aprobado ni lo cotizado por el
+  proveedor elegido. La función que guarda lo revisa con candado por
+  proyecto, y un trigger diferido lo vuelve a revisar al cerrar cada
+  transacción aunque alguien escriba directo en la tabla (probado).
+- Solo desde requisiciones aprobadas con comparativo aprobado, y solo con
+  los insumos que cotizó el proveedor elegido.
+- En la revisión 0 los precios deben ser los de la cotización (la base lo
+  exige); solo una modificación los cambia.
+- Quien elabora (o modifica) no aprueba; devolver, anular y modificar piden
+  motivo; el contrato no se envía sin objeto; la fecha no puede haber pasado.
+- Una requisición con órdenes o contratos vigentes no se anula (primero se
+  anulan ellos).
+- Todo queda en la auditoría: crear, editar, enviar, aprobar, devolver,
+  anular y modificar, con la revisión y el motivo.
+
 ### Esquema de la base de datos
 
 [`supabase/compras.sql`](supabase/compras.sql) (se puede volver a ejecutar
@@ -2306,6 +2349,10 @@ ejecutar nadie más (`revoke` a `public`, `anon` y `authenticated`).
 | `compras_cotizaciones` / `compras_cotizacion_lineas` | Cotizaciones (COT-0001) por requisición y proveedor (una registrada por pareja), con fecha, vigencia, entrega, pago, anticipo; líneas con cantidad, precio, descuento e IVA sobre las líneas aprobadas |
 | `compras_comparativos` | Por requisición: pesos, cotización elegida, justificación, estado (borrador, propuesto, aprobado), quién propuso y aprobó |
 | `compras_guardar_proveedor` / `compras_estado_proveedor` / `compras_guardar_cotizacion` / `compras_anular_cotizacion` / `compras_accion_comparativo` | Guardan con permisos, estados y su fila de auditoría |
+| `compras_ordenes` / `compras_orden_lineas` | Órdenes (OC) y contratos (CT): requisición, cotización, proveedor, estado, revisión, quién la elaboró y aprobó, entrega, pago, anticipo, retención, objeto, pólizas; líneas con la cantidad y el precio por línea de requisición |
+| `compras_orden_revisiones` | Cómo era cada orden emitida antes de cada modificación (solo inserción) |
+| `compras_comprometido(línea, excluir)` + trigger `compras_orden_lineas_sin_doble` | Lo ordenado de una línea; el trigger diferido impide pasar lo aprobado |
+| `compras_guardar_orden` / `compras_accion_orden` | Guardan y cambian de estado con permisos, compromiso, precios de la cotización y auditoría |
 
 ### API
 
@@ -2330,6 +2377,8 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `GET cotizaciones` / `PUT cotizaciones` | Requisiciones aprobadas con cotizaciones y comparativos / registrar o corregir | Cotizaciones: ver / crear o editar |
 | `POST cotizaciones/{id}/anular` | Anular con motivo | Cotizaciones: anular |
 | `POST comparativos/{requisición}` | Guardar, proponer, aprobar o devolver | Cotizaciones: crear o editar / aprobar |
+| `GET ordenes` / `PUT ordenes` | Órdenes y contratos visibles, sus revisiones y lo pendiente por ordenar / crear o editar un borrador | Órdenes o Contratos: ver / crear o editar |
+| `POST ordenes/{id}/estado` | Enviar, aprobar, devolver, anular o modificar | Según la acción y el tipo |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
@@ -2342,20 +2391,21 @@ Requisiciones: `auto-aprobacion`, `exceso-sin-permiso` (403);
 `justificacion-requerida`, `sin-lineas`, `fecha-pasada` (400); `no-existe` (404).
 Proveedores y cotizaciones: `nit-repetido`, `proveedor-no-activo`,
 `cotizacion-duplicada`, `cotizacion-no-elegible`, `comparativo-cerrado`,
-`requisicion-no-aprobada` (409).
+`requisicion-no-aprobada` (409). Órdenes: `doble-compromiso`,
+`sin-proveedor-elegido`, `con-ordenes` (409); `objeto-requerido` (400).
 
 El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
 reglas puras, `validate`, `store` con Supabase o memoria, `service`,
 `routes`, `client`, `formato`, `planificado`, `presupuestoLectura`,
-`requisiciones`, `proveedores` y `cotizaciones`, con sus pruebas) y
-`components/compras/`.
+`requisiciones`, `proveedores`, `cotizaciones` y `ordenes`, con sus
+pruebas) y `components/compras/`.
 
 ### Lo que sigue
 
-En este orden: órdenes de compra y contratos a partir del proveedor elegido
-(y con ellos lo comprometido), documentos en el CDE de Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
-confirma la carga), recepción en obra, y el panel con la trazabilidad de cada
-insumo.
+En este orden: documentos en el CDE de Trimble Connect (sin binarios en la
+base; "respaldado" solo cuando Trimble confirma la carga; incluye el PDF de
+cada orden y contrato), recepción en obra contra lo ordenado, y el panel con
+la trazabilidad de cada insumo.
 
 ---
 

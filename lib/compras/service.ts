@@ -6,10 +6,13 @@ import { esMotivo, ESTADO_HTTP, estadoAsignacion, MENSAJES, MotivoRechazo, permi
 import { esDocumento, insumosPlanificados, metradosDelModelo } from "./planificado";
 import type { LecturaPresupuesto } from "./presupuestoLectura";
 import { evaluar, razonesJustificacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
+import { comprometidoPorInsumo, comprometidoPorLinea, maximoLinea, numeroOrden, revisarAccionOrden, revisarOrden } from "./ordenes";
 import { excesos, limite, numeroRequisicion, puedeEditar, revisarAccion, solicitadoPorInsumo } from "./requisiciones";
 import { ROLES_INICIALES } from "./roles";
-import type { Actor, ComprasStore, LineaGuardada } from "./store";
+import type { Actor, ComprasStore, LineaGuardada, OrdenGuardada } from "./store";
 import {
+  leerAccionOrden,
+  leerCambioOrden,
   leerAccionComparativo,
   leerAccionRequisicion,
   leerAnulacion,
@@ -33,7 +36,9 @@ import {
   InsumoPlanificado,
   InsumosResponse,
   Modulo,
+  OrdenesResponse,
   Permiso,
+  TIPO_ORDEN,
   ProveedoresResponse,
   Requisicion,
   RequisicionesResponse,
@@ -251,9 +256,13 @@ async function planActual(ctx: Ctx): Promise<{ presupuesto: InsumosResponse["pre
 /** The resources planned in the project's budget (Presupuesto), with where each one is used and what was asked of each. */
 export async function getInsumos(ctx: Ctx): Promise<InsumosResponse> {
   await requerir(ctx, "insumos", "ver", "insumos.consultar");
-  const [plan, requisiciones] = await Promise.all([planActual(ctx), ctx.store.listRequisiciones(ctx.projectId)]);
+  const [plan, requisiciones, ordenes] = await Promise.all([planActual(ctx), ctx.store.listRequisiciones(ctx.projectId), ctx.store.listOrdenes(ctx.projectId)]);
   const pedidos = solicitadoPorInsumo(requisiciones);
-  return { ...plan, insumos: plan.insumos.map((i) => ({ ...i, solicitado: pedidos.get(i.id)?.solicitado ?? 0, aprobado: pedidos.get(i.id)?.aprobado ?? 0 })) };
+  const comprometido = comprometidoPorInsumo(ordenes);
+  return {
+    ...plan,
+    insumos: plan.insumos.map((i) => ({ ...i, solicitado: pedidos.get(i.id)?.solicitado ?? 0, aprobado: pedidos.get(i.id)?.aprobado ?? 0, comprometido: comprometido.get(i.id) ?? 0 })),
+  };
 }
 
 // ---------------------------------------------------------------- requisitions
@@ -502,4 +511,103 @@ export async function accionComparativo(ctx: Ctx, requisicionId: string, body: u
     throw e;
   }
   return getCotizaciones(ctx);
+}
+
+// ---------------------------------------------------------------- purchase orders and contracts
+
+/** Orders and contracts the caller can see (by type), their revisions, and the chosen suppliers still to order. */
+export async function getOrdenes(ctx: Ctx): Promise<OrdenesResponse> {
+  const a = await cargar(ctx);
+  const veOrdenes = tiene(a.permisos, "ordenes", "ver");
+  const veContratos = tiene(a.permisos, "contratos", "ver");
+  if (!veOrdenes && !veContratos) await requerir(ctx, "ordenes", "ver", "ordenes.consultar");
+  const [ordenes, revisiones, requisiciones, comparativos, cotizaciones, proveedores] = await Promise.all([
+    ctx.store.listOrdenes(ctx.projectId),
+    ctx.store.listRevisiones(ctx.projectId),
+    ctx.store.listRequisiciones(ctx.projectId),
+    ctx.store.listComparativos(ctx.projectId),
+    ctx.store.listCotizaciones(ctx.projectId),
+    ctx.store.listProveedores(ctx.projectId),
+  ]);
+  const visibles = ordenes.filter((o) => (o.tipo === "orden" ? veOrdenes : veContratos));
+  const ids = new Set(visibles.map((o) => o.id));
+  const tomado = comprometidoPorLinea(ordenes);
+  const porOrdenar = comparativos.flatMap((c) => {
+    const requisicion = requisiciones.find((r) => r.id === c.requisicionId && r.estado === "aprobada");
+    const cotizacion = cotizaciones.find((x) => x.id === c.cotizacionElegidaId);
+    const proveedor = proveedores.find((p) => p.id === cotizacion?.proveedorId);
+    if (c.estado !== "aprobado" || !requisicion || !cotizacion || !proveedor) return [];
+    const pendientes = Object.fromEntries(
+      cotizacion.lineas.flatMap((cl) => {
+        const rl = requisicion.lineas.find((x) => x.id === cl.requisicionLineaId);
+        return rl ? [[rl.id, maximoLinea(rl, cl.cantidad, tomado.get(rl.id) ?? 0)]] : [];
+      })
+    );
+    return [{ requisicion, cotizacion, proveedor, pendientes }];
+  });
+  return { ordenes: visibles, revisiones: revisiones.filter((r) => ids.has(r.ordenId)), porOrdenar, proveedores, hoy: ctx.hoy };
+}
+
+/** Creates or changes the draft of an order or contract from the chosen supplier's quotation. */
+export async function guardarOrden(ctx: Ctx, body: unknown): Promise<OrdenesResponse> {
+  const c = leerCambioOrden(body);
+  const m = TIPO_ORDEN[c.tipo].modulo;
+  const a = await requerir(ctx, m, "ver", `${m}.guardar`);
+  const [ordenes, requisiciones, comparativos, cotizaciones] = await Promise.all([
+    ctx.store.listOrdenes(ctx.projectId),
+    ctx.store.listRequisiciones(ctx.projectId),
+    ctx.store.listComparativos(ctx.projectId),
+    ctx.store.listCotizaciones(ctx.projectId),
+  ]);
+  const antes = c.id ? ordenes.find((o) => o.id === c.id) ?? null : null;
+  const r = requisiciones.find((x) => x.id === c.requisicionId);
+  const comp = comparativos.find((x) => x.requisicionId === c.requisicionId);
+  const cot = cotizaciones.find((x) => x.id === comp?.cotizacionElegidaId);
+  const audit = { objetoTipo: c.tipo, objetoId: c.id ?? "", sujetoNombre: antes ? numeroOrden(antes.tipo, antes.numero) : r ? numeroRequisicion(r.numero) : "" };
+  const motivo = revisarOrden({ actorId: ctx.caller.id, permisos: a.permisos, hoy: ctx.hoy }, c, antes, r, comp, cot, ordenes);
+  if (motivo === "sin-permiso") return denegar(ctx, `${m}.guardar`, m, motivo, audit);
+  if (motivo) throw rechazo(motivo);
+  // Prices come from the chosen quotation; only a modification (revision 1 or more) can change them.
+  const modifica = (antes?.revision ?? 0) > 0;
+  const guardada: OrdenGuardada = {
+    ...c,
+    lineas: c.lineas.map((l) => {
+      const cl = cot!.lineas.find((x) => x.requisicionLineaId === l.requisicionLineaId)!;
+      const previa = antes?.lineas.find((x) => x.requisicionLineaId === l.requisicionLineaId);
+      return {
+        requisicionLineaId: l.requisicionLineaId,
+        cantidad: l.cantidad,
+        precioUnitario: modifica ? l.precioUnitario ?? previa?.precioUnitario ?? cl.precioUnitario : cl.precioUnitario,
+        descuentoPct: modifica ? l.descuentoPct ?? previa?.descuentoPct ?? cl.descuentoPct : cl.descuentoPct,
+        ivaPct: modifica ? l.ivaPct ?? previa?.ivaPct ?? cl.ivaPct : cl.ivaPct,
+      };
+    }),
+  };
+  try {
+    await ctx.store.guardarOrden(ctx.projectId, actor(ctx), c.id ?? globalThis.crypto.randomUUID(), guardada);
+  } catch (err) {
+    throw traducir(err);
+  }
+  return getOrdenes(ctx);
+}
+
+/** Sends, approves (issues), returns, cancels or modifies an order or contract. */
+export async function accionOrden(ctx: Ctx, id: string, body: unknown): Promise<OrdenesResponse> {
+  const a = leerAccionOrden(body);
+  const o = (await ctx.store.listOrdenes(ctx.projectId)).find((x) => x.id === id);
+  if (!o) throw rechazo("no-existe");
+  const m = TIPO_ORDEN[o.tipo].modulo;
+  const acc = await requerir(ctx, m, "ver", `${m}.${a.accion}`);
+  const audit = { objetoTipo: o.tipo, objetoId: o.id, sujetoId: o.elaboradoPorId, sujetoNombre: numeroOrden(o.tipo, o.numero) };
+  const motivo = revisarAccionOrden({ actorId: ctx.caller.id, permisos: acc.permisos, hoy: ctx.hoy }, o, a);
+  if (motivo && DENEGACIONES.has(motivo)) return denegar(ctx, `${m}.${a.accion}`, m, motivo, audit);
+  if (motivo) throw rechazo(motivo);
+  try {
+    await ctx.store.accionOrden(ctx.projectId, actor(ctx), id, a);
+  } catch (err) {
+    const e = traducir(err);
+    if (e instanceof ServiceError && e.code && DENEGACIONES.has(e.code as MotivoRechazo)) await denegar(ctx, `${m}.${a.accion}`, m, e.code as MotivoRechazo, audit);
+    throw e;
+  }
+  return getOrdenes(ctx);
 }
