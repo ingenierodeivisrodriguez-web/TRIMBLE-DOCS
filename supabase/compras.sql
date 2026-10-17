@@ -1466,6 +1466,101 @@ begin
 end;
 $$;
 
+-- ================================================================ documentos en el CDE (carpetas de Trimble Connect)
+
+-- Tipos de documento legal de proveedores del proyecto (null: los iniciales de la app).
+alter table public.compras_config add column if not exists tipos_documento jsonb check (tipos_documento is null or jsonb_typeof(tipos_documento) = 'array');
+
+-- Carpetas del CDE que usa Compras en cada proyecto (id de la carpeta en Trimble Connect).
+create table if not exists public.compras_cde_carpetas (
+  project_id text        not null,
+  clave      text        not null check (clave ~ '^[a-z0-9_:-]{1,80}$'),
+  nombre     text        not null check (char_length(nombre) between 1 and 200),
+  folder_id  text        not null check (char_length(folder_id) between 1 and 200),
+  ruta       text        not null default '' check (char_length(ruta) <= 500),
+  creada     timestamptz not null default now(),
+  creada_por text        not null default '',
+  primary key (project_id, clave)
+);
+
+-- Documentos de Compras: solo la referencia al archivo de Trimble Connect (ningún binario aquí).
+-- "respaldado" solo con el archivo y la versión que confirmó Trimble.
+create table if not exists public.compras_documentos (
+  id               uuid        primary key,
+  project_id       text        not null,
+  entidad_tipo     text        not null check (entidad_tipo in ('requisicion', 'cotizacion', 'orden', 'contrato', 'proveedor', 'recepcion')),
+  entidad_id       uuid        not null,
+  tipo_doc         text        not null check (tipo_doc ~ '^[a-z0-9_]{1,40}$'),
+  titulo           text        not null default '' check (char_length(titulo) <= 200),
+  nombre_original  text        not null default '' check (char_length(nombre_original) <= 255),
+  nombre_archivo   text        not null check (char_length(nombre_archivo) between 1 and 255),
+  carpeta_id       text        not null,
+  ruta             text        not null default '' check (char_length(ruta) <= 500),
+  tamano           bigint      not null check (tamano between 0 and 104857600),
+  sha256           text        not null check (sha256 ~ '^[0-9a-f]{64}$'),
+  origen           text        not null default 'cargado' check (origen in ('cargado', 'generado')),
+  vence            date,
+  estado           text        not null default 'pendiente' check (estado in ('pendiente', 'respaldado', 'error', 'anulado')),
+  upload_id        text,
+  file_id          text,
+  version_id       text,
+  revision         integer,
+  intentos         integer     not null default 0,
+  ultimo_error     text        not null default '' check (char_length(ultimo_error) <= 1000),
+  subido_por_id    text        not null,
+  subido_por       text        not null default '',
+  creado           timestamptz not null default now(),
+  confirmado       timestamptz,
+  motivo_anulacion text        not null default '' check (char_length(motivo_anulacion) <= 1000),
+  version          integer     not null default 1,
+  actualizado      timestamptz not null default now(),
+  actualizado_por  text,
+  constraint compras_documentos_respaldo check (estado <> 'respaldado' or (file_id is not null and version_id is not null and confirmado is not null)),
+  constraint compras_documentos_anulacion check (estado <> 'anulado' or btrim(motivo_anulacion) <> '')
+);
+create index if not exists compras_documentos_entidad on public.compras_documentos (project_id, entidad_tipo, entidad_id);
+create unique index if not exists compras_documentos_nombre_unico
+  on public.compras_documentos (project_id, carpeta_id, lower(nombre_archivo)) where estado <> 'anulado';
+
+-- Un documento respaldado no vuelve atrás ni cambia de archivo (solo se puede anular); uno anulado no cambia.
+create or replace function public.compras_documentos_estable()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if old.estado = 'anulado' then
+    raise exception 'compras:estado-no-valido';
+  end if;
+  if old.estado = 'respaldado'
+     and (new.estado not in ('respaldado', 'anulado') or new.file_id is distinct from old.file_id or new.version_id is distinct from old.version_id) then
+    raise exception 'compras:estado-no-valido';
+  end if;
+  return new;
+end;
+$$;
+drop trigger if exists compras_documentos_sin_retroceso on public.compras_documentos;
+create trigger compras_documentos_sin_retroceso
+  before update on public.compras_documentos
+  for each row execute function public.compras_documentos_estable();
+
+-- Historial de sincronización con Trimble de cada documento (solo inserción).
+create table if not exists public.compras_sync_historial (
+  id           bigint      generated always as identity primary key,
+  project_id   text        not null,
+  documento_id uuid        not null references public.compras_documentos (id),
+  creado       timestamptz not null default now(),
+  por          text        not null default '',
+  accion       text        not null check (char_length(accion) between 1 and 60),
+  resultado    text        not null check (resultado in ('ok', 'error')),
+  detalle      text        not null default '' check (char_length(detalle) <= 1000)
+);
+create index if not exists compras_sync_historial_documento on public.compras_sync_historial (documento_id, id);
+drop trigger if exists compras_sync_historial_sin_cambios on public.compras_sync_historial;
+create trigger compras_sync_historial_sin_cambios
+  before update or delete on public.compras_sync_historial
+  for each row execute function public.compras_auditoria_inmutable();
+
 -- If the list of permissions grew, the administrators' role gets the new ones.
 update public.compras_roles
    set permisos = public.compras_permisos_validos()
@@ -1485,6 +1580,9 @@ alter table public.compras_comparativos enable row level security;
 alter table public.compras_ordenes enable row level security;
 alter table public.compras_orden_lineas enable row level security;
 alter table public.compras_orden_revisiones enable row level security;
+alter table public.compras_cde_carpetas enable row level security;
+alter table public.compras_documentos enable row level security;
+alter table public.compras_sync_historial enable row level security;
 
 -- Only the app's server (service role) uses these tables and functions.
 revoke all on table public.compras_roles, public.compras_usuarios, public.compras_auditoria from anon, authenticated;
@@ -1499,6 +1597,10 @@ grant select, insert, update on table public.compras_ordenes to service_role;
 grant select, insert, update, delete on table public.compras_orden_lineas to service_role;
 revoke update, delete, truncate on table public.compras_orden_revisiones from public, anon, authenticated, service_role;
 grant select, insert on table public.compras_orden_revisiones to service_role;
+revoke all on table public.compras_cde_carpetas, public.compras_documentos, public.compras_sync_historial from anon, authenticated;
+grant select, insert, update on table public.compras_cde_carpetas, public.compras_documentos to service_role;
+revoke update, delete, truncate on table public.compras_sync_historial from public, anon, authenticated, service_role;
+grant select, insert on table public.compras_sync_historial to service_role;
 revoke update, delete, truncate on table public.compras_auditoria from public, anon, authenticated, service_role;
 grant select, insert on table public.compras_auditoria to service_role;
 grant select, insert, update on table public.compras_roles, public.compras_usuarios to service_role;
@@ -1543,3 +1645,4 @@ revoke all on function public.compras_accion_orden(text, text, text, uuid, text,
 grant execute on function public.compras_comprometido(uuid, uuid) to service_role;
 grant execute on function public.compras_guardar_orden(text, text, text, uuid, jsonb, jsonb, integer) to service_role;
 grant execute on function public.compras_accion_orden(text, text, text, uuid, text, text, integer) to service_role;
+revoke all on function public.compras_documentos_estable() from public, anon, authenticated;

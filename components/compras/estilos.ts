@@ -15,3 +15,4 @@ export const select: CSSProperties = { border: "1px solid var(--tc-gray-300)", b
 export function etiqueta(color: string, fondo: string): CSSProperties {
   return { display: "inline-block", color, background: fondo, borderRadius: 10, padding: "1px 9px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" };
 }
+export const subtitulo: CSSProperties = { margin: "8px 0 4px", fontSize: 14, fontWeight: 600, color: "var(--tc-blue-800)" };

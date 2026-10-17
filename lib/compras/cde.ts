@@ -151,13 +151,19 @@ export async function estadoSubida(c: ClienteTrimble, uploadId: string): Promise
 }
 
 /** Sends the content to the signed URL (PUT, no token, no extra headers). */
-export async function enviarContenido(url: string, contenido: string, fetchFn: Fetch = fetch): Promise<number> {
+export async function enviarContenido(url: string, contenido: string | Uint8Array, fetchFn: Fetch = fetch): Promise<number> {
   // A Blob without a type: no Content-Type header, as the signed URL expects.
-  const res = await fetchFn(url, { method: "PUT", body: new Blob([contenido]), signal: AbortSignal.timeout(25_000) });
+  const res = await fetchFn(url, { method: "PUT", body: new Blob([contenido as BlobPart]), signal: AbortSignal.timeout(25_000) });
   return res.status;
 }
 
 /** The small text file of the test. */
 export function contenidoPrueba(quien: string, cuando: string): string {
   return `Prueba de escritura de la extensión Compras y Contratación.\r\nHecha por ${quien} el ${cuando}.\r\nEste archivo y su carpeta se pueden borrar.\r\n`;
+}
+
+/** A short-lived link to a file's content (a version of it, when given), made with the user's token: never stored. */
+export async function urlDescarga(c: ClienteTrimble, fileId: string, versionId?: string | null): Promise<{ url: string | null; respuesta: Respuesta }> {
+  const respuesta = await c.pedir("GET", `/files/fs/${encodeURIComponent(fileId)}/downloadurl${versionId ? `?versionId=${encodeURIComponent(versionId)}` : ""}`);
+  return { url: ok(respuesta) ? campo(respuesta, "url") : null, respuesta };
 }

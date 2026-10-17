@@ -43,7 +43,11 @@ export type MotivoRechazo =
   | "sin-proveedor-elegido"
   | "doble-compromiso"
   | "objeto-requerido"
-  | "con-ordenes";
+  | "con-ordenes"
+  | "carpetas-sin-preparar"
+  | "archivo-grande"
+  | "documento-duplicado"
+  | "archivo-distinto";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Compras en este proyecto. Pídeselo a un administrador de Compras.",
@@ -81,6 +85,10 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "doble-compromiso": "Esa cantidad ya está comprometida en otra orden o contrato: no se puede ordenar más de lo aprobado y cotizado.",
   "objeto-requerido": "El contrato necesita su objeto (qué se contrata) antes de enviarlo.",
   "con-ordenes": "La requisición tiene órdenes o contratos vigentes: anúlalos primero.",
+  "carpetas-sin-preparar": "Las carpetas de Compras en el CDE no están preparadas: un administrador debe prepararlas en la pestaña Documentos (CDE).",
+  "archivo-grande": "El archivo pasa el tamaño permitido.",
+  "documento-duplicado": "Ya hay un documento con ese nombre en esa carpeta.",
+  "archivo-distinto": "El archivo no es el mismo que se registró (su huella no coincide): elige el archivo original.",
 };
 
 /** The HTTP status of each refusal. */
@@ -120,6 +128,10 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "doble-compromiso": 409,
   "objeto-requerido": 400,
   "con-ordenes": 409,
+  "carpetas-sin-preparar": 409,
+  "archivo-grande": 400,
+  "documento-duplicado": 409,
+  "archivo-distinto": 400,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {

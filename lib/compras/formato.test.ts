@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { detalleEntrada, fecha, fechaHora, nombrePermiso } from "./formato";
+import { detalleEntrada, fecha, fechaHora, nombreAccion, nombrePermiso } from "./formato";
 import type { EntradaAuditoria } from "./types";
 
 const entrada = (e: Partial<EntradaAuditoria>): EntradaAuditoria => ({
@@ -47,5 +47,14 @@ describe("auditoría de la prueba del CDE", () => {
   it("muestra el paso y lo que respondió Trimble, también cuando falla", () => {
     assert.equal(detalleEntrada(entrada({ accion: "cde.prueba", resultado: "error", detalle: { paso: "crear-carpeta", mensaje: "No se pudo crear la carpeta." } })), "crear-carpeta: No se pudo crear la carpeta.");
     assert.equal(detalleEntrada(entrada({ accion: "cde.prueba", detalle: { paso: "duplicado", mensaje: "Trimble rechazó un duplicado." } })), "duplicado: Trimble rechazó un duplicado.");
+  });
+});
+
+describe("auditoría de los documentos", () => {
+  it("dice dónde quedó cada documento y qué carpetas se crearon", () => {
+    assert.equal(nombreAccion("documentos.respaldado"), "Documento respaldado en el CDE");
+    assert.equal(detalleEntrada(entrada({ accion: "documentos.respaldado", detalle: { ruta: "Compras y Contrataciones / Requisiciones", revision: 1 } })), "Compras y Contrataciones / Requisiciones, revisión 1 en Trimble");
+    assert.equal(detalleEntrada(entrada({ accion: "cde.carpetas", detalle: { creadas: ["Compras y Contrataciones"], existentes: [] } })), "Creó: Compras y Contrataciones");
+    assert.equal(detalleEntrada(entrada({ accion: "cde.carpetas", detalle: { creadas: [], existentes: ["x"] } })), "Ya existían todas; solo se registraron");
   });
 });

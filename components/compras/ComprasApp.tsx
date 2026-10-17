@@ -13,7 +13,7 @@ import Requisiciones from "./Requisiciones";
 import Proveedores from "./Proveedores";
 import Cotizaciones from "./Cotizaciones";
 import Ordenes from "./Ordenes";
-import PruebaCde from "./PruebaCde";
+import DocumentosCde from "./DocumentosCde";
 import { botonSecundario, card, linkBtn, texto, titulo } from "./estilos";
 
 type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "documentos" | "accesos" | "auditoria";
@@ -103,8 +103,8 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
             {actual === "requisiciones" && <Requisiciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "cotizaciones" && <Cotizaciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "proveedores" && <Proveedores api={api} permisos={permisos} onSinAcceso={onSinAcceso} />}
-            {actual === "ordenes" && <Ordenes api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
-            {actual === "documentos" && <PruebaCde api={api} administra={puede("documentos.administrar")} />}
+            {actual === "ordenes" && <Ordenes api={api} yo={estado.user.id} permisos={permisos} proyecto={projectName || projectId} onSinAcceso={onSinAcceso} />}
+            {actual === "documentos" && <DocumentosCde api={api} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "accesos" && <Accesos api={api} yo={estado.user.id} onSinAcceso={onSinAcceso} />}
             {actual === "auditoria" && <Auditoria api={api} onSinAcceso={onSinAcceso} />}
           </main>
@@ -235,7 +235,7 @@ function Inicio({ estado }: { estado: EstadoResponse }) {
         <h2 style={titulo}>En construcción</h2>
         <p style={texto}>
           Ya están los accesos por rol, la auditoría, los insumos del presupuesto, las requisiciones, los proveedores y las cotizaciones con su
-          comparativo, y las órdenes de compra y contratos. Siguen, en este orden: documentos en el CDE del proyecto, recepción en obra y el panel con la trazabilidad de cada insumo.
+          comparativo, las órdenes de compra y contratos, y sus documentos en el CDE del proyecto. Siguen, en este orden: recepción en obra y el panel con la trazabilidad de cada insumo.
         </p>
       </section>
     </div>

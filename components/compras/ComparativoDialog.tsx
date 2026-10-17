@@ -13,7 +13,8 @@ import { ApiError } from "../../lib/propiedades/client";
 import { isoToDisplay, parseDisplayDate } from "../../lib/propiedades/values";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
 import DateField from "../propiedades/DateField";
-import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, td, th } from "./estilos";
+import DocumentosRegistro from "./DocumentosRegistro";
+import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, subtitulo, td, th } from "./estilos";
 
 /** A requisition's quotations side by side, their scores, and the choice of supplier (proposed, then approved). */
 export default function ComparativoDialog({
@@ -336,6 +337,7 @@ export default function ComparativoDialog({
           datos={datos}
           requisicion={r}
           cotizacion={editarCot === "nueva" ? null : editarCot}
+          permisos={permisos}
           onGuardado={(d) => {
             onDatos(d);
             setEditarCot(null);
@@ -409,6 +411,7 @@ function CotizacionDialog({
   datos,
   requisicion: r,
   cotizacion: c,
+  permisos,
   onGuardado,
   onClose,
 }: {
@@ -416,6 +419,7 @@ function CotizacionDialog({
   datos: CotizacionesResponse;
   requisicion: Requisicion;
   cotizacion: Cotizacion | null;
+  permisos: Permiso[];
   onGuardado: (d: CotizacionesResponse) => void;
   onClose: () => void;
 }) {
@@ -635,6 +639,12 @@ function CotizacionDialog({
           </label>
           <textarea id="cot-obs" rows={2} maxLength={1000} value={observaciones} onChange={(e) => setObservaciones(e.target.value)} style={{ ...baseInput, width: "100%", resize: "vertical" }} />
         </div>
+        {c && (
+          <section>
+            <h3 style={subtitulo}>Documentos de la cotización</h3>
+            <DocumentosRegistro api={api} entidadTipo="cotizacion" entidadId={c.id} permisos={permisos} />
+          </section>
+        )}
         {error && <Notice kind="error">{error}</Notice>}
       </div>
     </Modal>

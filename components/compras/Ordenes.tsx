@@ -6,6 +6,7 @@ import type { ComprasApi } from "../../lib/compras/client";
 import { numeroCotizacion, totalesCotizacion, totalesLinea } from "../../lib/compras/cotizaciones";
 import { fecha, fechaHora } from "../../lib/compras/formato";
 import { ESTADOS_ORDEN, numeroOrden, puedeAccionOrden, puedeEditarOrden, TRANSICIONES_ORDEN } from "../../lib/compras/ordenes";
+import { nombrePdfOrden, pdfOrden } from "../../lib/compras/pdfOrden";
 import { nitConDv } from "../../lib/compras/proveedores";
 import { numeroRequisicion } from "../../lib/compras/requisiciones";
 import { AccionOrden, EstadoOrden, Orden, OrdenesResponse, Permiso, PorOrdenar, TIPO_ORDEN, TipoOrden } from "../../lib/compras/types";
@@ -14,12 +15,25 @@ import { ApiError } from "../../lib/propiedades/client";
 import { isoToDisplay, parseDisplayDate } from "../../lib/propiedades/values";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
 import DateField from "../propiedades/DateField";
-import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, td, th } from "./estilos";
+import DocumentosRegistro from "./DocumentosRegistro";
+import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, subtitulo, td, th } from "./estilos";
 
 type Abierta = { orden: Orden } | { nueva: PorOrdenar; tipo: TipoOrden };
 
 /** Purchase orders and contracts: what is still to order from the chosen suppliers, and the documents issued. */
-export default function Ordenes({ api, yo, permisos, onSinAcceso }: { api: ComprasApi; yo: string; permisos: Permiso[]; onSinAcceso: (err: unknown) => void }) {
+export default function Ordenes({
+  api,
+  yo,
+  permisos,
+  proyecto,
+  onSinAcceso,
+}: {
+  api: ComprasApi;
+  yo: string;
+  permisos: Permiso[];
+  proyecto: string;
+  onSinAcceso: (err: unknown) => void;
+}) {
   const [datos, setDatos] = useState<OrdenesResponse | null>(null);
   const [error, setError] = useState("");
   const [tipo, setTipo] = useState<TipoOrden | "">("");
@@ -169,6 +183,7 @@ export default function Ordenes({ api, yo, permisos, onSinAcceso }: { api: Compr
           nueva={"nueva" in abierta ? abierta : null}
           yo={yo}
           permisos={permisos}
+          proyecto={proyecto}
           onDatos={(d, id) => {
             setDatos(d);
             const o = id ? d.ordenes.find((x) => x.id === id) : undefined;
@@ -198,6 +213,7 @@ function OrdenDialog({
   nueva,
   yo,
   permisos,
+  proyecto,
   onDatos,
   onRecargar,
   onSinAcceso,
@@ -206,6 +222,7 @@ function OrdenDialog({
   api: ComprasApi;
   datos: OrdenesResponse;
   orden: Orden | null;
+  proyecto: string;
   nueva: { nueva: PorOrdenar; tipo: TipoOrden } | null;
   yo: string;
   permisos: Permiso[];
@@ -508,6 +525,29 @@ function OrdenDialog({
           </div>
         )}
         {error && <Notice kind="error">{error}</Notice>}
+        {o && (
+          <section>
+            <h3 style={subtitulo}>Documentos</h3>
+            <DocumentosRegistro
+              api={api}
+              entidadTipo={o.tipo}
+              entidadId={o.id}
+              permisos={permisos}
+              generar={
+                o.estado === "aprobada"
+                  ? {
+                      etiqueta: `Guardar el PDF ${o.revision ? `(revisión ${o.revision}) ` : ""}en el CDE`,
+                      tipoDoc: "pdf",
+                      crear: async () => ({
+                        archivo: await pdfOrden(o, datos.proveedores.find((p) => p.id === o.proveedorId), fuente?.requisicion, proyecto),
+                        nombre: nombrePdfOrden(o),
+                      }),
+                    }
+                  : undefined
+              }
+            />
+          </section>
+        )}
       </div>
 
       {pedirMotivo && (

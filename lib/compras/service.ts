@@ -5,7 +5,10 @@ import type { ProjectContacts } from "../propiedades/types";
 import { esMotivo, ESTADO_HTTP, estadoAsignacion, MENSAJES, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
 import { esDocumento, insumosPlanificados, metradosDelModelo } from "./planificado";
 import type { LecturaPresupuesto } from "./presupuestoLectura";
-import { ARCHIVO_PRUEBA, buscarEnCarpeta, CARPETA_PRUEBA, ClienteTrimble, contenidoPrueba, crearCarpeta, enviarContenido, estadoSubida, explicarEstado, iniciarSubida, leerCarpeta } from "./cde";
+import { ARCHIVO_PRUEBA, buscarEnCarpeta, CARPETA_PRUEBA, ClienteTrimble, contenidoPrueba, crearCarpeta, enviarContenido, estadoSubida, explicarEstado, iniciarSubida, leerCarpeta, urlDescarga } from "./cde";
+import { CARPETA_DE, CARPETAS, carpetaProveedor, MAX_RELEVO, MAX_TAMANO, MODULO_DE, nombreArchivo, revisarTipos, rutaCarpeta, TIPOS_LEGALES_INICIALES, tiposDe } from "./documentos";
+import { nitConDv } from "./proveedores";
+import { numeroCotizacion } from "./cotizaciones";
 import { evaluar, razonesJustificacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
 import { fechaHora } from "./formato";
 import { comprometidoPorInsumo, comprometidoPorLinea, maximoLinea, numeroOrden, revisarAccionOrden, revisarOrden } from "./ordenes";
@@ -42,6 +45,15 @@ import {
   PasoPruebaCde,
   Permiso,
   PruebaCdeResponse,
+  CarpetaCde,
+  Documento,
+  DocumentosResponse,
+  EntidadDocumento,
+  EstadoCarpetas,
+  NuevoDocumento,
+  SubidaDocumento,
+  SyncEntrada,
+  TipoDocumentoLegal,
   TIPO_ORDEN,
   ProveedoresResponse,
   Requisicion,
@@ -728,4 +740,388 @@ async function pasoCde(ctx: Ctx, c: ClienteTrimble, rootId: string, paso: PasoPr
       : "Trimble aceptó abrir otra subida con el mismo nombre aunque se pidió que no: habrá que evitar duplicados de otra forma.",
     { http: s.respuesta.estado }
   );
+}
+
+// ---------------------------------------------------------------- documents in the CDE
+
+const ENTIDADES: EntidadDocumento[] = ["requisicion", "cotizacion", "orden", "contrato", "proveedor", "recepcion"];
+const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+async function trimble(ctx: Ctx): Promise<{ cliente: ClienteTrimble; rootId: string }> {
+  if (!ctx.deps.cde) throw new ServiceError("La conexión con Trimble Connect no está disponible.", 503);
+  return ctx.deps.cde();
+}
+
+async function tiposLegales(ctx: Ctx): Promise<{ tipos: TipoDocumentoLegal[]; version: number }> {
+  const t = await ctx.store.getTiposDocumento(ctx.projectId);
+  return { tipos: t.tipos ?? TIPOS_LEGALES_INICIALES, version: t.version };
+}
+
+/** The project's documents the caller can see (of one record, of one kind of record, or all). */
+export async function getDocumentos(ctx: Ctx, params: URLSearchParams): Promise<DocumentosResponse> {
+  const entidadTipo = params.get("entidadTipo") as EntidadDocumento | null;
+  const entidadId = params.get("entidadId");
+  if (entidadTipo && !ENTIDADES.includes(entidadTipo)) throw rechazo("datos");
+  if (entidadId && !UUID.test(entidadId)) throw rechazo("datos");
+  const a = entidadTipo ? await requerir(ctx, MODULO_DE[entidadTipo], "ver", "documentos.consultar") : await requerir(ctx, "documentos", "ver", "documentos.consultar");
+  const [documentos, carpetas, tipos] = await Promise.all([
+    ctx.store.listDocumentos(ctx.projectId, { entidadTipo: entidadTipo ?? undefined, entidadId: entidadId ?? undefined }),
+    ctx.store.listCarpetasCde(ctx.projectId),
+    tiposLegales(ctx),
+  ]);
+  return {
+    documentos: documentos.filter((d) => tiene(a.permisos, MODULO_DE[d.entidadTipo], "ver")),
+    carpetas,
+    tipos: tipos.tipos,
+    versionConfig: tipos.version,
+    hoy: ctx.hoy,
+  };
+}
+
+export async function getHistorialDocumento(ctx: Ctx, id: string): Promise<{ historial: SyncEntrada[] }> {
+  const d = await documento(ctx, id);
+  await requerir(ctx, MODULO_DE[d.entidadTipo], "ver", "documentos.consultar");
+  return { historial: await ctx.store.listSync(ctx.projectId, id) };
+}
+
+/** What Compras' folders look like in the project now (nothing is created). Documentos: administrar. */
+export async function inspeccionarCarpetas(ctx: Ctx): Promise<EstadoCarpetas> {
+  await requerir(ctx, "documentos", "administrar", "cde.carpetas");
+  return estadoCarpetas(ctx, false);
+}
+
+/** Creates the folders that are missing (after the person saw what exists) and saves their ids. */
+export async function prepararCarpetas(ctx: Ctx): Promise<EstadoCarpetas> {
+  await requerir(ctx, "documentos", "administrar", "cde.carpetas");
+  return estadoCarpetas(ctx, true);
+}
+
+async function estadoCarpetas(ctx: Ctx, crear: boolean): Promise<EstadoCarpetas> {
+  const { cliente, rootId } = await trimble(ctx);
+  const raiz = await leerCarpeta(cliente, rootId);
+  if (!raiz.carpeta) throw new ServiceError(`No se pudo leer la carpeta raíz del proyecto: ${explicarEstado(raiz.respuesta.estado)}`, 502);
+  const guardadas = new Map((await ctx.store.listCarpetasCde(ctx.projectId)).map((c) => [c.clave, c]));
+  const ids = new Map<string, string>();
+  const salida: EstadoCarpetas["carpetas"] = [];
+  const creadas: string[] = [];
+  for (const c of CARPETAS) {
+    const padreId = c.padre ? ids.get(c.padre) ?? null : raiz.carpeta.id;
+    let folderId: string | null = null;
+    // The saved one if it is still there; else one with that name where it belongs; else (when asked) a new one.
+    const guardada = guardadas.get(c.clave);
+    if (guardada && (await leerCarpeta(cliente, guardada.folderId)).carpeta) folderId = guardada.folderId;
+    if (!folderId && padreId) folderId = (await buscarEnCarpeta(cliente, padreId, c.nombre, "FOLDER"))?.id ?? null;
+    const existe = !!folderId;
+    if (!folderId && crear && padreId) {
+      const padre = c.padre ? await leerCarpeta(cliente, padreId) : raiz;
+      if (!padre.carpeta) throw new ServiceError(`No se pudo leer la carpeta de ${c.nombre}.`, 502);
+      const hecha = await crearCarpeta(cliente, padre.carpeta, c.nombre);
+      if (!hecha.carpeta) throw new ServiceError(`No se pudo crear "${rutaCarpeta(c.clave)}": ${explicarEstado(hecha.respuesta.estado)}`, 502);
+      folderId = hecha.carpeta.id;
+      creadas.push(rutaCarpeta(c.clave));
+    }
+    if (folderId) ids.set(c.clave, folderId);
+    if (crear && folderId && guardada?.folderId !== folderId) {
+      await ctx.store.guardarCarpetaCde(ctx.projectId, { clave: c.clave, nombre: c.nombre, folderId, ruta: rutaCarpeta(c.clave), creada: "", creadaPor: ctx.caller.name });
+    }
+    salida.push({ clave: c.clave, nombre: c.nombre, ruta: rutaCarpeta(c.clave), folderId, existe, guardada: crear ? !!folderId : guardada?.folderId === folderId && !!folderId });
+  }
+  if (crear) {
+    await ctx.store.auditar(ctx.projectId, {
+      actorId: ctx.caller.id, actorNombre: ctx.caller.name, accion: "cde.carpetas", modulo: "documentos", objetoTipo: "cde", objetoId: rootId, sujetoId: null, sujetoNombre: "Carpeta raíz del proyecto",
+      resultado: "ok", detalle: { creadas, existentes: salida.filter((c) => c.existe).map((c) => c.ruta) },
+    });
+  }
+  return { raiz: { id: raiz.carpeta.id, permiso: raiz.carpeta.permiso }, carpetas: salida };
+}
+
+/** The record a document belongs to: that it exists, and the prefix of its files. */
+async function registroDe(ctx: Ctx, tipo: EntidadDocumento, id: string): Promise<{ prefijo: string; proveedor?: { nit: string; razonSocial: string } }> {
+  if (tipo === "requisicion") {
+    const r = (await ctx.store.listRequisiciones(ctx.projectId)).find((x) => x.id === id);
+    if (r) return { prefijo: numeroRequisicion(r.numero) };
+  } else if (tipo === "cotizacion") {
+    const c = (await ctx.store.listCotizaciones(ctx.projectId)).find((x) => x.id === id);
+    if (c) return { prefijo: numeroCotizacion(c.numero) };
+  } else if (tipo === "orden" || tipo === "contrato") {
+    const o = (await ctx.store.listOrdenes(ctx.projectId)).find((x) => x.id === id && x.tipo === tipo);
+    if (o) return { prefijo: `${numeroOrden(o.tipo, o.numero)}${o.revision ? ` rev${o.revision}` : ""}` };
+  } else if (tipo === "proveedor") {
+    const p = (await ctx.store.listProveedores(ctx.projectId)).find((x) => x.id === id);
+    if (p) return { prefijo: nitConDv(p.nit, p.dv), proveedor: { nit: nitConDv(p.nit, p.dv), razonSocial: p.razonSocial } };
+  }
+  throw rechazo("no-existe");
+}
+
+/** The folder a document goes to; a supplier's own one is created the first time. */
+async function carpetaPara(ctx: Ctx, cliente: ClienteTrimble, tipo: EntidadDocumento, entidadId: string, proveedor?: { nit: string; razonSocial: string }): Promise<CarpetaCde> {
+  const carpetas = new Map((await ctx.store.listCarpetasCde(ctx.projectId)).map((c) => [c.clave, c]));
+  const base = carpetas.get(CARPETA_DE[tipo]);
+  if (!base) throw rechazo("carpetas-sin-preparar");
+  if (tipo !== "proveedor" || !proveedor) return base;
+  const clave = `proveedor:${entidadId}`;
+  const propia = carpetas.get(clave);
+  if (propia) return propia;
+  const nombre = carpetaProveedor(proveedor.nit, proveedor.razonSocial);
+  let folderId = (await buscarEnCarpeta(cliente, base.folderId, nombre, "FOLDER"))?.id ?? null;
+  if (!folderId) {
+    const padre = await leerCarpeta(cliente, base.folderId);
+    if (!padre.carpeta) throw rechazo("carpetas-sin-preparar");
+    const hecha = await crearCarpeta(cliente, padre.carpeta, nombre);
+    if (!hecha.carpeta) throw new ServiceError(`No se pudo crear la carpeta del proveedor: ${explicarEstado(hecha.respuesta.estado)}`, 502);
+    folderId = hecha.carpeta.id;
+  }
+  const carpeta: CarpetaCde = { clave, nombre, folderId, ruta: `${base.ruta} / ${nombre}`, creada: "", creadaPor: ctx.caller.name };
+  await ctx.store.guardarCarpetaCde(ctx.projectId, carpeta);
+  return carpeta;
+}
+
+async function documento(ctx: Ctx, id: string): Promise<Documento> {
+  if (!UUID.test(id)) throw rechazo("datos");
+  const d = (await ctx.store.listDocumentos(ctx.projectId, { id }))[0];
+  if (!d) throw rechazo("no-existe");
+  return d;
+}
+
+async function anotar(ctx: Ctx, documentoId: string, accion: string, ok: boolean, detalle: string) {
+  await ctx.store.registrarSync(ctx.projectId, { documentoId, creado: "", por: ctx.caller.name, accion, resultado: ok ? "ok" : "error", detalle });
+}
+
+/** Saves a change to a document, or tells that someone else changed it meanwhile. */
+async function cambiarDocumento(ctx: Ctx, d: Documento, cambios: Partial<Documento>): Promise<Documento> {
+  try {
+    const nuevo = await ctx.store.actualizarDocumento(ctx.projectId, d.id, cambios, d.version, actor(ctx));
+    if (!nuevo) throw rechazo("version-conflict");
+    return nuevo;
+  } catch (err) {
+    throw traducir(err);
+  }
+}
+
+function leerNuevoDocumento(body: unknown): NuevoDocumento & { id: string } {
+  const o = (body ?? {}) as Record<string, unknown>;
+  const mal = (m: string): never => {
+    throw new ServiceError(m, 400, "datos");
+  };
+  if (typeof o.id !== "string" || !UUID.test(o.id)) mal("Documento no válido.");
+  if (typeof o.entidadTipo !== "string" || !ENTIDADES.includes(o.entidadTipo as EntidadDocumento)) mal("Registro no válido.");
+  if (typeof o.entidadId !== "string" || !UUID.test(o.entidadId)) mal("Registro no válido.");
+  if (typeof o.tipoDoc !== "string" || !/^[a-z0-9_]{1,40}$/.test(o.tipoDoc)) mal("Tipo de documento no válido.");
+  if (typeof o.nombreOriginal !== "string" || !o.nombreOriginal.trim() || o.nombreOriginal.length > 255) mal("Nombre de archivo no válido.");
+  if (typeof o.tamano !== "number" || !Number.isInteger(o.tamano) || o.tamano < 0) mal("Tamaño no válido.");
+  if (typeof o.sha256 !== "string" || !/^[0-9a-f]{64}$/.test(o.sha256)) mal("Huella del archivo no válida.");
+  if (o.origen !== "cargado" && o.origen !== "generado") mal("Origen no válido.");
+  if (o.vence !== null && o.vence !== undefined && (typeof o.vence !== "string" || !/^\d{4}-\d{2}-\d{2}$/.test(o.vence))) mal("Fecha de vencimiento no válida.");
+  return {
+    id: o.id as string,
+    entidadTipo: o.entidadTipo as EntidadDocumento,
+    entidadId: o.entidadId as string,
+    tipoDoc: o.tipoDoc as string,
+    nombreOriginal: (o.nombreOriginal as string).trim(),
+    tamano: o.tamano as number,
+    sha256: o.sha256 as string,
+    origen: o.origen as NuevoDocumento["origen"],
+    vence: (o.vence as string | null | undefined) ?? null,
+  };
+}
+
+/**
+ * Registers a document and opens its upload in Trimble: the browser then
+ * sends the content to the signed URL (or to /contenido, for small files,
+ * when it can't), and asks to confirm. It stays "pendiente" until Trimble
+ * confirms. Permission: the record's module, "documentos".
+ */
+export async function crearDocumento(ctx: Ctx, body: unknown): Promise<SubidaDocumento> {
+  const n = leerNuevoDocumento(body);
+  const m = MODULO_DE[n.entidadTipo];
+  await requerir(ctx, m, "documentos", "documentos.cargar");
+  if (n.tamano > MAX_TAMANO) throw rechazo("archivo-grande");
+  const { tipos } = await tiposLegales(ctx);
+  const tipo = tiposDe(n.entidadTipo, tipos).find((t) => t.clave === n.tipoDoc);
+  if (!tipo) throw new ServiceError("Ese tipo de documento no aplica a este registro.", 400, "datos");
+  if (n.vence && n.entidadTipo !== "proveedor") throw new ServiceError("Solo los documentos legales de proveedores llevan vencimiento.", 400, "datos");
+  const registro = await registroDe(ctx, n.entidadTipo, n.entidadId);
+  const { cliente } = await trimble(ctx);
+  const carpeta = await carpetaPara(ctx, cliente, n.entidadTipo, n.entidadId, registro.proveedor);
+  const d: Documento = {
+    ...n,
+    titulo: tipo.nombre,
+    nombreArchivo: nombreArchivo(registro.prefijo, tipo.nombre, n.nombreOriginal, n.id),
+    carpetaId: carpeta.folderId,
+    ruta: carpeta.ruta,
+    estado: "pendiente",
+    uploadId: null,
+    fileId: null,
+    versionId: null,
+    revision: null,
+    intentos: 0,
+    ultimoError: "",
+    subidoPorId: ctx.caller.id,
+    subidoPor: ctx.caller.name,
+    creado: new Date().toISOString(),
+    confirmado: null,
+    motivoAnulacion: "",
+    version: 1,
+  };
+  try {
+    await ctx.store.crearDocumento(ctx.projectId, d);
+  } catch (err) {
+    throw traducir(err);
+  }
+  await ctx.store.auditar(ctx.projectId, {
+    actorId: ctx.caller.id, actorNombre: ctx.caller.name, accion: "documentos.cargar", modulo: m, objetoTipo: n.entidadTipo, objetoId: n.entidadId, sujetoId: null,
+    sujetoNombre: registro.prefijo, resultado: "ok", detalle: { documento: d.nombreArchivo, ruta: d.ruta, tamano: d.tamano },
+  });
+  return abrirSubida(ctx, cliente, d);
+}
+
+/** Opens a new upload of a registered document (never a second file: fails if the name already exists). */
+async function abrirSubida(ctx: Ctx, cliente: ClienteTrimble, d: Documento): Promise<SubidaDocumento> {
+  const s = await iniciarSubida(cliente, d.carpetaId, d.nombreArchivo, { soloNuevo: true });
+  if (!s.uploadId || !s.url) {
+    const mensaje = `Trimble no abrió la subida: ${explicarEstado(s.respuesta.estado)}`;
+    await anotar(ctx, d.id, "abrir subida", false, mensaje);
+    return { documento: await cambiarDocumento(ctx, d, { estado: "error", ultimoError: mensaje, intentos: d.intentos + 1 }), url: null };
+  }
+  await anotar(ctx, d.id, "abrir subida", true, `Subida ${s.uploadId}`);
+  return { documento: await cambiarDocumento(ctx, d, { estado: "pendiente", uploadId: s.uploadId, ultimoError: "", intentos: d.intentos + 1 }), url: s.url };
+}
+
+/**
+ * The server sends the content for the browser (small files only), after
+ * checking it is the very file that was registered (same SHA-256).
+ */
+export async function enviarDocumento(ctx: Ctx, id: string, contenido: Uint8Array): Promise<{ documento: Documento }> {
+  const d = await documento(ctx, id);
+  await requerir(ctx, MODULO_DE[d.entidadTipo], "documentos", "documentos.cargar");
+  if (contenido.byteLength > MAX_RELEVO) throw rechazo("archivo-grande");
+  // The fingerprint of the bytes received, computed here: never one sent by the browser.
+  const hash = new Uint8Array(await globalThis.crypto.subtle.digest("SHA-256", contenido as Uint8Array<ArrayBuffer>));
+  if ([...hash].map((b) => b.toString(16).padStart(2, "0")).join("") !== d.sha256) throw rechazo("archivo-distinto");
+  if (d.estado !== "pendiente" || !d.uploadId) throw rechazo("estado-no-valido");
+  const { cliente } = await trimble(ctx);
+  const s = await estadoSubida(cliente, d.uploadId);
+  if (s.status !== "UPLOADABLE" || !s.url) throw new ServiceError("La subida ya no recibe el archivo: reinténtala.", 409, "estado-no-valido");
+  const http = await enviarContenido(s.url, contenido, ctx.deps.fetch ?? fetch);
+  const bien = http >= 200 && http < 300;
+  await anotar(ctx, d.id, "enviar desde el servidor", bien, `Respuesta ${http}`);
+  if (!bien) throw new ServiceError(`Trimble no recibió el archivo (respuesta ${http}).`, 502);
+  return { documento: d };
+}
+
+/** Asks Trimble how the upload went; only then is the document "respaldado". */
+export async function confirmarDocumento(ctx: Ctx, id: string): Promise<{ documento: Documento }> {
+  const d = await documento(ctx, id);
+  await requerir(ctx, MODULO_DE[d.entidadTipo], "documentos", "documentos.cargar");
+  if (d.estado === "respaldado" || d.estado === "anulado" || !d.uploadId) return { documento: d };
+  const { cliente } = await trimble(ctx);
+  return { documento: await leerConfirmacion(ctx, cliente, d) };
+}
+
+async function leerConfirmacion(ctx: Ctx, cliente: ClienteTrimble, d: Documento): Promise<Documento> {
+  const s = await estadoSubida(cliente, d.uploadId!);
+  if (s.status === "DONE" && s.fileId && s.versionId) {
+    await anotar(ctx, d.id, "confirmar", true, `Revisión ${s.revision ?? "?"}`);
+    const listo = await cambiarDocumento(ctx, d, { estado: "respaldado", fileId: s.fileId, versionId: s.versionId, revision: s.revision, confirmado: new Date().toISOString(), ultimoError: "" });
+    await ctx.store.auditar(ctx.projectId, {
+      actorId: ctx.caller.id, actorNombre: ctx.caller.name, accion: "documentos.respaldado", modulo: MODULO_DE[d.entidadTipo], objetoTipo: d.entidadTipo, objetoId: d.entidadId,
+      sujetoId: null, sujetoNombre: d.nombreArchivo, resultado: "ok", detalle: { ruta: d.ruta, revision: s.revision },
+    });
+    return listo;
+  }
+  if (s.status === "ERROR" || s.status === "EXPIRED" || s.respuesta.estado === 404) {
+    const mensaje = s.status === "EXPIRED" ? "La subida venció sin recibir el archivo." : s.errorReason || explicarEstado(s.respuesta.estado);
+    await anotar(ctx, d.id, "confirmar", false, mensaje);
+    return cambiarDocumento(ctx, d, { estado: "error", ultimoError: mensaje });
+  }
+  return d;
+}
+
+/**
+ * Retries a document that isn't backed up without making a second file:
+ * if Trimble already has it (the upload finished, or a file with its name is
+ * there), it is just confirmed; otherwise a new upload is opened.
+ */
+export async function reintentarDocumento(ctx: Ctx, id: string): Promise<SubidaDocumento> {
+  const d = await documento(ctx, id);
+  await requerir(ctx, MODULO_DE[d.entidadTipo], "documentos", "documentos.cargar");
+  if (d.estado === "respaldado" || d.estado === "anulado") return { documento: d, url: null };
+  const { cliente } = await trimble(ctx);
+  if (d.uploadId) {
+    const s = await estadoSubida(cliente, d.uploadId);
+    if (s.status === "DONE") return { documento: await leerConfirmacion(ctx, cliente, d), url: null };
+    if (s.status === "UPLOADABLE" && s.url) {
+      await anotar(ctx, d.id, "reintentar", true, "La subida abierta todavía recibe el archivo.");
+      return { documento: d, url: s.url };
+    }
+  }
+  const existente = await buscarEnCarpeta(cliente, d.carpetaId, d.nombreArchivo, "FILE");
+  if (existente?.versionId) {
+    await anotar(ctx, d.id, "reintentar", true, "El archivo ya estaba en Trimble: se confirma sin volver a subirlo.");
+    const listo = await cambiarDocumento(ctx, d, { estado: "respaldado", fileId: existente.id, versionId: existente.versionId, confirmado: new Date().toISOString(), ultimoError: "" });
+    return { documento: listo, url: null };
+  }
+  return abrirSubida(ctx, cliente, d);
+}
+
+/** A short-lived link to open a backed-up document, with the caller's own Trimble permissions. */
+export async function abrirDocumento(ctx: Ctx, id: string): Promise<{ url: string }> {
+  const d = await documento(ctx, id);
+  const m = MODULO_DE[d.entidadTipo];
+  await requerir(ctx, m, "documentos", "documentos.abrir");
+  if (d.estado !== "respaldado" || !d.fileId) throw new ServiceError("El documento todavía no está respaldado en el CDE.", 409, "estado-no-valido");
+  const { cliente } = await trimble(ctx);
+  const r = await urlDescarga(cliente, d.fileId, d.versionId);
+  if (!r.url) throw new ServiceError(`Trimble no entregó el archivo: ${explicarEstado(r.respuesta.estado)}`, r.respuesta.estado === 403 ? 403 : 502);
+  await ctx.store.auditar(ctx.projectId, {
+    actorId: ctx.caller.id, actorNombre: ctx.caller.name, accion: "documentos.abrir", modulo: m, objetoTipo: d.entidadTipo, objetoId: d.entidadId, sujetoId: null,
+    sujetoNombre: d.nombreArchivo, resultado: "ok", detalle: {},
+  });
+  return { url: r.url };
+}
+
+/** Cancels a document in Compras (the file stays in Trimble). */
+export async function anularDocumento(ctx: Ctx, id: string, body: unknown): Promise<{ documento: Documento }> {
+  const d = await documento(ctx, id);
+  const m = MODULO_DE[d.entidadTipo];
+  await requerir(ctx, m, "documentos", "documentos.anular");
+  const motivo = typeof (body as { motivo?: unknown })?.motivo === "string" ? ((body as { motivo: string }).motivo).trim().slice(0, 1000) : "";
+  if (!motivo) throw rechazo("motivo-requerido");
+  if (d.estado === "anulado") throw rechazo("estado-no-valido");
+  const listo = await cambiarDocumento(ctx, d, { estado: "anulado", motivoAnulacion: motivo });
+  await ctx.store.auditar(ctx.projectId, {
+    actorId: ctx.caller.id, actorNombre: ctx.caller.name, accion: "documentos.anular", modulo: m, objetoTipo: d.entidadTipo, objetoId: d.entidadId, sujetoId: null,
+    sujetoNombre: d.nombreArchivo, resultado: "ok", detalle: { motivo },
+  });
+  return { documento: listo };
+}
+
+/** The kinds of legal documents of suppliers (name, mandatory, days of validity, active). Documentos: administrar. */
+export async function guardarTiposDocumento(ctx: Ctx, body: unknown): Promise<DocumentosResponse> {
+  const o = (body ?? {}) as { tipos?: unknown; version?: unknown };
+  if (!Array.isArray(o.tipos) || typeof o.version !== "number") throw rechazo("datos");
+  const tipos: TipoDocumentoLegal[] = o.tipos.map((x) => {
+    const t = (x ?? {}) as Record<string, unknown>;
+    return {
+      clave: String(t.clave ?? ""),
+      nombre: String(t.nombre ?? "").trim(),
+      obligatorio: t.obligatorio === true,
+      vigenciaDias: t.vigenciaDias === null || t.vigenciaDias === undefined || t.vigenciaDias === "" ? null : Number(t.vigenciaDias),
+      activo: t.activo !== false,
+    };
+  });
+  await requerir(ctx, "documentos", "administrar", "documentos.tipos");
+  const antes = await tiposLegales(ctx);
+  const problema = revisarTipos(tipos, antes.tipos);
+  if (problema) throw new ServiceError(problema, 400, "datos");
+  try {
+    await ctx.store.guardarTiposDocumento(ctx.projectId, actor(ctx), tipos, o.version);
+  } catch (err) {
+    throw traducir(err);
+  }
+  await ctx.store.auditar(ctx.projectId, {
+    actorId: ctx.caller.id, actorNombre: ctx.caller.name, accion: "documentos.tipos", modulo: "documentos", objetoTipo: "proyecto", objetoId: ctx.projectId, sujetoId: null,
+    sujetoNombre: "", resultado: "ok", detalle: { tipos: tipos.map((t) => `${t.nombre}${t.obligatorio ? " (obligatorio)" : ""}${t.activo ? "" : " (inactivo)"}`) },
+  });
+  return getDocumentos(ctx, new URLSearchParams());
 }

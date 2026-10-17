@@ -11,7 +11,8 @@ import { isoToDisplay, parseDisplayDate } from "../../lib/propiedades/values";
 import { coincide, fmt } from "../../lib/presupuesto/format";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput, TextCommit } from "../presupuesto/ui";
 import DateField from "../propiedades/DateField";
-import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, td, th } from "./estilos";
+import DocumentosRegistro from "./DocumentosRegistro";
+import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, subtitulo, td, th } from "./estilos";
 
 interface LineaBorrador {
   insumoId: string;
@@ -447,6 +448,12 @@ export default function RequisicionDialog({
           </Notice>
         )}
         {error && <Notice kind="error">{error}</Notice>}
+        {r && (
+          <section>
+            <h3 style={subtitulo}>Documentos</h3>
+            <DocumentosRegistro api={api} entidadTipo="requisicion" entidadId={r.id} permisos={permisos} />
+          </section>
+        )}
       </div>
 
       {pedirMotivo && (

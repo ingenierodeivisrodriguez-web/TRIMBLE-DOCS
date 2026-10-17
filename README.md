@@ -2056,7 +2056,7 @@ Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
 construye por fases; ya están **el acceso por rol, la auditoría, la consulta
 de los insumos del presupuesto, las requisiciones, los proveedores, las
-cotizaciones con su comparativo y las órdenes de compra y contratos**. Aparece en el menú lateral del
+cotizaciones con su comparativo, las órdenes de compra y contratos y sus documentos en el CDE**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2323,10 +2323,89 @@ Reglas (`lib/compras/ordenes.ts` con pruebas, y en PostgreSQL):
 - Todo queda en la auditoría: crear, editar, enviar, aprobar, devolver,
   anular y modificar, con la revisión y el motivo.
 
-### Documentos (CDE): prueba de escritura
+### Documentos en el CDE
 
-Pestaña **Documentos (CDE)** (permiso Documentos: ver; la prueba la hace
-quien tiene Documentos: administrar). Antes de guardar los documentos de
+Los archivos de Compras viven en las carpetas del proyecto en Trimble
+Connect, nunca en la base de datos ni en Supabase Storage. Compras guarda
+solo la referencia: id del archivo y de su versión en Trimble, carpeta,
+nombre, tamaño, huella SHA-256, quién lo cargó y el estado de sincronización.
+
+**Carpetas.** En la pestaña **Documentos (CDE)**, quien tiene Documentos:
+administrar pulsa **Revisar en Trimble** (no crea nada: muestra qué existe)
+y luego **Preparar carpetas**, que pide confirmación con la lista exacta de lo
+que va a crear. En la raíz del proyecto queda:
+
+```
+Compras y Contrataciones/
+  Requisiciones/
+  Cotizaciones/
+  Órdenes de compra/
+  Contratos/
+  Documentación legal de proveedores/
+    890.903.938-8 Ferretería A/   (una por proveedor, al cargar su primer documento)
+  Actas y recepciones/
+```
+
+Si ya hay carpetas con esos nombres, se usan (no se duplican); si alguien
+movió o borró una, se vuelve a buscar o crear. Repetirlo no cambia nada.
+Queda en la auditoría.
+
+**Cargar.** Cada requisición, cotización, orden, contrato y proveedor tiene
+su sección **Documentos** (permiso "Documentos" del módulo: por ejemplo,
+Requisiciones: documentos). Se elige el tipo, el archivo (hasta 100 MB) y,
+para los legales del proveedor, el vencimiento (sugerido según el tipo).
+Antes de cargar dice en qué carpeta quedará. El archivo toma un nombre fijo:
+`REQ-0001 - Soporte - cotización ferretería [d0000000].pdf` (registro, tipo,
+nombre original y el inicio de su id), así un reintento nunca crea otro.
+
+Cómo viaja: el servidor registra el documento como **Pendiente de respaldo**
+y abre la subida en Trimble; el **navegador** envía el archivo directo a la
+URL firmada de Trimble (no pasa por Vercel). Si el navegador no puede
+(CORS), lo envía el servidor, solo hasta 4 MB (el límite de Vercel), y
+comprueba que su huella es la registrada. Luego se pregunta a Trimble hasta
+que confirma la carga: solo entonces queda **Respaldado en el CDE**, con su
+revisión. Una restricción de la base lo garantiza: un documento no puede
+quedar respaldado sin el id y la versión que dio Trimble, ni volver atrás.
+
+**Si algo falla** (se cerró la página, se cayó la red, la subida venció):
+queda Pendiente o Error, en la sección del registro y en la cola
+**Pendientes de respaldo** de la pestaña Documentos (CDE). **Reintentar**
+primero pregunta a Trimble: si el archivo ya llegó, solo se confirma; si la
+subida sigue abierta, se reenvía; si venció, se abre otra con el mismo nombre
+y con `If-None-Match`, así no hay duplicados. El navegador guarda una copia
+local (IndexedDB) hasta la confirmación; si no la tiene, pide el archivo y
+revisa que sea el mismo (huella). Cada paso queda en el historial del
+documento (**Historial**).
+
+**Abrir** pide a Trimble un enlace de descarga de corta duración con los
+permisos del usuario; no hay enlaces públicos. **Anular** pide motivo y deja
+el archivo en Trimble (no se borra nada); el nombre queda libre.
+
+**PDF de la orden.** En una orden o contrato emitido, **Guardar el PDF en
+el CDE** genera el PDF en el navegador (encabezado, proveedor con NIT,
+condiciones, objeto y pólizas del contrato, líneas, IVA y total, quién
+elaboró y aprobó) y lo carga en "Órdenes de compra" o "Contratos". El PDF es
+reproducible (misma orden, mismo archivo), así un reintento lleva la misma
+huella. Una modificación emitida (revisión 1, 2...) se guarda como otro PDF.
+
+**Expediente legal del proveedor.** En la ficha de cada proveedor,
+**Expediente legal** muestra cada tipo de documento (RUT, Cámara de
+Comercio, cédula del representante, certificación bancaria, seguridad
+social, pólizas, otro) con su estado: Falta, Cargado sin confirmar, Vigente,
+Por vencer (15 días) o Vencido. Solo cuenta lo que Trimble confirmó. El
+expediente queda **Completo**, **Por vencer**, **Vencido** o **Incompleto**;
+sale en la lista de proveedores y en la pestaña Documentos (CDE) con lo que
+falta. Quien tiene Documentos: administrar ajusta los tipos (nombre,
+obligatorio, días de vigencia, activo) o agrega otros; no se quitan, se
+desactivan.
+
+La pestaña Documentos (CDE) tiene además **Todos los documentos** (con
+búsqueda) y, para administradores, la prueba de escritura.
+
+### Prueba de escritura en el CDE
+
+Al final de la pestaña **Documentos (CDE)** (solo quien tiene Documentos:
+administrar). Antes de guardar los documentos de
 Compras en las carpetas del proyecto, **Hacer la prueba** confirma que la
 extensión puede escribir en Trimble Connect con la sesión del usuario (su
 token; no hay cuenta técnica):
@@ -2384,6 +2463,10 @@ ejecutar nadie más (`revoke` a `public`, `anon` y `authenticated`).
 | `compras_orden_revisiones` | Cómo era cada orden emitida antes de cada modificación (solo inserción) |
 | `compras_comprometido(línea, excluir)` + trigger `compras_orden_lineas_sin_doble` | Lo ordenado de una línea; el trigger diferido impide pasar lo aprobado |
 | `compras_guardar_orden` / `compras_accion_orden` | Guardan y cambian de estado con permisos, compromiso, precios de la cotización y auditoría |
+| `compras_cde_carpetas` | Las carpetas de Compras en Trimble de cada proyecto: clave, nombre, id de la carpeta, ruta, quién y cuándo |
+| `compras_documentos` | Referencias a los archivos del CDE: registro al que pertenece, tipo, título, nombre original y en Trimble, carpeta, tamaño, huella, vencimiento, estado (pendiente, respaldado, error, anulado), id de subida, de archivo y de versión, revisión, intentos, último error, motivo de anulación, versión. Nombre único por carpeta; restricciones: respaldado exige archivo, versión y confirmación; anulado exige motivo |
+| trigger `compras_documentos_sin_retroceso` | Un documento respaldado no vuelve a pendiente ni cambia de archivo; uno anulado no cambia |
+| `compras_sync_historial` | Cada paso de cada carga con Trimble (solo inserción) |
 
 ### API
 
@@ -2410,6 +2493,15 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `POST comparativos/{requisición}` | Guardar, proponer, aprobar o devolver | Cotizaciones: crear o editar / aprobar |
 | `GET ordenes` / `PUT ordenes` | Órdenes y contratos visibles, sus revisiones y lo pendiente por ordenar / crear o editar un borrador | Órdenes o Contratos: ver / crear o editar |
 | `POST ordenes/{id}/estado` | Enviar, aprobar, devolver, anular o modificar | Según la acción y el tipo |
+| `GET cde/carpetas` / `POST cde/carpetas` | Revisar / preparar las carpetas de Compras en el CDE | Documentos: administrar |
+| `GET documentos` | Documentos (de un registro con `entidadTipo` y `entidadId`, o todos los visibles), carpetas y tipos legales | Ver del módulo del registro (o Documentos: ver) |
+| `POST documentos` | Registrar un documento y abrir su subida en Trimble | Documentos del módulo del registro |
+| `POST documentos/{id}/contenido` | El servidor envía el archivo a Trimble (hasta 4 MB, misma huella) | Documentos del módulo |
+| `POST documentos/{id}/confirmar` / `reintentar` | Preguntar a Trimble si ya está / reintentar sin duplicar | Documentos del módulo |
+| `POST documentos/{id}/abrir` | Enlace de descarga de corta duración de Trimble | Documentos del módulo |
+| `POST documentos/{id}/anular` | Anular con motivo (el archivo sigue en Trimble) | Documentos del módulo |
+| `GET documentos/{id}/historial` | Los pasos de la carga con Trimble | Ver del módulo |
+| `PUT documentos/tipos` | Tipos de documentos legales de proveedores | Documentos: administrar |
 | `POST cde/prueba` | Un paso de la prueba de escritura en el CDE | Documentos: administrar |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
@@ -2425,19 +2517,22 @@ Proveedores y cotizaciones: `nit-repetido`, `proveedor-no-activo`,
 `cotizacion-duplicada`, `cotizacion-no-elegible`, `comparativo-cerrado`,
 `requisicion-no-aprobada` (409). Órdenes: `doble-compromiso`,
 `sin-proveedor-elegido`, `con-ordenes` (409); `objeto-requerido` (400).
+Documentos: `carpetas-sin-preparar`, `documento-duplicado` (409);
+`archivo-grande`, `archivo-distinto` (400).
 
 El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
 reglas puras, `validate`, `store` con Supabase o memoria, `service`,
 `routes`, `client`, `formato`, `planificado`, `presupuestoLectura`,
-`requisiciones`, `proveedores`, `cotizaciones` y `ordenes`, con sus
-pruebas) y `components/compras/`.
+`requisiciones`, `proveedores`, `cotizaciones`, `ordenes`, `cde` (la API de
+Trimble), `documentos` (carpetas, nombres, expediente), `subida` (el lado del
+navegador) y `pdfOrden`, con sus pruebas; `pruebas/trimbleFalso` es un
+Trimble Connect falso que se comporta como su API) y `components/compras/`.
 
 ### Lo que sigue
 
-En este orden: documentos en el CDE de Trimble Connect (sin binarios en la
-base; "respaldado" solo cuando Trimble confirma la carga; incluye el PDF de
-cada orden y contrato), recepción en obra contra lo ordenado, y el panel con
-la trazabilidad de cada insumo.
+En este orden: recepción en obra contra lo ordenado (con sus actas en el
+CDE; una orden no se podrá anular ni bajar por debajo de lo recibido), y el
+panel con la trazabilidad de cada insumo.
 
 ---
 

@@ -84,6 +84,13 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "contratos.anular": "Anular contrato",
   "contratos.modificar": "Modificar contrato (otrosí)",
   "cde.prueba": "Prueba de escritura en el CDE",
+  "cde.carpetas": "Preparar carpetas en el CDE",
+  "documentos.consultar": "Consultar documentos",
+  "documentos.cargar": "Cargar documento al CDE",
+  "documentos.respaldado": "Documento respaldado en el CDE",
+  "documentos.abrir": "Abrir documento",
+  "documentos.anular": "Anular documento",
+  "documentos.tipos": "Cambiar los documentos legales de proveedores",
 };
 
 export function nombreAccion(accion: string): string {
@@ -157,6 +164,14 @@ export function detalleEntrada(e: EntradaAuditoria): string {
     return partes.join(". ");
   }
   if (e.accion === "cde.prueba") return `${String(d.paso ?? "")}: ${String(d.mensaje ?? d.motivo ?? "")}`;
+  if (e.accion === "cde.carpetas") {
+    const creadas = Array.isArray(d.creadas) ? (d.creadas as string[]) : [];
+    return creadas.length ? `Creó: ${creadas.join("; ")}` : "Ya existían todas; solo se registraron";
+  }
+  if (e.accion === "documentos.cargar") return `${String(d.ruta ?? "")} / ${String(d.documento ?? "")}`;
+  if (e.accion === "documentos.respaldado") return `${String(d.ruta ?? "")}, revisión ${String(d.revision ?? "")} en Trimble`;
+  if (e.accion === "documentos.anular") return `motivo: ${String(d.motivo ?? "")}`;
+  if (e.accion === "documentos.tipos") return Array.isArray(d.tipos) ? (d.tipos as string[]).join("; ") : "";
   if (e.accion.startsWith("comparativos.")) {
     const partes: string[] = [];
     if (d.elegida) partes.push(`elegida: ${String(d.elegida)}`);

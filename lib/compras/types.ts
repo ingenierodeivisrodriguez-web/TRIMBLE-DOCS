@@ -623,3 +623,101 @@ export interface PruebaCdeResponse {
   mensaje: string;
   datos: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------- documents in the CDE
+
+export type EntidadDocumento = "requisicion" | "cotizacion" | "orden" | "contrato" | "proveedor" | "recepcion";
+/** pendiente: registered, waiting for Trimble's confirmation; respaldado: Trimble confirmed it (has file and version ids). */
+export type EstadoDocumento = "pendiente" | "respaldado" | "error" | "anulado";
+export type OrigenDocumento = "cargado" | "generado";
+
+export interface Documento {
+  id: string;
+  entidadTipo: EntidadDocumento;
+  entidadId: string;
+  /** Kind of document (a supplier's legal ones are configurable). */
+  tipoDoc: string;
+  titulo: string;
+  nombreOriginal: string;
+  /** Name in Trimble Connect (fixed, so a retry never makes another file). */
+  nombreArchivo: string;
+  carpetaId: string;
+  /** Path shown to people: "Compras y Contrataciones / Requisiciones". */
+  ruta: string;
+  tamano: number;
+  sha256: string;
+  origen: OrigenDocumento;
+  /** YYYY-MM-DD: legal documents that expire. */
+  vence: string | null;
+  estado: EstadoDocumento;
+  uploadId: string | null;
+  fileId: string | null;
+  versionId: string | null;
+  revision: number | null;
+  intentos: number;
+  ultimoError: string;
+  subidoPorId: string;
+  subidoPor: string;
+  creado: string;
+  confirmado: string | null;
+  motivoAnulacion: string;
+  version: number;
+}
+
+export interface CarpetaCde {
+  clave: string;
+  nombre: string;
+  folderId: string;
+  ruta: string;
+  creada: string;
+  creadaPor: string;
+}
+
+export interface TipoDocumentoLegal {
+  clave: string;
+  nombre: string;
+  obligatorio: boolean;
+  /** Days it is valid from its issue (null: no expiry), to suggest when it expires. */
+  vigenciaDias: number | null;
+  activo: boolean;
+}
+
+export interface SyncEntrada {
+  documentoId: string;
+  creado: string;
+  por: string;
+  accion: string;
+  resultado: "ok" | "error";
+  detalle: string;
+}
+
+export interface DocumentosResponse {
+  documentos: Documento[];
+  carpetas: CarpetaCde[];
+  tipos: TipoDocumentoLegal[];
+  /** The config version (the legal document kinds are saved with it). */
+  versionConfig: number;
+  hoy: string;
+}
+
+export interface NuevoDocumento {
+  entidadTipo: EntidadDocumento;
+  entidadId: string;
+  tipoDoc: string;
+  nombreOriginal: string;
+  tamano: number;
+  sha256: string;
+  origen: OrigenDocumento;
+  vence: string | null;
+}
+
+/** A document registered and its upload: the signed URL to PUT the content (null when there is nothing to send). */
+export interface SubidaDocumento {
+  documento: Documento;
+  url: string | null;
+}
+
+export interface EstadoCarpetas {
+  raiz: { id: string; permiso: string | null };
+  carpetas: { clave: string; nombre: string; ruta: string; folderId: string | null; existe: boolean; guardada: boolean }[];
+}

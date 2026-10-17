@@ -6,12 +6,14 @@ import type { ComprasApi } from "../../lib/compras/client";
 import { numeroCotizacion, totalesCotizacion } from "../../lib/compras/cotizaciones";
 import { fecha } from "../../lib/compras/formato";
 import { ESTADOS_PROVEEDOR, leerNit, nitConDv } from "../../lib/compras/proveedores";
-import { EstadoProveedor, Permiso, Proveedor, ProveedoresResponse, TipoPersona } from "../../lib/compras/types";
+import { ESTADOS_EXPEDIENTE, expediente } from "../../lib/compras/documentos";
+import { DocumentosResponse, EstadoProveedor, Permiso, Proveedor, ProveedoresResponse, TipoPersona } from "../../lib/compras/types";
 import { coincide, fmt } from "../../lib/presupuesto/format";
 import { TIPO_LABELS, TIPOS_INSUMO, TipoInsumo } from "../../lib/presupuesto/types";
 import { ApiError } from "../../lib/propiedades/client";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
-import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, td, th } from "./estilos";
+import DocumentosRegistro from "./DocumentosRegistro";
+import { botonPeligro, botonSecundario, etiqueta, linkBtn, select, subtitulo, td, th } from "./estilos";
 
 /** The project's suppliers: register, correct, block or deactivate, and their quotations. */
 export default function Proveedores({ api, permisos, onSinAcceso }: { api: ComprasApi; permisos: Permiso[]; onSinAcceso: (err: unknown) => void }) {
@@ -21,16 +23,23 @@ export default function Proveedores({ api, permisos, onSinAcceso }: { api: Compr
   const [estado, setEstado] = useState<EstadoProveedor | "">("");
   const [abierto, setAbierto] = useState<Proveedor | "nuevo" | null>(null);
   const [cambiarEstado, setCambiarEstado] = useState<Proveedor | null>(null);
+  const [docs, setDocs] = useState<DocumentosResponse | null>(null);
+
+  const cargarDocs = useCallback(() => {
+    // The legal files are a plus: the list works without them.
+    api.getDocumentos({ entidadTipo: "proveedor" }).then(setDocs, () => setDocs(null));
+  }, [api]);
 
   const cargar = useCallback(async () => {
     setError("");
+    cargarDocs();
     try {
       setDatos(await api.getProveedores());
     } catch (err) {
       setError(message(err));
       onSinAcceso(err);
     }
-  }, [api, onSinAcceso]);
+  }, [api, onSinAcceso, cargarDocs]);
 
   useEffect(() => {
     cargar();
@@ -80,6 +89,7 @@ export default function Proveedores({ api, permisos, onSinAcceso }: { api: Compr
               <th style={th}>Suministra</th>
               <th style={th}>IVA</th>
               <th style={th}>Estado</th>
+              {docs && <th style={th}>Expediente</th>}
               <th style={{ ...th, textAlign: "right" }}>Cotizaciones</th>
               <th style={th} aria-label="Acciones" />
             </tr>
@@ -106,6 +116,7 @@ export default function Proveedores({ api, permisos, onSinAcceso }: { api: Compr
                   <td style={td} title={p.motivoEstado}>
                     <span style={etiqueta(e.color, e.fondo)}>{e.texto}</span>
                   </td>
+                  {docs && <CeldaExpediente proveedorId={p.id} docs={docs} />}
                   <td style={{ ...td, textAlign: "right" }}>{cotsDe(p.id).length || "—"}</td>
                   <td style={{ ...td, whiteSpace: "nowrap", textAlign: "right" }}>
                     {tiene(permisos, "proveedores", "anular") && (
@@ -119,7 +130,7 @@ export default function Proveedores({ api, permisos, onSinAcceso }: { api: Compr
             })}
             {filas.length === 0 && (
               <tr>
-                <td colSpan={9} style={{ ...td, color: "var(--tc-gray-500)" }}>
+                <td colSpan={10} style={{ ...td, color: "var(--tc-gray-500)" }}>
                   {datos.proveedores.length ? "Ningún proveedor coincide." : "Todavía no hay proveedores en este proyecto."}
                 </td>
               </tr>
@@ -134,12 +145,16 @@ export default function Proveedores({ api, permisos, onSinAcceso }: { api: Compr
           proveedor={abierto === "nuevo" ? null : abierto}
           editable={abierto === "nuevo" ? tiene(permisos, "proveedores", "crear") : tiene(permisos, "proveedores", "editar")}
           historial={abierto === "nuevo" ? [] : cotsDe(abierto.id)}
+          permisos={permisos}
           onGuardado={(d) => {
             setDatos(d);
             setAbierto(null);
           }}
           onRecargar={cargar}
-          onClose={() => setAbierto(null)}
+          onClose={() => {
+            setAbierto(null);
+            cargarDocs();
+          }}
         />
       )}
       {cambiarEstado && (
@@ -162,6 +177,7 @@ function ProveedorDialog({
   proveedor: p,
   editable,
   historial,
+  permisos,
   onGuardado,
   onRecargar,
   onClose,
@@ -170,6 +186,7 @@ function ProveedorDialog({
   proveedor: Proveedor | null;
   editable: boolean;
   historial: ProveedoresResponse["cotizaciones"];
+  permisos: Permiso[];
   onGuardado: (d: ProveedoresResponse) => void;
   onRecargar: () => void;
   onClose: () => void;
@@ -190,6 +207,7 @@ function ProveedorDialog({
   const [responsableIva, setResponsableIva] = useState(p?.responsableIva ?? true);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  const [docs, setDocs] = useState<DocumentosResponse | null>(null);
 
   const lectura = nit.trim() ? leerNit(nit) : null;
   const problema = !lectura ? "Escribe el NIT." : "error" in lectura ? lectura.error : !campos.razonSocial.trim() ? "Escribe la razón social." : "";
@@ -327,6 +345,13 @@ function ProveedorDialog({
             )}
           </div>
         )}
+        {p && (
+          <section>
+            <h3 style={subtitulo}>Expediente legal</h3>
+            {docs && <Expediente proveedorId={p.id} docs={docs} />}
+            <DocumentosRegistro api={api} entidadTipo="proveedor" entidadId={p.id} permisos={permisos} alCambiar={setDocs} />
+          </section>
+        )}
         {error && <Notice kind="error">{error}</Notice>}
       </div>
     </Modal>
@@ -388,5 +413,56 @@ function EstadoDialog({ api, proveedor: p, onGuardado, onClose }: { api: Compras
         {error && <Notice kind="error">{error}</Notice>}
       </div>
     </Modal>
+  );
+}
+
+const VIGENCIA_TEXTO: Record<string, string> = {
+  falta: "Falta",
+  "sin-respaldo": "Cargado, sin confirmar en el CDE",
+  vigente: "Vigente",
+  "por-vencer": "Por vencer",
+  vencido: "Vencido",
+  "sin-vencimiento": "Vigente (no vence)",
+};
+
+/** The supplier's legal file in the list: its state, and what is missing in the tooltip. */
+function CeldaExpediente({ proveedorId, docs }: { proveedorId: string; docs: DocumentosResponse }) {
+  const exp = expediente(proveedorId, docs.documentos, docs.tipos, docs.hoy);
+  const e = ESTADOS_EXPEDIENTE[exp.estado];
+  const pendientes = exp.items.filter((i) => i.estado !== "vigente" && i.estado !== "sin-vencimiento" && (i.tipo.obligatorio || i.documento));
+  return (
+    <td style={td} title={pendientes.map((i) => `${i.tipo.nombre}: ${VIGENCIA_TEXTO[i.estado].toLowerCase()}`).join("\n") || "Todos los documentos obligatorios están vigentes y respaldados."}>
+      <span style={etiqueta(e.color, e.fondo)}>{e.texto}</span>
+    </td>
+  );
+}
+
+/** Each kind of legal document with its latest backed-up one. */
+function Expediente({ proveedorId, docs }: { proveedorId: string; docs: DocumentosResponse }) {
+  const exp = expediente(proveedorId, docs.documentos, docs.tipos, docs.hoy);
+  const e = ESTADOS_EXPEDIENTE[exp.estado];
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <p style={{ margin: "0 0 6px", fontSize: 13 }}>
+        Estado: <span style={etiqueta(e.color, e.fondo)}>{e.texto}</span>{" "}
+        <span style={{ color: "var(--tc-gray-500)" }}>(cuenta solo lo que Trimble confirmó; los marcados con * son obligatorios)</span>
+      </p>
+      <table style={{ borderCollapse: "collapse", width: "100%" }}>
+        <tbody>
+          {exp.items.map((i) => (
+            <tr key={i.tipo.clave}>
+              <td style={td}>
+                {i.tipo.nombre}
+                {i.tipo.obligatorio ? " *" : ""}
+              </td>
+              <td style={{ ...td, color: i.estado === "vencido" || (i.estado === "falta" && i.tipo.obligatorio) ? "#b3261e" : i.estado === "por-vencer" ? "#a35200" : undefined }}>
+                {VIGENCIA_TEXTO[i.estado]}
+                {i.documento?.vence && i.estado !== "falta" && i.estado !== "sin-respaldo" ? ` (vence el ${fecha(i.documento.vence)})` : ""}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }

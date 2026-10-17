@@ -7,6 +7,10 @@ import { numeroRequisicion, puedeEditar, revisarAccion, TRANSICIONES } from "./r
 import type { RolInicial } from "./roles";
 import { clienteSupabase, eq, faltaTabla } from "./supabase";
 import {
+  CarpetaCde,
+  Documento,
+  SyncEntrada,
+  TipoDocumentoLegal,
   AccionSobreOrden,
   CambioOrden,
   LineaOrden,
@@ -98,6 +102,18 @@ export interface ComprasStore {
   /** Creates (version 0) or changes a draft; lines come with the prices to save (the quotation's, in revision 0). */
   guardarOrden(projectId: string, actor: Actor, id: string, cambio: OrdenGuardada): Promise<number>;
   accionOrden(projectId: string, actor: Actor, id: string, a: AccionSobreOrden): Promise<number>;
+
+  listCarpetasCde(projectId: string): Promise<CarpetaCde[]>;
+  guardarCarpetaCde(projectId: string, carpeta: CarpetaCde): Promise<void>;
+  /** The legal document kinds saved for the project (null: the initial ones) and the config version. */
+  getTiposDocumento(projectId: string): Promise<{ tipos: TipoDocumentoLegal[] | null; version: number }>;
+  guardarTiposDocumento(projectId: string, actor: Actor, tipos: TipoDocumentoLegal[], version: number): Promise<number>;
+  listDocumentos(projectId: string, filtro: { entidadTipo?: Documento["entidadTipo"]; entidadId?: string; id?: string }): Promise<Documento[]>;
+  crearDocumento(projectId: string, d: Documento): Promise<void>;
+  /** Saves the changes if the stored version is still `version`; returns the document (null: someone changed it). */
+  actualizarDocumento(projectId: string, id: string, cambios: Partial<Omit<Documento, "id" | "version">>, version: number, actor: Actor): Promise<Documento | null>;
+  registrarSync(projectId: string, e: SyncEntrada): Promise<void>;
+  listSync(projectId: string, documentoId: string): Promise<SyncEntrada[]>;
 
   /** Every requisition of the project with its lines, newest first. */
   listRequisiciones(projectId: string): Promise<Requisicion[]>;
@@ -246,6 +262,7 @@ function supabaseStore(): ComprasStore | null {
       if (/compras_req_lineas_unica/.test(body)) return rechazo("linea-duplicada");
       if (/compras_proveedores_project_id_nit/.test(body)) return rechazo("nit-repetido");
       if (/compras_cotizaciones_una_por_proveedor/.test(body)) return rechazo("cotizacion-duplicada");
+      if (/compras_documentos_nombre_unico/.test(body)) return rechazo("documento-duplicado");
       return rechazo("nombre-repetido");
     }
     if (faltaTabla(body)) return new StoreError(SETUP_HINT);
@@ -518,6 +535,82 @@ function supabaseStore(): ComprasStore | null {
     accionOrden: (projectId, actor, id, a) =>
       rpc<number>("compras_accion_orden", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_accion: a.accion, p_motivo: a.motivo, p_version: a.version }),
 
+    async listCarpetasCde(projectId) {
+      const rows = await all<{ clave: string; nombre: string; folder_id: string; ruta: string; creada: string; creada_por: string }>(
+        `/compras_cde_carpetas?project_id=${eq(projectId)}&select=clave,nombre,folder_id,ruta,creada,creada_por&order=clave.asc`
+      );
+      return rows.map((r) => ({ clave: r.clave, nombre: r.nombre, folderId: r.folder_id, ruta: r.ruta, creada: r.creada, creadaPor: r.creada_por }));
+    },
+
+    async guardarCarpetaCde(projectId, c) {
+      await call("/compras_cde_carpetas?on_conflict=project_id,clave", {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({ project_id: projectId, clave: c.clave, nombre: c.nombre, folder_id: c.folderId, ruta: c.ruta, creada_por: c.creadaPor }),
+      });
+    },
+
+    async getTiposDocumento(projectId) {
+      const rows = await json<{ tipos_documento: TipoDocumentoLegal[] | null; version: number }[]>(`/compras_config?project_id=${eq(projectId)}&select=tipos_documento,version`);
+      return rows[0] ? { tipos: Array.isArray(rows[0].tipos_documento) ? rows[0].tipos_documento : null, version: rows[0].version } : { tipos: null, version: 0 };
+    },
+
+    async guardarTiposDocumento(projectId, actor, tipos, version) {
+      if (version === 0) {
+        await call("/compras_config", {
+          method: "POST",
+          headers: { Prefer: "return=minimal" },
+          body: JSON.stringify({ project_id: projectId, tipos_documento: tipos, version: 1, actualizado_por: actor.nombre }),
+        });
+        return 1;
+      }
+      const rows = await json<{ version: number }[]>(`/compras_config?project_id=${eq(projectId)}&version=eq.${version}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ tipos_documento: tipos, version: version + 1, actualizado: new Date().toISOString(), actualizado_por: actor.nombre }),
+      });
+      if (!rows.length) throw rechazo("version-conflict");
+      return rows[0].version;
+    },
+
+    async listDocumentos(projectId, f) {
+      const q = [`project_id=${eq(projectId)}`];
+      if (f.entidadTipo) q.push(`entidad_tipo=${eq(f.entidadTipo)}`);
+      if (f.entidadId) q.push(`entidad_id=${eq(f.entidadId)}`);
+      if (f.id) q.push(`id=${eq(f.id)}`);
+      const rows = await all<DocumentoRow>(`/compras_documentos?${q.join("&")}&select=${COLUMNAS_DOCUMENTO}&order=creado.desc`);
+      return rows.map(documentoDeFila);
+    },
+
+    async crearDocumento(projectId, d) {
+      await call("/compras_documentos", { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ ...filaDeDocumento(d), project_id: projectId, id: d.id }) });
+    },
+
+    async actualizarDocumento(projectId, id, cambios, version, actor) {
+      const fila = filaDeDocumento(cambios);
+      const rows = await json<DocumentoRow[]>(`/compras_documentos?project_id=${eq(projectId)}&id=${eq(id)}&version=eq.${version}&select=${COLUMNAS_DOCUMENTO}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify({ ...fila, version: version + 1, actualizado: new Date().toISOString(), actualizado_por: actor.nombre }),
+      });
+      return rows[0] ? documentoDeFila(rows[0]) : null;
+    },
+
+    async registrarSync(projectId, e) {
+      await call("/compras_sync_historial", {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ project_id: projectId, documento_id: e.documentoId, por: e.por, accion: e.accion, resultado: e.resultado, detalle: e.detalle.slice(0, 1000) }),
+      });
+    },
+
+    async listSync(projectId, documentoId) {
+      const rows = await all<{ documento_id: string; creado: string; por: string; accion: string; resultado: SyncEntrada["resultado"]; detalle: string }>(
+        `/compras_sync_historial?project_id=${eq(projectId)}&documento_id=${eq(documentoId)}&select=documento_id,creado,por,accion,resultado,detalle&order=id.asc`
+      );
+      return rows.map((r) => ({ documentoId: r.documento_id, creado: r.creado, por: r.por, accion: r.accion, resultado: r.resultado, detalle: r.detalle }));
+    },
+
     async listRequisiciones(projectId) {
       const [reqs, lineas] = await Promise.all([
         all<RequisicionRow>(
@@ -712,6 +805,82 @@ function comparativoDeFila(r: ComparativoRow): Comparativo {
     aprobadoPor: r.aprobado_por,
     version: r.version,
   };
+}
+
+const COLUMNAS_DOCUMENTO =
+  "id,entidad_tipo,entidad_id,tipo_doc,titulo,nombre_original,nombre_archivo,carpeta_id,ruta,tamano,sha256,origen,vence,estado,upload_id,file_id,version_id,revision,intentos,ultimo_error,subido_por_id,subido_por,creado,confirmado,motivo_anulacion,version";
+
+interface DocumentoRow {
+  id: string;
+  entidad_tipo: Documento["entidadTipo"];
+  entidad_id: string;
+  tipo_doc: string;
+  titulo: string;
+  nombre_original: string;
+  nombre_archivo: string;
+  carpeta_id: string;
+  ruta: string;
+  tamano: number | string;
+  sha256: string;
+  origen: Documento["origen"];
+  vence: string | null;
+  estado: Documento["estado"];
+  upload_id: string | null;
+  file_id: string | null;
+  version_id: string | null;
+  revision: number | null;
+  intentos: number;
+  ultimo_error: string;
+  subido_por_id: string;
+  subido_por: string;
+  creado: string;
+  confirmado: string | null;
+  motivo_anulacion: string;
+  version: number;
+}
+
+function documentoDeFila(r: DocumentoRow): Documento {
+  return {
+    id: r.id,
+    entidadTipo: r.entidad_tipo,
+    entidadId: r.entidad_id,
+    tipoDoc: r.tipo_doc,
+    titulo: r.titulo,
+    nombreOriginal: r.nombre_original,
+    nombreArchivo: r.nombre_archivo,
+    carpetaId: r.carpeta_id,
+    ruta: r.ruta,
+    tamano: Number(r.tamano),
+    sha256: r.sha256,
+    origen: r.origen,
+    vence: r.vence,
+    estado: r.estado,
+    uploadId: r.upload_id,
+    fileId: r.file_id,
+    versionId: r.version_id,
+    revision: r.revision,
+    intentos: r.intentos,
+    ultimoError: r.ultimo_error,
+    subidoPorId: r.subido_por_id,
+    subidoPor: r.subido_por,
+    creado: r.creado,
+    confirmado: r.confirmado,
+    motivoAnulacion: r.motivo_anulacion,
+    version: r.version,
+  };
+}
+
+/** Only the fields given, with the database's names. */
+function filaDeDocumento(d: Partial<Documento>): Record<string, unknown> {
+  const mapa: Record<string, string> = {
+    entidadTipo: "entidad_tipo", entidadId: "entidad_id", tipoDoc: "tipo_doc", titulo: "titulo", nombreOriginal: "nombre_original", nombreArchivo: "nombre_archivo",
+    carpetaId: "carpeta_id", ruta: "ruta", tamano: "tamano", sha256: "sha256", origen: "origen", vence: "vence", estado: "estado", uploadId: "upload_id", fileId: "file_id",
+    versionId: "version_id", revision: "revision", intentos: "intentos", ultimoError: "ultimo_error", subidoPorId: "subido_por_id", subidoPor: "subido_por",
+    confirmado: "confirmado", motivoAnulacion: "motivo_anulacion",
+  };
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(d)) if (mapa[k] && v !== undefined) out[mapa[k]] = v;
+  return out;
 }
 
 interface OrdenRow {
@@ -942,6 +1111,10 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
   const ordenes = new Map<string, Orden & { projectId: string }>();
   const revisiones: (RevisionOrden & { projectId: string })[] = [];
   const ordsDe = (projectId: string): Orden[] => [...ordenes.values()].filter((o) => o.projectId === projectId).map(sinProyecto);
+  const carpetasCde = new Map<string, CarpetaCde & { projectId: string }>();
+  const tiposDoc = new Map<string, TipoDocumentoLegal[]>();
+  const documentos = new Map<string, Documento & { projectId: string }>();
+  const sync: (SyncEntrada & { projectId: string })[] = [];
   const siguiente = (projectId: string, tipo: string) => {
     const n = (consecutivos.get(`${projectId}|${tipo}`) ?? 0) + 1;
     consecutivos.set(`${projectId}|${tipo}`, n);
@@ -1247,6 +1420,53 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
         detalle: { de, revision: revisionAntes, motivo: a.motivo.trim() },
       });
       return o.version;
+    },
+    async listCarpetasCde(projectId) {
+      return [...carpetasCde.values()].filter((c) => c.projectId === projectId).map(sinProyecto);
+    },
+    async guardarCarpetaCde(projectId, c) {
+      carpetasCde.set(`${projectId}|${c.clave}`, { ...c, projectId, creada: c.creada || ahora() });
+    },
+    async getTiposDocumento(projectId) {
+      return { tipos: tiposDoc.has(projectId) ? structuredClone(tiposDoc.get(projectId)!) : null, version: configDe(projectId).version };
+    },
+    async guardarTiposDocumento(projectId, actor, tipos, version) {
+      const c = configDe(projectId);
+      if (c.version !== version) throw rechazo("version-conflict");
+      configs.set(projectId, { ...c, version: version + 1 });
+      tiposDoc.set(projectId, structuredClone(tipos));
+      void actor;
+      return version + 1;
+    },
+    async listDocumentos(projectId, f) {
+      return [...documentos.values()]
+        .filter((d) => d.projectId === projectId && (!f.entidadTipo || d.entidadTipo === f.entidadTipo) && (!f.entidadId || d.entidadId === f.entidadId) && (!f.id || d.id === f.id))
+        .sort((a, b) => b.creado.localeCompare(a.creado))
+        .map(sinProyecto);
+    },
+    async crearDocumento(projectId, d) {
+      const choca = [...documentos.values()].some((x) => x.projectId === projectId && x.estado !== "anulado" && x.carpetaId === d.carpetaId && x.nombreArchivo.toLowerCase() === d.nombreArchivo.toLowerCase());
+      if (choca) throw rechazo("documento-duplicado");
+      documentos.set(d.id, { ...structuredClone(d), projectId });
+    },
+    async actualizarDocumento(projectId, id, cambios, version, actor) {
+      const d = documentos.get(id);
+      if (!d || d.projectId !== projectId || d.version !== version) return null;
+      // The same rules as the database: confirmed before backed up; a backed-up one only goes to cancelled; a cancelled one doesn't change.
+      const nuevo = { ...d, ...cambios };
+      if (d.estado === "anulado") throw rechazo("estado-no-valido");
+      if (d.estado === "respaldado" && (!["respaldado", "anulado"].includes(nuevo.estado) || nuevo.fileId !== d.fileId || nuevo.versionId !== d.versionId)) throw rechazo("estado-no-valido");
+      if (nuevo.estado === "respaldado" && (!nuevo.fileId || !nuevo.versionId || !nuevo.confirmado)) throw rechazo("datos");
+      if (nuevo.estado === "anulado" && !nuevo.motivoAnulacion.trim()) throw rechazo("datos");
+      Object.assign(d, cambios, { version: version + 1 });
+      void actor;
+      return sinProyecto(d);
+    },
+    async registrarSync(projectId, e) {
+      sync.push({ ...e, projectId, creado: e.creado || ahora() });
+    },
+    async listSync(projectId, documentoId) {
+      return sync.filter((e) => e.projectId === projectId && e.documentoId === documentoId).map(sinProyecto);
     },
     async listRequisiciones(projectId) {
       return reqsDe(projectId).sort((a, b) => b.numero - a.numero);
