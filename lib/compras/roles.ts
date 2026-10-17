@@ -29,10 +29,10 @@ export const ROLES_INICIALES: RolInicial[] = [
   {
     clave: "director",
     nombre: "Director",
-    descripcion: "Ve todo y aprueba requisiciones, comparativos, órdenes, contratos y recepciones.",
+    descripcion: "Ve todo y aprueba requisiciones (también sobre el presupuesto), comparativos, órdenes, contratos y recepciones.",
     permisos: [
       ...VER_TODO,
-      ...de("requisiciones", "aprobar", "anular", "documentos"),
+      ...de("requisiciones", "aprobar", "exceder", "anular", "documentos"),
       ...de("cotizaciones", "aprobar", "documentos"),
       ...de("ordenes", "aprobar", "anular", "documentos"),
       ...de("contratos", "aprobar", "anular", "documentos"),

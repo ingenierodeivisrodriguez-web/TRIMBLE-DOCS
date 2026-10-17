@@ -1,6 +1,18 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts } from "../propiedades/types";
-import type { AccesosResponse, CambioAsignacion, CambioRol, EntradaAuditoria, EstadoResponse, FiltroAuditoria, InsumosResponse } from "./types";
+import type {
+  AccesosResponse,
+  AccionSobreRequisicion,
+  CambioAsignacion,
+  CambioRequisicion,
+  CambioRol,
+  ConfigCompras,
+  EntradaAuditoria,
+  EstadoResponse,
+  FiltroAuditoria,
+  InsumosResponse,
+  RequisicionesResponse,
+} from "./types";
 
 /** What the Compras screen needs from the data service. */
 export interface ComprasApi {
@@ -12,6 +24,10 @@ export interface ComprasApi {
   guardarRol(cambio: CambioRol): Promise<AccesosResponse>;
   getAuditoria(filtro: FiltroAuditoria): Promise<EntradaAuditoria[]>;
   getInsumos(): Promise<InsumosResponse>;
+  getRequisiciones(): Promise<RequisicionesResponse>;
+  guardarRequisicion(cambio: CambioRequisicion): Promise<RequisicionesResponse>;
+  accionRequisicion(id: string, accion: AccionSobreRequisicion): Promise<RequisicionesResponse>;
+  guardarConfig(config: ConfigCompras): Promise<ConfigCompras>;
 }
 
 /** The HTTP client for /api/compras, authenticated with the user's Trimble token. */
@@ -23,6 +39,10 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     getAccesos: () => request<AccesosResponse>("/accesos"),
     getContactos: () => request<ProjectContacts>("/contactos"),
     getInsumos: () => request<InsumosResponse>("/insumos"),
+    getRequisiciones: () => request<RequisicionesResponse>("/requisiciones"),
+    guardarRequisicion: (cambio) => request<RequisicionesResponse>("/requisiciones", { method: "PUT", body: JSON.stringify(cambio) }),
+    accionRequisicion: (id, accion) => request<RequisicionesResponse>(`/requisiciones/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(accion) }),
+    guardarConfig: (config) => request<ConfigCompras>("/config", { method: "PUT", body: JSON.stringify(config) }),
     guardarUsuario: (cambio) => request<AccesosResponse>("/accesos/usuarios", { method: "PUT", body: JSON.stringify(cambio) }),
     guardarRol: (cambio) => request<AccesosResponse>("/accesos/roles", { method: "PUT", body: JSON.stringify(cambio) }),
     async getAuditoria(f) {

@@ -2054,8 +2054,8 @@ Códigos de error:
 Abastecimiento de la obra a partir de los insumos planificados en
 Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
-construye por fases; ya están **el acceso por rol, la auditoría y la consulta
-de los insumos del presupuesto**. Aparece en el menú lateral del
+construye por fases; ya están **el acceso por rol, la auditoría, la consulta
+de los insumos del presupuesto y las requisiciones**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2089,14 +2089,15 @@ herramienta, aunque algunos lleguen en fases siguientes: Accesos y roles,
 Auditoría, Insumos del presupuesto, Requisiciones, Proveedores, Cotizaciones
 y comparativos, Órdenes de compra, Contratos, Documentos (CDE), Recepción en
 obra y Panel y trazabilidad. Las acciones: ver, crear, editar,
-aprobar/rechazar, anular, cargar/descargar documentos y administrar (dar
-accesos; en Documentos, preparar las carpetas y los tipos de documento).
-Solo se ofrecen las combinaciones que tienen sentido: 42 permisos.
+aprobar/rechazar, aprobar sobre el presupuesto (solo en Requisiciones),
+anular, cargar/descargar documentos y administrar (dar accesos; en
+Documentos, preparar las carpetas y los tipos de documento). Solo se ofrecen
+las combinaciones que tienen sentido: 43 permisos.
 
 | Rol inicial | Para qué |
 |---|---|
 | Administrador de plataforma | Todo, incluido dar y revocar accesos. Su matriz no se puede cambiar |
-| Director | Ve todo y aprueba requisiciones, comparativos, órdenes, contratos y recepciones |
+| Director | Ve todo y aprueba requisiciones (también sobre el presupuesto), comparativos, órdenes, contratos y recepciones |
 | Residente | Pide insumos (requisiciones) y registra lo que llega a la obra |
 | Compras | Proveedores, cotizaciones, comparativos y órdenes de compra |
 | Presupuesto y costos | Revisa que lo pedido quepa en el presupuesto y aprueba requisiciones |
@@ -2164,9 +2165,62 @@ presupuesto se leyó y quién la guardó.
   (herramienta menor, "%MO") no se compran: se listan aparte con su valor.
 - Es solo lectura: `lib/compras/presupuestoLectura.ts` solo hace consultas
   GET a `presupuesto_documentos`, `presupuesto_mediciones` y la vista
-  `presupuesto_resumen_elementos` (una prueba lo verifica). Lo solicitado,
-  aprobado, comprometido, recibido y pendiente llegan con las requisiciones y
-  las órdenes.
+  `presupuesto_resumen_elementos` (una prueba lo verifica).
+- Columnas **Solicitado** (requisiciones enviadas con lo pedido, y aprobadas
+  con lo aprobado), **Aprobado** y **Por solicitar** (planificado menos
+  solicitado; en rojo si se pasó). Lo comprometido y lo recibido llegan con
+  las órdenes y la recepción.
+
+### Requisiciones
+
+Pestaña **Requisiciones** (permiso Requisiciones: ver). Lista con número
+(REQ-0001, consecutivo por proyecto), fecha de creación, solicitante, fecha
+requerida en obra (en rojo si ya pasó y sigue pendiente), prioridad, estado,
+cuántos insumos y el valor estimado a precios del presupuesto. Se filtra por
+estado y "solo las mías"; un atajo muestra las que están por aprobar.
+
+**Cómo se usa:** ＋ Nueva requisición → fecha requerida (DD-MM-AAAA),
+prioridad (baja, normal, alta, urgente) y para qué se necesita → en
+"Agregar un insumo" se escribe el código o la descripción y se elige de la
+lista (dice cuánto queda disponible) → cada línea propone lo disponible
+como cantidad, se puede asignar a una partida o dejar "Todo el proyecto" →
+**Guardar borrador** o **Enviar a aprobación**. Quien aprueba abre la
+requisición, ajusta la columna "Aprobar" si aprueba menos, y elige
+**Aprobar** (nota opcional), **Devolver** (vuelve a borrador para corregir)
+o **Rechazar**; también se puede **Anular**. Devolver, rechazar y anular
+piden el motivo, que queda a la vista en la requisición.
+
+Estados: borrador → por aprobar → aprobada o rechazada; devuelta vuelve a
+borrador; borrador, por aprobar o aprobada se pueden anular. Nunca se borran.
+
+Reglas (en `lib/compras/requisiciones.ts` con pruebas, y otra vez en
+PostgreSQL dentro de una transacción con candado por proyecto):
+
+- Solo insumos que están en el presupuesto vigente (no los de porcentaje), y
+  la partida, si se elige, debe usar ese insumo. Código, descripción,
+  unidad, tipo y precio se copian del presupuesto en el servidor (no los
+  manda el navegador); el mismo insumo y partida no se repite.
+- **Límite por insumo para todo el proyecto**: lo ya pedido en otras
+  requisiciones enviadas o aprobadas más lo de esta no puede pasar lo
+  planificado más la **tolerancia** (0 % de entrada; la cambia quien
+  administra accesos, con "Cambiar" junto a la lista). Para pasarlo hay que
+  escribir la **justificación del exceso** en la línea; el mensaje dice
+  cuánto se pediría, cuánto ya se pidió y el límite.
+- Aprobar por encima del límite requiere el permiso **Aprobar sobre el
+  presupuesto** (el Director lo trae en los proyectos que se activen desde
+  ahora; en un proyecto ya activado, el administrador lo marca en la matriz).
+- **Quien pide no decide** sobre su propia requisición (aprobar, devolver o
+  rechazar), aunque tenga el permiso.
+- El borrador lo cambia quien lo pidió (si puede crear) o quien puede editar
+  requisiciones. Para enviar hace falta al menos un insumo, la justificación
+  y una fecha requerida que no haya pasado.
+- Se aprueba entre 0 y lo pedido por línea, y al menos una línea; al enviar
+  se guarda lo planificado de cada insumo y la versión del presupuesto.
+- Dos personas enviando o aprobando a la vez no pasan juntas el límite: la
+  base las atiende una por una (prueba incluida).
+- Todo queda en la auditoría: crear, editar, enviar, aprobar (con lo
+  aprobado), devolver, rechazar y anular (con el motivo), los intentos sin
+  permiso y los cambios de tolerancia.
 
 ### Esquema de la base de datos
 
@@ -2180,10 +2234,16 @@ ejecutar nadie más (`revoke` a `public`, `anon` y `authenticated`).
 | `compras_roles` | Roles de cada proyecto con sus permisos (`text[]`, solo los válidos) y versión |
 | `compras_usuarios` | Un acceso por persona y proyecto: rol, desde, hasta, activo, quién lo dio, versión |
 | `compras_auditoria` | El registro de solo inserción |
-| `compras_permisos_validos()` | La lista de los 42 permisos (la misma de `lib/compras/types.ts`; una prueba lo verifica) |
+| `compras_permisos_validos()` | La lista de los 43 permisos (la misma de `lib/compras/types.ts`; una prueba lo verifica) |
 | `compras_permisos_de(proyecto, persona)` | Los permisos vigentes hoy de una persona |
 | `compras_activar(...)` | Activa Compras si el proyecto no tiene administrador vigente |
 | `compras_guardar_usuario(...)` / `compras_guardar_rol(...)` | Dan, cambian o revocan con todas las reglas de arriba y su fila de auditoría |
+| `compras_config` | Por proyecto: tolerancia sobre lo planificado (%) |
+| `compras_consecutivos` | Último número por proyecto y tipo de documento (REQ...) |
+| `compras_requisiciones` | Requisiciones: número, estado, solicitante, fecha requerida, prioridad, justificación, motivo, versión del presupuesto, quién envió y decidió |
+| `compras_requisicion_lineas` | Líneas: insumo (clave en el presupuesto), partida opcional, copia del insumo, cantidad, cantidad aprobada, planificado al enviar, justificación del exceso. Única por requisición, insumo y partida |
+| `compras_solicitado(proyecto, insumo, excluir)` | Lo pedido de un insumo en el proyecto |
+| `compras_guardar_requisicion(...)` / `compras_cambiar_estado_requisicion(...)` / `compras_guardar_config(...)` | Guardan con permisos, estados, límites y su fila de auditoría |
 
 ### API
 
@@ -2198,25 +2258,31 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `PUT accesos/usuarios` | Da, cambia o revoca un acceso | Accesos y roles: administrar |
 | `PUT accesos/roles` | Crea o cambia un rol | Accesos y roles: administrar |
 | `GET contactos` | Equipo del proyecto en Trimble (solo personas) | Accesos y roles: administrar |
-| `GET insumos` | Insumos planificados del presupuesto, con las partidas que los usan | Insumos: ver |
+| `GET insumos` | Insumos planificados del presupuesto, con las partidas que los usan y lo solicitado | Insumos: ver |
+| `GET requisiciones` | Requisiciones con sus líneas y la tolerancia | Requisiciones: ver |
+| `PUT requisiciones` | Crea o cambia un borrador | Requisiciones: crear (o editar) |
+| `POST requisiciones/{id}/estado` | Enviar, aprobar, rechazar, devolver o anular | Según la acción |
+| `PUT config` | Tolerancia sobre lo planificado | Accesos y roles: administrar |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
 `rol-protegido`, `no-admin-trimble`, `no-miembro` (403/400); `ultimo-admin`,
 `ya-activo`, `nombre-repetido`, `version-conflict` (409); `datos`,
 `rol-no-valido` (400); `trimble-session` (401: recargar Trimble Connect).
+Requisiciones: `auto-aprobacion`, `exceso-sin-permiso` (403);
+`cantidad-excedida`, `estado-no-valido`, `linea-duplicada` (409);
+`insumo-no-valido`, `cantidad-no-valida`, `motivo-requerido`,
+`justificacion-requerida`, `sin-lineas`, `fecha-pasada` (400); `no-existe` (404).
 
 El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
 reglas puras, `validate`, `store` con Supabase o memoria, `service`,
-`routes`, `client`, `formato`, `planificado` y `presupuestoLectura`, con sus
-pruebas) y
-`components/compras/`.
+`routes`, `client`, `formato`, `planificado`, `presupuestoLectura` y
+`requisiciones`, con sus pruebas) y `components/compras/`.
 
 ### Lo que sigue
 
-En este orden: requisiciones (y con ellas lo solicitado y aprobado de cada
-insumo), proveedores y cotizaciones, órdenes y contratos, documentos en el
-CDE de Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
+En este orden: proveedores y cotizaciones, órdenes y contratos (y con ellas
+lo comprometido), documentos en el CDE de Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
 confirma la carga), recepción en obra, y el panel con la trazabilidad de cada
 insumo.
 

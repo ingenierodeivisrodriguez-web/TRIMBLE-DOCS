@@ -109,6 +109,13 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
                 <th style={{ ...th, textAlign: "right" }} title="Cantidad planificada en el presupuesto">
                   Planificado
                 </th>
+                <th style={{ ...th, textAlign: "right" }} title="En requisiciones enviadas o aprobadas (lo aprobado, una vez aprobadas)">
+                  Solicitado
+                </th>
+                <th style={{ ...th, textAlign: "right" }}>Aprobado</th>
+                <th style={{ ...th, textAlign: "right" }} title="Planificado menos solicitado">
+                  Por solicitar
+                </th>
                 <th style={{ ...th, textAlign: "right" }}>Precio</th>
                 <th style={{ ...th, textAlign: "right" }}>Monto planificado</th>
                 <th style={th}>Partidas</th>
@@ -130,6 +137,11 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
                         <span style={etiqueta(i.via === "orden" ? "#0b5fa5" : "#7d2a8c", i.via === "orden" ? "#eaf4fc" : "#f3e6f5")}>{VIA_COMPRA[i.via]}</span>
                       </td>
                       <td style={num}>{fmt(i.cantidad, 4)}</td>
+                      <td style={num}>{i.solicitado ? fmt(i.solicitado, 4) : "—"}</td>
+                      <td style={num}>{i.aprobado ? fmt(i.aprobado, 4) : "—"}</td>
+                      <td style={{ ...num, color: i.cantidad - i.solicitado < 0 ? "#b3261e" : undefined, fontWeight: i.cantidad - i.solicitado < 0 ? 600 : undefined }}>
+                        {fmt(i.cantidad - i.solicitado, 4)}
+                      </td>
                       <td style={num}>{fmt(i.precio)}</td>
                       <td style={num}>{fmt(i.monto)}</td>
                       <td style={td}>
@@ -140,7 +152,7 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
                     </tr>
                     {abierto && (
                       <tr>
-                        <td colSpan={9} style={{ ...td, background: "#f7f9fc", padding: "6px 12px 10px 40px" }}>
+                        <td colSpan={12} style={{ ...td, background: "#f7f9fc", padding: "6px 12px 10px 40px" }}>
                           <table style={{ borderCollapse: "collapse", width: "100%" }}>
                             <thead>
                               <tr>
@@ -174,7 +186,7 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
               })}
               {visibles.length === 0 && (
                 <tr>
-                  <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={9}>
+                  <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={12}>
                     {datos.insumos.length ? "Ningún insumo coincide con los filtros." : "El presupuesto no tiene insumos con cantidad."}
                   </td>
                 </tr>
@@ -190,7 +202,8 @@ export default function Insumos({ api, onSinAcceso }: { api: ComprasApi; onSinAc
         </p>
       )}
       <p style={{ ...texto, margin: 0, fontSize: 12.5, color: "var(--tc-gray-500)" }}>
-        Lo solicitado, aprobado, comprometido, recibido y pendiente de cada insumo aparecerá cuando existan las requisiciones y las órdenes.
+        Solicitado cuenta las requisiciones enviadas (lo pedido) y las aprobadas (lo aprobado); los borradores, rechazadas y anuladas no cuentan. Lo
+        comprometido y lo recibido aparecerán con las órdenes y la recepción.
       </p>
     </div>
   );

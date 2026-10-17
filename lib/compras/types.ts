@@ -17,7 +17,7 @@ export type Modulo =
   | "recepciones"
   | "panel";
 
-export type Accion = "ver" | "crear" | "editar" | "aprobar" | "anular" | "documentos" | "administrar";
+export type Accion = "ver" | "crear" | "editar" | "aprobar" | "exceder" | "anular" | "documentos" | "administrar";
 
 /** "modulo.accion", e.g. "requisiciones.aprobar". */
 export type Permiso = `${Modulo}.${Accion}`;
@@ -41,6 +41,7 @@ export const ACCIONES: { id: Accion; nombre: string; ayuda: string }[] = [
   { id: "crear", nombre: "Crear", ayuda: "Registrar nuevos." },
   { id: "editar", nombre: "Editar", ayuda: "Modificar lo registrado mientras su estado lo permita." },
   { id: "aprobar", nombre: "Aprobar / rechazar", ayuda: "Decidir sobre lo enviado." },
+  { id: "exceder", nombre: "Aprobar sobre el presupuesto", ayuda: "Requisiciones: aprobar cantidades que pasan lo planificado (más la tolerancia)." },
   { id: "anular", nombre: "Anular", ayuda: "Dejar sin efecto (nunca se borra)." },
   { id: "documentos", nombre: "Cargar / descargar documentos", ayuda: "Subir soportes al CDE del proyecto y abrirlos." },
   { id: "administrar", nombre: "Administrar", ayuda: "Accesos: dar, cambiar y revocar accesos y roles. Documentos: preparar carpetas y tipos de documento." },
@@ -53,7 +54,7 @@ export const ACCIONES_POR_MODULO: Record<Modulo, Accion[]> = {
   accesos: ["ver", "administrar"],
   auditoria: ["ver"],
   insumos: ["ver"],
-  requisiciones: OPERACION,
+  requisiciones: ["ver", "crear", "editar", "aprobar", "exceder", "anular", "documentos"],
   proveedores: ["ver", "crear", "editar", "anular", "documentos"],
   cotizaciones: OPERACION,
   ordenes: OPERACION,
@@ -199,6 +200,10 @@ export interface InsumoPlanificado {
   monto: number;
   via: ViaCompra;
   usos: UsoInsumo[];
+  /** Asked in requisitions sent or approved (the approved quantity once approved). */
+  solicitado: number;
+  /** Approved in requisitions. */
+  aprobado: number;
 }
 
 export interface InsumosResponse {
@@ -208,6 +213,100 @@ export interface InsumosResponse {
   /** Resources given as a percentage ("%MO", "%"): money, not quantities; they aren't bought. */
   porcentaje: { id: string; descripcion: string; monto: number }[];
 }
+
+// ---------------------------------------------------------------- requisitions
+
+export type EstadoRequisicion = "borrador" | "enviada" | "aprobada" | "rechazada" | "anulada";
+export type Prioridad = "baja" | "normal" | "alta" | "urgente";
+/** What can be done to a requisition besides editing its draft. */
+export type AccionRequisicion = "enviar" | "aprobar" | "rechazar" | "devolver" | "anular";
+
+export const PRIORIDADES: { id: Prioridad; nombre: string }[] = [
+  { id: "baja", nombre: "Baja" },
+  { id: "normal", nombre: "Normal" },
+  { id: "alta", nombre: "Alta" },
+  { id: "urgente", nombre: "Urgente" },
+];
+
+/** A line: a planned resource (with a copy of its data when it was saved), how much is asked and how much was approved. */
+export interface LineaRequisicion {
+  id: string;
+  insumoId: string;
+  /** The budget partida it is for, when given (the limit is still per resource, for the whole project). */
+  partidaItemId: string | null;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  /** Planned unit price in the budget. */
+  precio: number;
+  cantidad: number;
+  /** Set when approved (0 to the line's quantity). */
+  cantidadAprobada: number | null;
+  /** Planned quantity of the resource when the requisition was sent. */
+  planificado: number | null;
+  /** Why it asks for more than the budget allows (required then). */
+  justificacionExceso: string;
+}
+
+export interface Requisicion {
+  id: string;
+  /** Consecutive per project: REQ-0001. */
+  numero: number;
+  estado: EstadoRequisicion;
+  solicitanteId: string;
+  solicitanteNombre: string;
+  /** YYYY-MM-DD */
+  fechaRequerida: string;
+  prioridad: Prioridad;
+  justificacion: string;
+  /** Reason of the last decision (returned, rejected, cancelled) or the approver's note. */
+  motivo: string;
+  /** The budget version the requisition was sent against. */
+  presupuestoVersion: number | null;
+  enviada: string | null;
+  enviadaPor: string | null;
+  decidida: string | null;
+  decididaPor: string | null;
+  lineas: LineaRequisicion[];
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+/** A draft as the screen sends it (the server fills in each resource's data from the budget). */
+export interface CambioRequisicion {
+  id?: string;
+  fechaRequerida: string;
+  prioridad: Prioridad;
+  justificacion: string;
+  lineas: { insumoId: string; partidaItemId: string | null; cantidad: number; justificacionExceso: string }[];
+  version: number;
+}
+
+export interface AccionSobreRequisicion {
+  accion: AccionRequisicion;
+  /** Required to return, reject or cancel. */
+  motivo: string;
+  /** Approved quantity by line id (approving; a missing line gets its whole quantity). */
+  aprobadas?: Record<string, number>;
+  version: number;
+}
+
+export interface ConfigCompras {
+  /** How much over the planned quantity can be asked without a justification, in %. */
+  toleranciaPct: number;
+  version: number;
+}
+
+export interface RequisicionesResponse {
+  requisiciones: Requisicion[];
+  config: ConfigCompras;
+  hoy: string;
+}
+
+export const MAX_LINEAS_REQUISICION = 200;
 
 // ---------------------------------------------------------------- API responses
 

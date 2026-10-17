@@ -42,6 +42,16 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "roles.guardar": "Crear o cambiar un rol",
   "auditoria.consultar": "Consultar la auditoría",
   "insumos.consultar": "Consultar los insumos del presupuesto",
+  "requisiciones.consultar": "Consultar requisiciones",
+  "requisiciones.guardar": "Guardar una requisición",
+  "requisiciones.crear": "Crear requisición",
+  "requisiciones.editar": "Editar requisición",
+  "requisiciones.enviar": "Enviar requisición",
+  "requisiciones.aprobar": "Aprobar requisición",
+  "requisiciones.rechazar": "Rechazar requisición",
+  "requisiciones.devolver": "Devolver requisición",
+  "requisiciones.anular": "Anular requisición",
+  "config.cambiar": "Cambiar la tolerancia",
 };
 
 export function nombreAccion(accion: string): string {
@@ -55,6 +65,8 @@ export function nombrePermiso(p: string): string {
   const accion = ACCIONES.find((x) => x.id === a)?.nombre ?? a;
   return `${modulo}: ${accion}`;
 }
+
+const ESTADO_TEXTO: Record<string, string> = { borrador: "Borrador", enviada: "Por aprobar", aprobada: "Aprobada", rechazada: "Rechazada", anulada: "Anulada" };
 
 type Vigencia = { rol?: unknown; desde?: unknown; hasta?: unknown; activo?: unknown };
 
@@ -94,5 +106,16 @@ export function detalleEntrada(e: EntradaAuditoria): string {
     return partes.join(". ") || "Sin cambios de permisos";
   }
   if (e.accion === "proyecto.activar") return `Quedó como ${String(d.rol ?? "administrador")}.`;
+  if (e.accion === "config.cambiar") return `Tolerancia ${String(d.tolerancia_antes ?? 0)} % → ${String(d.tolerancia ?? 0)} %`;
+  if (e.accion === "requisiciones.crear" || e.accion === "requisiciones.editar") {
+    return `${String(d.lineas ?? 0)} insumo(s)${typeof d.fecha_requerida === "string" ? `, requerida el ${fecha(d.fecha_requerida)}` : ""}`;
+  }
+  if (e.accion.startsWith("requisiciones.") && typeof d.a === "string") {
+    const partes = [`${ESTADO_TEXTO[String(d.de)] ?? String(d.de)} → ${ESTADO_TEXTO[d.a] ?? d.a}`];
+    const aprobadas = d.aprobadas && typeof d.aprobadas === "object" ? Object.entries(d.aprobadas as Record<string, unknown>) : [];
+    if (aprobadas.length) partes.push(`aprobado: ${aprobadas.map(([k, v]) => `${k} ${Number(v)}`).join("; ")}`);
+    if (typeof d.motivo === "string" && d.motivo) partes.push(`motivo: ${d.motivo}`);
+    return partes.join(". ");
+  }
   return "";
 }

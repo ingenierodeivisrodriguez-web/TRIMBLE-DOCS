@@ -1,7 +1,20 @@
 import { isValidIsoDate } from "../propiedades/values";
 import { ServiceError } from "../propiedades/service";
 import { esPermisoValido } from "./roles";
-import { CambioAsignacion, CambioRol, FiltroAuditoria, MAX_AUDITORIA, MODULOS, Permiso } from "./types";
+import {
+  AccionRequisicion,
+  AccionSobreRequisicion,
+  CambioAsignacion,
+  CambioRequisicion,
+  CambioRol,
+  ConfigCompras,
+  FiltroAuditoria,
+  MAX_AUDITORIA,
+  MAX_LINEAS_REQUISICION,
+  MODULOS,
+  Permiso,
+  Prioridad,
+} from "./types";
 
 /** Checks everything that comes from the browser before the rules see it. */
 
@@ -93,4 +106,59 @@ export function leerFiltroAuditoria(params: URLSearchParams): FiltroAuditoria {
     f.limite = n;
   }
   return f;
+}
+
+// ---------------------------------------------------------------- requisitions
+
+const PRIORIDAD_RE = /^(baja|normal|alta|urgente)$/;
+const ITEM_RE = /^[A-Za-z0-9_-]{1,64}$/;
+
+function cantidad(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 1e12) bad(`${what}: cantidad no válida.`);
+  return Math.round(value * 10_000) / 10_000;
+}
+
+export function leerCambioRequisicion(body: unknown): CambioRequisicion {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (o.id !== undefined && (typeof o.id !== "string" || !UUID_RE.test(o.id))) bad("Requisición no válida.");
+  const fechaRequerida = fecha(o.fechaRequerida, "Fecha requerida");
+  if (typeof o.prioridad !== "string" || !PRIORIDAD_RE.test(o.prioridad)) bad("Prioridad no válida.");
+  const justificacion = texto(o.justificacion ?? "", "Justificación", 1000).trim();
+  if (!Array.isArray(o.lineas)) bad("Las líneas deben ser una lista.");
+  if (o.lineas.length > MAX_LINEAS_REQUISICION) bad(`Máximo ${MAX_LINEAS_REQUISICION} líneas por requisición.`);
+  const lineas = o.lineas.map((v, i) => {
+    const l = (v ?? {}) as Record<string, unknown>;
+    if (typeof l.insumoId !== "string" || !ITEM_RE.test(l.insumoId)) bad(`Línea ${i + 1}: insumo no válido.`);
+    const partida = l.partidaItemId === null || l.partidaItemId === undefined || l.partidaItemId === "" ? null : l.partidaItemId;
+    if (partida !== null && (typeof partida !== "string" || !ITEM_RE.test(partida))) bad(`Línea ${i + 1}: partida no válida.`);
+    const c = cantidad(l.cantidad, `Línea ${i + 1}`);
+    if (c <= 0) bad(`Línea ${i + 1}: la cantidad debe ser mayor que cero.`);
+    return { insumoId: l.insumoId, partidaItemId: partida as string | null, cantidad: c, justificacionExceso: texto(l.justificacionExceso ?? "", `Línea ${i + 1}: justificación del exceso`, 500).trim() };
+  });
+  return { ...(o.id ? { id: o.id as string } : {}), fechaRequerida, prioridad: o.prioridad as Prioridad, justificacion, lineas, version: version(o.version) };
+}
+
+const ACCION_RE = /^(enviar|aprobar|rechazar|devolver|anular)$/;
+
+export function leerAccionRequisicion(body: unknown): AccionSobreRequisicion {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (typeof o.accion !== "string" || !ACCION_RE.test(o.accion)) bad("Acción no válida.");
+  const motivo = texto(o.motivo ?? "", "Motivo", 1000).trim();
+  let aprobadas: Record<string, number> | undefined;
+  if (o.aprobadas !== undefined && o.aprobadas !== null) {
+    if (typeof o.aprobadas !== "object" || Array.isArray(o.aprobadas)) bad("Cantidades aprobadas no válidas.");
+    aprobadas = {};
+    for (const [k, v] of Object.entries(o.aprobadas as Record<string, unknown>)) {
+      if (!UUID_RE.test(k)) bad("Línea no válida.");
+      aprobadas[k] = cantidad(v, "Cantidad aprobada");
+    }
+  }
+  return { accion: o.accion as AccionRequisicion, motivo, ...(aprobadas ? { aprobadas } : {}), version: version(o.version) };
+}
+
+export function leerConfig(body: unknown): ConfigCompras {
+  const o = (body ?? {}) as Record<string, unknown>;
+  const t = o.toleranciaPct;
+  if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 100) bad("La tolerancia debe estar entre 0 y 100 %.");
+  return { toleranciaPct: Math.round(t * 100) / 100, version: version(o.version) };
 }

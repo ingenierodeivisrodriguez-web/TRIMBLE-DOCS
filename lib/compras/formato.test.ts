@@ -31,3 +31,14 @@ describe("formato de Compras", () => {
     assert.equal(detalleEntrada(entrada({ resultado: "denegado", accion: "ingreso", detalle: { motivo: "no-activado" } })), "Compras no está activado en el proyecto.");
   });
 });
+
+describe("auditoría de requisiciones", () => {
+  it("dice el cambio de estado, lo aprobado y el motivo", () => {
+    assert.equal(
+      detalleEntrada(entrada({ accion: "requisiciones.aprobar", modulo: "requisiciones", detalle: { de: "enviada", a: "aprobada", motivo: "Por ahora 300", aprobadas: { "BLOQUE No. 5": 300 } } })),
+      "Por aprobar → Aprobada. aprobado: BLOQUE No. 5 300. motivo: Por ahora 300"
+    );
+    assert.equal(detalleEntrada(entrada({ accion: "requisiciones.crear", detalle: { lineas: 2, fecha_requerida: "2026-10-25" } })), "2 insumo(s), requerida el 25-10-2026");
+    assert.equal(detalleEntrada(entrada({ accion: "config.cambiar", detalle: { tolerancia_antes: 0, tolerancia: 5 } })), "Tolerancia 0 % → 5 %");
+  });
+});

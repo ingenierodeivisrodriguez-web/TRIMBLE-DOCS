@@ -21,7 +21,19 @@ export type MotivoRechazo =
   | "no-miembro"
   | "datos"
   | "nombre-repetido"
-  | "version-conflict";
+  | "version-conflict"
+  | "no-existe"
+  | "estado-no-valido"
+  | "auto-aprobacion"
+  | "cantidad-excedida"
+  | "exceso-sin-permiso"
+  | "cantidad-no-valida"
+  | "motivo-requerido"
+  | "justificacion-requerida"
+  | "sin-lineas"
+  | "fecha-pasada"
+  | "linea-duplicada"
+  | "insumo-no-valido";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Compras en este proyecto. Pídeselo a un administrador de Compras.",
@@ -36,7 +48,19 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "no-miembro": "La persona no está en el equipo del proyecto en Trimble Connect.",
   datos: "Los datos no son válidos.",
   "nombre-repetido": "Ya hay un rol con ese nombre en este proyecto.",
-  "version-conflict": "Otra persona cambió estos accesos mientras los editabas. Se recargaron: revisa y vuelve a guardar.",
+  "version-conflict": "Otra persona cambió esto mientras lo editabas. Se recargó: revisa y vuelve a guardar.",
+  "no-existe": "No existe en este proyecto.",
+  "estado-no-valido": "En su estado actual no se puede hacer eso.",
+  "auto-aprobacion": "Quien hizo la requisición no puede aprobarla, rechazarla ni devolverla: lo decide otra persona.",
+  "cantidad-excedida": "La cantidad pasa lo que queda del presupuesto: escribe la justificación del exceso en esa línea.",
+  "exceso-sin-permiso": "Aprobar por encima del presupuesto requiere el permiso “Aprobar sobre el presupuesto”.",
+  "cantidad-no-valida": "La cantidad aprobada debe estar entre 0 y la pedida, y al menos una línea debe aprobarse.",
+  "motivo-requerido": "Escribe el motivo.",
+  "justificacion-requerida": "Escribe para qué se necesita (justificación) antes de enviarla.",
+  "sin-lineas": "Agrega al menos un insumo.",
+  "fecha-pasada": "La fecha requerida ya pasó: cámbiala antes de enviar.",
+  "linea-duplicada": "El mismo insumo (y partida) está dos veces: deja una sola línea.",
+  "insumo-no-valido": "Ese insumo no está en el presupuesto del proyecto (o es un porcentaje, que no se compra).",
 };
 
 /** The HTTP status of each refusal. */
@@ -54,6 +78,18 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "ya-activo": 409,
   "nombre-repetido": 409,
   "version-conflict": 409,
+  "no-existe": 404,
+  "estado-no-valido": 409,
+  "auto-aprobacion": 403,
+  "cantidad-excedida": 409,
+  "exceso-sin-permiso": 403,
+  "cantidad-no-valida": 400,
+  "motivo-requerido": 400,
+  "justificacion-requerida": 400,
+  "sin-lineas": 400,
+  "fecha-pasada": 400,
+  "linea-duplicada": 409,
+  "insumo-no-valido": 400,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {
