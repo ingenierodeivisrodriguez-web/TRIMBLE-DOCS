@@ -41,6 +41,7 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "roles.cambiar": "Cambiar rol",
   "roles.guardar": "Crear o cambiar un rol",
   "auditoria.consultar": "Consultar la auditoría",
+  "panel.consultar": "Consultar el panel",
   "insumos.consultar": "Consultar los insumos del presupuesto",
   "requisiciones.consultar": "Consultar requisiciones",
   "requisiciones.guardar": "Guardar una requisición",

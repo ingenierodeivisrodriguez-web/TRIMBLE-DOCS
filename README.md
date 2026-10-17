@@ -2056,7 +2056,7 @@ Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
 construye por fases; ya están **el acceso por rol, la auditoría, la consulta
 de los insumos del presupuesto, las requisiciones, los proveedores, las
-cotizaciones con su comparativo, las órdenes de compra y contratos, sus documentos en el CDE y la recepción en obra**. Aparece en el menú lateral del
+cotizaciones con su comparativo, las órdenes de compra y contratos, sus documentos en el CDE, la recepción en obra y el panel con la trazabilidad de cada insumo**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2479,6 +2479,55 @@ auditoría (acción "Prueba de escritura en el CDE"). El código está en
 `lib/compras/cde.ts` (con un Trimble falso en las pruebas que se comporta
 como la API documentada) y `components/compras/PruebaCde.tsx`.
 
+### Panel y trazabilidad
+
+Pestaña **Panel** (permiso Panel: ver), la segunda después de Inicio.
+
+**Indicadores** (cada tarjeta dice cómo se calcula; si no hay con qué
+calcularlo dice **Sin datos suficientes**, nunca un cero inventado; las que
+piden atención se marcan en amarillo):
+
+- Presupuesto de compras comprometido: valor de las órdenes y contratos
+  emitidos (sin IVA) sobre el valor planificado de los insumos que se compran.
+- Valor comprometido (sin IVA).
+- Precio comprado frente al presupuesto: lo comprometido frente a las mismas
+  cantidades al precio del presupuesto (positivo: se compró más caro).
+- Comprometido ya recibido: lo aceptado en recepciones aprobadas, al precio
+  de su orden, sobre el valor comprometido.
+- Rechazado en obra: rechazado sobre recibido (alerta por encima de 5 %).
+- Tiempo para aprobar una requisición: promedio en días entre envío y
+  aprobación.
+- Esperando aprobación: requisiciones, órdenes o contratos y recepciones
+  enviadas.
+- Entregas vencidas: órdenes emitidas con la fecha de entrega pasada sin
+  recibir todo.
+- Documentos sin respaldo en el CDE y proveedores con expediente por
+  completar.
+
+**Insumos: de lo planificado a lo recibido.** Cada insumo con planificado,
+solicitado, aprobado, comprometido, recibido, por solicitar, por recibir y
+el precio comprado frente al presupuesto, con una barra de avance (recibido
+en verde, comprometido por recibir en azul, aprobado sin ordenar en
+amarillo). Se puede buscar y dejar solo los que tienen movimiento.
+
+**Ruta del insumo.** Al pulsar un insumo se abre su recorrido:
+presupuesto → requisición → cotizaciones (la elegida marcada) → orden o
+contrato → recepciones, cada etapa con su estado, cantidades, precios sin
+IVA y sus documentos del CDE (con **Abrir** si el rol tiene el permiso de
+documentos de ese módulo). La ruta muestra solo lo que el rol puede ver: si
+no ve cotizaciones, órdenes o recepciones, esa etapa dice que está oculta;
+si no ve requisiciones, la ruta no se muestra.
+
+**Exportar a Excel** descarga un libro con tres hojas: Indicadores, Insumos
+y Trazabilidad (una fila por etapa de cada insumo, con sus documentos).
+Fechas como fechas (DD-MM-AAAA) y cantidades con 4 decimales.
+
+El plan proponía una vista SQL (`compras_insumo_estado`); el panel se
+calcula en el servidor con las mismas funciones que ya usan las demás
+pestañas (y sus pruebas), porque lo planificado sale del cálculo del
+presupuesto, que vive en el código y no en la base. Por eso esta fase no
+cambia `supabase/compras.sql`.
+
 ### Esquema de la base de datos
 
 [`supabase/compras.sql`](supabase/compras.sql) (se puede volver a ejecutar
@@ -2555,6 +2604,7 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `POST cde/prueba` | Un paso de la prueba de escritura en el CDE | Documentos: administrar |
 | `GET recepciones` / `PUT recepciones` | Recepciones y órdenes emitidas con lo pendiente (sin precios) / registrar o editar un borrador | Recepción en obra: ver / crear o editar |
 | `POST recepciones/{id}/estado` | Enviar, aprobar, devolver o anular | Según la acción |
+| `GET panel` | Indicadores, estado de cada insumo y su ruta (solo con los módulos que el rol ve) | Panel: ver |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
@@ -2579,13 +2629,14 @@ reglas puras, `validate`, `store` con Supabase o memoria, `service`,
 `routes`, `client`, `formato`, `planificado`, `presupuestoLectura`,
 `requisiciones`, `proveedores`, `cotizaciones`, `ordenes`, `cde` (la API de
 Trimble), `documentos` (carpetas, nombres, expediente), `subida` (el lado del
-navegador), `pdfOrden`, `recepciones` y `pdfRecepcion`, con sus pruebas; `pruebas/trimbleFalso` es un
+navegador), `pdfOrden`, `recepciones`, `pdfRecepcion`, `panel` y `excelPanel`, con sus pruebas; `pruebas/trimbleFalso` es un
 Trimble Connect falso que se comporta como su API) y `components/compras/`.
 
 ### Lo que sigue
 
-El panel con la trazabilidad de cada insumo: presupuesto → requisición →
-cotización → proveedor → orden o contrato → recepción, con sus documentos.
+Las ocho fases del plan están hechas. Falta probar de punta a punta dentro
+de Trimble Connect real: la prueba de escritura en el CDE (pestaña
+Documentos (CDE)) y el recorrido completo con personas de distintos roles.
 
 ---
 

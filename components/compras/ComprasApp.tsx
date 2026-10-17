@@ -14,10 +14,11 @@ import Proveedores from "./Proveedores";
 import Cotizaciones from "./Cotizaciones";
 import Ordenes from "./Ordenes";
 import Recepciones from "./Recepciones";
+import Panel from "./Panel";
 import DocumentosCde from "./DocumentosCde";
 import { botonSecundario, card, linkBtn, texto, titulo } from "./estilos";
 
-type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "recepciones" | "documentos" | "accesos" | "auditoria";
+type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "recepciones" | "documentos" | "panel" | "accesos" | "auditoria";
 
 /** "Compras y Contratación" in the project menu: who you are, your access, and what your role lets you open. */
 export default function ComprasApp({ api, projectId, projectName }: { api: ComprasApi; projectId: string; projectName: string }) {
@@ -50,6 +51,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
   const puede = (p: Permiso) => permisos.includes(p);
   const pestanas: { id: Pestana; nombre: string }[] = [
     { id: "inicio", nombre: "Inicio" },
+    ...(puede("panel.ver") ? [{ id: "panel" as const, nombre: "Panel" }] : []),
     ...(puede("insumos.ver") ? [{ id: "insumos" as const, nombre: "Insumos del presupuesto" }] : []),
     ...(puede("requisiciones.ver") ? [{ id: "requisiciones" as const, nombre: "Requisiciones" }] : []),
     ...(puede("cotizaciones.ver") ? [{ id: "cotizaciones" as const, nombre: "Cotizaciones" }] : []),
@@ -101,6 +103,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
           </nav>
           <main style={{ flex: 1, minHeight: 0, padding: 16 }}>
             {actual === "inicio" && <Inicio estado={estado} />}
+            {actual === "panel" && <Panel api={api} permisos={permisos} proyecto={projectName || projectId} onSinAcceso={onSinAcceso} />}
             {actual === "insumos" && <Insumos api={api} onSinAcceso={onSinAcceso} />}
             {actual === "requisiciones" && <Requisiciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "cotizaciones" && <Cotizaciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
@@ -235,10 +238,11 @@ function Inicio({ estado }: { estado: EstadoResponse }) {
         </table>
       </section>
       <section style={card}>
-        <h2 style={titulo}>En construcción</h2>
+        <h2 style={titulo}>El recorrido de una compra</h2>
         <p style={texto}>
-          Ya están los accesos por rol, la auditoría, los insumos del presupuesto, las requisiciones, los proveedores y las cotizaciones con su
-          comparativo, las órdenes de compra y contratos, sus documentos en el CDE del proyecto y la recepción en obra. Sigue el panel con la trazabilidad de cada insumo.
+          Insumo del presupuesto → requisición (se pide y se aprueba) → cotizaciones y comparativo (se elige proveedor) → orden de compra o contrato (se
+          emite) → recepción en obra (se recibe, acepta o rechaza). Cada paso lo aprueba otra persona, deja sus documentos en el CDE del proyecto y queda en
+          la auditoría. El Panel muestra el avance de cada insumo y su ruta completa.
         </p>
       </section>
     </div>

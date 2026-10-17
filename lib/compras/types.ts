@@ -692,6 +692,128 @@ export interface RecepcionesResponse {
   hoy: string;
 }
 
+// ---------------------------------------------------------------- panel and traceability
+
+/** One resource in the panel: planned, asked, approved, committed and received, and what is pending. */
+export interface FilaPanel {
+  id: string;
+  codigo: string;
+  descripcion: string;
+  unidad: string;
+  tipo: TipoInsumo;
+  via: ViaCompra;
+  /** Unit price in the budget. */
+  precio: number;
+  planificado: number;
+  solicitado: number;
+  aprobado: number;
+  /** In issued orders and contracts. */
+  comprometido: number;
+  /** Accepted in approved receptions. */
+  recibido: number;
+  /** Rejected in approved receptions. */
+  rechazado: number;
+  /** Planned less asked (negative: asked over the budget). */
+  porSolicitar: number;
+  /** Committed less received. */
+  porRecibir: number;
+  /** Planned quantity at the budget price. */
+  montoPlanificado: number;
+  /** What the issued orders cost, without VAT (null: nothing committed). */
+  valorComprometido: number | null;
+  /** The committed quantity at the budget price, to compare. */
+  valorPresupuestoComprometido: number;
+}
+
+/** A figure of the panel; null when there is not enough data to say it. */
+export interface Indicador {
+  clave: string;
+  nombre: string;
+  valor: number | null;
+  unidad: "pct" | "pesos" | "cantidad" | "dias";
+  /** How it is computed, in words. */
+  ayuda: string;
+  /** Something to look at (late deliveries, files to complete...). */
+  alerta?: boolean;
+}
+
+export interface DocumentoRuta {
+  id: string;
+  titulo: string;
+  nombreArchivo: string;
+  estado: Documento["estado"];
+  entidadTipo: EntidadDocumento;
+}
+
+export interface RecepcionRuta {
+  id: string;
+  numero: number;
+  estado: EstadoRecepcion;
+  fecha: string;
+  recibido: number;
+  aceptado: number;
+  rechazado: number;
+  devuelto: number;
+  documentos: DocumentoRuta[];
+}
+
+export interface OrdenRuta {
+  id: string;
+  tipo: TipoOrden;
+  numero: number;
+  revision: number;
+  estado: EstadoOrden;
+  proveedor: string;
+  fechaEntrega: string;
+  cantidad: number;
+  /** Net unit price (after discount, without VAT). */
+  precioNeto: number;
+  documentos: DocumentoRuta[];
+  /** null: the caller can't see receptions. */
+  recepciones: RecepcionRuta[] | null;
+}
+
+export interface CotizacionRuta {
+  id: string;
+  numero: number;
+  estado: Cotizacion["estado"];
+  proveedor: string;
+  cantidad: number;
+  precioNeto: number;
+  elegida: boolean;
+  documentos: DocumentoRuta[];
+}
+
+/** The path of a resource through one requisition line: requisition, quotations, orders and receptions. */
+export interface RutaRequisicion {
+  requisicionLineaId: string;
+  requisicion: { id: string; numero: number; estado: EstadoRequisicion; creada: string; solicitante: string; cantidad: number; aprobada: number | null };
+  documentos: DocumentoRuta[];
+  /** null: the caller can't see quotations. */
+  cotizaciones: CotizacionRuta[] | null;
+  /** Orders and contracts the caller can see (null: neither). */
+  ordenes: OrdenRuta[] | null;
+}
+
+/** The modules the caller can see (the path hides the rest). */
+export interface VisibilidadRuta {
+  requisiciones: boolean;
+  cotizaciones: boolean;
+  ordenes: boolean;
+  contratos: boolean;
+  recepciones: boolean;
+}
+
+export interface PanelResponse {
+  presupuesto: InsumosResponse["presupuesto"];
+  indicadores: Indicador[];
+  filas: FilaPanel[];
+  /** By resource id: its path (resources asked in some requisition; empty if the caller can't see requisitions). */
+  rutas: Record<string, RutaRequisicion[]>;
+  ve: VisibilidadRuta;
+  hoy: string;
+}
+
 // ---------------------------------------------------------------- API responses
 
 export interface EstadoResponse {

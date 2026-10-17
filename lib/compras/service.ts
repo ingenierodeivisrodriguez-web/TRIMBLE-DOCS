@@ -6,12 +6,13 @@ import { esMotivo, ESTADO_HTTP, estadoAsignacion, MENSAJES, MotivoRechazo, permi
 import { esDocumento, insumosPlanificados, metradosDelModelo } from "./planificado";
 import type { LecturaPresupuesto } from "./presupuestoLectura";
 import { ARCHIVO_PRUEBA, buscarEnCarpeta, CARPETA_PRUEBA, ClienteTrimble, contenidoPrueba, crearCarpeta, enviarContenido, estadoSubida, explicarEstado, iniciarSubida, leerCarpeta, urlDescarga } from "./cde";
-import { CARPETA_DE, CARPETAS, carpetaProveedor, MAX_RELEVO, MAX_TAMANO, MODULO_DE, nombreArchivo, revisarTipos, rutaCarpeta, TIPOS_LEGALES_INICIALES, tiposDe } from "./documentos";
+import { CARPETA_DE, CARPETAS, carpetaProveedor, expediente, MAX_RELEVO, MAX_TAMANO, MODULO_DE, nombreArchivo, revisarTipos, rutaCarpeta, TIPOS_LEGALES_INICIALES, tiposDe } from "./documentos";
 import { nitConDv } from "./proveedores";
 import { numeroCotizacion } from "./cotizaciones";
 import { evaluar, razonesJustificacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
 import { fechaHora } from "./formato";
 import { comprometidoPorInsumo, comprometidoPorLinea, maximoLinea, numeroOrden, revisarAccionOrden, revisarOrden } from "./ordenes";
+import { filasPanel, indicadores, rutasInsumos } from "./panel";
 import { aceptadoDeOrden, numeroRecepcion, ordenesPorRecibir, recibidoPorInsumo, revisarAccionRecepcion, revisarRecepcion, tieneRecepciones } from "./recepciones";
 import { excesos, limite, numeroRequisicion, puedeEditar, revisarAccion, solicitadoPorInsumo } from "./requisiciones";
 import { ROLES_INICIALES } from "./roles";
@@ -45,6 +46,8 @@ import {
   InsumosResponse,
   Modulo,
   OrdenesResponse,
+  PanelResponse,
+  VisibilidadRuta,
   RecepcionesResponse,
   PasoPruebaCde,
   Permiso,
@@ -280,7 +283,13 @@ async function planActual(ctx: Ctx): Promise<{ presupuesto: InsumosResponse["pre
 /** The resources planned in the project's budget (Presupuesto), with where each one is used and what was asked of each. */
 export async function getInsumos(ctx: Ctx): Promise<InsumosResponse> {
   await requerir(ctx, "insumos", "ver", "insumos.consultar");
-  const [plan, requisiciones, ordenes, recepciones] = await Promise.all([
+  const { plan } = await insumosConEstado(ctx);
+  return plan;
+}
+
+/** The planned resources with what was asked, approved, committed and received of each (and the lists it used). */
+async function insumosConEstado(ctx: Ctx) {
+  const [base, requisiciones, ordenes, recepciones] = await Promise.all([
     planActual(ctx),
     ctx.store.listRequisiciones(ctx.projectId),
     ctx.store.listOrdenes(ctx.projectId),
@@ -289,9 +298,46 @@ export async function getInsumos(ctx: Ctx): Promise<InsumosResponse> {
   const pedidos = solicitadoPorInsumo(requisiciones);
   const comprometido = comprometidoPorInsumo(ordenes);
   const recibido = recibidoPorInsumo(recepciones);
+  const plan: InsumosResponse = {
+    ...base,
+    insumos: base.insumos.map((i) => ({ ...i, solicitado: pedidos.get(i.id)?.solicitado ?? 0, aprobado: pedidos.get(i.id)?.aprobado ?? 0, comprometido: comprometido.get(i.id) ?? 0, recibido: recibido.get(i.id) ?? 0 })),
+  };
+  return { plan, requisiciones, ordenes, recepciones };
+}
+
+// ---------------------------------------------------------------- panel and traceability
+
+/**
+ * The panel: figures, each planned resource with its state, and the path of
+ * each one (requisition, quotations, orders, receptions and their documents),
+ * showing in the path only the modules the caller can see. Panel: ver.
+ */
+export async function getPanel(ctx: Ctx): Promise<PanelResponse> {
+  const a = await requerir(ctx, "panel", "ver", "panel.consultar");
+  const [{ plan, requisiciones, ordenes, recepciones }, cotizaciones, comparativos, proveedores, documentos, tipos] = await Promise.all([
+    insumosConEstado(ctx),
+    ctx.store.listCotizaciones(ctx.projectId),
+    ctx.store.listComparativos(ctx.projectId),
+    ctx.store.listProveedores(ctx.projectId),
+    ctx.store.listDocumentos(ctx.projectId, {}),
+    tiposLegales(ctx),
+  ]);
+  const ve: VisibilidadRuta = {
+    requisiciones: tiene(a.permisos, "requisiciones", "ver"),
+    cotizaciones: tiene(a.permisos, "cotizaciones", "ver"),
+    ordenes: tiene(a.permisos, "ordenes", "ver"),
+    contratos: tiene(a.permisos, "contratos", "ver"),
+    recepciones: tiene(a.permisos, "recepciones", "ver"),
+  };
+  const filas = filasPanel(plan.insumos, ordenes, recepciones);
+  const expedientesPorCompletar = proveedores.filter((p) => p.estado === "activo" && ["incompleto", "vencido"].includes(expediente(p.id, documentos, tipos.tipos, ctx.hoy).estado)).length;
   return {
-    ...plan,
-    insumos: plan.insumos.map((i) => ({ ...i, solicitado: pedidos.get(i.id)?.solicitado ?? 0, aprobado: pedidos.get(i.id)?.aprobado ?? 0, comprometido: comprometido.get(i.id) ?? 0, recibido: recibido.get(i.id) ?? 0 })),
+    presupuesto: plan.presupuesto,
+    indicadores: indicadores({ filas, requisiciones, ordenes, recepciones, documentos, expedientesPorCompletar, hoy: ctx.hoy }),
+    filas,
+    rutas: rutasInsumos({ requisiciones, cotizaciones, comparativos, proveedores, ordenes, recepciones, documentos }, ve),
+    ve,
+    hoy: ctx.hoy,
   };
 }
 

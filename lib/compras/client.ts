@@ -1,6 +1,7 @@
 import { ApiError, createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts } from "../propiedades/types";
 import type {
+  PanelResponse,
   AccionSobreRecepcion,
   CambioRecepcion,
   RecepcionesResponse,
@@ -61,6 +62,7 @@ export interface ComprasApi {
   guardarOrden(cambio: CambioOrden): Promise<OrdenesResponse>;
   accionOrden(id: string, accion: AccionSobreOrden): Promise<OrdenesResponse>;
   getRecepciones(): Promise<RecepcionesResponse>;
+  getPanel(): Promise<PanelResponse>;
   guardarRecepcion(cambio: CambioRecepcion): Promise<RecepcionesResponse>;
   accionRecepcion(id: string, accion: AccionSobreRecepcion): Promise<RecepcionesResponse>;
   pruebaCde(paso: PasoPruebaCde, datos?: { carpetaId?: string; uploadId?: string }): Promise<PruebaCdeResponse>;
@@ -99,6 +101,7 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     anularCotizacion: (id, motivo, version) => request<CotizacionesResponse>(`/cotizaciones/${encodeURIComponent(id)}/anular`, { method: "POST", body: JSON.stringify({ motivo, version }) }),
     getOrdenes: () => request<OrdenesResponse>("/ordenes"),
     getRecepciones: () => request<RecepcionesResponse>("/recepciones"),
+    getPanel: () => request<PanelResponse>("/panel"),
     guardarRecepcion: (cambio) => request<RecepcionesResponse>("/recepciones", { method: "PUT", body: JSON.stringify(cambio) }),
     accionRecepcion: (id, accion) => request<RecepcionesResponse>(`/recepciones/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(accion) }),
     getDocumentos: (filtro = {}) => {
