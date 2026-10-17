@@ -297,7 +297,171 @@ export interface AccionSobreRequisicion {
 export interface ConfigCompras {
   /** How much over the planned quantity can be asked without a justification, in %. */
   toleranciaPct: number;
+  /** Quotations expected per requisition; with fewer, the choice must be justified. */
+  minCotizaciones: number;
   version: number;
+}
+
+// ---------------------------------------------------------------- suppliers
+
+export type EstadoProveedor = "activo" | "inactivo" | "bloqueado";
+export type TipoPersona = "natural" | "juridica";
+
+export interface DatosProveedor {
+  /** Digits only, without the check digit. */
+  nit: string;
+  tipoPersona: TipoPersona;
+  razonSocial: string;
+  nombreComercial: string;
+  contacto: string;
+  telefono: string;
+  correo: string;
+  ciudad: string;
+  direccion: string;
+  /** Kinds of resources it supplies (MT, EQ, SC, MO). */
+  categorias: TipoInsumo[];
+  /** Charges IVA (responsable de IVA). */
+  responsableIva: boolean;
+  observaciones: string;
+}
+
+export interface Proveedor extends DatosProveedor {
+  id: string;
+  /** DIAN check digit of the NIT. */
+  dv: number;
+  estado: EstadoProveedor;
+  /** Why it was deactivated or blocked. */
+  motivoEstado: string;
+  version: number;
+  creado: string;
+  creadoPor: string;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+export interface CambioProveedor extends DatosProveedor {
+  id?: string;
+  version: number;
+}
+
+export interface CambioEstadoProveedor {
+  estado: EstadoProveedor;
+  motivo: string;
+  version: number;
+}
+
+// ---------------------------------------------------------------- quotations and comparison
+
+export type EstadoCotizacion = "registrada" | "anulada";
+
+export interface LineaCotizacion {
+  id: string;
+  /** The requisition line it prices. */
+  requisicionLineaId: string;
+  cantidad: number;
+  /** Before discount and IVA. */
+  precioUnitario: number;
+  descuentoPct: number;
+  ivaPct: number;
+}
+
+export interface Cotizacion {
+  id: string;
+  /** COT-0001 */
+  numero: number;
+  requisicionId: string;
+  proveedorId: string;
+  /** The supplier's own number for it. */
+  referencia: string;
+  /** YYYY-MM-DD */
+  fecha: string;
+  vigenciaHasta: string;
+  plazoEntregaDias: number;
+  /** Days of credit (0: cash). */
+  diasPago: number;
+  anticipoPct: number;
+  formaPago: string;
+  observaciones: string;
+  estado: EstadoCotizacion;
+  motivo: string;
+  lineas: LineaCotizacion[];
+  version: number;
+  creada: string;
+  creadaPor: string;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+export interface CambioCotizacion {
+  id?: string;
+  requisicionId: string;
+  proveedorId: string;
+  referencia: string;
+  fecha: string;
+  vigenciaHasta: string;
+  plazoEntregaDias: number;
+  diasPago: number;
+  anticipoPct: number;
+  formaPago: string;
+  observaciones: string;
+  lineas: Omit<LineaCotizacion, "id">[];
+  version: number;
+}
+
+/** Weights (summing 100) of each criterion in the comparison. */
+export interface Criterios {
+  precio: number;
+  entrega: number;
+  pago: number;
+}
+
+export const CRITERIOS_INICIALES: Criterios = { precio: 70, entrega: 20, pago: 10 };
+
+export type EstadoComparativo = "borrador" | "propuesto" | "aprobado";
+export type AccionComparativo = "guardar" | "proponer" | "aprobar" | "devolver";
+
+/** The comparison of a requisition's quotations and the chosen one. */
+export interface Comparativo {
+  requisicionId: string;
+  estado: EstadoComparativo;
+  criterios: Criterios;
+  cotizacionElegidaId: string | null;
+  justificacion: string;
+  /** Why it was returned. */
+  motivo: string;
+  propuesto: string | null;
+  propuestoPorId: string | null;
+  propuestoPor: string | null;
+  aprobado: string | null;
+  aprobadoPor: string | null;
+  version: number;
+}
+
+export interface AccionSobreComparativo {
+  accion: AccionComparativo;
+  criterios: Criterios;
+  cotizacionElegidaId: string | null;
+  justificacion: string;
+  motivo: string;
+  /** 0 when the requisition has no comparison saved yet. */
+  version: number;
+}
+
+export interface CotizacionesResponse {
+  /** Approved requisitions (what can be quoted). */
+  requisiciones: Requisicion[];
+  cotizaciones: Cotizacion[];
+  comparativos: Comparativo[];
+  proveedores: Proveedor[];
+  config: ConfigCompras;
+  hoy: string;
+}
+
+export interface ProveedoresResponse {
+  proveedores: Proveedor[];
+  /** Quotations of each supplier (history), when the caller can see quotations. */
+  cotizaciones: Cotizacion[];
+  hoy: string;
 }
 
 export interface RequisicionesResponse {

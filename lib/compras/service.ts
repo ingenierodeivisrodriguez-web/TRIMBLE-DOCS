@@ -5,21 +5,36 @@ import type { ProjectContacts } from "../propiedades/types";
 import { esMotivo, ESTADO_HTTP, estadoAsignacion, MENSAJES, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
 import { esDocumento, insumosPlanificados, metradosDelModelo } from "./planificado";
 import type { LecturaPresupuesto } from "./presupuestoLectura";
+import { evaluar, razonesJustificacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
 import { excesos, limite, numeroRequisicion, puedeEditar, revisarAccion, solicitadoPorInsumo } from "./requisiciones";
 import { ROLES_INICIALES } from "./roles";
 import type { Actor, ComprasStore, LineaGuardada } from "./store";
-import { leerAccionRequisicion, leerCambioAsignacion, leerCambioRequisicion, leerCambioRol, leerConfig, leerFiltroAuditoria } from "./validate";
+import {
+  leerAccionComparativo,
+  leerAccionRequisicion,
+  leerAnulacion,
+  leerCambioAsignacion,
+  leerCambioCotizacion,
+  leerCambioProveedor,
+  leerCambioRequisicion,
+  leerCambioRol,
+  leerConfig,
+  leerEstadoProveedor,
+  leerFiltroAuditoria,
+} from "./validate";
 import {
   AccesosResponse,
   Accion,
   Asignacion,
   ConfigCompras,
+  CotizacionesResponse,
   EntradaAuditoria,
   EstadoResponse,
   InsumoPlanificado,
   InsumosResponse,
   Modulo,
   Permiso,
+  ProveedoresResponse,
   Requisicion,
   RequisicionesResponse,
   Rol,
@@ -348,10 +363,143 @@ function detalleRechazo(motivo: MotivoRechazo, r: Requisicion, reglas: Parameter
   return new ServiceError(`${lista.join("; ")}. Escribe la justificación del exceso en esa línea o baja la cantidad.`, 409, motivo);
 }
 
-/** Changes the tolerance over the planned quantities (Accesos y roles: administrar). */
+/** Changes the tolerance over the planned quantities and the minimum of quotations (Accesos y roles: administrar). */
 export async function guardarConfig(ctx: Ctx, body: unknown): Promise<ConfigCompras> {
   const c = leerConfig(body);
   await requerir(ctx, "accesos", "administrar", "config.cambiar");
-  await ctx.store.guardarConfig(ctx.projectId, actor(ctx), c.toleranciaPct, c.version);
+  await ctx.store.guardarConfig(ctx.projectId, actor(ctx), { toleranciaPct: c.toleranciaPct, minCotizaciones: c.minCotizaciones }, c.version);
   return ctx.store.getConfig(ctx.projectId);
+}
+
+// ---------------------------------------------------------------- suppliers
+
+export async function getProveedores(ctx: Ctx): Promise<ProveedoresResponse> {
+  const a = await requerir(ctx, "proveedores", "ver", "proveedores.consultar");
+  const [proveedores, cotizaciones] = await Promise.all([
+    ctx.store.listProveedores(ctx.projectId),
+    tiene(a.permisos, "cotizaciones", "ver") ? ctx.store.listCotizaciones(ctx.projectId) : Promise.resolve([]),
+  ]);
+  return { proveedores, cotizaciones, hoy: ctx.hoy };
+}
+
+/** Creates or changes a supplier (its check digit computed from the NIT). */
+export async function guardarProveedor(ctx: Ctx, body: unknown): Promise<ProveedoresResponse> {
+  const { id: idDado, version, ...datos } = leerCambioProveedor(body);
+  const a = await requerir(ctx, "proveedores", "ver", "proveedores.guardar");
+  const lista = await ctx.store.listProveedores(ctx.projectId);
+  const antes = idDado ? lista.find((p) => p.id === idDado) : undefined;
+  const audit = { objetoTipo: "proveedor", objetoId: idDado ?? "", sujetoNombre: datos.razonSocial };
+  if (!tiene(a.permisos, "proveedores", antes ? "editar" : "crear")) return denegar(ctx, "proveedores.guardar", "proveedores", "sin-permiso", audit);
+  if (lista.some((p) => p.nit === datos.nit && p.id !== idDado)) throw rechazo("nit-repetido");
+  try {
+    await ctx.store.guardarProveedor(ctx.projectId, actor(ctx), idDado ?? globalThis.crypto.randomUUID(), datos, version);
+  } catch (err) {
+    throw traducir(err);
+  }
+  return getProveedores(ctx);
+}
+
+/** Activates, deactivates or blocks a supplier (Proveedores: anular); deactivating or blocking needs a reason. */
+export async function estadoProveedor(ctx: Ctx, id: string, body: unknown): Promise<ProveedoresResponse> {
+  const c = leerEstadoProveedor(body);
+  await requerir(ctx, "proveedores", "anular", "proveedores.estado");
+  if (c.estado !== "activo" && !c.motivo) throw rechazo("motivo-requerido");
+  try {
+    await ctx.store.estadoProveedor(ctx.projectId, actor(ctx), id, c.estado, c.motivo, c.version);
+  } catch (err) {
+    throw traducir(err);
+  }
+  return getProveedores(ctx);
+}
+
+// ---------------------------------------------------------------- quotations and comparisons
+
+/** Approved requisitions with their quotations, comparisons and the suppliers. */
+export async function getCotizaciones(ctx: Ctx): Promise<CotizacionesResponse> {
+  await requerir(ctx, "cotizaciones", "ver", "cotizaciones.consultar");
+  const [requisiciones, cotizaciones, comparativos, proveedores, config] = await Promise.all([
+    ctx.store.listRequisiciones(ctx.projectId),
+    ctx.store.listCotizaciones(ctx.projectId),
+    ctx.store.listComparativos(ctx.projectId),
+    ctx.store.listProveedores(ctx.projectId),
+    ctx.store.getConfig(ctx.projectId),
+  ]);
+  return { requisiciones: requisiciones.filter((r) => r.estado === "aprobada"), cotizaciones, comparativos, proveedores, config, hoy: ctx.hoy };
+}
+
+/** Registers or corrects a supplier's quotation for an approved requisition. */
+export async function guardarCotizacion(ctx: Ctx, body: unknown): Promise<CotizacionesResponse> {
+  const c = leerCambioCotizacion(body);
+  const a = await requerir(ctx, "cotizaciones", "ver", "cotizaciones.guardar");
+  const [reqs, cots, comps, provs, config] = await Promise.all([
+    ctx.store.listRequisiciones(ctx.projectId),
+    ctx.store.listCotizaciones(ctx.projectId),
+    ctx.store.listComparativos(ctx.projectId),
+    ctx.store.listProveedores(ctx.projectId),
+    ctx.store.getConfig(ctx.projectId),
+  ]);
+  const antes = c.id ? cots.find((x) => x.id === c.id) ?? null : null;
+  const r = reqs.find((x) => x.id === c.requisicionId);
+  const audit = { objetoTipo: "cotizacion", objetoId: c.id ?? "", sujetoNombre: r ? numeroRequisicion(r.numero) : "" };
+  const reglas = { actorId: ctx.caller.id, permisos: a.permisos, hoy: ctx.hoy, minCotizaciones: config.minCotizaciones };
+  const motivo = revisarCotizacion(reglas, c, antes, r, comps.find((x) => x.requisicionId === c.requisicionId), provs.find((p) => p.id === c.proveedorId), cots);
+  if (motivo === "sin-permiso") return denegar(ctx, "cotizaciones.guardar", "cotizaciones", motivo, audit);
+  if (motivo) throw rechazo(motivo);
+  const id = c.id ?? globalThis.crypto.randomUUID();
+  const lineas = c.lineas.map((l) => ({ ...l, id: antes?.lineas.find((x) => x.requisicionLineaId === l.requisicionLineaId)?.id ?? globalThis.crypto.randomUUID() }));
+  try {
+    await ctx.store.guardarCotizacion(ctx.projectId, actor(ctx), id, { ...c, lineas });
+  } catch (err) {
+    throw traducir(err);
+  }
+  return getCotizaciones(ctx);
+}
+
+export async function anularCotizacion(ctx: Ctx, id: string, body: unknown): Promise<CotizacionesResponse> {
+  const c = leerAnulacion(body);
+  await requerir(ctx, "cotizaciones", "anular", "cotizaciones.anular");
+  if (!c.motivo) throw rechazo("motivo-requerido");
+  try {
+    await ctx.store.anularCotizacion(ctx.projectId, actor(ctx), id, c.motivo, c.version);
+  } catch (err) {
+    throw traducir(err);
+  }
+  return getCotizaciones(ctx);
+}
+
+/** Saves, proposes, approves or returns a requisition's comparison. */
+export async function accionComparativo(ctx: Ctx, requisicionId: string, body: unknown): Promise<CotizacionesResponse> {
+  const a = leerAccionComparativo(body);
+  const acc = await requerir(ctx, "cotizaciones", "ver", `comparativos.${a.accion}`);
+  const [reqs, cots, comps, provs, config] = await Promise.all([
+    ctx.store.listRequisiciones(ctx.projectId),
+    ctx.store.listCotizaciones(ctx.projectId),
+    ctx.store.listComparativos(ctx.projectId),
+    ctx.store.listProveedores(ctx.projectId),
+    ctx.store.getConfig(ctx.projectId),
+  ]);
+  const r = reqs.find((x) => x.id === requisicionId);
+  if (!r) throw rechazo("no-existe");
+  const comparativo = comps.find((x) => x.requisicionId === requisicionId);
+  const audit = { objetoTipo: "comparativo", objetoId: requisicionId, sujetoId: comparativo?.propuestoPorId ?? null, sujetoNombre: numeroRequisicion(r.numero) };
+  const evaluaciones = evaluar(cots, r, new Map(provs.map((p) => [p.id, p])), a.criterios, ctx.hoy);
+  const reglas = { actorId: ctx.caller.id, permisos: acc.permisos, hoy: ctx.hoy, minCotizaciones: config.minCotizaciones };
+  const motivo = revisarComparativo(reglas, r, comparativo, evaluaciones, a);
+  if (motivo && DENEGACIONES.has(motivo)) return denegar(ctx, `comparativos.${a.accion}`, "cotizaciones", motivo, audit);
+  if (motivo === "justificacion-requerida") {
+    const razones = razonesJustificacion(evaluaciones, a.cotizacionElegidaId, config.minCotizaciones);
+    throw new ServiceError(`${razones.join(" ")} Escribe la justificación de la elección.`, 400, motivo);
+  }
+  if (motivo) throw rechazo(motivo);
+  const requiere = a.accion === "proponer" && razonesJustificacion(evaluaciones, a.cotizacionElegidaId, config.minCotizaciones).length > 0;
+  try {
+    await ctx.store.accionComparativo(ctx.projectId, actor(ctx), requisicionId, a, requiere);
+  } catch (err) {
+    const e = traducir(err);
+    if (e instanceof ServiceError && e.code && DENEGACIONES.has(e.code as MotivoRechazo)) {
+      await denegar(ctx, `comparativos.${a.accion}`, "cotizaciones", e.code as MotivoRechazo, audit);
+    }
+    throw e;
+  }
+  return getCotizaciones(ctx);
 }

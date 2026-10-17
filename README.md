@@ -2055,7 +2055,8 @@ Abastecimiento de la obra a partir de los insumos planificados en
 Presupuesto: requisiciones, cotizaciones y proveedores, órdenes de compra y
 contratos, documentos en el CDE del proyecto y recepción en obra. Se
 construye por fases; ya están **el acceso por rol, la auditoría, la consulta
-de los insumos del presupuesto y las requisiciones**. Aparece en el menú lateral del
+de los insumos del presupuesto, las requisiciones, los proveedores y las
+cotizaciones con su comparativo**. Aparece en el menú lateral del
 proyecto (`/compras`, `manifest-compras.json`); no tiene panel del visor 3D.
 
 Presupuesto sigue siendo la única fuente de insumos, cantidades y precios:
@@ -2203,7 +2204,8 @@ PostgreSQL dentro de una transacción con candado por proyecto):
 - **Límite por insumo para todo el proyecto**: lo ya pedido en otras
   requisiciones enviadas o aprobadas más lo de esta no puede pasar lo
   planificado más la **tolerancia** (0 % de entrada; la cambia quien
-  administra accesos, con "Cambiar" junto a la lista). Para pasarlo hay que
+  administra accesos, con "Cambiar" junto a la lista, donde también va el
+  mínimo de cotizaciones). Para pasarlo hay que
   escribir la **justificación del exceso** en la línea; el mensaje dice
   cuánto se pediría, cuánto ya se pidió y el límite.
 - Aprobar por encima del límite requiere el permiso **Aprobar sobre el
@@ -2222,6 +2224,62 @@ PostgreSQL dentro de una transacción con candado por proyecto):
   aprobado), devolver, rechazar y anular (con el motivo), los intentos sin
   permiso y los cambios de tolerancia.
 
+### Proveedores
+
+Pestaña **Proveedores** (permiso Proveedores: ver). Cada proyecto tiene los
+suyos: NIT o cédula con su **dígito de verificación** (se calcula con el
+método de la DIAN; si se escribe uno equivocado, la pantalla dice cuál es),
+persona natural o jurídica, razón social, nombre comercial, contacto,
+teléfono, correo, ciudad, dirección, qué suministra (materiales, equipos,
+subcontratos, mano de obra), si es responsable de IVA y observaciones. El NIT
+no se repite en el proyecto. Al abrir uno se ven sus cotizaciones.
+
+Un proveedor no se borra: con **Inactivar o bloquear** (permiso Proveedores:
+anular) pasa a inactivo o bloqueado con el motivo (por ejemplo "RUT
+vencido"), y así no recibe cotizaciones nuevas ni puede ser elegido. Se
+reactiva igual.
+
+### Cotizaciones y comparativo
+
+Pestaña **Cotizaciones** (permiso Cotizaciones: ver). Lista las requisiciones
+aprobadas con cuántas cotizaciones vigentes tienen (en naranja si son menos
+del mínimo), el estado de su comparativo y el proveedor elegido.
+
+**Cómo se usa:** abrir la requisición → **＋ Registrar cotización** → elegir
+el proveedor (activo y sin cotización en esa requisición), número del
+proveedor, fecha, vigencia, plazo de entrega en días, días de pago (0 =
+contado), anticipo y condiciones → por cada insumo aprobado: si lo cotiza,
+cantidad (hasta lo aprobado), precio unitario sin IVA, descuento e IVA (19 %
+de entrada; 0 % si el proveedor no es responsable de IVA). Las cotizaciones
+se ven lado a lado: precio unitario neto de cada insumo con su diferencia
+contra el precio del presupuesto (verde si es menor, rojo si es mayor),
+subtotal, IVA, total, entrega, pago, vigencia, si cubre todo lo aprobado y
+el puntaje. Se elige una y **Proponer este proveedor**; otra persona con el
+permiso de aprobar la **aprueba** (nota opcional) o la **devuelve** con el
+motivo para corregir.
+
+Reglas (`lib/compras/cotizaciones.ts` con pruebas, y en PostgreSQL):
+
+- **Puntaje** con pesos que suman 100 (70 precio, 20 entrega, 10 pago de
+  entrada; se cambian en el comparativo): precio = el total más bajo entre
+  las que cubren todo ÷ el total de cada una; entrega = (plazo más corto +
+  1) ÷ (plazo + 1); pago = (días de crédito + 1) ÷ (los más largos + 1). La
+  **mejor** es la de mayor puntaje entre las que cubren todo lo aprobado.
+- No se pueden elegir las **vencidas** ni las de proveedores no activos.
+- La **justificación** es obligatoria si la elegida no es la mejor, si no
+  cubre todo lo aprobado o si hay menos cotizaciones vigentes que el
+  **mínimo** (3 de entrada; lo cambia quien administra accesos).
+- **Quien propone no aprueba**; el rol Compras propone y el Director
+  aprueba (Cotizaciones: aprobar).
+- Mientras el comparativo está propuesto o aprobado, sus cotizaciones no se
+  corrigen ni se anulan; si lo devuelven, sí. Anular una cotización pide
+  motivo y no la borra.
+- Una cotización por proveedor y requisición, solo sobre requisiciones
+  aprobadas y sus líneas aprobadas, sin pasar la cantidad aprobada.
+- Todo queda en la auditoría: proveedores creados, corregidos, bloqueados;
+  cotizaciones registradas, corregidas y anuladas; comparativos guardados,
+  propuestos (con la elegida y la justificación), aprobados y devueltos.
+
 ### Esquema de la base de datos
 
 [`supabase/compras.sql`](supabase/compras.sql) (se puede volver a ejecutar
@@ -2238,12 +2296,16 @@ ejecutar nadie más (`revoke` a `public`, `anon` y `authenticated`).
 | `compras_permisos_de(proyecto, persona)` | Los permisos vigentes hoy de una persona |
 | `compras_activar(...)` | Activa Compras si el proyecto no tiene administrador vigente |
 | `compras_guardar_usuario(...)` / `compras_guardar_rol(...)` | Dan, cambian o revocan con todas las reglas de arriba y su fila de auditoría |
-| `compras_config` | Por proyecto: tolerancia sobre lo planificado (%) |
+| `compras_config` | Por proyecto: tolerancia sobre lo planificado (%) y mínimo de cotizaciones |
 | `compras_consecutivos` | Último número por proyecto y tipo de documento (REQ...) |
 | `compras_requisiciones` | Requisiciones: número, estado, solicitante, fecha requerida, prioridad, justificación, motivo, versión del presupuesto, quién envió y decidió |
 | `compras_requisicion_lineas` | Líneas: insumo (clave en el presupuesto), partida opcional, copia del insumo, cantidad, cantidad aprobada, planificado al enviar, justificación del exceso. Única por requisición, insumo y partida |
 | `compras_solicitado(proyecto, insumo, excluir)` | Lo pedido de un insumo en el proyecto |
 | `compras_guardar_requisicion(...)` / `compras_cambiar_estado_requisicion(...)` / `compras_guardar_config(...)` | Guardan con permisos, estados, límites y su fila de auditoría |
+| `compras_proveedores` | Proveedores: NIT, dígito de verificación (revisado con `compras_dv`), datos, categorías, IVA, estado y motivo. NIT único por proyecto |
+| `compras_cotizaciones` / `compras_cotizacion_lineas` | Cotizaciones (COT-0001) por requisición y proveedor (una registrada por pareja), con fecha, vigencia, entrega, pago, anticipo; líneas con cantidad, precio, descuento e IVA sobre las líneas aprobadas |
+| `compras_comparativos` | Por requisición: pesos, cotización elegida, justificación, estado (borrador, propuesto, aprobado), quién propuso y aprobó |
+| `compras_guardar_proveedor` / `compras_estado_proveedor` / `compras_guardar_cotizacion` / `compras_anular_cotizacion` / `compras_accion_comparativo` | Guardan con permisos, estados y su fila de auditoría |
 
 ### API
 
@@ -2262,7 +2324,12 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `GET requisiciones` | Requisiciones con sus líneas y la tolerancia | Requisiciones: ver |
 | `PUT requisiciones` | Crea o cambia un borrador | Requisiciones: crear (o editar) |
 | `POST requisiciones/{id}/estado` | Enviar, aprobar, rechazar, devolver o anular | Según la acción |
-| `PUT config` | Tolerancia sobre lo planificado | Accesos y roles: administrar |
+| `PUT config` | Tolerancia y mínimo de cotizaciones | Accesos y roles: administrar |
+| `GET proveedores` / `PUT proveedores` | Proveedores (y sus cotizaciones) / crear o corregir | Proveedores: ver / crear o editar |
+| `POST proveedores/{id}/estado` | Activar, inactivar o bloquear | Proveedores: anular |
+| `GET cotizaciones` / `PUT cotizaciones` | Requisiciones aprobadas con cotizaciones y comparativos / registrar o corregir | Cotizaciones: ver / crear o editar |
+| `POST cotizaciones/{id}/anular` | Anular con motivo | Cotizaciones: anular |
+| `POST comparativos/{requisición}` | Guardar, proponer, aprobar o devolver | Cotizaciones: crear o editar / aprobar |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,
@@ -2273,16 +2340,20 @@ Requisiciones: `auto-aprobacion`, `exceso-sin-permiso` (403);
 `cantidad-excedida`, `estado-no-valido`, `linea-duplicada` (409);
 `insumo-no-valido`, `cantidad-no-valida`, `motivo-requerido`,
 `justificacion-requerida`, `sin-lineas`, `fecha-pasada` (400); `no-existe` (404).
+Proveedores y cotizaciones: `nit-repetido`, `proveedor-no-activo`,
+`cotizacion-duplicada`, `cotizacion-no-elegible`, `comparativo-cerrado`,
+`requisicion-no-aprobada` (409).
 
 El código está en `lib/compras/` (`types`, `roles`, `accesos` con las
 reglas puras, `validate`, `store` con Supabase o memoria, `service`,
-`routes`, `client`, `formato`, `planificado`, `presupuestoLectura` y
-`requisiciones`, con sus pruebas) y `components/compras/`.
+`routes`, `client`, `formato`, `planificado`, `presupuestoLectura`,
+`requisiciones`, `proveedores` y `cotizaciones`, con sus pruebas) y
+`components/compras/`.
 
 ### Lo que sigue
 
-En este orden: proveedores y cotizaciones, órdenes y contratos (y con ellas
-lo comprometido), documentos en el CDE de Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
+En este orden: órdenes de compra y contratos a partir del proveedor elegido
+(y con ellos lo comprometido), documentos en el CDE de Trimble Connect (sin binarios en la base; "respaldado" solo cuando Trimble
 confirma la carga), recepción en obra, y el panel con la trazabilidad de cada
 insumo.
 

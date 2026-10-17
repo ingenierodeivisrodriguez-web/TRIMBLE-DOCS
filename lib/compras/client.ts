@@ -2,6 +2,12 @@ import { createRequester, TokenSource } from "../propiedades/client";
 import type { ProjectContacts } from "../propiedades/types";
 import type {
   AccesosResponse,
+  AccionSobreComparativo,
+  CambioCotizacion,
+  CambioEstadoProveedor,
+  CambioProveedor,
+  CotizacionesResponse,
+  ProveedoresResponse,
   AccionSobreRequisicion,
   CambioAsignacion,
   CambioRequisicion,
@@ -28,6 +34,13 @@ export interface ComprasApi {
   guardarRequisicion(cambio: CambioRequisicion): Promise<RequisicionesResponse>;
   accionRequisicion(id: string, accion: AccionSobreRequisicion): Promise<RequisicionesResponse>;
   guardarConfig(config: ConfigCompras): Promise<ConfigCompras>;
+  getProveedores(): Promise<ProveedoresResponse>;
+  guardarProveedor(cambio: Omit<CambioProveedor, "nit"> & { nit: string }): Promise<ProveedoresResponse>;
+  estadoProveedor(id: string, cambio: CambioEstadoProveedor): Promise<ProveedoresResponse>;
+  getCotizaciones(): Promise<CotizacionesResponse>;
+  guardarCotizacion(cambio: CambioCotizacion): Promise<CotizacionesResponse>;
+  anularCotizacion(id: string, motivo: string, version: number): Promise<CotizacionesResponse>;
+  accionComparativo(requisicionId: string, accion: AccionSobreComparativo): Promise<CotizacionesResponse>;
 }
 
 /** The HTTP client for /api/compras, authenticated with the user's Trimble token. */
@@ -43,6 +56,13 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     guardarRequisicion: (cambio) => request<RequisicionesResponse>("/requisiciones", { method: "PUT", body: JSON.stringify(cambio) }),
     accionRequisicion: (id, accion) => request<RequisicionesResponse>(`/requisiciones/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(accion) }),
     guardarConfig: (config) => request<ConfigCompras>("/config", { method: "PUT", body: JSON.stringify(config) }),
+    getProveedores: () => request<ProveedoresResponse>("/proveedores"),
+    guardarProveedor: (cambio) => request<ProveedoresResponse>("/proveedores", { method: "PUT", body: JSON.stringify(cambio) }),
+    estadoProveedor: (id, cambio) => request<ProveedoresResponse>(`/proveedores/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(cambio) }),
+    getCotizaciones: () => request<CotizacionesResponse>("/cotizaciones"),
+    guardarCotizacion: (cambio) => request<CotizacionesResponse>("/cotizaciones", { method: "PUT", body: JSON.stringify(cambio) }),
+    anularCotizacion: (id, motivo, version) => request<CotizacionesResponse>(`/cotizaciones/${encodeURIComponent(id)}/anular`, { method: "POST", body: JSON.stringify({ motivo, version }) }),
+    accionComparativo: (requisicionId, accion) => request<CotizacionesResponse>(`/comparativos/${encodeURIComponent(requisicionId)}`, { method: "POST", body: JSON.stringify(accion) }),
     guardarUsuario: (cambio) => request<AccesosResponse>("/accesos/usuarios", { method: "PUT", body: JSON.stringify(cambio) }),
     guardarRol: (cambio) => request<AccesosResponse>("/accesos/roles", { method: "PUT", body: JSON.stringify(cambio) }),
     async getAuditoria(f) {

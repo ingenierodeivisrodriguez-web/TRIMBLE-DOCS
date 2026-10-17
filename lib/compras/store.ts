@@ -1,11 +1,22 @@
 import { StoreError } from "../propiedades/store";
 import { hoyIso } from "../manuales/licencia";
 import { esMotivo, ESTADO_HTTP, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
+import { evaluar, numeroCotizacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
 import { numeroRequisicion, puedeEditar, revisarAccion, TRANSICIONES } from "./requisiciones";
 import type { RolInicial } from "./roles";
 import { clienteSupabase, eq, faltaTabla } from "./supabase";
 import {
+  AccionSobreComparativo,
   AccionSobreRequisicion,
+  CambioCotizacion,
+  Comparativo,
+  Cotizacion,
+  CRITERIOS_INICIALES,
+  Criterios,
+  DatosProveedor,
+  EstadoProveedor,
+  LineaCotizacion,
+  Proveedor,
   Asignacion,
   CambioAsignacion,
   CambioRol,
@@ -57,7 +68,21 @@ export interface ComprasStore {
 
   /** The project's settings (tolerance 0 and version 0 until first saved). */
   getConfig(projectId: string): Promise<ConfigCompras>;
-  guardarConfig(projectId: string, actor: Actor, toleranciaPct: number, version: number): Promise<number>;
+  guardarConfig(projectId: string, actor: Actor, config: Omit<ConfigCompras, "version">, version: number): Promise<number>;
+
+  listProveedores(projectId: string): Promise<Proveedor[]>;
+  /** Creates (version 0) or changes a supplier; returns its new version. */
+  guardarProveedor(projectId: string, actor: Actor, id: string, datos: DatosProveedor & { dv: number }, version: number): Promise<number>;
+  estadoProveedor(projectId: string, actor: Actor, id: string, estado: EstadoProveedor, motivo: string, version: number): Promise<number>;
+
+  /** Every quotation of the project with its lines. */
+  listCotizaciones(projectId: string): Promise<Cotizacion[]>;
+  /** Registers (version 0) or corrects a quotation, replacing its lines. */
+  guardarCotizacion(projectId: string, actor: Actor, id: string, cambio: Omit<CambioCotizacion, "lineas" | "id"> & { lineas: LineaCotizacion[] }): Promise<number>;
+  anularCotizacion(projectId: string, actor: Actor, id: string, motivo: string, version: number): Promise<number>;
+  listComparativos(projectId: string): Promise<Comparativo[]>;
+  /** `requiereJustificacion`: what the scores say (the database also checks the minimum of quotations). */
+  accionComparativo(projectId: string, actor: Actor, requisicionId: string, a: AccionSobreComparativo, requiereJustificacion: boolean): Promise<number>;
 
   /** Every requisition of the project with its lines, newest first. */
   listRequisiciones(projectId: string): Promise<Requisicion[]>;
@@ -199,7 +224,12 @@ function supabaseStore(): ComprasStore | null {
     const motivo = /compras:([a-z-]+)/.exec(detail.message ?? body)?.[1];
     if (motivo && esMotivo(motivo)) return rechazo(motivo);
     if (/version-conflict/.test(body)) return rechazo("version-conflict");
-    if (detail.code === "23505") return rechazo(/compras_req_lineas_unica/.test(body) ? "linea-duplicada" : "nombre-repetido");
+    if (detail.code === "23505") {
+      if (/compras_req_lineas_unica/.test(body)) return rechazo("linea-duplicada");
+      if (/compras_proveedores_project_id_nit/.test(body)) return rechazo("nit-repetido");
+      if (/compras_cotizaciones_una_por_proveedor/.test(body)) return rechazo("cotizacion-duplicada");
+      return rechazo("nombre-repetido");
+    }
     if (faltaTabla(body)) return new StoreError(SETUP_HINT);
     if (detail.code && /^(22\w{3}|23\w{3})$/.test(detail.code)) return rechazo("datos");
     return null;
@@ -294,12 +324,128 @@ function supabaseStore(): ComprasStore | null {
     },
 
     async getConfig(projectId) {
-      const rows = await json<{ tolerancia_pct: number | string; version: number }[]>(`/compras_config?project_id=${eq(projectId)}&select=tolerancia_pct,version`);
-      return rows[0] ? { toleranciaPct: Number(rows[0].tolerancia_pct), version: rows[0].version } : { toleranciaPct: 0, version: 0 };
+      const rows = await json<{ tolerancia_pct: number | string; min_cotizaciones: number; version: number }[]>(
+        `/compras_config?project_id=${eq(projectId)}&select=tolerancia_pct,min_cotizaciones,version`
+      );
+      return rows[0] ? { toleranciaPct: Number(rows[0].tolerancia_pct), minCotizaciones: rows[0].min_cotizaciones, version: rows[0].version } : { ...CONFIG_INICIAL };
     },
 
-    guardarConfig: (projectId, actor, toleranciaPct, version) =>
-      rpc<number>("compras_guardar_config", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_tolerancia: toleranciaPct, p_version: version }),
+    guardarConfig: (projectId, actor, c, version) =>
+      rpc<number>("compras_guardar_config", {
+        p_project_id: projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_tolerancia: c.toleranciaPct,
+        p_min_cotizaciones: c.minCotizaciones,
+        p_version: version,
+      }),
+
+    async listProveedores(projectId) {
+      const rows = await all<ProveedorRow>(
+        `/compras_proveedores?project_id=${eq(projectId)}&select=id,nit,dv,tipo_persona,razon_social,nombre_comercial,contacto,telefono,correo,ciudad,direccion,categorias,responsable_iva,observaciones,estado,motivo_estado,version,creado,creado_por,actualizado,actualizado_por&order=razon_social.asc`
+      );
+      return rows.map(proveedorDeFila);
+    },
+
+    guardarProveedor: (projectId, actor, id, d, version) =>
+      rpc<number>("compras_guardar_proveedor", {
+        p_project_id: projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_id: id,
+        p_datos: {
+          nit: d.nit,
+          dv: d.dv,
+          tipo_persona: d.tipoPersona,
+          razon_social: d.razonSocial,
+          nombre_comercial: d.nombreComercial,
+          contacto: d.contacto,
+          telefono: d.telefono,
+          correo: d.correo,
+          ciudad: d.ciudad,
+          direccion: d.direccion,
+          categorias: d.categorias,
+          responsable_iva: d.responsableIva,
+          observaciones: d.observaciones,
+        },
+        p_version: version,
+      }),
+
+    estadoProveedor: (projectId, actor, id, estado, motivo, version) =>
+      rpc<number>("compras_estado_proveedor", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_estado: estado, p_motivo: motivo, p_version: version }),
+
+    async listCotizaciones(projectId) {
+      const [cots, lineas] = await Promise.all([
+        all<CotizacionRow>(
+          `/compras_cotizaciones?project_id=${eq(projectId)}&select=id,numero,requisicion_id,proveedor_id,referencia,fecha,vigencia_hasta,plazo_entrega_dias,dias_pago,anticipo_pct,forma_pago,observaciones,estado,motivo,version,creada,creada_por,actualizado,actualizado_por&order=numero.desc`
+        ),
+        all<CotizacionLineaRow>(
+          `/compras_cotizacion_lineas?project_id=${eq(projectId)}&select=id,cotizacion_id,requisicion_linea_id,cantidad,precio_unitario,descuento_pct,iva_pct&order=cotizacion_id.asc`
+        ),
+      ]);
+      const porCot = new Map<string, LineaCotizacion[]>();
+      for (const l of lineas) {
+        porCot.set(l.cotizacion_id, [
+          ...(porCot.get(l.cotizacion_id) ?? []),
+          { id: l.id, requisicionLineaId: l.requisicion_linea_id, cantidad: Number(l.cantidad), precioUnitario: Number(l.precio_unitario), descuentoPct: Number(l.descuento_pct), ivaPct: Number(l.iva_pct) },
+        ]);
+      }
+      return cots.map((c) => cotizacionDeFila(c, porCot.get(c.id) ?? []));
+    },
+
+    guardarCotizacion: (projectId, actor, id, c) =>
+      rpc<number>("compras_guardar_cotizacion", {
+        p_project_id: projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_id: id,
+        p_datos: {
+          requisicion_id: c.requisicionId,
+          proveedor_id: c.proveedorId,
+          referencia: c.referencia,
+          fecha: c.fecha,
+          vigencia_hasta: c.vigenciaHasta,
+          plazo_entrega_dias: c.plazoEntregaDias,
+          dias_pago: c.diasPago,
+          anticipo_pct: c.anticipoPct,
+          forma_pago: c.formaPago,
+          observaciones: c.observaciones,
+        },
+        p_lineas: c.lineas.map((l) => ({
+          id: l.id,
+          requisicion_linea_id: l.requisicionLineaId,
+          cantidad: l.cantidad,
+          precio_unitario: l.precioUnitario,
+          descuento_pct: l.descuentoPct,
+          iva_pct: l.ivaPct,
+        })),
+        p_version: c.version,
+      }),
+
+    anularCotizacion: (projectId, actor, id, motivo, version) =>
+      rpc<number>("compras_anular_cotizacion", { p_project_id: projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_motivo: motivo, p_version: version }),
+
+    async listComparativos(projectId) {
+      const rows = await all<ComparativoRow>(
+        `/compras_comparativos?project_id=${eq(projectId)}&select=requisicion_id,estado,criterios,cotizacion_elegida_id,justificacion,motivo,propuesto,propuesto_por_id,propuesto_por,aprobado,aprobado_por,version&order=requisicion_id.asc`
+      );
+      return rows.map(comparativoDeFila);
+    },
+
+    accionComparativo: (projectId, actor, requisicionId, a, requiere) =>
+      rpc<number>("compras_accion_comparativo", {
+        p_project_id: projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_requisicion_id: requisicionId,
+        p_accion: a.accion,
+        p_criterios: a.criterios,
+        p_elegida: a.cotizacionElegidaId,
+        p_justificacion: a.justificacion,
+        p_motivo: a.motivo,
+        p_requiere_justificacion: requiere,
+        p_version: a.version,
+      }),
 
     async listRequisiciones(projectId) {
       const [reqs, lineas] = await Promise.all([
@@ -353,6 +499,147 @@ function supabaseStore(): ComprasStore | null {
         p_presupuesto_version: presupuestoVersion,
         p_version: a.version,
       }),
+  };
+}
+
+const CONFIG_INICIAL: ConfigCompras = { toleranciaPct: 0, minCotizaciones: 3, version: 0 };
+
+interface ProveedorRow {
+  id: string;
+  nit: string;
+  dv: number;
+  tipo_persona: Proveedor["tipoPersona"];
+  razon_social: string;
+  nombre_comercial: string;
+  contacto: string;
+  telefono: string;
+  correo: string;
+  ciudad: string;
+  direccion: string;
+  categorias: Proveedor["categorias"] | null;
+  responsable_iva: boolean;
+  observaciones: string;
+  estado: EstadoProveedor;
+  motivo_estado: string;
+  version: number;
+  creado: string;
+  creado_por: string;
+  actualizado: string | null;
+  actualizado_por: string | null;
+}
+
+function proveedorDeFila(r: ProveedorRow): Proveedor {
+  return {
+    id: r.id,
+    nit: r.nit,
+    dv: Number(r.dv),
+    tipoPersona: r.tipo_persona,
+    razonSocial: r.razon_social,
+    nombreComercial: r.nombre_comercial,
+    contacto: r.contacto,
+    telefono: r.telefono,
+    correo: r.correo,
+    ciudad: r.ciudad,
+    direccion: r.direccion,
+    categorias: r.categorias ?? [],
+    responsableIva: r.responsable_iva,
+    observaciones: r.observaciones,
+    estado: r.estado,
+    motivoEstado: r.motivo_estado,
+    version: r.version,
+    creado: r.creado,
+    creadoPor: r.creado_por,
+    actualizado: r.actualizado,
+    actualizadoPor: r.actualizado_por,
+  };
+}
+
+interface CotizacionRow {
+  id: string;
+  numero: number;
+  requisicion_id: string;
+  proveedor_id: string;
+  referencia: string;
+  fecha: string;
+  vigencia_hasta: string;
+  plazo_entrega_dias: number;
+  dias_pago: number;
+  anticipo_pct: number | string;
+  forma_pago: string;
+  observaciones: string;
+  estado: Cotizacion["estado"];
+  motivo: string;
+  version: number;
+  creada: string;
+  creada_por: string;
+  actualizado: string | null;
+  actualizado_por: string | null;
+}
+
+interface CotizacionLineaRow {
+  id: string;
+  cotizacion_id: string;
+  requisicion_linea_id: string;
+  cantidad: number | string;
+  precio_unitario: number | string;
+  descuento_pct: number | string;
+  iva_pct: number | string;
+}
+
+function cotizacionDeFila(c: CotizacionRow, lineas: LineaCotizacion[]): Cotizacion {
+  return {
+    id: c.id,
+    numero: c.numero,
+    requisicionId: c.requisicion_id,
+    proveedorId: c.proveedor_id,
+    referencia: c.referencia,
+    fecha: c.fecha,
+    vigenciaHasta: c.vigencia_hasta,
+    plazoEntregaDias: c.plazo_entrega_dias,
+    diasPago: c.dias_pago,
+    anticipoPct: Number(c.anticipo_pct),
+    formaPago: c.forma_pago,
+    observaciones: c.observaciones,
+    estado: c.estado,
+    motivo: c.motivo,
+    lineas,
+    version: c.version,
+    creada: c.creada,
+    creadaPor: c.creada_por,
+    actualizado: c.actualizado,
+    actualizadoPor: c.actualizado_por,
+  };
+}
+
+interface ComparativoRow {
+  requisicion_id: string;
+  estado: Comparativo["estado"];
+  criterios: Criterios | null;
+  cotizacion_elegida_id: string | null;
+  justificacion: string;
+  motivo: string;
+  propuesto: string | null;
+  propuesto_por_id: string | null;
+  propuesto_por: string | null;
+  aprobado: string | null;
+  aprobado_por: string | null;
+  version: number;
+}
+
+function comparativoDeFila(r: ComparativoRow): Comparativo {
+  return {
+    requisicionId: r.requisicion_id,
+    estado: r.estado,
+    criterios: r.criterios ?? { ...CRITERIOS_INICIALES },
+    cotizacionElegidaId: r.cotizacion_elegida_id,
+    justificacion: r.justificacion,
+    motivo: r.motivo,
+    propuesto: r.propuesto,
+    propuestoPorId: r.propuesto_por_id,
+    propuestoPor: r.propuesto_por,
+    aprobado: r.aprobado,
+    aprobadoPor: r.aprobado_por,
+    version: r.version,
   };
 }
 
@@ -447,6 +734,22 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
   const configs = new Map<string, ConfigCompras>();
   const requisiciones = new Map<string, Requisicion & { projectId: string }>();
   const consecutivos = new Map<string, number>();
+  const proveedores = new Map<string, Proveedor & { projectId: string }>();
+  const cotizaciones = new Map<string, Cotizacion & { projectId: string }>();
+  const comparativos = new Map<string, Comparativo & { projectId: string }>();
+  const siguiente = (projectId: string, tipo: string) => {
+    const n = (consecutivos.get(`${projectId}|${tipo}`) ?? 0) + 1;
+    consecutivos.set(`${projectId}|${tipo}`, n);
+    return n;
+  };
+  const sinProyecto = <T extends { projectId: string }>(x: T): Omit<T, "projectId"> => {
+    const { projectId: _, ...resto } = structuredClone(x);
+    return resto;
+  };
+  const provsDe = (projectId: string): Proveedor[] => [...proveedores.values()].filter((p) => p.projectId === projectId).map(sinProyecto);
+  const cotsDe = (projectId: string): Cotizacion[] => [...cotizaciones.values()].filter((c) => c.projectId === projectId).map(sinProyecto);
+  const compsDe = (projectId: string): Comparativo[] => [...comparativos.values()].filter((c) => c.projectId === projectId).map(sinProyecto);
+  const configDe = (projectId: string): ConfigCompras => ({ ...(configs.get(projectId) ?? CONFIG_INICIAL) });
   const reqsDe = (projectId: string): Requisicion[] =>
     [...requisiciones.values()].filter((r) => r.projectId === projectId).map(({ projectId: _, ...r }) => structuredClone(r));
   const permisosDe = (projectId: string, userId: string) => permisosVigentes(userId, usuariosDe(projectId), rolesDe(projectId), hoy());
@@ -553,16 +856,125 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
         .map(({ projectId: _, ...e }) => structuredClone(e));
     },
     async getConfig(projectId) {
-      return { ...(configs.get(projectId) ?? { toleranciaPct: 0, version: 0 }) };
+      return configDe(projectId);
     },
-    async guardarConfig(projectId, actor, toleranciaPct, version) {
+    async guardarConfig(projectId, actor, c, version) {
       if (!tiene(permisosDe(projectId, actor.id), "accesos", "administrar")) throw rechazo("sin-permiso");
       const antes = configs.get(projectId);
       if ((antes?.version ?? 0) !== version) throw rechazo("version-conflict");
-      if (!(toleranciaPct >= 0 && toleranciaPct <= 100)) throw rechazo("datos");
-      configs.set(projectId, { toleranciaPct, version: version + 1 });
-      auditar(projectId, { actorId: actor.id, actorNombre: actor.nombre, accion: "config.cambiar", modulo: "requisiciones", objetoTipo: "proyecto", objetoId: projectId, sujetoId: null, sujetoNombre: "", resultado: "ok", detalle: { tolerancia_antes: antes?.toleranciaPct ?? 0, tolerancia: toleranciaPct } });
+      if (!(c.toleranciaPct >= 0 && c.toleranciaPct <= 100) || !(c.minCotizaciones >= 1 && c.minCotizaciones <= 10)) throw rechazo("datos");
+      configs.set(projectId, { ...c, version: version + 1 });
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: "config.cambiar", modulo: "requisiciones", objetoTipo: "proyecto", objetoId: projectId, sujetoId: null, sujetoNombre: "", resultado: "ok",
+        detalle: { tolerancia_antes: antes?.toleranciaPct ?? 0, tolerancia: c.toleranciaPct, min_cotizaciones_antes: antes?.minCotizaciones ?? 3, min_cotizaciones: c.minCotizaciones },
+      });
       return version + 1;
+    },
+    async listProveedores(projectId) {
+      return provsDe(projectId).sort((a, b) => a.razonSocial.localeCompare(b.razonSocial, "es"));
+    },
+    async guardarProveedor(projectId, actor, id, d, version) {
+      const antes = proveedores.get(id);
+      if (antes && antes.projectId !== projectId) throw rechazo("no-existe");
+      if (!tiene(permisosDe(projectId, actor.id), "proveedores", antes ? "editar" : "crear")) throw rechazo("sin-permiso");
+      if ((antes?.version ?? 0) !== version) throw rechazo("version-conflict");
+      if (provsDe(projectId).some((p) => p.id !== id && p.nit === d.nit)) throw rechazo("nit-repetido");
+      const ahoraIso = ahora();
+      proveedores.set(id, {
+        ...d, projectId, id, estado: antes?.estado ?? "activo", motivoEstado: antes?.motivoEstado ?? "", version: version + 1,
+        creado: antes?.creado ?? ahoraIso, creadoPor: antes?.creadoPor ?? actor.nombre, actualizado: ahoraIso, actualizadoPor: actor.nombre,
+      });
+      auditar(projectId, { actorId: actor.id, actorNombre: actor.nombre, accion: antes ? "proveedores.editar" : "proveedores.crear", modulo: "proveedores", objetoTipo: "proveedor", objetoId: id, sujetoId: null, sujetoNombre: d.razonSocial, resultado: "ok", detalle: { nit: `${d.nit}-${d.dv}` } });
+      return version + 1;
+    },
+    async estadoProveedor(projectId, actor, id, estado, motivo, version) {
+      if (!tiene(permisosDe(projectId, actor.id), "proveedores", "anular")) throw rechazo("sin-permiso");
+      const p = proveedores.get(id);
+      if (!p || p.projectId !== projectId) throw rechazo("no-existe");
+      if (estado !== "activo" && !motivo.trim()) throw rechazo("motivo-requerido");
+      if (p.version !== version) throw rechazo("version-conflict");
+      const de = p.estado;
+      Object.assign(p, { estado, motivoEstado: estado === "activo" ? "" : motivo.trim(), version: version + 1, actualizado: ahora(), actualizadoPor: actor.nombre });
+      auditar(projectId, { actorId: actor.id, actorNombre: actor.nombre, accion: "proveedores.estado", modulo: "proveedores", objetoTipo: "proveedor", objetoId: id, sujetoId: null, sujetoNombre: p.razonSocial, resultado: "ok", detalle: { de, a: estado, motivo: motivo.trim() } });
+      return version + 1;
+    },
+    async listCotizaciones(projectId) {
+      return cotsDe(projectId).sort((a, b) => b.numero - a.numero);
+    },
+    async guardarCotizacion(projectId, actor, id, c) {
+      const antes = cotizaciones.get(id);
+      if (antes && antes.projectId !== projectId) throw rechazo("no-existe");
+      const reqs = reqsDe(projectId);
+      const ctx = { actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy(), minCotizaciones: configDe(projectId).minCotizaciones };
+      const motivo = revisarCotizacion(
+        ctx, c, antes ? sinProyecto(antes) : null, reqs.find((r) => r.id === c.requisicionId), compsDe(projectId).find((x) => x.requisicionId === c.requisicionId),
+        provsDe(projectId).find((p) => p.id === c.proveedorId), cotsDe(projectId)
+      );
+      if (motivo) throw rechazo(motivo);
+      const numero = antes?.numero ?? siguiente(projectId, "cotizacion");
+      const ahoraIso = ahora();
+      cotizaciones.set(id, {
+        ...c, projectId, id, numero, estado: "registrada", motivo: "", version: c.version + 1,
+        creada: antes?.creada ?? ahoraIso, creadaPor: antes?.creadaPor ?? actor.nombre, actualizado: ahoraIso, actualizadoPor: actor.nombre,
+      });
+      const req = reqs.find((r) => r.id === c.requisicionId)!;
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: antes ? "cotizaciones.editar" : "cotizaciones.registrar", modulo: "cotizaciones", objetoTipo: "cotizacion", objetoId: id,
+        sujetoId: null, sujetoNombre: numeroCotizacion(numero), resultado: "ok",
+        detalle: { requisicion: numeroRequisicion(req.numero), proveedor: proveedores.get(c.proveedorId)?.razonSocial ?? "", lineas: c.lineas.length },
+      });
+      return c.version + 1;
+    },
+    async anularCotizacion(projectId, actor, id, motivo, version) {
+      if (!tiene(permisosDe(projectId, actor.id), "cotizaciones", "anular")) throw rechazo("sin-permiso");
+      const c = cotizaciones.get(id);
+      if (!c || c.projectId !== projectId) throw rechazo("no-existe");
+      if (c.estado !== "registrada") throw rechazo("estado-no-valido");
+      const comp = comparativos.get(c.requisicionId);
+      if (comp && comp.estado !== "borrador") throw rechazo("comparativo-cerrado");
+      if (!motivo.trim()) throw rechazo("motivo-requerido");
+      if (c.version !== version) throw rechazo("version-conflict");
+      Object.assign(c, { estado: "anulada", motivo: motivo.trim(), version: version + 1, actualizado: ahora(), actualizadoPor: actor.nombre });
+      if (comp?.cotizacionElegidaId === id) comp.cotizacionElegidaId = null;
+      auditar(projectId, { actorId: actor.id, actorNombre: actor.nombre, accion: "cotizaciones.anular", modulo: "cotizaciones", objetoTipo: "cotizacion", objetoId: id, sujetoId: null, sujetoNombre: numeroCotizacion(c.numero), resultado: "ok", detalle: { motivo: motivo.trim() } });
+      return version + 1;
+    },
+    async listComparativos(projectId) {
+      return compsDe(projectId);
+    },
+    async accionComparativo(projectId, actor, requisicionId, a, requiere) {
+      const r = reqsDe(projectId).find((x) => x.id === requisicionId);
+      if (!r) throw rechazo("no-existe");
+      const actual = comparativos.get(requisicionId);
+      const config = configDe(projectId);
+      const evaluaciones = evaluar(cotsDe(projectId), r, new Map(provsDe(projectId).map((p) => [p.id, p])), a.criterios, hoy());
+      const ctx = { actorId: actor.id, permisos: permisosDe(projectId, actor.id), hoy: hoy(), minCotizaciones: config.minCotizaciones };
+      const motivo = revisarComparativo(ctx, r, actual ? sinProyecto(actual) : undefined, evaluaciones, a);
+      if (motivo) throw rechazo(motivo);
+      const elegibles = evaluaciones.filter((e) => e.elegible).length;
+      if (a.accion === "proponer" && (requiere || elegibles < config.minCotizaciones) && !a.justificacion.trim()) throw rechazo("justificacion-requerida");
+      const ahoraIso = ahora();
+      const c: Comparativo & { projectId: string } = actual ?? {
+        projectId, requisicionId, estado: "borrador", criterios: a.criterios, cotizacionElegidaId: null, justificacion: "", motivo: "",
+        propuesto: null, propuestoPorId: null, propuestoPor: null, aprobado: null, aprobadoPor: null, version: 0,
+      };
+      const propuestoPorId = c.propuestoPorId;
+      if (a.accion === "guardar" || a.accion === "proponer") Object.assign(c, { criterios: a.criterios, cotizacionElegidaId: a.cotizacionElegidaId, justificacion: a.justificacion.trim() });
+      if (a.accion === "proponer") Object.assign(c, { estado: "propuesto", propuesto: ahoraIso, propuestoPorId: actor.id, propuestoPor: actor.nombre, motivo: "" });
+      if (a.accion === "aprobar") Object.assign(c, { estado: "aprobado", aprobado: ahoraIso, aprobadoPor: actor.nombre, motivo: a.motivo.trim() });
+      if (a.accion === "devolver") Object.assign(c, { estado: "borrador", motivo: a.motivo.trim() });
+      c.version += 1;
+      comparativos.set(requisicionId, c);
+      const elegida = cotizaciones.get(c.cotizacionElegidaId ?? "");
+      auditar(projectId, {
+        actorId: actor.id, actorNombre: actor.nombre, accion: `comparativos.${a.accion}`, modulo: "cotizaciones", objetoTipo: "comparativo", objetoId: requisicionId,
+        sujetoId: propuestoPorId, sujetoNombre: numeroRequisicion(r.numero), resultado: "ok",
+        detalle: {
+          elegida: elegida ? `${numeroCotizacion(elegida.numero)} ${proveedores.get(elegida.proveedorId)?.razonSocial ?? ""}` : null,
+          justificacion: a.justificacion.trim(), motivo: a.motivo.trim(), criterios: a.criterios,
+        },
+      });
+      return c.version;
     },
     async listRequisiciones(projectId) {
       return reqsDe(projectId).sort((a, b) => b.numero - a.numero);
@@ -583,10 +995,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ComprasStore {
       if (claves.size !== lineas.length) throw rechazo("linea-duplicada");
       if (lineas.some((l) => !(l.cantidad > 0))) throw rechazo("datos");
       let numero = antes?.numero;
-      if (!numero) {
-        numero = (consecutivos.get(projectId) ?? 0) + 1;
-        consecutivos.set(projectId, numero);
-      }
+      if (!numero) numero = siguiente(projectId, "requisicion");
       const ahoraIso = ahora();
       requisiciones.set(id, {
         projectId,

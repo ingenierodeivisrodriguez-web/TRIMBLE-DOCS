@@ -33,7 +33,13 @@ export type MotivoRechazo =
   | "sin-lineas"
   | "fecha-pasada"
   | "linea-duplicada"
-  | "insumo-no-valido";
+  | "insumo-no-valido"
+  | "requisicion-no-aprobada"
+  | "comparativo-cerrado"
+  | "proveedor-no-activo"
+  | "cotizacion-duplicada"
+  | "cotizacion-no-elegible"
+  | "nit-repetido";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Compras en este proyecto. Pídeselo a un administrador de Compras.",
@@ -61,6 +67,12 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "fecha-pasada": "La fecha requerida ya pasó: cámbiala antes de enviar.",
   "linea-duplicada": "El mismo insumo (y partida) está dos veces: deja una sola línea.",
   "insumo-no-valido": "Ese insumo no está en el presupuesto del proyecto (o es un porcentaje, que no se compra).",
+  "requisicion-no-aprobada": "Solo se cotizan requisiciones aprobadas.",
+  "comparativo-cerrado": "El comparativo de esta requisición ya se propuso o aprobó: sus cotizaciones no se cambian (si lo devuelven, se pueden corregir).",
+  "proveedor-no-activo": "El proveedor está inactivo o bloqueado.",
+  "cotizacion-duplicada": "Ese proveedor ya tiene una cotización para esta requisición: corrígela en vez de registrar otra.",
+  "cotizacion-no-elegible": "La cotización elegida está vencida, anulada, es de un proveedor no activo o no es de esta requisición.",
+  "nit-repetido": "Ya hay un proveedor con ese NIT en este proyecto.",
 };
 
 /** The HTTP status of each refusal. */
@@ -90,6 +102,12 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "fecha-pasada": 400,
   "linea-duplicada": 409,
   "insumo-no-valido": 400,
+  "requisicion-no-aprobada": 409,
+  "comparativo-cerrado": 409,
+  "proveedor-no-activo": 409,
+  "cotizacion-duplicada": 409,
+  "cotizacion-no-elegible": 409,
+  "nit-repetido": 409,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {

@@ -51,7 +51,21 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "requisiciones.rechazar": "Rechazar requisición",
   "requisiciones.devolver": "Devolver requisición",
   "requisiciones.anular": "Anular requisición",
-  "config.cambiar": "Cambiar la tolerancia",
+  "config.cambiar": "Cambiar la configuración",
+  "proveedores.consultar": "Consultar proveedores",
+  "proveedores.guardar": "Guardar un proveedor",
+  "proveedores.crear": "Crear proveedor",
+  "proveedores.editar": "Editar proveedor",
+  "proveedores.estado": "Cambiar estado del proveedor",
+  "cotizaciones.consultar": "Consultar cotizaciones",
+  "cotizaciones.guardar": "Guardar una cotización",
+  "cotizaciones.registrar": "Registrar cotización",
+  "cotizaciones.editar": "Corregir cotización",
+  "cotizaciones.anular": "Anular cotización",
+  "comparativos.guardar": "Guardar comparativo",
+  "comparativos.proponer": "Proponer proveedor",
+  "comparativos.aprobar": "Aprobar proveedor elegido",
+  "comparativos.devolver": "Devolver comparativo",
 };
 
 export function nombreAccion(accion: string): string {
@@ -66,6 +80,7 @@ export function nombrePermiso(p: string): string {
   return `${modulo}: ${accion}`;
 }
 
+const ESTADO_PROVEEDOR: Record<string, string> = { activo: "Activo", inactivo: "Inactivo", bloqueado: "Bloqueado" };
 const ESTADO_TEXTO: Record<string, string> = { borrador: "Borrador", enviada: "Por aprobar", aprobada: "Aprobada", rechazada: "Rechazada", anulada: "Anulada" };
 
 type Vigencia = { rol?: unknown; desde?: unknown; hasta?: unknown; activo?: unknown };
@@ -106,7 +121,22 @@ export function detalleEntrada(e: EntradaAuditoria): string {
     return partes.join(". ") || "Sin cambios de permisos";
   }
   if (e.accion === "proyecto.activar") return `Quedó como ${String(d.rol ?? "administrador")}.`;
-  if (e.accion === "config.cambiar") return `Tolerancia ${String(d.tolerancia_antes ?? 0)} % → ${String(d.tolerancia ?? 0)} %`;
+  if (e.accion === "config.cambiar") {
+    const partes = [`Tolerancia ${String(d.tolerancia_antes ?? 0)} % → ${String(d.tolerancia ?? 0)} %`];
+    if (d.min_cotizaciones !== undefined && d.min_cotizaciones !== d.min_cotizaciones_antes) partes.push(`mínimo de cotizaciones ${String(d.min_cotizaciones_antes ?? 3)} → ${String(d.min_cotizaciones)}`);
+    return partes.join("; ");
+  }
+  if (e.accion === "proveedores.crear" || e.accion === "proveedores.editar") return `NIT ${String(d.nit ?? "")}`;
+  if (e.accion === "proveedores.estado") return `${ESTADO_PROVEEDOR[String(d.de)] ?? String(d.de)} → ${ESTADO_PROVEEDOR[String(d.a)] ?? String(d.a)}${d.motivo ? `. motivo: ${String(d.motivo)}` : ""}`;
+  if (e.accion === "cotizaciones.registrar" || e.accion === "cotizaciones.editar") return `${String(d.requisicion ?? "")}, ${String(d.proveedor ?? "")}, ${String(d.lineas ?? 0)} línea(s)`;
+  if (e.accion === "cotizaciones.anular") return `motivo: ${String(d.motivo ?? "")}`;
+  if (e.accion.startsWith("comparativos.")) {
+    const partes: string[] = [];
+    if (d.elegida) partes.push(`elegida: ${String(d.elegida)}`);
+    if (d.justificacion) partes.push(`justificación: ${String(d.justificacion)}`);
+    if (d.motivo) partes.push(`motivo: ${String(d.motivo)}`);
+    return partes.join(". ");
+  }
   if (e.accion === "requisiciones.crear" || e.accion === "requisiciones.editar") {
     return `${String(d.lineas ?? 0)} insumo(s)${typeof d.fecha_requerida === "string" ? `, requerida el ${fecha(d.fecha_requerida)}` : ""}`;
   }

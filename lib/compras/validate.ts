@@ -1,7 +1,16 @@
 import { isValidIsoDate } from "../propiedades/values";
 import { ServiceError } from "../propiedades/service";
+import type { TipoInsumo } from "../presupuesto/types";
+import { leerNit } from "./proveedores";
 import { esPermisoValido } from "./roles";
 import {
+  AccionComparativo,
+  AccionSobreComparativo,
+  CambioCotizacion,
+  CambioEstadoProveedor,
+  CambioProveedor,
+  EstadoProveedor,
+  TipoPersona,
   AccionRequisicion,
   AccionSobreRequisicion,
   CambioAsignacion,
@@ -160,5 +169,130 @@ export function leerConfig(body: unknown): ConfigCompras {
   const o = (body ?? {}) as Record<string, unknown>;
   const t = o.toleranciaPct;
   if (typeof t !== "number" || !Number.isFinite(t) || t < 0 || t > 100) bad("La tolerancia debe estar entre 0 y 100 %.");
-  return { toleranciaPct: Math.round(t * 100) / 100, version: version(o.version) };
+  const m = o.minCotizaciones;
+  if (typeof m !== "number" || !Number.isInteger(m) || m < 1 || m > 10) bad("El mínimo de cotizaciones debe ser un número entero entre 1 y 10.");
+  return { toleranciaPct: Math.round(t * 100) / 100, minCotizaciones: m, version: version(o.version) };
+}
+
+// ---------------------------------------------------------------- suppliers
+
+const TIPOS: TipoInsumo[] = ["MO", "MT", "EQ", "SC"];
+const CORREO_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+/** A supplier as typed; the NIT can come with dots and its check digit (which must be right). */
+export function leerCambioProveedor(body: unknown): CambioProveedor & { dv: number } {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (o.id !== undefined && (typeof o.id !== "string" || !UUID_RE.test(o.id))) bad("Proveedor no válido.");
+  const nit = leerNit(texto(o.nit, "NIT", 30));
+  if ("error" in nit) bad(nit.error);
+  if (o.tipoPersona !== "natural" && o.tipoPersona !== "juridica") bad("Tipo de persona no válido.");
+  const razonSocial = texto(o.razonSocial, "Razón social", 200).trim();
+  if (!razonSocial) bad("Escribe la razón social (o el nombre, si es persona natural).");
+  const correo = texto(o.correo ?? "", "Correo", 120).trim();
+  if (correo && !CORREO_RE.test(correo)) bad("El correo no es válido.");
+  if (!Array.isArray(o.categorias) || o.categorias.some((c) => !TIPOS.includes(c as TipoInsumo))) bad("Categorías no válidas.");
+  if (typeof o.responsableIva !== "boolean") bad("Indica si es responsable de IVA.");
+  return {
+    ...(o.id ? { id: o.id as string } : {}),
+    nit: nit.nit,
+    dv: nit.dv,
+    tipoPersona: o.tipoPersona as TipoPersona,
+    razonSocial,
+    nombreComercial: texto(o.nombreComercial ?? "", "Nombre comercial", 200).trim(),
+    contacto: texto(o.contacto ?? "", "Contacto", 120).trim(),
+    telefono: texto(o.telefono ?? "", "Teléfono", 40).trim(),
+    correo,
+    ciudad: texto(o.ciudad ?? "", "Ciudad", 80).trim(),
+    direccion: texto(o.direccion ?? "", "Dirección", 200).trim(),
+    categorias: [...new Set(o.categorias as TipoInsumo[])],
+    responsableIva: o.responsableIva,
+    observaciones: texto(o.observaciones ?? "", "Observaciones", 1000).trim(),
+    version: version(o.version),
+  };
+}
+
+export function leerEstadoProveedor(body: unknown): CambioEstadoProveedor {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (o.estado !== "activo" && o.estado !== "inactivo" && o.estado !== "bloqueado") bad("Estado no válido.");
+  return { estado: o.estado as EstadoProveedor, motivo: texto(o.motivo ?? "", "Motivo", 500).trim(), version: version(o.version) };
+}
+
+// ---------------------------------------------------------------- quotations
+
+function entero(value: unknown, what: string, max: number): number {
+  if (typeof value !== "number" || !Number.isInteger(value) || value < 0 || value > max) bad(`${what}: número entero entre 0 y ${max}.`);
+  return value;
+}
+
+function porcentaje(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value < 0 || value > 100) bad(`${what}: entre 0 y 100 %.`);
+  return Math.round(value * 100) / 100;
+}
+
+export function leerCambioCotizacion(body: unknown): CambioCotizacion {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (o.id !== undefined && (typeof o.id !== "string" || !UUID_RE.test(o.id))) bad("Cotización no válida.");
+  if (typeof o.requisicionId !== "string" || !UUID_RE.test(o.requisicionId)) bad("Requisición no válida.");
+  if (typeof o.proveedorId !== "string" || !UUID_RE.test(o.proveedorId)) bad("Elige el proveedor.");
+  const fechaC = fecha(o.fecha, "Fecha de la cotización");
+  const vigencia = fecha(o.vigenciaHasta, "Vigente hasta");
+  if (vigencia < fechaC) bad("La vigencia no puede terminar antes de la fecha de la cotización.");
+  if (!Array.isArray(o.lineas) || !o.lineas.length) bad("La cotización necesita al menos un precio.");
+  if (o.lineas.length > MAX_LINEAS_REQUISICION) bad(`Máximo ${MAX_LINEAS_REQUISICION} líneas.`);
+  const lineas = o.lineas.map((v, i) => {
+    const l = (v ?? {}) as Record<string, unknown>;
+    if (typeof l.requisicionLineaId !== "string" || !UUID_RE.test(l.requisicionLineaId)) bad(`Línea ${i + 1}: no válida.`);
+    const c = cantidad(l.cantidad, `Línea ${i + 1}`);
+    if (c <= 0) bad(`Línea ${i + 1}: la cantidad debe ser mayor que cero.`);
+    const precio = l.precioUnitario;
+    if (typeof precio !== "number" || !Number.isFinite(precio) || precio < 0 || precio > 1e13) bad(`Línea ${i + 1}: precio no válido.`);
+    return {
+      requisicionLineaId: l.requisicionLineaId,
+      cantidad: c,
+      precioUnitario: Math.round(precio * 100) / 100,
+      descuentoPct: porcentaje(l.descuentoPct ?? 0, `Línea ${i + 1}: descuento`),
+      ivaPct: porcentaje(l.ivaPct ?? 0, `Línea ${i + 1}: IVA`),
+    };
+  });
+  if (new Set(lineas.map((l) => l.requisicionLineaId)).size !== lineas.length) bad("Una línea de la requisición está dos veces.");
+  return {
+    ...(o.id ? { id: o.id as string } : {}),
+    requisicionId: o.requisicionId,
+    proveedorId: o.proveedorId,
+    referencia: texto(o.referencia ?? "", "Referencia", 80).trim(),
+    fecha: fechaC,
+    vigenciaHasta: vigencia,
+    plazoEntregaDias: entero(o.plazoEntregaDias, "Plazo de entrega (días)", 3650),
+    diasPago: entero(o.diasPago, "Días de pago", 3650),
+    anticipoPct: porcentaje(o.anticipoPct ?? 0, "Anticipo"),
+    formaPago: texto(o.formaPago ?? "", "Forma de pago", 200).trim(),
+    observaciones: texto(o.observaciones ?? "", "Observaciones", 1000).trim(),
+    lineas,
+    version: version(o.version),
+  };
+}
+
+export function leerAnulacion(body: unknown): { motivo: string; version: number } {
+  const o = (body ?? {}) as Record<string, unknown>;
+  return { motivo: texto(o.motivo ?? "", "Motivo", 1000).trim(), version: version(o.version) };
+}
+
+const ACCION_COMPARATIVO_RE = /^(guardar|proponer|aprobar|devolver)$/;
+
+export function leerAccionComparativo(body: unknown): AccionSobreComparativo {
+  const o = (body ?? {}) as Record<string, unknown>;
+  if (typeof o.accion !== "string" || !ACCION_COMPARATIVO_RE.test(o.accion)) bad("Acción no válida.");
+  const c = (o.criterios ?? {}) as Record<string, unknown>;
+  const criterios = { precio: entero(c.precio, "Peso del precio", 100), entrega: entero(c.entrega, "Peso de la entrega", 100), pago: entero(c.pago, "Peso del pago", 100) };
+  if (criterios.precio + criterios.entrega + criterios.pago !== 100) bad("Los pesos de los criterios deben sumar 100.");
+  const elegida = o.cotizacionElegidaId ?? null;
+  if (elegida !== null && (typeof elegida !== "string" || !UUID_RE.test(elegida))) bad("Cotización no válida.");
+  return {
+    accion: o.accion as AccionComparativo,
+    criterios,
+    cotizacionElegidaId: elegida as string | null,
+    justificacion: texto(o.justificacion ?? "", "Justificación", 1000).trim(),
+    motivo: texto(o.motivo ?? "", "Motivo", 1000).trim(),
+    version: version(o.version),
+  };
 }

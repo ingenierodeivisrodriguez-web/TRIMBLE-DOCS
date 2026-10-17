@@ -10,9 +10,11 @@ import Accesos from "./Accesos";
 import Auditoria from "./Auditoria";
 import Insumos from "./Insumos";
 import Requisiciones from "./Requisiciones";
+import Proveedores from "./Proveedores";
+import Cotizaciones from "./Cotizaciones";
 import { botonSecundario, card, linkBtn, texto, titulo } from "./estilos";
 
-type Pestana = "inicio" | "insumos" | "requisiciones" | "accesos" | "auditoria";
+type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "accesos" | "auditoria";
 
 /** "Compras y Contratación" in the project menu: who you are, your access, and what your role lets you open. */
 export default function ComprasApp({ api, projectId, projectName }: { api: ComprasApi; projectId: string; projectName: string }) {
@@ -47,6 +49,8 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
     { id: "inicio", nombre: "Inicio" },
     ...(puede("insumos.ver") ? [{ id: "insumos" as const, nombre: "Insumos del presupuesto" }] : []),
     ...(puede("requisiciones.ver") ? [{ id: "requisiciones" as const, nombre: "Requisiciones" }] : []),
+    ...(puede("cotizaciones.ver") ? [{ id: "cotizaciones" as const, nombre: "Cotizaciones" }] : []),
+    ...(puede("proveedores.ver") ? [{ id: "proveedores" as const, nombre: "Proveedores" }] : []),
     ...(puede("accesos.ver") ? [{ id: "accesos" as const, nombre: "Accesos y roles" }] : []),
     ...(puede("auditoria.ver") ? [{ id: "auditoria" as const, nombre: "Auditoría" }] : []),
   ];
@@ -93,6 +97,8 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
             {actual === "inicio" && <Inicio estado={estado} />}
             {actual === "insumos" && <Insumos api={api} onSinAcceso={onSinAcceso} />}
             {actual === "requisiciones" && <Requisiciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
+            {actual === "cotizaciones" && <Cotizaciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
+            {actual === "proveedores" && <Proveedores api={api} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "accesos" && <Accesos api={api} yo={estado.user.id} onSinAcceso={onSinAcceso} />}
             {actual === "auditoria" && <Auditoria api={api} onSinAcceso={onSinAcceso} />}
           </main>
@@ -222,8 +228,8 @@ function Inicio({ estado }: { estado: EstadoResponse }) {
       <section style={card}>
         <h2 style={titulo}>En construcción</h2>
         <p style={texto}>
-          Ya están los accesos por rol, la auditoría, los insumos del presupuesto y las requisiciones. Siguen, en este orden: proveedores y
-          cotizaciones, órdenes y contratos, documentos en el CDE del proyecto, recepción en obra y el panel con la trazabilidad de cada insumo.
+          Ya están los accesos por rol, la auditoría, los insumos del presupuesto, las requisiciones, los proveedores y las cotizaciones con su
+          comparativo. Siguen, en este orden: órdenes y contratos, documentos en el CDE del proyecto, recepción en obra y el panel con la trazabilidad de cada insumo.
         </p>
       </section>
     </div>

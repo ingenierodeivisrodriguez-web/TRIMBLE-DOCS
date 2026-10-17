@@ -96,7 +96,7 @@ export default function Requisiciones({ api, yo, permisos, onSinAcceso }: { api:
         )}
         <span style={{ flex: 1 }} />
         <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }} title="Cuánto se puede pedir sobre lo planificado sin justificar el exceso">
-          Tolerancia sobre lo planificado: <strong>{fmt(datos.config.toleranciaPct)} %</strong>
+          Tolerancia sobre lo planificado: <strong>{fmt(datos.config.toleranciaPct)} %</strong> · mínimo de cotizaciones: <strong>{datos.config.minCotizaciones}</strong>
         </span>
         {tiene(permisos, "accesos", "administrar") && (
           <button type="button" onClick={() => setTolerancia(true)} style={{ ...linkBtn, fontSize: 13 }}>
@@ -201,15 +201,17 @@ function ToleranciaDialog({
   onClose: () => void;
 }) {
   const [texto, setTexto] = useState(String(actual.toleranciaPct));
+  const [minimo, setMinimo] = useState(String(actual.minCotizaciones));
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const valor = Number(texto.replace(",", "."));
-  const valido = texto.trim() !== "" && Number.isFinite(valor) && valor >= 0 && valor <= 100;
+  const min = Number(minimo);
+  const valido = texto.trim() !== "" && Number.isFinite(valor) && valor >= 0 && valor <= 100 && Number.isInteger(min) && min >= 1 && min <= 10;
   async function guardar() {
     setBusy(true);
     setError("");
     try {
-      onGuardado(await api.guardarConfig({ toleranciaPct: valor, version: actual.version }));
+      onGuardado(await api.guardarConfig({ toleranciaPct: valor, minCotizaciones: min, version: actual.version }));
     } catch (err) {
       setBusy(false);
       setError(message(err));
@@ -217,7 +219,7 @@ function ToleranciaDialog({
   }
   return (
     <Modal
-      title="Tolerancia sobre lo planificado"
+      title="Configuración de compras"
       width={480}
       onClose={() => !busy && onClose()}
       footer={
@@ -240,7 +242,12 @@ function ToleranciaDialog({
           Tolerancia (%)
         </label>
         <input id="tolerancia" inputMode="decimal" value={texto} onChange={(e) => setTexto(e.target.value)} style={{ ...baseInput, width: 120 }} />
-        {!valido && <span style={{ fontSize: 13, color: "#b3261e" }}>Escribe un número entre 0 y 100.</span>}
+        <p style={{ margin: "8px 0 0" }}>Cuántas cotizaciones se esperan por requisición. Con menos, quien propone el proveedor debe justificar la elección.</p>
+        <label style={labelStyle} htmlFor="min-cotizaciones">
+          Mínimo de cotizaciones
+        </label>
+        <input id="min-cotizaciones" inputMode="numeric" value={minimo} onChange={(e) => setMinimo(e.target.value)} style={{ ...baseInput, width: 120 }} />
+        {!valido && <span style={{ fontSize: 13, color: "#b3261e" }}>La tolerancia va de 0 a 100 y el mínimo de cotizaciones de 1 a 10.</span>}
         {error && <Notice kind="error">{error}</Notice>}
       </div>
     </Modal>

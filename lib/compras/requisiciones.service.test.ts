@@ -113,8 +113,8 @@ describe("requisiciones: crear y enviar", () => {
     const r2 = await crear(store, luis, 300);
     await rejects(enviar(store, luis, r2.id, 1), 409, "cantidad-excedida", /BLOQUE No\. 5: se pedirían 800\.0000 UND en total \(ya pedidos 500\.0000\) y el límite es 750\.0000/);
     // With 10 % of tolerance the limit is 825.
-    await rejects(guardarConfig(ctx(store, luis), { toleranciaPct: 10, version: 0 }), 403, "sin-permiso");
-    await guardarConfig(ctx(store, ana), { toleranciaPct: 10, version: 0 });
+    await rejects(guardarConfig(ctx(store, luis), { toleranciaPct: 10, minCotizaciones: 3, version: 0 }), 403, "sin-permiso");
+    await guardarConfig(ctx(store, ana), { toleranciaPct: 10, minCotizaciones: 3, version: 0 });
     assert.equal((await enviar(store, luis, r2.id, 1)).requisiciones[0].estado, "enviada");
   });
 
