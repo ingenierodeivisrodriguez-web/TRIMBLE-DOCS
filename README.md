@@ -2323,6 +2323,37 @@ Reglas (`lib/compras/ordenes.ts` con pruebas, y en PostgreSQL):
 - Todo queda en la auditoría: crear, editar, enviar, aprobar, devolver,
   anular y modificar, con la revisión y el motivo.
 
+### Documentos (CDE): prueba de escritura
+
+Pestaña **Documentos (CDE)** (permiso Documentos: ver; la prueba la hace
+quien tiene Documentos: administrar). Antes de guardar los documentos de
+Compras en las carpetas del proyecto, **Hacer la prueba** confirma que la
+extensión puede escribir en Trimble Connect con la sesión del usuario (su
+token; no hay cuenta técnica):
+
+1. Lee la carpeta raíz del proyecto (`GET /projects/{id}` → `rootId`,
+   `GET /folders/{id}`) y busca la carpeta "Compras - prueba de conexión (se
+   puede borrar)" (`GET /folders/{id}/item?name=&type=FOLDER`).
+2. Si no existe, la crea (`POST /folders` con el id de versión de la raíz
+   como `parentId`, como dice la API; si no lo acepta, con el id).
+3. Sube `prueba-compras.txt`: el servidor abre la subida
+   (`POST /files/fs/upload` con `If-None-Match: *`) y el **navegador** envía
+   el contenido directo a la URL firmada de Trimble (sin pasar por Vercel,
+   que limita los envíos a 4.5 MB). Si el navegador no puede (por ejemplo, por
+   CORS), lo envía el servidor.
+4. Espera a que Trimble confirme la carga (`GET /files/fs/upload`, estado
+   DONE con su revisión).
+5. Lo sube otra vez con el mismo nombre (con `If-Match` de la versión
+   vigente) y comprueba que sale la revisión siguiente.
+6. Pide un duplicado con `If-None-Match: *` y comprueba que Trimble lo
+   rechaza (así los reintentos no duplicarán archivos).
+
+No borra nada. Muestra cada paso con ✔ o ✖ y en palabras ("Trimble negó el
+permiso", "CORS"...), un resumen para copiar y cada paso queda en la
+auditoría (acción "Prueba de escritura en el CDE"). El código está en
+`lib/compras/cde.ts` (con un Trimble falso en las pruebas que se comporta
+como la API documentada) y `components/compras/PruebaCde.tsx`.
+
 ### Esquema de la base de datos
 
 [`supabase/compras.sql`](supabase/compras.sql) (se puede volver a ejecutar
@@ -2379,6 +2410,7 @@ Todas bajo `/api/compras`, con `?projectId=` y el token de Trimble
 | `POST comparativos/{requisición}` | Guardar, proponer, aprobar o devolver | Cotizaciones: crear o editar / aprobar |
 | `GET ordenes` / `PUT ordenes` | Órdenes y contratos visibles, sus revisiones y lo pendiente por ordenar / crear o editar un borrador | Órdenes o Contratos: ver / crear o editar |
 | `POST ordenes/{id}/estado` | Enviar, aprobar, devolver, anular o modificar | Según la acción y el tipo |
+| `POST cde/prueba` | Un paso de la prueba de escritura en el CDE | Documentos: administrar |
 | `GET auditoria` | La auditoría con filtros | Auditoría: ver |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `propio`, `escalamiento`,

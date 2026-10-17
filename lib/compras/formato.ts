@@ -83,6 +83,7 @@ const ACCIONES_AUDITORIA: Record<string, string> = {
   "contratos.devolver": "Devolver contrato",
   "contratos.anular": "Anular contrato",
   "contratos.modificar": "Modificar contrato (otrosí)",
+  "cde.prueba": "Prueba de escritura en el CDE",
 };
 
 export function nombreAccion(accion: string): string {
@@ -119,6 +120,7 @@ export function detalleEntrada(e: EntradaAuditoria): string {
   if (e.resultado !== "ok") {
     const motivo = typeof d.motivo === "string" ? d.motivo : "";
     if (motivo === "no-activado") return "Compras no está activado en el proyecto.";
+    if (!motivo && typeof d.mensaje === "string") return `${String(d.paso ?? "")}: ${d.mensaje}`;
     const texto = esMotivo(motivo) ? MENSAJES[motivo] : motivo;
     return typeof d.permiso === "string" ? `${texto} (permiso: ${nombrePermiso(d.permiso)})` : texto;
   }
@@ -154,6 +156,7 @@ export function detalleEntrada(e: EntradaAuditoria): string {
     if (d.motivo) partes.push(`motivo: ${String(d.motivo)}`);
     return partes.join(". ");
   }
+  if (e.accion === "cde.prueba") return `${String(d.paso ?? "")}: ${String(d.mensaje ?? d.motivo ?? "")}`;
   if (e.accion.startsWith("comparativos.")) {
     const partes: string[] = [];
     if (d.elegida) partes.push(`elegida: ${String(d.elegida)}`);

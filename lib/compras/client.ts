@@ -5,6 +5,8 @@ import type {
   AccionSobreOrden,
   CambioOrden,
   OrdenesResponse,
+  PasoPruebaCde,
+  PruebaCdeResponse,
   AccionSobreComparativo,
   CambioCotizacion,
   CambioEstadoProveedor,
@@ -47,6 +49,7 @@ export interface ComprasApi {
   getOrdenes(): Promise<OrdenesResponse>;
   guardarOrden(cambio: CambioOrden): Promise<OrdenesResponse>;
   accionOrden(id: string, accion: AccionSobreOrden): Promise<OrdenesResponse>;
+  pruebaCde(paso: PasoPruebaCde, datos?: { carpetaId?: string; uploadId?: string }): Promise<PruebaCdeResponse>;
 }
 
 /** The HTTP client for /api/compras, authenticated with the user's Trimble token. */
@@ -69,6 +72,7 @@ export function comprasApi(projectId: string, auth: TokenSource): ComprasApi {
     guardarCotizacion: (cambio) => request<CotizacionesResponse>("/cotizaciones", { method: "PUT", body: JSON.stringify(cambio) }),
     anularCotizacion: (id, motivo, version) => request<CotizacionesResponse>(`/cotizaciones/${encodeURIComponent(id)}/anular`, { method: "POST", body: JSON.stringify({ motivo, version }) }),
     getOrdenes: () => request<OrdenesResponse>("/ordenes"),
+    pruebaCde: (paso, datos = {}) => request<PruebaCdeResponse>("/cde/prueba", { method: "POST", body: JSON.stringify({ paso, ...datos }) }),
     guardarOrden: (cambio) => request<OrdenesResponse>("/ordenes", { method: "PUT", body: JSON.stringify(cambio) }),
     accionOrden: (id, accion) => request<OrdenesResponse>(`/ordenes/${encodeURIComponent(id)}/estado`, { method: "POST", body: JSON.stringify(accion) }),
     accionComparativo: (requisicionId, accion) => request<CotizacionesResponse>(`/comparativos/${encodeURIComponent(requisicionId)}`, { method: "POST", body: JSON.stringify(accion) }),

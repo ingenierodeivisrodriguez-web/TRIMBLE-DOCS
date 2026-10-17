@@ -4,7 +4,8 @@ import { hoyIso } from "../manuales/licencia";
 import { projectContacts, resolveCaller } from "../propiedades/caller";
 import { ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
-import { TrimbleApiError } from "../trimbleApi";
+import { getProjectDetails, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
+import { clienteTrimble } from "./cde";
 import { Ctx, traducir } from "./service";
 import { lecturaPresupuesto } from "./presupuestoLectura";
 import { comprasStore } from "./store";
@@ -38,7 +39,14 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       presupuesto: lecturaPresupuesto(),
       hoy: hoyIso(),
       accessToken,
-      deps: { contactos: () => projectContacts(accessToken, projectId) },
+      deps: {
+        contactos: () => projectContacts(accessToken, projectId),
+        cde: async () => {
+          const baseUrl = await resolveProjectBaseUrl(accessToken, projectId);
+          const proyecto = await getProjectDetails(baseUrl, accessToken, projectId);
+          return { cliente: clienteTrimble(baseUrl, accessToken), rootId: proyecto.rootId };
+        },
+      },
     });
   } catch (raw) {
     const err = traducir(raw);

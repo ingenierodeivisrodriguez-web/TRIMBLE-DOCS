@@ -42,3 +42,10 @@ describe("auditoría de requisiciones", () => {
     assert.equal(detalleEntrada(entrada({ accion: "config.cambiar", detalle: { tolerancia_antes: 0, tolerancia: 5 } })), "Tolerancia 0 % → 5 %");
   });
 });
+
+describe("auditoría de la prueba del CDE", () => {
+  it("muestra el paso y lo que respondió Trimble, también cuando falla", () => {
+    assert.equal(detalleEntrada(entrada({ accion: "cde.prueba", resultado: "error", detalle: { paso: "crear-carpeta", mensaje: "No se pudo crear la carpeta." } })), "crear-carpeta: No se pudo crear la carpeta.");
+    assert.equal(detalleEntrada(entrada({ accion: "cde.prueba", detalle: { paso: "duplicado", mensaje: "Trimble rechazó un duplicado." } })), "duplicado: Trimble rechazó un duplicado.");
+  });
+});

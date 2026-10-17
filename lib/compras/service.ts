@@ -5,7 +5,9 @@ import type { ProjectContacts } from "../propiedades/types";
 import { esMotivo, ESTADO_HTTP, estadoAsignacion, MENSAJES, MotivoRechazo, permisosVigentes, revisarAsignacion, revisarRol, tiene } from "./accesos";
 import { esDocumento, insumosPlanificados, metradosDelModelo } from "./planificado";
 import type { LecturaPresupuesto } from "./presupuestoLectura";
+import { ARCHIVO_PRUEBA, buscarEnCarpeta, CARPETA_PRUEBA, ClienteTrimble, contenidoPrueba, crearCarpeta, enviarContenido, estadoSubida, explicarEstado, iniciarSubida, leerCarpeta } from "./cde";
 import { evaluar, razonesJustificacion, revisarComparativo, revisarCotizacion } from "./cotizaciones";
+import { fechaHora } from "./formato";
 import { comprometidoPorInsumo, comprometidoPorLinea, maximoLinea, numeroOrden, revisarAccionOrden, revisarOrden } from "./ordenes";
 import { excesos, limite, numeroRequisicion, puedeEditar, revisarAccion, solicitadoPorInsumo } from "./requisiciones";
 import { ROLES_INICIALES } from "./roles";
@@ -37,7 +39,9 @@ import {
   InsumosResponse,
   Modulo,
   OrdenesResponse,
+  PasoPruebaCde,
   Permiso,
+  PruebaCdeResponse,
   TIPO_ORDEN,
   ProveedoresResponse,
   Requisicion,
@@ -58,6 +62,10 @@ export interface Ctx {
   deps: {
     /** The project's team in Trimble Connect (people and groups). */
     contactos: () => Promise<ProjectContacts>;
+    /** The Core API of the project's region with the caller's token, and the project's root folder. */
+    cde?: () => Promise<{ cliente: ClienteTrimble; rootId: string }>;
+    /** For the content PUT to Trimble's signed URL (tests replace it). */
+    fetch?: typeof fetch;
   };
 }
 
@@ -610,4 +618,114 @@ export async function accionOrden(ctx: Ctx, id: string, body: unknown): Promise<
     throw e;
   }
   return getOrdenes(ctx);
+}
+
+// ---------------------------------------------------------------- CDE write test
+
+const PASOS_CDE: PasoPruebaCde[] = ["inspeccionar", "crear-carpeta", "iniciar-subida", "estado-subida", "subir-desde-servidor", "duplicado"];
+const ID_TRIMBLE = /^[A-Za-z0-9_.:-]{1,200}$/;
+
+/**
+ * One step of the test that checks the extension can write to the project's
+ * CDE with the caller's token: find or create a test folder in the root,
+ * start an upload (the browser sends the content to the signed URL; when it
+ * can't, the server does), confirm it, upload again for a new version and
+ * check that a duplicate is refused. Nothing is deleted. Documentos: administrar.
+ */
+export async function pruebaCde(ctx: Ctx, body: unknown): Promise<PruebaCdeResponse> {
+  const o = (body ?? {}) as Record<string, unknown>;
+  const paso = o.paso as PasoPruebaCde;
+  if (!PASOS_CDE.includes(paso)) throw new ServiceError("Paso no válido.", 400, "datos");
+  const id = (k: string) => {
+    const v = o[k];
+    if (typeof v !== "string" || !ID_TRIMBLE.test(v)) throw new ServiceError(`Falta ${k}.`, 400, "datos");
+    return v;
+  };
+  await requerir(ctx, "documentos", "administrar", "cde.prueba");
+  if (!ctx.deps.cde) throw new ServiceError("La conexión con Trimble Connect no está disponible.", 503);
+  const { cliente, rootId } = await ctx.deps.cde();
+  const r = await pasoCde(ctx, cliente, rootId, paso, id);
+  await ctx.store.auditar(ctx.projectId, {
+    actorId: ctx.caller.id,
+    actorNombre: ctx.caller.name,
+    accion: "cde.prueba",
+    modulo: "documentos",
+    objetoTipo: "cde",
+    objetoId: CARPETA_PRUEBA,
+    sujetoId: null,
+    sujetoNombre: "",
+    resultado: r.ok ? "ok" : "error",
+    detalle: { paso, mensaje: r.mensaje, http: r.datos.http ?? null },
+  });
+  return r;
+}
+
+async function pasoCde(ctx: Ctx, c: ClienteTrimble, rootId: string, paso: PasoPruebaCde, id: (k: string) => string): Promise<PruebaCdeResponse> {
+  const responder = (ok: boolean, mensaje: string, datos: Record<string, unknown> = {}): PruebaCdeResponse => ({ paso, ok, mensaje, datos });
+  const contenido = () => contenidoPrueba(ctx.caller.name, fechaHora(new Date().toISOString()));
+  if (paso === "inspeccionar") {
+    const raiz = await leerCarpeta(c, rootId);
+    if (!raiz.carpeta) return responder(false, `No se pudo leer la carpeta raíz del proyecto: ${explicarEstado(raiz.respuesta.estado)}`, { http: raiz.respuesta.estado });
+    const existente = await buscarEnCarpeta(c, raiz.carpeta.id, CARPETA_PRUEBA, "FOLDER");
+    return responder(
+      true,
+      `Raíz del proyecto leída (tu acceso: ${raiz.carpeta.permiso ?? "sin dato"}). ${existente ? "La carpeta de prueba ya existe de una prueba anterior." : "La carpeta de prueba no existe todavía."}`,
+      { raiz: raiz.carpeta, carpetaId: existente?.id ?? null }
+    );
+  }
+  if (paso === "crear-carpeta") {
+    const raiz = await leerCarpeta(c, rootId);
+    if (!raiz.carpeta) return responder(false, explicarEstado(raiz.respuesta.estado), { http: raiz.respuesta.estado });
+    const existente = await buscarEnCarpeta(c, raiz.carpeta.id, CARPETA_PRUEBA, "FOLDER");
+    if (existente) return responder(true, "La carpeta de prueba ya existía: no se crea otra.", { carpetaId: existente.id, creada: false });
+    const hecha = await crearCarpeta(c, raiz.carpeta, CARPETA_PRUEBA);
+    if (!hecha.carpeta) return responder(false, `No se pudo crear la carpeta: ${explicarEstado(hecha.respuesta.estado)}`, { http: hecha.respuesta.estado, respuesta: hecha.respuesta.cuerpo });
+    return responder(
+      true,
+      `Carpeta creada en la raíz (parentId con el ${hecha.con === "versionId" ? "id de versión" : "id"} de la raíz; tu acceso: ${hecha.carpeta.permiso ?? "sin dato"}).`,
+      { carpetaId: hecha.carpeta.id, creada: true, con: hecha.con }
+    );
+  }
+  if (paso === "iniciar-subida" || paso === "subir-desde-servidor") {
+    const carpetaId = id("carpetaId");
+    const existente = await buscarEnCarpeta(c, carpetaId, ARCHIVO_PRUEBA, "FILE");
+    const s = await iniciarSubida(c, carpetaId, ARCHIVO_PRUEBA, existente ? { siVersion: existente.versionId ?? undefined } : { soloNuevo: true });
+    if (!s.uploadId || !s.url) return responder(false, `Trimble no abrió la subida: ${explicarEstado(s.respuesta.estado)}`, { http: s.respuesta.estado, respuesta: s.respuesta.cuerpo });
+    if (paso === "iniciar-subida") {
+      return responder(true, existente ? "Subida abierta como versión nueva del archivo existente." : "Subida abierta para un archivo nuevo.", {
+        uploadId: s.uploadId,
+        url: s.url,
+        nuevaVersion: !!existente,
+        contenido: contenido(),
+      });
+    }
+    // The server sends the content itself (it never takes a URL from the browser).
+    const http = await enviarContenido(s.url, contenido(), ctx.deps.fetch ?? fetch);
+    const bien = http >= 200 && http < 300;
+    return responder(bien, bien ? "El servidor envió el contenido a la URL firmada de Trimble." : `El servidor no pudo enviar el contenido (respuesta ${http}).`, {
+      uploadId: s.uploadId,
+      nuevaVersion: !!existente,
+      http,
+    });
+  }
+  if (paso === "estado-subida") {
+    const s = await estadoSubida(c, id("uploadId"));
+    const listo = s.status === "DONE";
+    const mensaje = listo
+      ? `Trimble confirmó la carga: archivo en la revisión ${s.revision ?? "?"}.`
+      : s.status === "ERROR"
+        ? `Trimble marcó error: ${s.errorReason ?? ""}`
+        : `Estado: ${s.status ?? explicarEstado(s.respuesta.estado)}`;
+    return responder(listo || s.status === "UPLOADABLE", mensaje, { status: s.status, fileId: s.fileId, versionId: s.versionId, revision: s.revision, http: s.respuesta.estado });
+  }
+  // duplicado: a new upload with the same name and "If-None-Match: *" must be refused.
+  const s = await iniciarSubida(c, id("carpetaId"), ARCHIVO_PRUEBA, { soloNuevo: true });
+  const bloqueado = !s.uploadId || s.respuesta.estado >= 400;
+  return responder(
+    bloqueado,
+    bloqueado
+      ? `Trimble rechazó un duplicado con el mismo nombre (respuesta ${s.respuesta.estado}): los reintentos no duplicarán archivos.`
+      : "Trimble aceptó abrir otra subida con el mismo nombre aunque se pidió que no: habrá que evitar duplicados de otra forma.",
+    { http: s.respuesta.estado }
+  );
 }

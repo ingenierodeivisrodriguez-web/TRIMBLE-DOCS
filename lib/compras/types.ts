@@ -611,3 +611,15 @@ export interface AccesosResponse {
   misPermisos: Permiso[];
   hoy: string;
 }
+
+// ---------------------------------------------------------------- CDE (Trimble Connect folders)
+
+export type PasoPruebaCde = "inspeccionar" | "crear-carpeta" | "iniciar-subida" | "estado-subida" | "subir-desde-servidor" | "duplicado";
+
+/** One step of the CDE write test: whether it worked, what it means, and its data. */
+export interface PruebaCdeResponse {
+  paso: PasoPruebaCde;
+  ok: boolean;
+  mensaje: string;
+  datos: Record<string, unknown>;
+}

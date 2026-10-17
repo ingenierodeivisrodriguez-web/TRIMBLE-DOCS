@@ -13,9 +13,10 @@ import Requisiciones from "./Requisiciones";
 import Proveedores from "./Proveedores";
 import Cotizaciones from "./Cotizaciones";
 import Ordenes from "./Ordenes";
+import PruebaCde from "./PruebaCde";
 import { botonSecundario, card, linkBtn, texto, titulo } from "./estilos";
 
-type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "accesos" | "auditoria";
+type Pestana = "inicio" | "insumos" | "requisiciones" | "proveedores" | "cotizaciones" | "ordenes" | "documentos" | "accesos" | "auditoria";
 
 /** "Compras y Contratación" in the project menu: who you are, your access, and what your role lets you open. */
 export default function ComprasApp({ api, projectId, projectName }: { api: ComprasApi; projectId: string; projectName: string }) {
@@ -53,6 +54,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
     ...(puede("cotizaciones.ver") ? [{ id: "cotizaciones" as const, nombre: "Cotizaciones" }] : []),
     ...(puede("ordenes.ver") || puede("contratos.ver") ? [{ id: "ordenes" as const, nombre: "Órdenes y contratos" }] : []),
     ...(puede("proveedores.ver") ? [{ id: "proveedores" as const, nombre: "Proveedores" }] : []),
+    ...(puede("documentos.ver") ? [{ id: "documentos" as const, nombre: "Documentos (CDE)" }] : []),
     ...(puede("accesos.ver") ? [{ id: "accesos" as const, nombre: "Accesos y roles" }] : []),
     ...(puede("auditoria.ver") ? [{ id: "auditoria" as const, nombre: "Auditoría" }] : []),
   ];
@@ -102,6 +104,7 @@ export default function ComprasApp({ api, projectId, projectName }: { api: Compr
             {actual === "cotizaciones" && <Cotizaciones api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "proveedores" && <Proveedores api={api} permisos={permisos} onSinAcceso={onSinAcceso} />}
             {actual === "ordenes" && <Ordenes api={api} yo={estado.user.id} permisos={permisos} onSinAcceso={onSinAcceso} />}
+            {actual === "documentos" && <PruebaCde api={api} administra={puede("documentos.administrar")} />}
             {actual === "accesos" && <Accesos api={api} yo={estado.user.id} onSinAcceso={onSinAcceso} />}
             {actual === "auditoria" && <Auditoria api={api} onSinAcceso={onSinAcceso} />}
           </main>
