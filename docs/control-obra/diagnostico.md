@@ -10,13 +10,12 @@ el diseño.**
 
 ## 0. Tres avisos antes de empezar
 
-1. **El documento "PROYECTO CONTROL DE OBRA" no llegó a esta sesión.** No estaba
-   adjunto ni en el repositorio. Este diagnóstico se apoya en el mensaje de
-   encargo (que resume la especificación: módulos, reglas de cálculo, seguridad,
-   bitácora, multiempresa, licencias) y en el código. Los puntos de la
-   **sección 3 del documento** que no estén en ese resumen quedan **por
-   contrastar**: cuando el dueño adjunte el documento, se revisa punto por punto
-   y se ajusta este archivo y el diseño antes de la Fase 3.
+1. **Documento de especificación.** La primera versión de este diagnóstico se
+   hizo sin él. El dueño lo entregó después ("CONTROL DE OBRA — Documento de
+   definición funcional, técnica y de implementación", versión 1.0, octubre de
+   2026). La **sección 9** de este archivo es el informe de su sección 3
+   (arquitectura) y el contraste punto por punto con el resto; el diseño quedó
+   en su versión 2.
 2. **Ya hay siete extensiones, no seis.** La séptima es **Compras y
    Contratación** (`app/compras/`, `lib/compras/`, `supabase/compras.sql`,
    `public/manifest-compras.json`), construida en octubre de 2026. Control de
@@ -25,11 +24,8 @@ el diseño.**
    cambiar, documentos en el CDE con "respaldado solo cuando Trimble confirma",
    lectura de Presupuesto sin escribir en él). La recomendación es **copiar sus
    patrones**, no inventar otros (sección 2).
-3. **Esta sesión no puede subir a GitHub.** El repositorio se puede leer, pero
-   el permiso de escritura fue rechazado (la app de Claude en GitHub no tiene
-   acceso de escritura a `ingenierodeivisrodriguez-web/TRIMBLE-DOCS` desde esta
-   cuenta). El commit queda hecho en la copia local; ver el mensaje final para
-   cómo habilitarlo.
+3. **Acceso a GitHub.** Al principio la sesión no podía subir; el dueño conectó
+   GitHub y ya se sube a `main` normalmente.
 
 ### Estado del repositorio al empezar
 
@@ -270,8 +266,9 @@ dueño prefiere la A, se propone como fase aparte (pregunta D2).
 
 | Riesgo | Efecto | Qué se hace |
 |---|---|---|
-| Falta el documento de especificación | El diseño puede no cubrir algo de la sección 3 | Adjuntarlo; se contrasta antes de la Fase 3 |
-| Esta sesión no puede subir a GitHub | Los cambios no llegan a Vercel | Dar acceso de escritura a la app de Claude o subir desde otra sesión |
+| Reexportación del modelo con IFCGUID nuevos (doc §15) | Los registros quedan ligados a elementos que "desaparecen" | Alerta de estabilidad al leer una versión; nunca se reasigna solo (diseño 4.3) |
+| Metodología de costos y avance sin acordar del todo (doc §15) | Indicadores discutibles | Fórmulas por defecto escritas en el diseño (sección 6) y visibles en cada indicador; se cambian solo con aprobación |
+| Copia de seguridad independiente del CDE (doc §9) | Confundir "está en el CDE" con "tiene respaldo" | Decisión D10 del diseño |
 | Escritura en el CDE sin probar en un proyecto real | Documentos y fotos podrían no respaldarse | Hacer la prueba de escritura de Compras antes de la Fase 7 |
 | `GET /files/{id}/versions` sin confirmar | La lista de versiones desde el menú podría no salir así | Prueba de lectura en la Fase 4; si no sirve, las versiones se conocen solo desde el visor (`getModels`) |
 | Comparar versiones obliga a cargar cada versión en el visor | Lento en modelos grandes | Huellas guardadas por versión; se compara contra la última leída; barra de avance |
@@ -286,9 +283,45 @@ dueño prefiere la A, se propone como fase aparte (pregunta D2).
 
 | Fase | Qué se construye | Qué verás tú |
 |---|---|---|
-| 3 | Empresas, licencias, roles y permisos; bitácora; vínculo empresa ↔ proyectos; arreglo de `npm test` | Extensión "Control de Obra" instalable en el menú del proyecto. Como administrador técnico: crear una empresa, darle licencia, vincular el proyecto, nombrar administrador. Pestañas "Accesos y roles" y "Bitácora". Una persona sin rol ve "sin acceso". |
-| 4 | Modelos, versiones, elementos por IFCGUID, jerarquías, incidencias de GUID, panel del visor | Panel "Control de Obra" en el visor: seleccionar elementos y ver su estado; "Leer versión" guarda la huella; lista de nuevos / cambiados / eliminados entre versiones; cola de "IFCGUID faltante o dudoso". |
-| 5 | Cantidades reportadas / verificadas / aceptadas, conversiones de unidades, costos real y estimado (y lectura de lo comprometido en Compras), avance ponderado | Pestaña "Cantidades y avance" con presupuestado, modelo, reportado, verificado, aceptado por partida; "Costos" con las tres columnas rotuladas; avance global con su regla visible. |
-| 6 | Criterios de aceptación por proyecto (aprobados por el responsable técnico), lotes, ensayos, inspecciones, no conformidades, aceptación de elementos | Pestaña "Calidad": configurar criterios, registrar ensayos de un lote, ver cumple / no cumple ensayo por ensayo; inspecciones con lista de chequeo; NC-0001; "Aceptar" bloqueado mientras falte algo. En 3D: colores por estado de calidad. |
-| 7 | Documentos y fotos en el CDE, indicadores con numerador y denominador, reportes Excel/PDF | Botón "Adjuntar" en ensayos, inspecciones y NC con estado pendiente / respaldado / error y reintento; tablero de indicadores; descarga de reportes. |
-| 8 | Pruebas finales de acceso cruzado, manifiestos, README, guía de instalación | URLs de instalación definitivas y lista de verificación para probar con personas de distintos roles. |
+| 3 | Base comercial (doc §13): empresas, licencias con módulos habilitados, usuarios, roles, administradores de empresa y de proyecto, bitácora; vínculo empresa ↔ proyectos; configuración de la estructura de obra (niveles y nodos); arreglo de `npm test` | Extensión "Control de Obra" instalable en el menú del proyecto. Como administrador técnico: crear una empresa, darle licencia, vincular el proyecto, nombrar administrador. Pestañas "Proyectos y estructura de obra", "Administración" y "Bitácora". Una persona sin rol ve "sin acceso". |
+| 4 | Integración BIM: modelos, versiones, elementos por IFCGUID, mapeo de niveles a propiedades, calidad del GUID, panel del visor | Panel "Control de Obra" en el visor: seleccionar elementos y ver su ficha y sus niveles (torre, zona, nivel…); "Leer versión" guarda la huella; nuevos / cambiados / eliminados entre versiones; cola de "IFCGUID faltante o dudoso"; alerta de reexportación. |
+| 5 | Cantidades (presupuestada a pendiente), conversiones, costos (base, vigente, planificado, comprometido, real, estimado), avance físico ponderado, reportes de cantidades, costos y avance | Pestañas "Cantidades y costos" y "Avance físico", con cada cifra rotulada por su fuente y cada indicador con su regla; filtros por la estructura de obra; Excel. |
+| 6 | Calidad: materiales configurables, criterios aprobados por el responsable técnico, lotes, muestras, ensayos, inspecciones con sus 7 estados, NC, aceptación | Pestaña "Calidad, inspecciones y aceptación" y "No conformidades"; cumple / no cumple ensayo por ensayo; "Aceptar" bloqueado mientras falte algo; colores en 3D por estado de inspección. |
+| 7 | Documentación (doc §13): documentos, fotos y certificados en el CDE, sincronización y recuperación de errores, expediente descargable (D10); panel de control consolidado | Botón "Adjuntar" con estado pendiente / sincronizado / fallido y reintento; cola de pendientes; "Descargar expediente"; panel de control. |
+| 8 | Validación y despliegue: pruebas finales de acceso cruzado, manifiestos, README, manual básico de uso e instalación, guía de capacitación | URLs de instalación definitivas, manual y lista de verificación para probar con personas de distintos roles. |
+
+## 9. Informe de la sección 3 del documento y contraste con el resto
+
+### 9.1 Sección 3 — Arquitectura general, punto por punto
+
+| Lo que pide el documento | Situación en el código | Cómo queda |
+|---|---|---|
+| Extensión **independiente** de Presupuesto y de los demás módulos | Cada extensión tiene sus páginas, API, `lib/`, componentes y `.sql` propios (p. ej. Compras: `app/compras/`, `lib/compras/`, `supabase/compras.sql`) | `app/control-obra/`, `lib/control-obra/`, `components/control-obra/`, `supabase/control-obra.sql`, manifiestos propios. No modifica archivos de otras extensiones. |
+| Compartir datos por el **mismo proyecto Supabase** | Todas usan la misma base con su prefijo (`presupuesto_`, `compras_`, `propiedades_`, `manuales_`, `validacion_`) | Prefijo `obra_` en la misma base |
+| **No duplicar catálogos** ni crear fuentes paralelas | Catálogos y presupuesto en `presupuesto_*`; comprometido y recibido en `compras_*`; atributos por IFCGUID en `propiedades_valores` | Se leen; Control de Obra solo agrega lo que no existe (sección 1). Capítulos, actividades y paquetes salen de Presupuesto; los niveles propios pueden leer atributos de Propiedades. |
+| Integración por **identificadores y contratos de datos documentados** | Compras ya lee Presupuesto con un módulo de solo lectura (`lib/compras/presupuestoLectura.ts:28`) | Contratos escritos en el diseño (sección 9) con una prueba de contrato por fuente. |
+| Trimble Connect: proyecto activo, modelos, elementos, propiedades y CDE | Proyecto activo: `api.project.getProject` (`components/trimble/ExtensionShell.tsx:117`); modelos y propiedades por el visor (sección 3.1); CDE por API Core (`lib/compras/cde.ts`) | Igual; lo que falta confirmar está en la sección 3.2. |
+| Supabase/PostgreSQL: datos, relaciones, reglas, permisos y auditoría | Reglas críticas en funciones SQL con bloqueo y triggers (`supabase/compras.sql`, sección 7 de `compras.md`) | Mismo patrón; permisos revisados también dentro de las funciones SQL. |
+| Administración y licencias: empresas, usuarios, roles, permisos, vigencias, funcionalidades contratadas | No existe a nivel empresa; Manuales tiene licencias por correo (`supabase/manuales.sql:33-45`) | Tablas `obra_empresas`, `obra_licencias` (con módulos habilitados), `obra_usuarios`, `obra_roles`, `obra_asignaciones`. |
+| **La autenticación de Trimble no equivale a la de Supabase**; verificar cómo se identifica y autoriza en cada sistema | Comprobado: no hay Supabase Auth. El usuario se identifica con su token de Trimble (`requestPermission("accesstoken")`, `ExtensionShell.tsx:121`), el servidor lo valida contra Trimble (`resolveCaller`, `lib/propiedades/caller.ts:22-74`) y habla con Supabase con la clave de servicio, que nunca llega al navegador | Igual. La autorización (empresa, licencia, rol) la decide el servidor con datos propios en Supabase y la repiten las funciones SQL. El token de Trimble no se usa como token de Supabase. |
+
+### 9.2 Resto del documento: qué cambió en el diseño
+
+| Sección del documento | Ya cubierto en la versión 1 | Agregado en la versión 2 del diseño |
+|---|---|---|
+| §2, §4.1, §5 Estructura de obra (torre, etapa, capítulo, actividad, paquete, zona, nombre de zona, nivel, frente, disciplina) | Solo mapeo de jerarquía al modelo | Tablas `obra_niveles` y `obra_nodos` con responsables, fechas y estados; capítulo, actividad y paquete leídos de Presupuesto; filtros por todos los niveles |
+| §4.2 Versiones y elementos no encontrados | Huellas, elementos que no están en la última versión | Calidad del IFCGUID (disponibilidad, unicidad, estabilidad) con alerta de reexportación |
+| §4.3, §6.1 Estados de cantidad | Reportada, verificada, aceptada | Rechazada con motivo, pendiente calculada (tres variantes), fuente de cada dato, ajustes sin sobrescribir, `clave_idempotencia` contra duplicados por reenvío |
+| §4.4 Costos | Real, comprometido, estimado | Presupuesto base y vigente, planificado, costo unitario real, desviaciones y proyección con fórmula visible |
+| §4.5, §6.2 Avance | Ponderación por valor presupuestal | Planificado, reportado, verificado y aceptado; cantidades homogéneas dentro de una partida; responsable, evidencia y metodología en cada corte |
+| §4.6, §7.1-7.3 Calidad | Criterios, lotes, ensayos | Materiales configurables con documentos obligatorios; muestras con edades; fabricante, diámetros y certificados; inspección de recepción |
+| §4.7, §7.4 Estados de inspección | Conforme / no conforme | Los 7 estados del documento; "aceptado con observaciones" solo si el proyecto lo permite (D12) |
+| §7.5 Indicadores de calidad | Promedios que no ocultan incumplimientos | Inspeccionados, aceptados, rechazados, pendientes, NC abiertas y cerradas, cumplimiento documental, todos con numerador y denominador |
+| §8 Bitácora | Lo pedido | Referencia a la evidencia; activación, suspensión y renovación de licencias como eventos |
+| §9 CDE | Lo pedido | Revisar carpetas antes de crear, reemplazos de documentos, historial de sincronización, copia independiente (D10) |
+| §10 Roles y autorización | Administrador técnico y de empresa | Administrador de proyecto; roles con los nombres del documento (D13); permisos sin caché para revocación inmediata; módulos no contratados bloqueados |
+| §11 Datos y seguridad | RLS cerrado, claves compuestas | Muestras, sincronización, migraciones con constancia de versión (D11) |
+| §12 Interfaz | Pestañas | Navegación en el orden del documento, filtros comunes, cada indicador con fecha de corte, alcance, fuente y regla |
+| §13 Plan | Fases 3 a 8 | Plan de pruebas (diseño, sección 12); manual básico y capacitación en la Fase 8 |
+| §14 Criterios de aceptación | — | Tabla criterio → fase (diseño, sección 13) |
+| §15 Riesgos | Varios | Riesgos agregados en la sección 7 de este archivo |
