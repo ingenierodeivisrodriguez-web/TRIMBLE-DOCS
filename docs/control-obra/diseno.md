@@ -21,10 +21,10 @@ aquí primero.
 
 ## 1. Decisiones que debe tomar el dueño
 
-Cada una tiene una recomendación; si estás de acuerdo con todas, basta con
-decir "de acuerdo con las recomendaciones".
+**Aprobadas por el dueño el 20-10-2026: todas las recomendaciones** (columna
+de la derecha). Son las reglas de la Fase 3 en adelante.
 
-| # | Pregunta | Recomendación |
+| # | Pregunta | Decisión (la recomendación, aprobada) |
 |---|---|---|
 | D1 | ¿Control de Obra escribe en los cortes de avance de Presupuesto? | **No.** Calcula su propio valor ganado con las cantidades **aceptadas**, la misma línea base y las mismas funciones. Más adelante, si quieres, un botón en Presupuesto "Leer de Control de Obra" que pregunta antes de reemplazar. |
 | D2 | ¿Seguridad con RLS por empresa (opción A) o autorización en el servidor con claves compuestas (opción B)? | **B** (ver diagnóstico, sección 5). |
