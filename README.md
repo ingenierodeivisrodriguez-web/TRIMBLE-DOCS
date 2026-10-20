@@ -13,6 +13,7 @@ ambos lugares** para Trimble Connect:
 | **Presupuesto** — presupuesto con catálogos de insumos y partidas (APU) bajo OmniClass, asociado a los modelos por IFCGUID | Menú lateral del proyecto (presupuesto) **y** panel del visor 3D (asociar elementos) | `/presupuesto` | `/manifest-presupuesto.json` |
 | **Manuales** — los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT para las personas que autorice su administrador | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
+| **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -39,6 +40,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Presupuesto (proyecto + visor 3D)](#presupuesto-proyecto--visor-3d)
 - [Manuales (proyecto)](#manuales-proyecto)
 - [Compras y Contratación (proyecto)](#compras-y-contratación-proyecto)
+- [Control de Obra (proyecto)](#control-de-obra-proyecto)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -2640,6 +2642,230 @@ Documentos (CDE)) y el recorrido completo con personas de distintos roles.
 
 ---
 
+## Control de Obra (proyecto)
+
+Control de cantidades, costos, avance físico y calidad de la obra, ligado a
+los elementos de los modelos 3D por IFCGUID + modelo + versión, con
+empresas, licencias, roles y permisos, estructura de obra y bitácora de
+auditoría. Es un producto **comercial y multiempresa**: cada empresa cliente
+tiene su licencia y registra sus proyectos de Trimble Connect. Aparece en el
+menú lateral del proyecto (`/control-obra`, `manifest-control-obra.json`);
+el panel del visor 3D llega en la fase 4.
+
+Se construye por fases según el diagnóstico y el diseño aprobados
+([`docs/control-obra/diagnostico.md`](docs/control-obra/diagnostico.md) y
+[`docs/control-obra/diseno.md`](docs/control-obra/diseno.md)). **Fase 3
+(hecha): base comercial** — empresas, licencias, personas, roles, accesos,
+estructura de obra y bitácora. Siguen: 4) modelos 3D e IFCGUID,
+5) cantidades, costos y avance, 6) calidad, inspecciones y aceptación,
+7) documentos en el CDE, 8) pruebas finales e instalación.
+
+Presupuesto y Compras son la fuente oficial del presupuesto, la línea base,
+el valor ganado y lo comprometido: Control de Obra solo los lee (desde la
+fase 5) y nunca escribe en `presupuesto_*` ni `compras_*`.
+
+### Quién hace qué
+
+Tres niveles de administración, separados de los permisos de obra:
+
+- **Administrador técnico del producto**: los IDs de usuario de Trimble
+  Connect que estén en la variable `CONTROL_OBRA_ADMINS` de Vercel (nunca un
+  botón). Ve la pestaña **Empresas y licencias**: crea empresas (con NIT y
+  dígito de verificación), registra los eventos de su licencia y nombra o
+  quita a sus administradores por su correo de Trimble Connect. No entra a
+  los datos de obra de las empresas. Para saber tu ID, abre Control de Obra
+  en un proyecto donde no tengas acceso: la pantalla lo muestra con un botón
+  "Copiar".
+- **Administrador de la empresa**: registra proyectos, da accesos en ellos,
+  configura los roles de la empresa, desactiva personas y configura la
+  estructura de obra (la plantilla de la empresa y la de cada proyecto). La
+  primera vez que abre Control de Obra queda ligado a su usuario por el
+  correo con que lo nombraron (el correo lo da Trimble Connect con su sesión).
+- **Administrador del proyecto**: da accesos y configura la estructura y la
+  configuración de su proyecto. No nombra otros administradores ni cambia a
+  otro administrador de proyecto.
+
+Administrar **no da permisos de obra**: para reportar, verificar o aprobar
+hace falta un rol en el proyecto, y **nadie se lo da a sí mismo**. Por eso el
+administrador de la empresa nombra a un administrador de proyecto, y este le
+da su rol operativo a él.
+
+### Licencias
+
+Cada cambio de la licencia es un **evento nuevo** del historial (activación,
+renovación, cambio de plan o límites, suspensión, reactivación); nada se
+sobrescribe ni se borra, y la vigente es la última. Lleva plan, desde,
+hasta (último día con acceso; vacía = sin vencimiento), proyectos y personas
+activas permitidos, módulos contratados y soporte. Suspender y reactivar
+piden motivo.
+
+- Estados: activa, por vencer (15 días antes), vencida, suspendida, empieza
+  más adelante, sin licencia, empresa desactivada. **Solo activa, por vencer
+  y sin vencimiento dejan trabajar**: en los demás nadie de la empresa entra,
+  tampoco sus administradores; los datos se conservan.
+- Los módulos se venden por grupos (estructura y modelos 3D, cantidades y
+  avance, costos, calidad, documentos, reportes); panel, bitácora y accesos
+  vienen siempre. Un permiso de un módulo no contratado no sirve aunque el
+  rol lo tenga, y la API responde `modulo-no-contratado`.
+- Un proyecto activo pertenece a **una sola empresa**. Registrar un proyecto
+  ocupa un cupo; retirarlo (con motivo) lo libera y conserva sus datos.
+  Cada persona activa de la empresa ocupa un cupo de personas; desactivarla
+  lo libera.
+
+### Roles y matriz de permisos
+
+Un permiso es un módulo con una acción (ver, crear o reportar, editar,
+verificar, aprobar o aceptar, anular o revocar, adjuntar documentos,
+exportar, configurar): 75 permisos, ya con los módulos de las fases
+siguientes para dejar los roles listos. Cada empresa nace con siete roles
+iniciales (los cinco del documento y dos más); su matriz se puede cambiar,
+se pueden crear otros, y se desactivan, no se borran.
+
+| Rol inicial | Para qué |
+|---|---|
+| Director de proyecto | Consulta indicadores y aprueba según sus atribuciones |
+| Residente de obra | Reporta cantidades, avance y observaciones (no verifica lo suyo) |
+| Profesional de costos | Costos autorizados y cortes de avance |
+| Inspector de calidad | Inspecciones, ensayos, no conformidades; verifica cantidades |
+| Auditor | Consulta todo, incluida la bitácora |
+| Responsable técnico de calidad | Aprueba criterios de aceptación y ensayos; cierra no conformidades |
+| Laboratorio | Muestras y resultados de ensayos |
+
+### Reglas que nadie se salta
+
+Se revisan en el servidor y otra vez en PostgreSQL, con un candado por
+empresa:
+
+- **Se niega por defecto**: sin empresa con licencia vigente, sin rol
+  vigente o sin el permiso, la respuesta es 403 y el intento queda en la
+  bitácora. Los permisos y la licencia se leen en **cada solicitud**, sin
+  caché: revocar, desactivar a la persona o suspender la licencia corta el
+  acceso en la siguiente acción.
+- Nadie cambia su propio acceso, ni el rol que tiene asignado, ni su
+  licencia; nadie nombra un administrador de su nivel o superior.
+- **La empresa la deduce el servidor** del proyecto: el navegador nunca la
+  envía, así no hay forma de pedir datos de otra empresa.
+- Todas las tablas llevan `empresa_id` y `project_id` con **claves foráneas
+  compuestas**: la base de datos impide ligar un acceso, un rol o un valor de
+  la estructura a otra empresa u otro proyecto, aunque el servidor se
+  equivocara. Una prueba revisa que cada consulta del servidor lleve los dos
+  filtros.
+- El servidor **solo puede leer** las tablas (y agregar filas a la
+  bitácora): todo cambio pasa por funciones de la base de datos que revisan
+  las reglas (`security definer`), así ni con la clave del servidor se escribe
+  saltándose las reglas.
+- Guardar sobre un cambio de otra persona responde 409 `version-conflict`.
+
+### Estructura de obra
+
+Pestaña **Proyecto y estructura de obra** (permiso Estructura: ver; la
+cambian los administradores):
+
+- **Configuración del proyecto**: responsable técnico de calidad (aprueba
+  los criterios de aceptación en la fase 6), tolerancia entre cantidad
+  reportada y verificada (%) y si se permite "aceptado con observaciones"
+  (apagado por defecto).
+- **Niveles**: capítulo, actividad y paquete de trabajo vienen de
+  Presupuesto y no se duplican. Los demás (torre, etapa, zona, nombre de
+  zona, nivel, frente, disciplina y los que agregue la empresa) los define la
+  plantilla de la empresa, que cada proyecto hereda y puede reemplazar con su
+  propio nivel de la misma clave. Cada nivel dice de dónde sale su valor:
+  propiedad del modelo (solo lectura), atributo de Propiedades por IFCGUID, o
+  asignación a mano. Un nivel no puede ser su propio superior.
+- **Valores** de cada nivel (Torre 1, Piso 5…), dentro de su valor superior,
+  con responsable (del equipo del proyecto), inicio, fin, estado y nota. Un
+  valor no se repite en su nivel (sin importar mayúsculas) y no se borra: se
+  deja inactivo.
+
+### Bitácora
+
+Pestaña **Bitácora** (permiso Bitácora: ver solo de este proyecto; los
+administradores de la empresa ven toda la empresa). Cada fila: posición,
+fecha y hora (Colombia), quién, qué, sobre qué, resultado (hecho, negado,
+error) y el detalle (antes → después, motivo). Quedan todos los cambios y
+todos los intentos negados, incluido entrar sin acceso. Nunca guarda tokens
+ni secretos.
+
+Es **inmodificable** en tres capas: el rol de servicio solo tiene `select,
+insert`; triggers rechazan `update`, `delete` y `truncate` aunque alguien
+recupere esos permisos; y cada fila guarda la **huella SHA-256 de la
+anterior** (una cadena por empresa, otra para el administrador técnico),
+calculada por PostgreSQL. El botón **Verificar integridad** recalcula la
+cadena: si alguien cambió o borró una fila a mano desde el SQL Editor, dice
+desde qué fila no cuadra.
+
+### Esquema de la base de datos
+
+[`supabase/control-obra.sql`](supabase/control-obra.sql) (se puede volver a
+ejecutar sin perder datos; va por bloques numerados y cada bloque queda en
+`obra_migraciones`). RLS activado sin políticas en todas las tablas.
+
+| Tabla / función | Contenido |
+|---|---|
+| `obra_empresas` | Empresas: razón social, NIT y dígito, activa, versión |
+| `obra_licencias` | Historial de la licencia (solo inserción): evento, plan, vigencia, cupos, módulos, suspendida, motivo, soporte |
+| `obra_empresa_proyectos` | Proyectos de Trimble registrados por cada empresa (uno activo por proyecto) |
+| `obra_roles` | Roles de la empresa con sus permisos (solo los válidos) |
+| `obra_usuarios` | Personas de la empresa: usuario de Trimble (o invitado por correo), administrador de la empresa, activa |
+| `obra_asignaciones` | El rol de cada persona en cada proyecto: administrador del proyecto, desde, hasta, activo |
+| `obra_config` | Por proyecto: responsable técnico, tolerancia, aceptado con observaciones |
+| `obra_niveles` / `obra_nodos` | Niveles de la estructura (plantilla o proyecto) y sus valores |
+| `obra_bitacora` | La bitácora encadenada (solo inserción) |
+| `obra_migraciones` | Los bloques del SQL ya ejecutados |
+| `obra_permisos_de(empresa, proyecto, persona)` | Permisos vigentes hoy, recortados a la licencia |
+| `obra_licencia_usable`, `obra_es_admin_empresa`, `obra_es_admin_proyecto` | Las condiciones que revisan las funciones |
+| `obra_guardar_*`, `obra_registrar_licencia`, `obra_vincular_*`, `obra_desvincular_proyecto` | Los cambios, con sus reglas y su fila de bitácora |
+| `obra_bitacora_verificar(cadena)` | Recalcula una cadena y dice dónde se rompe |
+
+### API
+
+Todas bajo `/api/control-obra`, con `?projectId=` y el token de Trimble
+(`Authorization: Bearer`).
+
+| Ruta | Qué hace | Quién |
+|---|---|---|
+| `GET estado` | Quién eres, la empresa, su licencia, tu acceso y a quién pedirlo | Cualquiera del proyecto (sin acceso deja registro) |
+| `POST vincular` / `POST desvincular` | Registrar o retirar (con motivo) el proyecto | Administrador de la empresa que sea ADMIN del proyecto en Trimble |
+| `GET accesos` | Roles, personas y accesos del proyecto | Administradores o Accesos: ver |
+| `PUT accesos/asignaciones` | Dar, cambiar o revocar un acceso | Administradores |
+| `PUT accesos/roles` / `PUT accesos/usuarios` | Roles de la empresa / activar o desactivar una persona | Administrador de la empresa |
+| `GET contactos` | Equipo del proyecto en Trimble | Administradores |
+| `GET estructura` | Niveles, plantilla, valores y configuración | Estructura: ver o administradores |
+| `PUT estructura/niveles` / `PUT estructura/nodos` / `PUT config` | Cambiar la estructura y la configuración | Administradores (la plantilla, solo el de la empresa) |
+| `GET bitacora` / `POST bitacora/verificar` | Consultar y verificar | Bitácora: ver o administrador de la empresa |
+| `GET/PUT admin/empresas`, `GET/POST admin/licencias`, `PUT admin/administradores`, `GET admin/bitacora`, `POST admin/bitacora/verificar` | Empresas, licencias y administradores | Administrador técnico |
+
+Errores (`code`): `sin-acceso`, `sin-permiso`, `no-admin`,
+`solo-admin-tecnico`, `solo-admin-empresa`, `es-administrador`, `propio`,
+`licencia-no-vigente`, `modulo-no-contratado`, `no-admin-trimble`,
+`otra-empresa` (403); `ya-vinculado`, `cupo-proyectos`, `cupo-usuarios`,
+`usuario-inactivo`, `nombre-repetido`, `nit-repetido`, `clave-repetida`,
+`valor-repetido`, `version-conflict` (409); `datos`, `no-miembro`,
+`rol-no-valido`, `nivel-no-valido`, `padre-no-valido`, `motivo-requerido`
+(400); `sin-empresa` (404); `trimble-session` (401: recargar Trimble Connect).
+
+El código está en `lib/control-obra/` (`types`, `roles`, `licencias`,
+`accesos` y `estructura` con las reglas puras, `bitacora` (la cadena),
+`formato`, `validate`, `store` con Supabase o memoria, `service`, `routes`,
+`client`, con sus pruebas) y `components/control-obra/`.
+
+### Instalar y poner en marcha
+
+1. En Supabase → SQL Editor, ejecuta `supabase/control-obra.sql`.
+2. En Vercel → Settings → Environment Variables, agrega
+   `CONTROL_OBRA_ADMINS` con tu ID de usuario de Trimble Connect (varios,
+   separados por coma) y vuelve a desplegar.
+3. Instala `https://trimble-docs.vercel.app/manifest-control-obra.json` en
+   el proyecto (Configuración del proyecto → Apps & Capabilities → Add
+   Custom).
+4. Ábrelo: en **Empresas y licencias** crea la empresa, registra la
+   activación de su licencia y nombra a su administrador por correo.
+5. El administrador de la empresa abre Control de Obra en un proyecto donde
+   sea ADMIN en Trimble Connect, lo registra, nombra a un administrador del
+   proyecto y da los accesos.
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -2849,6 +3075,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Presupuesto | `https://trimble-docs.vercel.app/manifest-presupuesto.json` |
    | Manuales | `https://trimble-docs.vercel.app/manifest-manuales.json` |
    | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
+   | Control de Obra | `https://trimble-docs.vercel.app/manifest-control-obra.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;

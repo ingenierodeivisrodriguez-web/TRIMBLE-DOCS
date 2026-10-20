@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/control-obra",
+  "title": "Control de Obra",
+  "description": "Control de cantidades, costos, avance físico y calidad de la obra ligado a los elementos de los modelos 3D por IFCGUID, con empresas, licencias, roles y permisos, estructura de obra y bitácora de auditoría.",
+  "icon": "https://trimble-docs.vercel.app/icon-control-obra.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project"],
+  "enabled": true
+}

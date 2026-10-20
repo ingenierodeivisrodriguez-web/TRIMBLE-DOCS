@@ -5,9 +5,8 @@ Fecha: 20-10-2026. Acompaña a `docs/control-obra/diagnostico.md`.
 **Versión 2**, contrastada con el documento "CONTROL DE OBRA — Documento de
 definición funcional, técnica y de implementación", versión 1.0 (octubre de
 2026). Lo que cambió respecto a la versión 1 por el documento se marca con
-**(doc §N)**, donde N es la sección del documento. Nada de esto se programa ni
-se ejecuta en Supabase hasta que el dueño responda las decisiones nuevas
-(D10 a D13) y diga "sigue con la Fase 3".
+**(doc §N)**, donde N es la sección del documento. El dueño aprobó el diseño y
+las decisiones D1 a D13 el 20-10-2026 ("de acuerdo y sigue con la Fase 3").
 
 ## Contenido
 
@@ -27,8 +26,8 @@ se ejecuta en Supabase hasta que el dueño responda las decisiones nuevas
 
 ## 1. Decisiones del dueño
 
-D1 a D9 **aprobadas el 20-10-2026** (todas las recomendaciones). D10 a D13 son
-**nuevas**, salen del documento y **faltan por responder**.
+D1 a D13 **aprobadas por el dueño el 20-10-2026** (todas las recomendaciones;
+D10 a D13 salieron del documento).
 
 | # | Pregunta | Decisión |
 |---|---|---|
@@ -41,10 +40,10 @@ D1 a D9 **aprobadas el 20-10-2026** (todas las recomendaciones). D10 a D13 son
 | D7 | ¿Licencias a mano o venta en línea? | **Aprobada: a mano** en esta etapa. |
 | D8 | ¿Un rol por persona y proyecto? | **Aprobada: uno**, más las marcas "administrador de empresa" y "administrador de proyecto" (doc §10.1). |
 | D9 | ¿Costos reales a mano o importados? | **Aprobada: a mano y por Excel**, cada uno con su fuente. |
-| D10 | El documento pide "distinguir el almacenamiento en CDE de una copia de seguridad independiente" (doc §9). ¿Qué copia independiente? | **Recomendación:** en la Fase 7, botón "Descargar expediente" que baja en un .zip los archivos respaldados de un periodo o un registro, con un índice en Excel (proyecto, archivo, versión, huella, registro asociado), para guardarlo donde la empresa decida. La interfaz nunca dice "copia de seguridad" de lo que solo está en el CDE. Copia automática a otro proveedor (Drive, S3…): después, si la pides. |
-| D11 | El documento pide "migraciones versionadas" (doc §11). El repositorio usa un solo `.sql` re-ejecutable por extensión. | **Recomendación:** mantener **un archivo re-ejecutable** (`supabase/control-obra.sql`, como las demás) dividido en bloques numerados, y una tabla `obra_migraciones` donde cada bloque deja constancia de su número y fecha al ejecutarse. Así sabes qué versión tiene la base sin cambiar la forma de trabajar. |
-| D12 | "Aceptado con observaciones, si el procedimiento lo permite" (doc §7.4). | **Recomendación:** opción por proyecto, **apagada** por defecto; la enciende el administrador del proyecto y queda en la bitácora. |
-| D13 | El documento sugiere 8 roles (doc §10.1). La versión 1 del diseño agregaba responsable técnico de calidad, laboratorio y control documental. | **Recomendación:** los roles iniciales son **los del documento** (director de proyecto, residente de obra, profesional de costos, inspector de calidad, auditor) **más** "responsable técnico de calidad" (lo exige la regla de que los criterios los aprueba un responsable técnico) y "laboratorio". Control documental queda como rol que la empresa crea si lo necesita. |
+| D10 | El documento pide "distinguir el almacenamiento en CDE de una copia de seguridad independiente" (doc §9). ¿Qué copia independiente? | **Aprobada:** en la Fase 7, botón "Descargar expediente" que baja en un .zip los archivos respaldados de un periodo o un registro, con un índice en Excel (proyecto, archivo, versión, huella, registro asociado), para guardarlo donde la empresa decida. La interfaz nunca dice "copia de seguridad" de lo que solo está en el CDE. Copia automática a otro proveedor (Drive, S3…): después, si la pides. |
+| D11 | El documento pide "migraciones versionadas" (doc §11). El repositorio usa un solo `.sql` re-ejecutable por extensión. | **Aprobada:** mantener **un archivo re-ejecutable** (`supabase/control-obra.sql`, como las demás) dividido en bloques numerados, y una tabla `obra_migraciones` donde cada bloque deja constancia de su número y fecha al ejecutarse. Así sabes qué versión tiene la base sin cambiar la forma de trabajar. |
+| D12 | "Aceptado con observaciones, si el procedimiento lo permite" (doc §7.4). | **Aprobada:** opción por proyecto, **apagada** por defecto; la enciende el administrador del proyecto y queda en la bitácora. |
+| D13 | El documento sugiere 8 roles (doc §10.1). La versión 1 del diseño agregaba responsable técnico de calidad, laboratorio y control documental. | **Aprobada:** los roles iniciales son **los del documento** (director de proyecto, residente de obra, profesional de costos, inspector de calidad, auditor) **más** "responsable técnico de calidad" (lo exige la regla de que los criterios los aprueba un responsable técnico) y "laboratorio". Control documental queda como rol que la empresa crea si lo necesita. |
 
 ## 2. Principios
 
@@ -693,3 +692,32 @@ En cada fase, antes de subir:
 
 La Fase 8 agrega lo que pide el documento para el cierre: **manual básico** de
 uso e instalación y guía de capacitación (doc §13).
+
+## 14. Ajustes al construir la Fase 3
+
+Diferencias menores con lo de arriba, hechas al programar y explicadas aquí:
+
+1. **El administrador técnico no entra a los proyectos**: solo crea empresas,
+   registra licencias y nombra o quita administradores de empresa. No da roles
+   ni edita roles. Así la base de datos puede comprobar por sí misma cada
+   regla de accesos (no depende de que el servidor le diga "soy el técnico").
+2. **Administradores de empresa invitados por correo**: el técnico los nombra
+   con su correo de Trimble Connect; la primera vez que abren Control de Obra
+   quedan ligados a su usuario. Así el técnico no necesita ser miembro de los
+   proyectos de la empresa.
+3. **Nadie se da a sí mismo un rol de obra**: el administrador de la empresa
+   nombra a un administrador de proyecto, y este le da su rol operativo. El
+   administrador de proyecto no nombra administradores ni cambia a otro
+   administrador de proyecto.
+4. **Más estricto que Compras en la base de datos**: el rol de servicio solo
+   puede leer las tablas (y agregar filas a la bitácora). Todo cambio pasa por
+   funciones `security definer` que revisan las reglas.
+5. **Los valores de la estructura se ligan al nivel por su clave**
+   (`obra_nodos.nivel_clave`), no por el id del nivel: el nivel que rige puede
+   ser el de la plantilla o el propio del proyecto con la misma clave.
+6. **La licencia vende grupos de módulos** (estructura y modelos, cantidades y
+   avance, costos, calidad, documentos, reportes); panel, bitácora y accesos
+   vienen siempre. El historial de la licencia guarda el tipo de evento.
+7. Lo que tiene la estructura de obra en esta fase es su configuración
+   (niveles, valores, responsables, fechas y estados). Leer los valores del
+   modelo o de Propiedades para cada elemento llega con la Fase 4.
