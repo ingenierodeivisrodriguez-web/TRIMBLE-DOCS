@@ -5,7 +5,7 @@ import { textoAlias } from "../../lib/loin/alias";
 import type { LoinApi } from "../../lib/loin/client";
 import { exportarCatalogo, leerLibroParametros } from "../../lib/loin/excel";
 import { entradasDyco, leerHojaParametros, planificarImportacion, PlanImportacion } from "../../lib/loin/importar";
-import { CatalogoResponse, EstadoResponse, NDIS, ORIGENES, OrigenDato, Parametro, TIPOS_DATO } from "../../lib/loin/types";
+import { CamposModelo, CatalogoResponse, EstadoResponse, NDIS, ORIGENES, OrigenDato, Parametro, TIPOS_DATO } from "../../lib/loin/types";
 import { nombreSeguro } from "../../lib/presupuesto/excel";
 import { coincide } from "../../lib/presupuesto/format";
 import { baseInput, C, message, Notice } from "../presupuesto/ui";
@@ -19,12 +19,14 @@ export default function Catalogo({
   estado,
   catalogo,
   proyecto,
+  camposModelo,
   onGuardados,
 }: {
   api: LoinApi;
   estado: EstadoResponse;
   catalogo: CatalogoResponse;
   proyecto: string;
+  camposModelo: CamposModelo | null;
   onGuardados: (p: Parametro[]) => void;
 }) {
   const [busqueda, setBusqueda] = useState("");
@@ -230,6 +232,7 @@ export default function Catalogo({
           parametros={parametros}
           parametro={editando === "nuevo" ? null : editando}
           puedeEditar={puede}
+          camposModelo={camposModelo}
           onGuardado={(p) => {
             onGuardados([p]);
             setEditando(null);

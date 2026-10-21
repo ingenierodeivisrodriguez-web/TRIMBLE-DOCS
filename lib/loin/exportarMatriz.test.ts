@@ -11,7 +11,7 @@ const catalogo: Parametro[] = parametrosDyco()
 const disciplina: Disciplina = { id: "arq", codigo: "ARQ", nombre: "Arquitectura", color: "#2a78d6", orden: 1, activo: true, version: 1, actualizado: "", actualizadoPor: null };
 const muro: Elemento = {
   id: "m", disciplinaId: "arq", codigo: "MUR", nombre: "Muro", claseIfc: "IfcWall", tipoPredefinido: "", clasificacionSistema: "", clasificacionCodigo: "", notas: "",
-  parametros: catalogo.map((p) => ({ parametroId: p.id, obligatorio: true, ndi: null, regla: null })), orden: 1, activo: true, version: 1, actualizado: "", actualizadoPor: null,
+  parametros: catalogo.map((p) => ({ parametroId: p.id, obligatorio: true, ndi: null, regla: null })), regla: null, orden: 1, activo: true, version: 1, actualizado: "", actualizadoPor: null,
 };
 const puerta: Elemento = { ...muro, id: "p", codigo: "PUE", nombre: "Puerta", claseIfc: "IfcDoor", parametros: [] };
 const etapas: Etapa[] = [

@@ -1,13 +1,20 @@
+import { isIfcGuid } from "../propiedades/ifcGuid";
 import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import type { Responsable } from "../propiedades/types";
 import { plegar } from "../presupuesto/format";
+import { reglaDesdeClase } from "./clasificacion";
 import { ETAPAS_SUGERIDAS } from "./matriz";
 import { codigoLibre, contenidoPlantilla, elementosDePlantilla } from "./plantillas";
 import { VALORES_BASURA_INICIALES } from "./reglas";
 import { disciplinasSugeridas, TDI_INICIALES } from "./semilla";
 import type { ConVersion, ImagenGuardada, LoinStore, StoredConfig } from "./store";
 import {
+  CamposModelo,
+  MAX_ASOCIACIONES_POR_ENVIO,
+  MAX_CAMPOS_MODELO,
+  ModeloDisciplina,
+  VisorResponse,
   CatalogoResponse,
   CeldaData,
   CeldaMatriz,
@@ -351,6 +358,8 @@ export async function cargarSugeridas(ctx: Ctx): Promise<{ disciplinas: number; 
             clasificacionCodigo: "",
             notas: e.notas ?? "",
             parametros: exigidos,
+            // A starting rule by IFC class, only when no other element of the discipline has that class.
+            regla: s.elementos.filter((x) => x.claseIfc === e.claseIfc).length === 1 ? reglaDesdeClase(e.claseIfc) : null,
             orden: i + 1,
             activo: true,
           },
@@ -411,6 +420,75 @@ export async function guardarMatriz(ctx: Ctx, body: unknown): Promise<{ celdas: 
     }
   }
   return { celdas: await guardando(ctx.store.saveMatriz(ctx.projectId, filas, ctx.caller.name)) };
+}
+
+// ---------------------------------------------------------------- the models (3D viewer)
+
+/** The models' disciplines and the objects linked by hand (any member may see them). */
+export async function getVisor(ctx: Ctx): Promise<VisorResponse> {
+  const [modelos, asociaciones] = await Promise.all([ctx.store.listModelos(ctx.projectId), ctx.store.listAsociaciones(ctx.projectId)]);
+  return { modelos, asociaciones };
+}
+
+const FILE_ID = /^[A-Za-z0-9_.-]{1,100}$/;
+
+/** Which disciplines a model file belongs to (an empty list takes it out of the classification). */
+export async function guardarModelo(ctx: Ctx, body: unknown): Promise<{ modelo: ModeloDisciplina }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as { fileId?: unknown; nombre?: unknown; disciplinaIds?: unknown };
+  if (typeof o.fileId !== "string" || !FILE_ID.test(o.fileId)) bad("Modelo no válido.");
+  const nombre = typeof o.nombre === "string" ? o.nombre.trim().slice(0, 200) : "";
+  if (!Array.isArray(o.disciplinaIds) || o.disciplinaIds.length > 30) bad("Las disciplinas del modelo deben ser una lista.");
+  const ids = [...new Set(o.disciplinaIds.map((d) => leerId(d, "Disciplina")))];
+  const propias = new Set((await ctx.store.listDisciplinas(ctx.projectId)).map((d) => d.id));
+  if (ids.some((d) => !propias.has(d))) bad("Una de las disciplinas no es de este proyecto.");
+  return { modelo: await ctx.store.saveModelo(ctx.projectId, { fileId: o.fileId, nombre, disciplinaIds: ids }, ctx.caller.name) };
+}
+
+/** Links objects (by IFCGUID) to an element by hand, or unlinks them (`elementoId: null`). */
+export async function asociar(ctx: Ctx, body: unknown): Promise<{ asociados: number }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as { elementoId?: unknown; objetos?: unknown };
+  const elementoId = o.elementoId === null ? null : leerId(o.elementoId, "Elemento");
+  if (!Array.isArray(o.objetos) || o.objetos.length === 0) bad("No hay objetos que asociar.");
+  if (o.objetos.length > MAX_ASOCIACIONES_POR_ENVIO) bad(`Máximo ${MAX_ASOCIACIONES_POR_ENVIO} objetos por envío.`);
+  const vistos = new Set<string>();
+  const objetos = o.objetos.flatMap((x) => {
+    const v = (x ?? {}) as { ifcGuid?: unknown; fileId?: unknown };
+    if (typeof v.ifcGuid !== "string" || !isIfcGuid(v.ifcGuid)) bad("Un objeto no tiene un IFCGUID válido.");
+    if (typeof v.fileId !== "string" || !FILE_ID.test(v.fileId)) bad("Un objeto no tiene modelo.");
+    if (vistos.has(v.ifcGuid)) return [];
+    vistos.add(v.ifcGuid);
+    return [{ ifcGuid: v.ifcGuid, fileId: v.fileId }];
+  });
+  if (elementoId) {
+    const e = (await ctx.store.listElementos(ctx.projectId)).find((x) => x.id === elementoId);
+    if (!e) bad("Ese elemento no es de este proyecto.");
+    if (!e.activo) bad("Ese elemento está desactivado: actívalo antes de asociarle objetos.");
+  }
+  return { asociados: await guardando(ctx.store.asociar(ctx.projectId, elementoId, objetos, ctx.caller.name)) };
+}
+
+export async function getCamposModelo(ctx: Ctx): Promise<{ campos: CamposModelo | null }> {
+  return { campos: await ctx.store.getCamposModelo(ctx.projectId) };
+}
+
+/** The group and property names read from the loaded models (read in the viewer, used from the project's menu). */
+export async function guardarCamposModelo(ctx: Ctx, body: unknown): Promise<{ guardados: number }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as { modelos?: unknown; campos?: unknown };
+  if (!Array.isArray(o.modelos) || !Array.isArray(o.campos)) bad("Faltan los modelos o las propiedades leídas.");
+  if (o.campos.length === 0) bad("No se encontraron propiedades en los modelos.");
+  if (o.campos.length > MAX_CAMPOS_MODELO) bad(`Máximo ${MAX_CAMPOS_MODELO} propiedades.`);
+  const modelos = o.modelos.slice(0, 100).map((m) => (typeof m === "string" ? m.slice(0, 200) : bad("Modelo no válido.")));
+  const campos = o.campos.map((x) => {
+    const c = (x ?? {}) as { grupo?: unknown; propiedad?: unknown; cuenta?: unknown };
+    if (typeof c.grupo !== "string" || typeof c.propiedad !== "string" || !c.propiedad.trim()) bad("Propiedad leída no válida.");
+    const cuenta = Number.isInteger(c.cuenta) && (c.cuenta as number) >= 0 ? (c.cuenta as number) : 0;
+    return { grupo: c.grupo.trim().slice(0, 200), propiedad: c.propiedad.trim().slice(0, 200), cuenta };
+  });
+  await ctx.store.saveCamposModelo(ctx.projectId, { modelos, campos }, ctx.caller.name);
+  return { guardados: campos.length };
 }
 
 // ---------------------------------------------------------------- reference images

@@ -14,7 +14,7 @@ ambos lugares** para Trimble Connect:
 | **Manuales** — los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT para las personas que autorice su administrador | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
-| **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (el panel del visor llega en la fase 3) | `/loin` | `/manifest-loin.json` |
+| **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3016,9 +3016,12 @@ y documentación.
 
 Se construye por fases. Están la **fase 1** (catálogo de parámetros,
 disciplinas, elementos a modelar con sus imágenes y parámetros exigidos,
-Excel y plantillas) y la **fase 2** (etapas y matriz LOIN, con exportación a
-Excel y PDF para el BEP). Aparece en el menú lateral del proyecto (`/loin`,
-`manifest-loin.json`); el panel del visor 3D llega en la fase 3.
+Excel y plantillas), la **fase 2** (etapas y matriz LOIN, con exportación a
+Excel y PDF para el BEP) y la **fase 3** (panel del visor 3D: modelos por
+disciplina, reglas de asociación, "Probar regla", asociación manual y objetos
+sin clasificar). Un solo manifiesto (`manifest-loin.json`) la pone en el menú
+lateral del proyecto (`/loin`) y en el panel de extensiones del visor;
+`manifest-loin-visor.json` (`/loin/visor`) es el respaldo solo para el visor.
 
 Reglas que no cambian:
 
@@ -3175,12 +3178,64 @@ y **actor responsable** (quién entrega), más una nota opcional.
   queda como requisito declarado; la auditoría (fase 4) revisa la
   información.
 
+### Panel del visor: modelos, reglas y asociación
+
+Panel **Requisitos BIM (LOIN)** en el visor 3D. **Solo lee los modelos**:
+nunca escribe en sus Property Sets ni en los UDA. Lee los objetos por lotes
+de 250, con barra de avance y **Cancelar**, una vez por sesión (botón
+"Volver a leer" después de cargar una versión nueva).
+
+- **Modelos**: cada modelo cargado con botones por disciplina (ARQ, EST…):
+  se marca a cuál o cuáles pertenece. Se guarda por archivo, así que vale
+  también para sus versiones nuevas. Los objetos de un modelo solo se
+  comparan con los elementos de sus disciplinas; un modelo sin disciplina no
+  se clasifica.
+  - **Leer los modelos**: lee todos sus objetos (se ve cuántos tiene cada uno).
+  - **Guardar nombres de propiedades**: guarda los nombres reales de grupos
+    y propiedades (con cuántos objetos los tienen) para que en el menú del
+    proyecto, en la ficha de cada parámetro, se elijan como equivalencias de
+    lectura con un clic ("Agregar" o "*.Propiedad" para cualquier grupo).
+- **Reglas**: por disciplina y elemento, condiciones combinadas con **Y**
+  (todas) u **O** (alguna) sobre **Clase IFC** (sin mayúsculas; un subtipo
+  como IfcWallStandardCase cuenta como IfcWall), **Nombre**, **Tipo**,
+  **Descripción**, **Nivel** (de las propiedades usuales: Nivel, Nivel de
+  referencia, Restricción de base, Level, Building Storey…) o cualquier
+  **propiedad** escrita como Grupo.Propiedad o *.Propiedad. Operadores: es,
+  no es, contiene, no contiene, empieza por, tiene valor, no tiene valor. Los
+  campos y los valores más comunes de los modelos se sugieren al escribir.
+  Ejemplo: Losa = Clase IFC es IfcSlab **y** Tipo contiene "LOSA".
+  - **Usar la clase IFC del elemento** arma la primera condición.
+  - **Probar regla**: cuenta los objetos que toma en los modelos de la
+    disciplina, muestra ejemplos de sus tipos, y los **selecciona y pinta**
+    con el color de la disciplina. **Quitar resaltado** los devuelve.
+  - **Guardar regla** la guarda en el elemento. La regla también se ve y se
+    edita en la ficha del elemento, en el menú del proyecto.
+  - Las disciplinas sugeridas traen una regla inicial por clase IFC cuando
+    la clase no se repite en la disciplina (Piso y Cielo raso son los dos
+    IfcCovering: esos quedan sin regla para que se distingan por el tipo).
+- **Clasificación**: **Clasificar los modelos** dice, por disciplina y
+  elemento, cuántos objetos hay (por regla y a mano), los elementos sin
+  ningún objeto (en rojo) y los **sin clasificar**, agrupados por clase y
+  tipo con un botón **Seleccionar** por grupo. Si un objeto cumple la regla
+  de varios elementos queda en el primero (por el orden de disciplinas y
+  elementos) y se avisa cuántos son. Los objetos del árbol del modelo
+  (proyecto, sitio, edificio, niveles, aberturas, ejes…) no cuentan como sin
+  clasificar, salvo que una regla los pida (como Información del proyecto).
+  **Colorear por disciplina** pinta cada objeto con el color de su disciplina
+  y los sin clasificar en gris.
+- **Asociación manual** (gana sobre las reglas): con objetos seleccionados
+  en el visor se elige el elemento y **Asociar**. Se guarda por IFCGUID, así
+  que sigue valiendo en la versión nueva del modelo si el objeto sigue ahí.
+  **Quitar asociación manual** los devuelve a las reglas. Los objetos sin
+  IFCGUID no se pueden asociar ni auditar (se cuentan aparte).
+
 ### Permisos
 
 | Acción | Quién |
 |---|---|
 | Ver catálogo, disciplinas, elementos, imágenes y plantillas | Cualquier miembro del proyecto |
-| Editar disciplinas, elementos e imágenes, etapas y matriz LOIN, usar plantillas, valores de relleno y umbral | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
+| Editar disciplinas, elementos e imágenes, etapas y matriz LOIN, usar plantillas, valores de relleno y umbral; en el visor: disciplinas de los modelos, reglas, asociación manual y nombres de propiedades | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
+| Probar reglas y clasificar en el visor | Cualquier miembro (solo lee) |
 | Editar el catálogo, los grupos TDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
 | Elegir editores y proyecto base | Administradores del proyecto |
 
@@ -3206,6 +3261,11 @@ políticas: solo el servidor (clave de servicio) lee y escribe.
 | `loin_etapas` | Por proyecto (código único): nombre, fecha del hito, orden, activa; con versión |
 | `loin_matriz` | Una celda por elemento × etapa (única): LOD, NDI, propósitos, actor, nota; con versión. Sin LOD ni NDI = no se exige |
 | `loin_guardar_etapa(...)`, `loin_guardar_matriz(proyecto, celdas, usuario)` | Como las demás; la matriz guarda todas las celdas o ninguna y exige que el elemento y la etapa sean del proyecto |
+| `loin_elementos.regla` | La regla de asociación del elemento (jsonb: modo y condiciones; vacía = sin regla) |
+| `loin_modelos` | Por proyecto y archivo: nombre y disciplinas del modelo |
+| `loin_asociaciones` | Por proyecto e IFCGUID (único): archivo y elemento asociado a mano |
+| `loin_campos_modelo` | Por proyecto: los nombres de grupos y propiedades leídos de los modelos, cuándo y quién |
+| `loin_asociar(proyecto, elemento, objetos, usuario)` | Asocia (o con elemento vacío, quita) varios objetos: todos o ninguno; el elemento debe ser del proyecto |
 | `loin_guardar_parametros(base, filas, usuario)` | Guarda varios: todos o ninguno (`version-conflict`, `duplicate-code`) |
 | `loin_guardar_disciplina`, `loin_guardar_elemento`, `loin_guardar_plantilla` | Crean (versión 0) o cambian si la versión coincide; el elemento debe ser de una disciplina del proyecto |
 | `loin_sin_borrar()` | Trigger que rechaza borrar parámetros, disciplinas, elementos, plantillas, etapas y celdas de la matriz |
@@ -3234,16 +3294,19 @@ comprueban que sea miembro del proyecto (`lib/loin/routes.ts`).
 | `PUT /api/loin/etapas` | Guarda una etapa |
 | `POST /api/loin/etapas/sugeridas` | Agrega las etapas usuales que falten |
 | `GET/POST /api/loin/matriz` | Etapas y celdas / guarda celdas (todas o ninguna) |
+| `GET /api/loin/visor` | Disciplinas de los modelos y asociaciones manuales |
+| `PUT /api/loin/modelos` | Disciplinas de un modelo |
+| `POST /api/loin/asociaciones` | Asocia objetos a un elemento (o los desasocia) |
+| `GET/PUT /api/loin/campos-modelo` | Nombres de propiedades leídos de los modelos |
 
 Lógica pura con pruebas en `lib/loin/` (`alias.ts`, `reglas.ts`, `ndi.ts`,
 `semilla.ts`, `importar.ts`, `plantillas.ts`, `excel.ts`, `matriz.ts`,
-`exportarMatriz.ts`) y servicio probado contra `memoryStore()`
-(`service.test.ts`).
+`exportarMatriz.ts`, `clasificacion.ts`) y servicio probado contra
+`memoryStore()` (`service.test.ts`). La lectura del visor
+(`lecturaVisor.ts`) usa los lectores de Gráficos de Modelos.
 
 ### Lo que sigue
 
-3. **Panel del visor**: modelos por disciplina, reglas de asociación,
-   "Probar regla", asociación manual por IFCGUID y objetos sin clasificar.
 4. **Auditoría**: presencia, contenido, regla y origen de cada parámetro,
    colores en el visor, excepciones, historial y reportes.
 5. **IDS**: exportar (luego importar) y, con confirmación, ToDos/BCF.
@@ -3477,6 +3540,9 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    **Presupuesto** funciona igual: el presupuesto en el menú lateral y la
    asociación de partidas en el visor (respaldo:
    `https://trimble-docs.vercel.app/manifest-presupuesto-visor.json`).
+   **Requisitos BIM (LOIN)** también: los requisitos en el menú lateral y la
+   asociación con los modelos en el visor (respaldo:
+   `https://trimble-docs.vercel.app/manifest-loin-visor.json`).
 6. Al abrir Resumen Archivos o Validación por primera vez, Trimble Connect
    pedira tu consentimiento para que la extension pueda leer el access token
    del usuario actual (esto es lo que permite leer los documentos del

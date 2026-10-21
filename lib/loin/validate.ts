@@ -2,10 +2,15 @@
 // the service's rules or the database.
 import { ServiceError } from "../propiedades/service";
 import type { Responsable } from "../propiedades/types";
-import { normalizarNombre } from "./alias";
+import { leerAlias as aliasDeTexto, normalizarNombre } from "./alias";
+import { CAMPOS_FIJOS, OPERADORES } from "./clasificacion";
 import { errorPatron } from "./reglas";
 import {
   Alias,
+  CondicionRegla,
+  MAX_CONDICIONES,
+  OperadorRegla,
+  ReglaAsociacion,
   CeldaData,
   EtapaData,
   Lod,
@@ -193,6 +198,28 @@ function leerExigidos(v: unknown): ParametroExigido[] {
   return out;
 }
 
+/** An element's association rule (null: none). */
+export function leerReglaAsociacion(v: unknown): ReglaAsociacion | null {
+  if (v === null || v === undefined) return null;
+  const o = objeto(v, "Regla de asociación");
+  if (o.modo !== undefined && o.modo !== "todas" && o.modo !== "alguna") bad("La regla combina sus condiciones con Y (todas) u O (alguna).");
+  if (!Array.isArray(o.condiciones)) bad("La regla de asociación necesita una lista de condiciones.");
+  if (o.condiciones.length > MAX_CONDICIONES) bad(`Máximo ${MAX_CONDICIONES} condiciones por regla.`);
+  const condiciones = o.condiciones.map((x, i): CondicionRegla => {
+    const c = objeto(x, `Condición ${i + 1}`);
+    const campo = texto(c.campo, `Condición ${i + 1} (campo)`, 200, true);
+    if (!CAMPOS_FIJOS.some((f) => f.campo === campo) && (campo.startsWith("@") || !aliasDeTexto(campo))) {
+      bad(`Condición ${i + 1}: "${campo}" no es un campo (Clase IFC, Nombre, Tipo, Descripción, Nivel o Grupo.Propiedad).`);
+    }
+    const operador = c.operador as OperadorRegla;
+    if (typeof operador !== "string" || !(operador in OPERADORES)) bad(`Condición ${i + 1}: operador no válido.`);
+    const sinValor = operador === "existe" || operador === "no_existe";
+    const valor = texto(c.valor, `Condición ${i + 1} (valor)`, 200, !sinValor);
+    return { campo, operador, valor: sinValor ? "" : valor };
+  });
+  return { modo: o.modo === "alguna" ? "alguna" : "todas", condiciones };
+}
+
 export function leerElemento(v: unknown): ElementoData {
   const o = objeto(v, "Elemento");
   const codigo = texto(o.codigo, "Código del elemento", 30, true);
@@ -214,6 +241,7 @@ export function leerElemento(v: unknown): ElementoData {
     clasificacionCodigo: texto(o.clasificacionCodigo, "Código de clasificación", 60),
     notas: texto(o.notas, "Notas de modelado", MAX_TEXTO),
     parametros: leerExigidos(o.parametros),
+    regla: leerReglaAsociacion(o.regla),
     orden: o.orden === undefined ? 0 : entero(o.orden, "Orden", -100000, 100000),
     activo: booleano(o.activo, "Elemento", true),
   };

@@ -5,7 +5,10 @@ import type { LoinApi } from "../../lib/loin/client";
 import { reducirImagen } from "../../lib/loin/imagen";
 import { agregarGrupo, conteoPorNdi, ndiDe } from "../../lib/loin/ndi";
 import { describirRegla, errorPatron } from "../../lib/loin/reglas";
-import { Disciplina, Elemento, ElementoData, EstadoResponse, GrupoTdi, Imagen, MAX_IMAGENES_ELEMENTO, NDIS, Ndi, Parametro, ParametroExigido, REGLA_VACIA, ReglaValor } from "../../lib/loin/types";
+import { textoAlias } from "../../lib/loin/alias";
+import { textoRegla } from "../../lib/loin/clasificacion";
+import ReglaEditor from "./ReglaEditor";
+import { CamposModelo, Disciplina, Elemento, ElementoData, EstadoResponse, GrupoTdi, Imagen, MAX_IMAGENES_ELEMENTO, NDIS, Ndi, Parametro, ParametroExigido, REGLA_VACIA, ReglaValor } from "../../lib/loin/types";
 import { coincide, fecha } from "../../lib/presupuesto/format";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
 import { area, ayuda, botonPeligro, botonSecundario, campo, ETIQUETA_NDI, inactivo, linkBtn, select, td, th } from "./estilos";
@@ -34,6 +37,7 @@ export default function ElementoDialog({
   parametros,
   tdiGrupos,
   imagenes,
+  camposModelo,
   puedeEditar,
   onGuardado,
   onImagenes,
@@ -48,6 +52,7 @@ export default function ElementoDialog({
   parametros: Parametro[];
   tdiGrupos: GrupoTdi[];
   imagenes: Imagen[];
+  camposModelo: CamposModelo | null;
   puedeEditar: boolean;
   onGuardado: (e: Elemento) => void;
   onImagenes: (elementoId: string, lista: Imagen[]) => void;
@@ -57,7 +62,7 @@ export default function ElementoDialog({
   const [d, setD] = useState<ElementoData>(() =>
     elemento
       ? structuredClone(elemento)
-      : { disciplinaId, codigo: "", nombre: "", claseIfc: "", tipoPredefinido: "", clasificacionSistema: "", clasificacionCodigo: "", notas: "", parametros: [], orden: siguienteOrden, activo: true }
+      : { disciplinaId, codigo: "", nombre: "", claseIfc: "", tipoPredefinido: "", clasificacionSistema: "", clasificacionCodigo: "", notas: "", parametros: [], regla: null, orden: siguienteOrden, activo: true }
   );
   const [fotos, setFotos] = useState<Imagen[]>(imagenes);
   const [seccion, setSeccion] = useState<Seccion>("ficha");
@@ -133,7 +138,7 @@ export default function ElementoDialog({
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         {error && <Notice kind="error">{error}</Notice>}
         {ok && <Notice kind="info">{ok}</Notice>}
-        {seccion === "ficha" && <Ficha d={d} set={set} ro={ro} disciplinas={disciplinas} />}
+        {seccion === "ficha" && <Ficha d={d} set={set} ro={ro} disciplinas={disciplinas} camposModelo={camposModelo} />}
         {seccion === "parametros" && <Exigidos d={d} set={set} ro={ro} parametros={parametros} catalogo={catalogo} tdiGrupos={tdiGrupos} conteo={conteo} />}
         {seccion === "imagenes" && (
           <Imagenes
@@ -156,7 +161,20 @@ export default function ElementoDialog({
   );
 }
 
-function Ficha({ d, set, ro, disciplinas }: { d: ElementoData; set: (p: Partial<ElementoData>) => void; ro: boolean; disciplinas: Disciplina[] }) {
+function Ficha({
+  d,
+  set,
+  ro,
+  disciplinas,
+  camposModelo,
+}: {
+  d: ElementoData;
+  set: (p: Partial<ElementoData>) => void;
+  ro: boolean;
+  disciplinas: Disciplina[];
+  camposModelo: CamposModelo | null;
+}) {
+  const campos = useMemo(() => (camposModelo?.campos ?? []).slice(0, 600).map((c) => textoAlias({ grupo: c.grupo, propiedad: c.propiedad })), [camposModelo]);
   return (
     <div style={{ display: "grid", gridTemplateColumns: "repeat(6, minmax(0, 1fr))", gap: "10px 12px" }}>
       <label style={{ gridColumn: "span 1" }}>
@@ -215,6 +233,13 @@ function Ficha({ d, set, ro, disciplinas }: { d: ElementoData; set: (p: Partial<
           aria-label="Notas de modelado"
         />
       </label>
+      <div style={{ gridColumn: "1 / -1" }}>
+        <span style={labelStyle}>Regla de asociación con los modelos</span>
+        <ReglaEditor regla={d.regla} onChange={(regla) => set({ regla })} ro={ro} claseIfc={d.claseIfc} campos={campos} valores={() => []} />
+        <p style={ayuda}>
+          {textoRegla(d.regla)}. Pruébala en el visor 3D (panel Requisitos BIM → Reglas → Probar regla), donde se ve cuántos objetos toma y se resaltan.
+        </p>
+      </div>
       <label style={{ gridColumn: "1 / -1", fontSize: 14, display: "flex", gap: 6, alignItems: "center" }}>
         <input type="checkbox" checked={d.activo} onChange={(e) => set({ activo: e.target.checked })} disabled={ro} /> Activo
         <span style={{ ...ayuda, margin: 0 }}>(los elementos no se borran: se desactivan)</span>

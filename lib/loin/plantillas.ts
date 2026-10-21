@@ -37,6 +37,7 @@ export function contenidoPlantilla(
         clasificacionCodigo: e.clasificacionCodigo,
         notas: e.notas,
         parametros: e.parametros.map((p) => ({ ...p })),
+        regla: e.regla ? structuredClone(e.regla) : null,
         orden: e.orden,
         imagenes: imagenes
           .filter((i) => i.elementoId === e.id)

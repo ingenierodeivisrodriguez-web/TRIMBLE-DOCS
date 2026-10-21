@@ -5,6 +5,11 @@ import { entradasDyco, planificarImportacion } from "./importar";
 import {
   aplicarPlantilla,
   cambiarPlantilla,
+  asociar,
+  getCamposModelo,
+  getVisor,
+  guardarCamposModelo,
+  guardarModelo,
   cargarEtapasSugeridas,
   cargarSugeridas,
   crearPlantilla,
@@ -219,6 +224,47 @@ describe("servicio de Requisitos BIM", () => {
     // "Not required" is a cell without levels, never a deletion.
     const [vacia] = (await guardarMatriz(ctx(store, ADMIN), { celdas: [{ ...celda, version: 1, lod: null, ndi: null }] })).celdas;
     assert.deepEqual([vacia.lod, vacia.ndi, vacia.version], [null, null, 2]);
+  });
+
+  it("la regla de asociación se valida y las disciplinas sugeridas la traen solo cuando la clase no se repite", async () => {
+    const store = memoryStore();
+    await conDyco(store);
+    await cargarSugeridas(ctx(store, ADMIN));
+    const { disciplinas, elementos } = await getElementos(ctx(store, ADMIN));
+    const arq = disciplinas.find((d) => d.codigo === "ARQ")!;
+    const muro = elementos.find((e) => e.disciplinaId === arq.id && e.codigo === "MUR")!;
+    const piso = elementos.find((e) => e.disciplinaId === arq.id && e.codigo === "PIS")!;
+    assert.deepEqual(muro.regla, { modo: "todas", condiciones: [{ campo: "@clase", operador: "igual", valor: "IfcWall" }] });
+    assert.equal(piso.regla, null); // Piso and Cielo raso are both IfcCovering
+    const regla = { modo: "todas", condiciones: [{ campo: "@clase", operador: "igual", valor: "IfcCovering" }, { campo: "@tipo", operador: "contiene", valor: "piso" }, { campo: "*.Material", operador: "existe", valor: "x" }] };
+    const { elemento } = await guardarElemento(ctx(store, ADMIN), { ...piso, regla });
+    assert.equal(elemento.regla?.condiciones[2].valor, ""); // "existe" needs no value
+    await rechaza(guardarElemento(ctx(store, ADMIN), { ...elemento, regla: { modo: "todas", condiciones: [{ campo: "@otro", operador: "igual", valor: "x" }] } }), 400);
+    await rechaza(guardarElemento(ctx(store, ADMIN), { ...elemento, regla: { modo: "todas", condiciones: [{ campo: "@clase", operador: "parece", valor: "x" }] } }), 400);
+    await rechaza(guardarElemento(ctx(store, ADMIN), { ...elemento, regla: { modo: "todas", condiciones: [{ campo: "@clase", operador: "igual", valor: "" }] } }), 400);
+  });
+
+  it("los modelos se asignan a disciplinas del proyecto y los objetos se asocian a mano por IFCGUID", async () => {
+    const store = memoryStore();
+    const { disciplina } = await guardarDisciplina(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "ARQ", nombre: "Arquitectura", color: "#2a78d6" });
+    const { elemento } = await guardarElemento(ctx(store, ADMIN), { id: uuid(), version: 0, disciplinaId: disciplina.id, codigo: "MUR", nombre: "Muro" });
+    const { modelo } = await guardarModelo(ctx(store, ADMIN), { fileId: "abc-123", nombre: "ARQ.ifc", disciplinaIds: [disciplina.id, disciplina.id] });
+    assert.deepEqual(modelo.disciplinaIds, [disciplina.id]);
+    await rechaza(guardarModelo(ctx(store, ADMIN), { fileId: "abc-123", nombre: "x", disciplinaIds: [uuid()] }), 400);
+    await rechaza(guardarModelo(ctx(store, MIEMBRO), { fileId: "abc-123", nombre: "x", disciplinaIds: [] }), 403, "not-editor");
+
+    const objetos = [{ ifcGuid: "3CqVfw$t15ihB2vPgB1wri", fileId: "abc-123" }, { ifcGuid: "3CqVfw$t15ihB2vPgB1wri", fileId: "abc-123" }, { ifcGuid: "0aaaaaaaaaaaaaaaaaaaaa", fileId: "abc-123" }];
+    assert.equal((await asociar(ctx(store, ADMIN), { elementoId: elemento.id, objetos })).asociados, 2);
+    await rechaza(asociar(ctx(store, ADMIN), { elementoId: elemento.id, objetos: [{ ifcGuid: "no-es-guid", fileId: "abc-123" }] }), 400);
+    await rechaza(asociar(ctx(store, ADMIN, "OBRA2"), { elementoId: elemento.id, objetos }), 400);
+    await guardarElemento(ctx(store, ADMIN), { ...elemento, activo: false });
+    await rechaza(asociar(ctx(store, ADMIN), { elementoId: elemento.id, objetos }), 400);
+    assert.equal((await asociar(ctx(store, ADMIN), { elementoId: null, objetos: [objetos[0]] })).asociados, 1);
+    const visor = await getVisor(ctx(store, MIEMBRO));
+    assert.deepEqual([visor.modelos.length, visor.asociaciones.map((a) => a.ifcGuid)], [1, ["0aaaaaaaaaaaaaaaaaaaaa"]]);
+
+    await guardarCamposModelo(ctx(store, ADMIN), { modelos: ["ARQ.ifc"], campos: [{ grupo: "Pset_WallCommon", propiedad: "LoadBearing", cuenta: 12 }] });
+    assert.equal((await getCamposModelo(ctx(store, MIEMBRO))).campos?.campos[0].propiedad, "LoadBearing");
   });
 
   it("una disciplina guardada como plantilla se copia a otro proyecto con la misma base, con sus imágenes", async () => {

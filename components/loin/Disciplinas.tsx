@@ -3,7 +3,7 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import { conteoPorNdi } from "../../lib/loin/ndi";
-import type { Disciplina, Elemento, ElementosResponse, EstadoResponse, GrupoTdi, Imagen, Parametro } from "../../lib/loin/types";
+import type { CamposModelo, Disciplina, Elemento, ElementosResponse, EstadoResponse, GrupoTdi, Imagen, Parametro } from "../../lib/loin/types";
 import { CATEGORY_COLORS } from "../../lib/graficos/colors";
 import { acceptButton, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
 import ElementoDialog from "./ElementoDialog";
@@ -11,7 +11,19 @@ import { ayuda, botonPrincipal, botonSecundario, campo, ETIQUETA_NDI, inactivo, 
 import PlantillasDialog from "./PlantillasDialog";
 
 /** Disciplines on the left, the elements to model of the chosen one on the right. */
-export default function Disciplinas({ api, estado, parametros, tdiGrupos }: { api: LoinApi; estado: EstadoResponse; parametros: Parametro[]; tdiGrupos: GrupoTdi[] }) {
+export default function Disciplinas({
+  api,
+  estado,
+  parametros,
+  tdiGrupos,
+  camposModelo,
+}: {
+  api: LoinApi;
+  estado: EstadoResponse;
+  parametros: Parametro[];
+  tdiGrupos: GrupoTdi[];
+  camposModelo: CamposModelo | null;
+}) {
   const [datos, setDatos] = useState<ElementosResponse | null>(null);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
@@ -215,6 +227,7 @@ export default function Disciplinas({ api, estado, parametros, tdiGrupos }: { ap
           siguienteOrden={Math.max(0, ...elementos.map((e) => e.orden)) + 1}
           parametros={parametros}
           tdiGrupos={tdiGrupos}
+          camposModelo={camposModelo}
           imagenes={editarElemento === "nuevo" ? [] : imagenesDe(editarElemento.id)}
           puedeEditar={puede}
           onGuardado={(e) => setDatos((d) => (d ? { ...d, elementos: reemplazar(d.elementos, e) } : d))}

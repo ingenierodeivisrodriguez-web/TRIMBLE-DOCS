@@ -182,7 +182,7 @@ describe("plantillas de disciplina", () => {
   const elemento = (e: Partial<Elemento>): Elemento => ({
     id: "e1", disciplinaId: "d1", codigo: "MUR", nombre: "Muro", claseIfc: "IfcWall", tipoPredefinido: "", clasificacionSistema: "", clasificacionCodigo: "",
     notas: "Por capas", parametros: [{ parametroId: "a", obligatorio: true, ndi: null, regla: null }, { parametroId: "z", obligatorio: true, ndi: null, regla: null }],
-    orden: 2, activo: true, version: 3, actualizado: "", actualizadoPor: null, ...e,
+    regla: null, orden: 2, activo: true, version: 3, actualizado: "", actualizadoPor: null, ...e,
   });
 
   it("guarda los elementos activos de la disciplina con sus imágenes copiadas aparte", () => {

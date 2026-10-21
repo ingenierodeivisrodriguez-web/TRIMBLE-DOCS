@@ -117,9 +117,68 @@ export interface ElementoData {
   /** How it must be modeled (layers, by level, joins, what is not modeled). */
   notas: string;
   parametros: ParametroExigido[];
+  /** Which objects of the models are this element (null: no rule yet). */
+  regla: ReglaAsociacion | null;
   orden: number;
   activo: boolean;
 }
+
+// ---------------------------------------------------------------- linking the models (phase 3)
+
+/**
+ * What a condition looks at: "@clase" (IFC class), "@nombre" (object name),
+ * "@tipo" (type name), "@descripcion", "@nivel" (the level, from the usual
+ * level properties) or a property written like an alias: "Grupo.Propiedad",
+ * "*.Propiedad", "Pset_*Common.Propiedad".
+ */
+export type OperadorRegla = "igual" | "distinto" | "contiene" | "no_contiene" | "empieza" | "existe" | "no_existe";
+
+export interface CondicionRegla {
+  campo: string;
+  operador: OperadorRegla;
+  valor: string;
+}
+
+/** "todas" = every condition (Y); "alguna" = any of them (O). Without conditions it matches nothing. */
+export interface ReglaAsociacion {
+  modo: "todas" | "alguna";
+  condiciones: CondicionRegla[];
+}
+
+/** A model file (stable across versions) and the disciplines it belongs to. */
+export interface ModeloDisciplina {
+  fileId: string;
+  nombre: string;
+  disciplinaIds: string[];
+  actualizado: string;
+  actualizadoPor: string | null;
+}
+
+/** An object linked by hand to an element (wins over the rules). */
+export interface AsociacionManual {
+  ifcGuid: string;
+  fileId: string;
+  elementoId: string;
+  creado: string;
+  creadoPor: string | null;
+}
+
+/** Property names found in the loaded models (to pick aliases and rule fields from the project's menu). */
+export interface CamposModelo {
+  leido: string;
+  leidoPor: string | null;
+  modelos: string[];
+  campos: { grupo: string; propiedad: string; cuenta: number }[];
+}
+
+export interface VisorResponse {
+  modelos: ModeloDisciplina[];
+  asociaciones: AsociacionManual[];
+}
+
+export const MAX_CONDICIONES = 12;
+export const MAX_ASOCIACIONES_POR_ENVIO = 2000;
+export const MAX_CAMPOS_MODELO = 3000;
 
 export interface Imagen {
   id: string;

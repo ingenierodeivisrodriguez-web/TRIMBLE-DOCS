@@ -2,7 +2,7 @@
 
 import { CSSProperties, useCallback, useEffect, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
-import type { CatalogoResponse, EstadoResponse, Parametro } from "../../lib/loin/types";
+import type { CamposModelo, CatalogoResponse, EstadoResponse, Parametro } from "../../lib/loin/types";
 import { C, message, Notice } from "../presupuesto/ui";
 import Catalogo from "./Catalogo";
 import ConfigDialog from "./ConfigDialog";
@@ -19,6 +19,7 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
   const [error, setError] = useState("");
   const [pestana, setPestana] = useState<Pestana>("catalogo");
   const [config, setConfig] = useState(false);
+  const [camposModelo, setCamposModelo] = useState<CamposModelo | null>(null);
 
   const cargar = useCallback(async () => {
     setError("");
@@ -29,6 +30,8 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
     } catch (err) {
       setError(message(err));
     }
+    // Optional: the property names read in the 3D viewer (to pick aliases and rule fields).
+    api.getCamposModelo().then(setCamposModelo, () => setCamposModelo(null));
   }, [api]);
 
   useEffect(() => {
@@ -92,8 +95,8 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
             ))}
           </nav>
           <main style={{ flex: 1, minHeight: 0, padding: 16, display: "flex", flexDirection: "column" }}>
-            {pestana === "catalogo" && <Catalogo api={api} estado={estado} catalogo={catalogo} proyecto={projectName || projectId} onGuardados={alGuardar} />}
-            {pestana === "elementos" && <Disciplinas api={api} estado={estado} parametros={catalogo.parametros} tdiGrupos={catalogo.tdiGrupos} />}
+            {pestana === "catalogo" && <Catalogo api={api} estado={estado} catalogo={catalogo} proyecto={projectName || projectId} camposModelo={camposModelo} onGuardados={alGuardar} />}
+            {pestana === "elementos" && <Disciplinas api={api} estado={estado} parametros={catalogo.parametros} tdiGrupos={catalogo.tdiGrupos} camposModelo={camposModelo} />}
             {pestana === "matriz" && <Matriz api={api} estado={estado} parametros={catalogo.parametros} proyecto={projectName || projectId} />}
           </main>
         </>

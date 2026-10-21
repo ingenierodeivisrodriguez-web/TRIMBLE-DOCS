@@ -1,12 +1,12 @@
 "use client";
 
 import { CSSProperties, useState } from "react";
-import { leerAlias, textoAlias } from "../../lib/loin/alias";
+import { leerAlias, normalizarNombre, textoAlias } from "../../lib/loin/alias";
 import type { LoinApi } from "../../lib/loin/client";
 import { errorPatron, MOTIVOS, revisarValor } from "../../lib/loin/reglas";
 import { codigoDyco } from "../../lib/loin/semilla";
-import { Alias, EstadoResponse, GrupoTdi, NDIS, Ndi, ORIGENES, OrigenDato, Parametro, ParametroData, REGLA_VACIA, TIPOS_DATO, TipoDato } from "../../lib/loin/types";
-import { fecha } from "../../lib/presupuesto/format";
+import { Alias, CamposModelo, EstadoResponse, GrupoTdi, NDIS, Ndi, ORIGENES, OrigenDato, Parametro, ParametroData, REGLA_VACIA, TIPOS_DATO, TipoDato } from "../../lib/loin/types";
+import { coincide, fecha } from "../../lib/presupuesto/format";
 import { acceptButton, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
 import { area, ayuda, botonSecundario, campo, h3, linkBtn, select, sugerida } from "./estilos";
 
@@ -38,6 +38,7 @@ export default function ParametroDialog({
   parametros,
   parametro,
   puedeEditar,
+  camposModelo,
   onGuardado,
   onClose,
 }: {
@@ -47,6 +48,8 @@ export default function ParametroDialog({
   parametros: Parametro[];
   parametro: Parametro | null;
   puedeEditar: boolean;
+  /** Property names read from the models in the 3D viewer (null: not read yet). */
+  camposModelo: CamposModelo | null;
   onGuardado: (p: Parametro) => void;
   onClose: () => void;
 }) {
@@ -282,6 +285,7 @@ export default function ParametroDialog({
               )}
             </div>
           )}
+          {!ro && <LeidosDelModelo camposModelo={camposModelo} nombre={d.nombre} onAgregar={(a) => setAlias([...d.alias, a])} yaEstan={d.alias} />}
         </section>
 
         <label style={{ fontSize: 14, display: "flex", gap: 6, alignItems: "flex-start" }}>
@@ -293,6 +297,50 @@ export default function ParametroDialog({
         </label>
       </div>
     </Modal>
+  );
+}
+
+/** The real group / property names of the models (read in the 3D viewer), to add as aliases with one click. */
+function LeidosDelModelo({ camposModelo, nombre, yaEstan, onAgregar }: { camposModelo: CamposModelo | null; nombre: string; yaEstan: Alias[]; onAgregar: (a: Alias) => void }) {
+  const [busqueda, setBusqueda] = useState("");
+  if (!camposModelo) {
+    return (
+      <p style={ayuda}>
+        Para elegir entre los nombres reales de los modelos: en el visor 3D abre el panel Requisitos BIM, pestaña Modelos, y pulsa &quot;Guardar nombres de propiedades&quot;.
+      </p>
+    );
+  }
+  const q = busqueda.trim() || nombre;
+  const esta = (grupo: string, propiedad: string) => yaEstan.some((a) => normalizarNombre(a.grupo) === normalizarNombre(grupo) && normalizarNombre(a.propiedad) === normalizarNombre(propiedad));
+  const encontrados = camposModelo.campos.filter((c) => coincide(`${c.grupo} ${c.propiedad}`, q)).slice(0, 25);
+  return (
+    <div style={{ marginTop: 10, border: "1px solid #e1e5ea", borderRadius: 4, padding: 8, background: "#fff" }}>
+      <span style={labelStyle}>
+        Nombres leídos de los modelos ({camposModelo.modelos.join(", ")}; {fecha(camposModelo.leido).slice(0, 10)})
+      </span>
+      <input value={busqueda} onChange={(e) => setBusqueda(e.target.value)} placeholder={`Buscar (por defecto: "${nombre}")`} style={{ ...campo, marginBottom: 6 }} aria-label="Buscar en los nombres leídos" />
+      {encontrados.length === 0 && <p style={{ ...ayuda, margin: 0 }}>Ningún nombre leído coincide.</p>}
+      {encontrados.map((c) => (
+        <div key={`${c.grupo}|${c.propiedad}`} style={{ display: "flex", gap: 8, alignItems: "center", fontSize: 13, padding: "2px 0" }}>
+          <span style={{ flex: 1, fontFamily: "monospace", fontSize: 12.5, wordBreak: "break-word" }}>
+            {c.grupo}.{c.propiedad}
+          </span>
+          <span style={{ color: "var(--tc-gray-500)", fontSize: 12, whiteSpace: "nowrap" }}>{c.cuenta.toLocaleString("es")} obj.</span>
+          {esta(c.grupo, c.propiedad) ? (
+            <span style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>ya está</span>
+          ) : (
+            <button type="button" style={linkBtn} onClick={() => onAgregar({ grupo: c.grupo, propiedad: c.propiedad, sugerida: false })}>
+              Agregar
+            </button>
+          )}
+          {!esta("*", c.propiedad) && (
+            <button type="button" style={linkBtn} onClick={() => onAgregar({ grupo: "*", propiedad: c.propiedad, sugerida: false })} title="En cualquier grupo">
+              *.{c.propiedad.length > 14 ? "…" : c.propiedad}
+            </button>
+          )}
+        </div>
+      ))}
+    </div>
   );
 }
 

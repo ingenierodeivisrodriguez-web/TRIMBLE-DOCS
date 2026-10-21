@@ -1,0 +1,10 @@
+{
+  "url": "https://trimble-docs.vercel.app/loin/visor",
+  "title": "Requisitos BIM (LOIN)",
+  "description": "Asocia los objetos de los modelos 3D a los elementos a modelar: modelos por disciplina, reglas de asociación (Probar regla), asociación manual por IFCGUID y objetos sin clasificar. Solo lee los modelos.",
+  "icon": "https://trimble-docs.vercel.app/icon-loin.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "panel",
+  "enabled": true
+}

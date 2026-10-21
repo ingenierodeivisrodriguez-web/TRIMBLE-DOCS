@@ -15,6 +15,9 @@ import type {
   CeldaMatriz,
   Etapa,
   EtapaData,
+  AsociacionManual,
+  CamposModelo,
+  ModeloDisciplina,
 } from "./types";
 
 /**
@@ -90,6 +93,14 @@ export interface LoinStore {
   listMatriz(projectId: string): Promise<CeldaMatriz[]>;
   /** All or none; the element and the stage must be the project's ("disciplina-ajena"). */
   saveMatriz(projectId: string, filas: ConVersion<CeldaData>[], user: string): Promise<CeldaMatriz[]>;
+
+  listModelos(projectId: string): Promise<ModeloDisciplina[]>;
+  saveModelo(projectId: string, modelo: { fileId: string; nombre: string; disciplinaIds: string[] }, user: string): Promise<ModeloDisciplina>;
+  listAsociaciones(projectId: string): Promise<AsociacionManual[]>;
+  /** Links the objects to the element, or unlinks them (null); all or none. Returns how many. */
+  asociar(projectId: string, elementoId: string | null, objetos: { ifcGuid: string; fileId: string }[], user: string): Promise<number>;
+  getCamposModelo(projectId: string): Promise<CamposModelo | null>;
+  saveCamposModelo(projectId: string, data: Pick<CamposModelo, "modelos" | "campos">, user: string): Promise<void>;
 
   archivos: Archivos;
 }
@@ -205,6 +216,7 @@ interface ElementoRow {
   clasificacion_codigo: string;
   notas: string;
   parametros: Elemento["parametros"];
+  regla?: Elemento["regla"];
   orden: number;
   activo: boolean;
   version: number;
@@ -223,6 +235,7 @@ const elementoDeFila = (r: ElementoRow): Elemento => ({
   clasificacionCodigo: r.clasificacion_codigo,
   notas: r.notas,
   parametros: (r.parametros ?? []).map((p) => ({ parametroId: p.parametroId, obligatorio: p.obligatorio !== false, ndi: p.ndi ?? null, regla: p.regla ? reglaDe(p.regla) : null })),
+  regla: r.regla && Array.isArray(r.regla.condiciones) ? { modo: r.regla.modo === "alguna" ? "alguna" : "todas", condiciones: r.regla.condiciones } : null,
   orden: r.orden,
   activo: r.activo,
   version: r.version,
@@ -242,6 +255,7 @@ const filaDeElemento = (e: ConVersion<ElementoData>) => ({
   clasificacion_codigo: e.clasificacionCodigo,
   notas: e.notas,
   parametros: e.parametros,
+  regla: e.regla,
   orden: e.orden,
   activo: e.activo,
 });
@@ -536,6 +550,36 @@ function supabaseStore(): LoinStore | null {
       return (await rpc<CeldaRow[]>("loin_guardar_matriz", { p_project_id: projectId, p_filas: filas.map(filaDeCelda), p_usuario: user })).map(celdaDeFila);
     },
 
+    async listModelos(projectId) {
+      const rows = await all<{ file_id: string; nombre: string; disciplinas: string[]; updated_at: string; updated_by: string | null }>(
+        `/loin_modelos?project_id=${eq(projectId)}&select=file_id,nombre,disciplinas,updated_at,updated_by&order=nombre.asc`
+      );
+      return rows.map((r) => ({ fileId: r.file_id, nombre: r.nombre, disciplinaIds: r.disciplinas ?? [], actualizado: r.updated_at, actualizadoPor: r.updated_by }));
+    },
+    async saveModelo(projectId, m, user) {
+      const actualizado = new Date().toISOString();
+      await upsert("loin_modelos", { project_id: projectId, file_id: m.fileId, nombre: m.nombre, disciplinas: m.disciplinaIds, updated_at: actualizado, updated_by: user }, "project_id,file_id");
+      return { ...m, actualizado, actualizadoPor: user };
+    },
+    async listAsociaciones(projectId) {
+      const rows = await all<{ ifc_guid: string; file_id: string; elemento_id: string; creado: string; creado_por: string | null }>(
+        `/loin_asociaciones?project_id=${eq(projectId)}&select=ifc_guid,file_id,elemento_id,creado,creado_por&order=ifc_guid.asc`
+      );
+      return rows.map((r) => ({ ifcGuid: r.ifc_guid, fileId: r.file_id, elementoId: r.elemento_id, creado: r.creado, creadoPor: r.creado_por }));
+    },
+    asociar: (projectId, elementoId, objetos, user) =>
+      rpc<number>("loin_asociar", { p_project_id: projectId, p_elemento_id: elementoId, p_filas: objetos.map((o) => ({ ifc_guid: o.ifcGuid, file_id: o.fileId })), p_usuario: user }),
+    async getCamposModelo(projectId) {
+      const rows = await json<{ leido: string; leido_por: string | null; modelos: string[]; campos: CamposModelo["campos"] }[]>(
+        `/loin_campos_modelo?project_id=${eq(projectId)}&select=leido,leido_por,modelos,campos`
+      );
+      const r = rows[0];
+      return r ? { leido: r.leido, leidoPor: r.leido_por, modelos: r.modelos ?? [], campos: r.campos ?? [] } : null;
+    },
+    async saveCamposModelo(projectId, data, user) {
+      await upsert("loin_campos_modelo", { project_id: projectId, leido: new Date().toISOString(), leido_por: user, modelos: data.modelos, campos: data.campos }, "project_id");
+    },
+
     archivos,
   };
 }
@@ -591,6 +635,9 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
   const plantillas = new Map<string, Plantilla & { baseId: string }>();
   const etapas = new Map<string, Etapa & { projectId: string }>();
   const matriz = new Map<string, CeldaMatriz & { projectId: string }>();
+  const modelos = new Map<string, ModeloDisciplina & { projectId: string }>();
+  const asociaciones = new Map<string, AsociacionManual & { projectId: string }>();
+  const campos = new Map<string, CamposModelo>();
   const ahora = () => new Date().toISOString();
   const rechazo = (motivo: (typeof MOTIVOS)[number]) => new StoreError(motivo, motivo === "disciplina-ajena" ? 400 : 409);
   const sin = <T extends object, K extends string>(x: T, k: K): Omit<T, K> => {
@@ -738,6 +785,34 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
       }
       for (const c of siguiente) matriz.set(c.id, c);
       return siguiente.map((c) => sin(c, "projectId"));
+    },
+
+    async listModelos(projectId) {
+      return [...modelos.values()].filter((m) => m.projectId === projectId).map((m) => sin(m, "projectId"));
+    },
+    async saveModelo(projectId, m, user) {
+      const guardado = { ...structuredClone(m), actualizado: ahora(), actualizadoPor: user, projectId };
+      modelos.set(`${projectId}|${m.fileId}`, guardado);
+      return sin(guardado, "projectId");
+    },
+    async listAsociaciones(projectId) {
+      return [...asociaciones.values()].filter((a) => a.projectId === projectId).map((a) => sin(a, "projectId"));
+    },
+    async asociar(projectId, elementoId, objetos, user) {
+      if (elementoId !== null && elementos.get(elementoId)?.projectId !== projectId) throw rechazo("disciplina-ajena");
+      for (const o of objetos) {
+        const k = `${projectId}|${o.ifcGuid}`;
+        if (elementoId === null) asociaciones.delete(k);
+        else asociaciones.set(k, { ifcGuid: o.ifcGuid, fileId: o.fileId, elementoId, creado: ahora(), creadoPor: user, projectId });
+      }
+      return objetos.length;
+    },
+    async getCamposModelo(projectId) {
+      const c = campos.get(projectId);
+      return c ? structuredClone(c) : null;
+    },
+    async saveCamposModelo(projectId, data, user) {
+      campos.set(projectId, { ...structuredClone(data), leido: ahora(), leidoPor: user });
     },
 
     archivos,

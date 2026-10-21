@@ -1,9 +1,9 @@
 {
   "url": "https://trimble-docs.vercel.app/loin",
   "title": "Requisitos BIM (LOIN)",
-  "description": "Qué se modela, con qué nivel de detalle y con qué información en cada disciplina y etapa del proyecto (nivel de información necesaria, ISO 7817-1): catálogo de parámetros, disciplinas y elementos a modelar con sus imágenes de referencia y parámetros exigidos.",
+  "description": "Qué se modela, con qué nivel de detalle y con qué información en cada disciplina y etapa del proyecto (nivel de información necesaria, ISO 7817-1): catálogo de parámetros, elementos a modelar, matriz LOIN por etapa y, en el visor 3D, la asociación con los objetos de los modelos.",
   "icon": "https://trimble-docs.vercel.app/icon-loin.svg",
   "infoUrl": "https://trimble-docs.vercel.app",
-  "extensionType": ["project"],
+  "extensionType": ["project", "3dviewer"],
   "enabled": true
 }

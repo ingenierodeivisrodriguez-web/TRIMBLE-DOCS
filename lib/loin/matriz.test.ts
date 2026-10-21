@@ -20,7 +20,7 @@ import { CeldaMatriz, Disciplina, Elemento, Etapa, LODS, Parametro, REGLA_VACIA,
 const etapa = (id: string, orden: number, extra: Partial<Etapa> = {}): Etapa => ({ id, codigo: id.toUpperCase(), nombre: `Etapa ${id}`, fecha: null, orden, activo: true, version: 1, actualizado: "", actualizadoPor: null, ...extra });
 const elemento = (id: string, disciplinaId: string, extra: Partial<Elemento> = {}): Elemento => ({
   id, disciplinaId, codigo: id.toUpperCase(), nombre: id, claseIfc: "IfcWall", tipoPredefinido: "", clasificacionSistema: "", clasificacionCodigo: "", notas: "",
-  parametros: [], orden: 0, activo: true, version: 1, actualizado: "", actualizadoPor: null, ...extra,
+  parametros: [], regla: null, orden: 0, activo: true, version: 1, actualizado: "", actualizadoPor: null, ...extra,
 });
 const celda = (elementoId: string, etapaId: string, r: Partial<Requerimiento>, version = 1): CeldaMatriz => ({
   ...SIN_REQUERIMIENTO, ...r, id: `${elementoId}-${etapaId}`, elementoId, etapaId, version, actualizado: "", actualizadoPor: null,

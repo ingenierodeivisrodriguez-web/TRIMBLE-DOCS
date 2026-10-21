@@ -3,6 +3,10 @@ import { expiresSoon } from "../propiedades/token";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
 import type { ConVersion } from "./store";
 import {
+  CamposModelo,
+  MAX_ASOCIACIONES_POR_ENVIO,
+  ModeloDisciplina,
+  VisorResponse,
   CatalogoResponse,
   CeldaData,
   CeldaMatriz,
@@ -48,6 +52,12 @@ export interface LoinApi {
   cargarEtapasSugeridas(): Promise<{ etapas: number; yaExistian: string[] }>;
   /** Several requests when there are many (each one all or none). */
   guardarMatriz(filas: ConVersion<CeldaData>[], onProgress?: (hechos: number) => void): Promise<CeldaMatriz[]>;
+  getVisor(): Promise<VisorResponse>;
+  guardarModelo(m: { fileId: string; nombre: string; disciplinaIds: string[] }): Promise<ModeloDisciplina>;
+  /** Several requests when there are many; `elementoId` null unlinks. */
+  asociar(elementoId: string | null, objetos: { ifcGuid: string; fileId: string }[], onProgress?: (hechos: number) => void): Promise<number>;
+  getCamposModelo(): Promise<CamposModelo | null>;
+  guardarCamposModelo(data: Pick<CamposModelo, "modelos" | "campos">): Promise<number>;
 }
 
 /** Calls /api/loin with the user's Trimble token (asked again once if Trimble rejects it). */
@@ -126,5 +136,18 @@ export function loinApi(projectId: string, auth: TokenSource): LoinApi {
       }
       return out;
     },
+    getVisor: () => request("/visor"),
+    guardarModelo: (m) => request<{ modelo: ModeloDisciplina }>("/modelos", send("PUT", m)).then((r) => r.modelo),
+    async asociar(elementoId, objetos, onProgress) {
+      let n = 0;
+      for (let i = 0; i < objetos.length; i += MAX_ASOCIACIONES_POR_ENVIO) {
+        const lote = objetos.slice(i, i + MAX_ASOCIACIONES_POR_ENVIO);
+        n += (await request<{ asociados: number }>("/asociaciones", send("POST", { elementoId, objetos: lote }))).asociados;
+        onProgress?.(Math.min(i + lote.length, objetos.length));
+      }
+      return n;
+    },
+    getCamposModelo: () => request<{ campos: CamposModelo | null }>("/campos-modelo").then((r) => r.campos),
+    guardarCamposModelo: (data) => request<{ guardados: number }>("/campos-modelo", send("PUT", data)).then((r) => r.guardados),
   };
 }

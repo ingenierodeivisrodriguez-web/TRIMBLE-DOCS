@@ -1,6 +1,7 @@
 -- Requisitos BIM (LOIN): catálogo de parámetros, disciplinas, elementos a
 -- modelar con sus imágenes de referencia y parámetros exigidos, y plantillas
--- de disciplina, etapas y matriz LOIN. Se puede ejecutar varias veces sin perder datos (Supabase →
+-- de disciplina, etapas y matriz LOIN, modelos por disciplina, reglas y
+-- asociaciones manuales con los objetos de los modelos. Se puede ejecutar varias veces sin perder datos (Supabase →
 -- SQL Editor → pegar y ejecutar).
 --
 -- Reglas que también cumple la base de datos:
@@ -95,6 +96,8 @@ create table if not exists public.loin_elementos (
   actualizado_por       text
 );
 create unique index if not exists loin_elementos_codigo_unico on public.loin_elementos (disciplina_id, lower(btrim(codigo)));
+-- Regla de asociación con los objetos de los modelos: {"modo": "todas"|"alguna", "condiciones": [...]}.
+alter table public.loin_elementos add column if not exists regla jsonb check (regla is null or jsonb_typeof(regla) = 'object');
 create index if not exists loin_elementos_proyecto on public.loin_elementos (project_id);
 
 -- Imágenes de referencia: el archivo va al bucket privado "loin-imagenes" de
@@ -168,6 +171,72 @@ create table if not exists public.loin_matriz (
 );
 create unique index if not exists loin_matriz_celda_unica on public.loin_matriz (elemento_id, etapa_id);
 create index if not exists loin_matriz_proyecto on public.loin_matriz (project_id);
+
+-- Modelos del proyecto (por id de archivo, que no cambia con las versiones) y
+-- las disciplinas a las que pertenecen: sus objetos se comparan con las
+-- reglas de los elementos de esas disciplinas.
+create table if not exists public.loin_modelos (
+  project_id  text        not null,
+  file_id     text        not null check (length(file_id) between 1 and 100),
+  nombre      text        not null default '',
+  disciplinas jsonb       not null default '[]'::jsonb check (jsonb_typeof(disciplinas) = 'array'),
+  updated_at  timestamptz not null default now(),
+  updated_by  text,
+  primary key (project_id, file_id)
+);
+
+-- Objetos asociados a mano a un elemento (por IFCGUID); ganan sobre las reglas.
+create table if not exists public.loin_asociaciones (
+  project_id  text        not null,
+  ifc_guid    text        not null check (ifc_guid ~ '^[0-3][0-9A-Za-z_$]{21}$'),
+  file_id     text        not null,
+  elemento_id uuid        not null references public.loin_elementos (id),
+  creado      timestamptz not null default now(),
+  creado_por  text,
+  primary key (project_id, ifc_guid)
+);
+create index if not exists loin_asociaciones_elemento on public.loin_asociaciones (elemento_id);
+
+-- Nombres de grupos y propiedades leídos de los modelos (para elegir equivalencias y campos de reglas).
+create table if not exists public.loin_campos_modelo (
+  project_id text        primary key,
+  leido      timestamptz not null default now(),
+  leido_por  text,
+  modelos    jsonb       not null default '[]'::jsonb check (jsonb_typeof(modelos) = 'array'),
+  campos     jsonb       not null default '[]'::jsonb check (jsonb_typeof(campos) = 'array')
+);
+
+-- Asocia (p_elemento_id) o quita la asociación manual (p_elemento_id null) de
+-- varios objetos: todos o ninguno; el elemento debe ser del proyecto.
+create or replace function public.loin_asociar(p_project_id text, p_elemento_id uuid, p_filas jsonb, p_usuario text)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  f jsonb;
+  n integer := 0;
+begin
+  if p_elemento_id is not null then
+    perform 1 from public.loin_elementos where id = p_elemento_id and project_id = p_project_id;
+    if not found then
+      raise exception 'disciplina-ajena';
+    end if;
+  end if;
+  for f in select * from jsonb_array_elements(p_filas) loop
+    if p_elemento_id is null then
+      delete from public.loin_asociaciones where project_id = p_project_id and ifc_guid = f ->> 'ifc_guid';
+    else
+      insert into public.loin_asociaciones (project_id, ifc_guid, file_id, elemento_id, creado_por)
+      values (p_project_id, f ->> 'ifc_guid', f ->> 'file_id', p_elemento_id, p_usuario)
+      on conflict (project_id, ifc_guid) do update
+        set elemento_id = excluded.elemento_id, file_id = excluded.file_id, creado = now(), creado_por = excluded.creado_por;
+    end if;
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
 
 -- Nada del catálogo, disciplinas, elementos, plantillas, etapas ni matriz se borra: se desactiva.
 create or replace function public.loin_sin_borrar()
@@ -290,10 +359,11 @@ begin
   end if;
   if (p_fila ->> 'version')::integer = 0 then
     insert into public.loin_elementos (id, project_id, disciplina_id, codigo, nombre, clase_ifc, tipo_predefinido, clasificacion_sistema, clasificacion_codigo,
-                                       notas, parametros, orden, activo, creado_por, actualizado_por)
+                                       notas, parametros, regla, orden, activo, creado_por, actualizado_por)
     values ((p_fila ->> 'id')::uuid, p_project_id, (p_fila ->> 'disciplina_id')::uuid, btrim(p_fila ->> 'codigo'), btrim(p_fila ->> 'nombre'),
             coalesce(p_fila ->> 'clase_ifc', ''), coalesce(p_fila ->> 'tipo_predefinido', ''), coalesce(p_fila ->> 'clasificacion_sistema', ''),
             coalesce(p_fila ->> 'clasificacion_codigo', ''), coalesce(p_fila ->> 'notas', ''), coalesce(p_fila -> 'parametros', '[]'::jsonb),
+            nullif(p_fila -> 'regla', 'null'::jsonb),
             coalesce((p_fila ->> 'orden')::integer, 0), coalesce((p_fila ->> 'activo')::boolean, true), p_usuario, p_usuario)
     returning * into r;
   else
@@ -302,6 +372,7 @@ begin
            clase_ifc = coalesce(p_fila ->> 'clase_ifc', ''), tipo_predefinido = coalesce(p_fila ->> 'tipo_predefinido', ''),
            clasificacion_sistema = coalesce(p_fila ->> 'clasificacion_sistema', ''), clasificacion_codigo = coalesce(p_fila ->> 'clasificacion_codigo', ''),
            notas = coalesce(p_fila ->> 'notas', ''), parametros = coalesce(p_fila -> 'parametros', '[]'::jsonb),
+           regla = nullif(p_fila -> 'regla', 'null'::jsonb),
            orden = coalesce((p_fila ->> 'orden')::integer, 0), activo = coalesce((p_fila ->> 'activo')::boolean, true),
            version = version + 1, actualizado = now(), actualizado_por = p_usuario
      where id = (p_fila ->> 'id')::uuid and project_id = p_project_id and version = (p_fila ->> 'version')::integer
@@ -457,6 +528,10 @@ alter table public.loin_imagenes enable row level security;
 alter table public.loin_plantillas enable row level security;
 alter table public.loin_etapas enable row level security;
 alter table public.loin_matriz enable row level security;
+alter table public.loin_modelos enable row level security;
+alter table public.loin_asociaciones enable row level security;
+alter table public.loin_campos_modelo enable row level security;
+revoke all on function public.loin_asociar(text, uuid, jsonb, text) from public;
 revoke all on function public.loin_guardar_parametros(text, jsonb, text) from public;
 revoke all on function public.loin_guardar_etapa(text, jsonb, text) from public;
 revoke all on function public.loin_guardar_matriz(text, jsonb, text) from public;
@@ -472,6 +547,7 @@ begin
     revoke all on function public.loin_guardar_plantilla(text, jsonb, text) from anon, authenticated;
     revoke all on function public.loin_guardar_etapa(text, jsonb, text) from anon, authenticated;
     revoke all on function public.loin_guardar_matriz(text, jsonb, text) from anon, authenticated;
+    revoke all on function public.loin_asociar(text, uuid, jsonb, text) from anon, authenticated;
   end if;
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     grant execute on function public.loin_guardar_parametros(text, jsonb, text) to service_role;
@@ -480,6 +556,7 @@ begin
     grant execute on function public.loin_guardar_plantilla(text, jsonb, text) to service_role;
     grant execute on function public.loin_guardar_etapa(text, jsonb, text) to service_role;
     grant execute on function public.loin_guardar_matriz(text, jsonb, text) to service_role;
+    grant execute on function public.loin_asociar(text, uuid, jsonb, text) to service_role;
   end if;
 end;
 $$;
