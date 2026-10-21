@@ -3014,9 +3014,10 @@ objeto, y se divide en información geométrica (detalle, dimensionalidad,
 ubicación, apariencia y comportamiento paramétrico), información alfanumérica
 y documentación.
 
-Se construye por fases. Está la **fase 1: catálogo de parámetros, disciplinas,
-elementos a modelar con sus imágenes y parámetros exigidos, Excel y
-plantillas**. Aparece en el menú lateral del proyecto (`/loin`,
+Se construye por fases. Están la **fase 1** (catálogo de parámetros,
+disciplinas, elementos a modelar con sus imágenes y parámetros exigidos,
+Excel y plantillas) y la **fase 2** (etapas y matriz LOIN, con exportación a
+Excel y PDF para el BEP). Aparece en el menú lateral del proyecto (`/loin`,
 `manifest-loin.json`); el panel del visor 3D llega en la fase 3.
 
 Reglas que no cambian:
@@ -3130,12 +3131,56 @@ con su miniatura, clase IFC y cuántos parámetros exige por NDI.
   -2, -3…; los parámetros que el catálogo del proyecto no tenga se dejan
   fuera y se avisa. Las plantillas se desactivan, no se borran.
 
+### Etapas y matriz LOIN
+
+Pestaña **Matriz LOIN**: una fila por elemento activo (agrupados por
+disciplina) y una columna por etapa activa. Cada celda dice qué se exige a
+ese elemento en esa etapa: **LOD** (detalle geométrico, 100 / 200 / 300 /
+350 / 400 / 500), **NDI** (nivel de información, acumulativo), **propósito**
+(coordinación, cantidades, licencia, construcción…; se pueden agregar otros)
+y **actor responsable** (quién entrega), más una nota opcional.
+
+- **Etapas…**: código, nombre, **fecha del hito** (DD-MM-AAAA) y orden
+  (↑ ↓). **Cargar etapas sugeridas** agrega Anteproyecto, Proyecto / diseño
+  de detalle, Licencia, Construcción y As-built / entrega a operación. Las
+  etapas se desactivan, no se borran.
+- **Clic en una celda**: se eligen el LOD (con su descripción corta) y el
+  NDI; cada botón de NDI dice cuántos parámetros exigiría ese elemento
+  ("NDI-2 · 20 parám.") y abajo cuántos son obligatorios y opcionales. **No
+  se exige en esta etapa** deja la celda sin LOD ni NDI (no se borra).
+- **Asignar a todos** (fila de cada disciplina, en cada etapa): el mismo LOD,
+  NDI, propósito y actor para todos los elementos de la disciplina.
+- **Copiar de la anterior** (encabezado de cada etapa): cada elemento toma lo
+  que pide en la etapa anterior (respeta el filtro de disciplina).
+- En las dos acciones masivas se muestra antes cuántas celdas vacías se
+  llenan, cuántas ya tienen esos valores y cuántas **ya piden otra cosa**:
+  esas no se tocan salvo que se marque "Cambiar también…".
+- **Colores**: un solo azul, de claro (LOD 100) a oscuro (LOD 500); gris
+  claro si solo se pide NDI, y "—" si no se exige. Cada celda dice además su
+  texto ("LOD 300 · NDI-2"), así que no depende solo del color. Al pasar el
+  mouse se ven el detalle, los parámetros, el propósito y el actor.
+- **⚠ Revisar**: la celda avisa si el LOD o el NDI bajan respecto a una
+  etapa anterior, o si pide un NDI y el elemento no tiene parámetros exigidos
+  de ese nivel.
+- **Exportar Excel** (para el BEP): hoja "Matriz LOIN" con los colores y la
+  leyenda, "Detalle por celda" (LOD, NDI, propósito, actor, nota y cuántos
+  parámetros), "Información exigida" (cada parámetro que cada elemento debe
+  llevar en cada etapa, con su regla y dónde se lee) y "Etapas".
+- **Exportar PDF**: la matriz con sus colores en hojas horizontales (A3
+  cuando hay más de 6 etapas), con leyenda, el encabezado repetido en cada
+  página, la disciplina repetida si continúa y "Página x de y".
+- Las descripciones de LOD son un resumen propio de la convención BIMForum
+  (sus definiciones completas tienen derechos de la AIA, G202-2013; el 350
+  es de BIMForum). El LOD no se puede medir automáticamente en el modelo:
+  queda como requisito declarado; la auditoría (fase 4) revisa la
+  información.
+
 ### Permisos
 
 | Acción | Quién |
 |---|---|
 | Ver catálogo, disciplinas, elementos, imágenes y plantillas | Cualquier miembro del proyecto |
-| Editar disciplinas, elementos e imágenes, usar plantillas, valores de relleno y umbral | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
+| Editar disciplinas, elementos e imágenes, etapas y matriz LOIN, usar plantillas, valores de relleno y umbral | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
 | Editar el catálogo, los grupos TDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
 | Elegir editores y proyecto base | Administradores del proyecto |
 
@@ -3158,9 +3203,12 @@ políticas: solo el servidor (clave de servicio) lee y escribe.
 | `loin_elementos` | Por proyecto (código único dentro de su disciplina); los parámetros exigidos van en la misma fila (`parametros` jsonb), con versión |
 | `loin_imagenes` | Dónde está cada imagen en el bucket, sus medidas y quién la subió |
 | `loin_plantillas` | Por proyecto base; el contenido no cambia después de guardarla |
+| `loin_etapas` | Por proyecto (código único): nombre, fecha del hito, orden, activa; con versión |
+| `loin_matriz` | Una celda por elemento × etapa (única): LOD, NDI, propósitos, actor, nota; con versión. Sin LOD ni NDI = no se exige |
+| `loin_guardar_etapa(...)`, `loin_guardar_matriz(proyecto, celdas, usuario)` | Como las demás; la matriz guarda todas las celdas o ninguna y exige que el elemento y la etapa sean del proyecto |
 | `loin_guardar_parametros(base, filas, usuario)` | Guarda varios: todos o ninguno (`version-conflict`, `duplicate-code`) |
 | `loin_guardar_disciplina`, `loin_guardar_elemento`, `loin_guardar_plantilla` | Crean (versión 0) o cambian si la versión coincide; el elemento debe ser de una disciplina del proyecto |
-| `loin_sin_borrar()` | Trigger que rechaza borrar parámetros, disciplinas, elementos y plantillas |
+| `loin_sin_borrar()` | Trigger que rechaza borrar parámetros, disciplinas, elementos, plantillas, etapas y celdas de la matriz |
 | Bucket `loin-imagenes` | Privado, 2 MB por archivo, solo PNG / JPG / WebP |
 
 ### API
@@ -3183,15 +3231,17 @@ comprueban que sea miembro del proyecto (`lib/loin/routes.ts`).
 | `DELETE /api/loin/imagenes/[id]` | Quita una imagen |
 | `GET/POST/PUT /api/loin/plantillas` | Lista, crea desde una disciplina, renombra o desactiva |
 | `POST /api/loin/plantillas/aplicar` | Copia una plantilla a este proyecto |
+| `PUT /api/loin/etapas` | Guarda una etapa |
+| `POST /api/loin/etapas/sugeridas` | Agrega las etapas usuales que falten |
+| `GET/POST /api/loin/matriz` | Etapas y celdas / guarda celdas (todas o ninguna) |
 
 Lógica pura con pruebas en `lib/loin/` (`alias.ts`, `reglas.ts`, `ndi.ts`,
-`semilla.ts`, `importar.ts`, `plantillas.ts`, `excel.ts`) y servicio
-probado contra `memoryStore()` (`service.test.ts`).
+`semilla.ts`, `importar.ts`, `plantillas.ts`, `excel.ts`, `matriz.ts`,
+`exportarMatriz.ts`) y servicio probado contra `memoryStore()`
+(`service.test.ts`).
 
 ### Lo que sigue
 
-2. Etapas y **matriz LOIN** (elemento × etapa con LOD, NDI, propósito y
-   actor), exportación a Excel y PDF para el BEP.
 3. **Panel del visor**: modelos por disciplina, reglas de asociación,
    "Probar regla", asociación manual por IFCGUID y objetos sin clasificar.
 4. **Auditoría**: presencia, contenido, regla y origen de cada parámetro,

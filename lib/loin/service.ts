@@ -2,12 +2,18 @@ import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import type { Responsable } from "../propiedades/types";
 import { plegar } from "../presupuesto/format";
+import { ETAPAS_SUGERIDAS } from "./matriz";
 import { codigoLibre, contenidoPlantilla, elementosDePlantilla } from "./plantillas";
 import { VALORES_BASURA_INICIALES } from "./reglas";
 import { disciplinasSugeridas, TDI_INICIALES } from "./semilla";
 import type { ConVersion, ImagenGuardada, LoinStore, StoredConfig } from "./store";
 import {
   CatalogoResponse,
+  CeldaData,
+  CeldaMatriz,
+  Etapa,
+  MatrizResponse,
+  MAX_CELDAS_POR_ENVIO,
   ConfigLoin,
   Disciplina,
   Elemento,
@@ -27,6 +33,8 @@ import {
 } from "./types";
 import {
   bad,
+  leerCelda,
+  leerEtapa,
   leerDisciplina,
   leerEditores,
   leerElemento,
@@ -74,7 +82,7 @@ export function traducir(err: unknown): unknown {
     );
   }
   if (err.message === "duplicate-code") return new ServiceError("Ya existe otro registro con ese código. Los códigos no se pueden repetir.", 409, "duplicate-code");
-  if (err.message === "disciplina-ajena") return new ServiceError("Esa disciplina o elemento no es de este proyecto.", 400, "disciplina-ajena");
+  if (err.message === "disciplina-ajena") return new ServiceError("Esa disciplina, elemento o etapa no es de este proyecto.", 400, "disciplina-ajena");
   return err;
 }
 
@@ -353,6 +361,56 @@ export async function cargarSugeridas(ctx: Ctx): Promise<{ disciplinas: number; 
     }
   }
   return { disciplinas, elementos, yaExistian };
+}
+
+// ---------------------------------------------------------------- stages and the LOIN matrix
+
+export async function getMatriz(ctx: Ctx): Promise<MatrizResponse> {
+  const [etapas, celdas] = await Promise.all([ctx.store.listEtapas(ctx.projectId), ctx.store.listMatriz(ctx.projectId)]);
+  return { etapas, celdas };
+}
+
+/** Creates (version 0) or changes a stage; to take one out of use, `activo: false`. */
+export async function guardarEtapa(ctx: Ctx, body: unknown): Promise<{ etapa: Etapa }> {
+  await requireEdit(ctx);
+  const fila = { ...leerEtapa(body), ...conId(body) };
+  return { etapa: await guardando(ctx.store.saveEtapa(ctx.projectId, fila, ctx.caller.name)) };
+}
+
+/** Adds the usual stages whose code the project doesn't use yet. */
+export async function cargarEtapasSugeridas(ctx: Ctx): Promise<{ etapas: number; yaExistian: string[] }> {
+  await requireEdit(ctx);
+  const actuales = await ctx.store.listEtapas(ctx.projectId);
+  const usados = new Set(actuales.map((e) => plegar(e.codigo)));
+  let orden = Math.max(0, ...actuales.map((e) => e.orden));
+  let etapas = 0;
+  const yaExistian: string[] = [];
+  for (const s of ETAPAS_SUGERIDAS) {
+    if (usados.has(plegar(s.codigo))) {
+      yaExistian.push(s.codigo);
+      continue;
+    }
+    await guardando(ctx.store.saveEtapa(ctx.projectId, { id: nuevoId(ctx), version: 0, codigo: s.codigo, nombre: s.nombre, fecha: null, orden: ++orden, activo: true }, ctx.caller.name));
+    etapas++;
+  }
+  return { etapas, yaExistian };
+}
+
+/** Saves cells of the matrix (all or none). Cells are never deleted: without LOD and NDI they require nothing. */
+export async function guardarMatriz(ctx: Ctx, body: unknown): Promise<{ celdas: CeldaMatriz[] }> {
+  await requireEdit(ctx);
+  const list = (body as { celdas?: unknown } | null)?.celdas;
+  if (!Array.isArray(list) || list.length === 0) bad("No hay celdas que guardar.");
+  if (list.length > MAX_CELDAS_POR_ENVIO) bad(`Máximo ${MAX_CELDAS_POR_ENVIO} celdas por envío.`);
+  const filas: ConVersion<CeldaData>[] = list.map((v, i) => ({ ...leerCelda(v, `Celda ${i + 1}`), ...conId(v) }));
+  const vistas = new Set<string>();
+  for (const f of filas) {
+    for (const k of [`id:${f.id}`, `celda:${f.elementoId}|${f.etapaId}`]) {
+      if (vistas.has(k)) bad("Una celda de la matriz viene dos veces en el envío.");
+      vistas.add(k);
+    }
+  }
+  return { celdas: await guardando(ctx.store.saveMatriz(ctx.projectId, filas, ctx.caller.name)) };
 }
 
 // ---------------------------------------------------------------- reference images

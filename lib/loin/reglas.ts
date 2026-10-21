@@ -64,6 +64,17 @@ export function leerFecha(valor: unknown): string | null {
   return `${y}-${String(m).padStart(2, "0")}-${String(d).padStart(2, "0")}`;
 }
 
+/** "entre 0.08 y 0.5 m · patrón [A-Z]+", or "" when the rule asks only for a value. */
+export function describirRegla(r: ReglaValor, unidad: string): string {
+  const u = unidad ? ` ${unidad}` : "";
+  const partes: string[] = [];
+  if (r.min !== null && r.max !== null) partes.push(`entre ${r.min} y ${r.max}${u}`);
+  else if (r.min !== null) partes.push(`≥ ${r.min}${u}`);
+  else if (r.max !== null) partes.push(`≤ ${r.max}${u}`);
+  if (r.patron) partes.push(`patrón ${r.patron}`);
+  return partes.join(" · ");
+}
+
 /** Why a pattern can't be used, or null when it compiles. */
 export function errorPatron(patron: string): string | null {
   if (!patron.trim()) return null;

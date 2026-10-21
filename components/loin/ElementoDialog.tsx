@@ -4,7 +4,7 @@ import { CSSProperties, useMemo, useRef, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import { reducirImagen } from "../../lib/loin/imagen";
 import { agregarGrupo, conteoPorNdi, ndiDe } from "../../lib/loin/ndi";
-import { errorPatron } from "../../lib/loin/reglas";
+import { describirRegla, errorPatron } from "../../lib/loin/reglas";
 import { Disciplina, Elemento, ElementoData, EstadoResponse, GrupoTdi, Imagen, MAX_IMAGENES_ELEMENTO, NDIS, Ndi, Parametro, ParametroExigido, REGLA_VACIA, ReglaValor } from "../../lib/loin/types";
 import { coincide, fecha } from "../../lib/presupuesto/format";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
@@ -408,16 +408,6 @@ function Exigidos({
       )}
     </>
   );
-}
-
-function describirRegla(r: ReglaValor, unidad: string): string {
-  const u = unidad ? ` ${unidad}` : "";
-  const partes: string[] = [];
-  if (r.min !== null && r.max !== null) partes.push(`entre ${r.min} y ${r.max}${u}`);
-  else if (r.min !== null) partes.push(`≥ ${r.min}${u}`);
-  else if (r.max !== null) partes.push(`≤ ${r.max}${u}`);
-  if (r.patron) partes.push(`patrón ${r.patron}`);
-  return partes.join(" · ");
 }
 
 /** The element's own bounds or pattern for a parameter (null: the catalog's). */

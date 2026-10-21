@@ -11,6 +11,10 @@ import type {
   ParametroData,
   Plantilla,
   PlantillaData,
+  CeldaData,
+  CeldaMatriz,
+  Etapa,
+  EtapaData,
 } from "./types";
 
 /**
@@ -80,6 +84,12 @@ export interface LoinStore {
   listPlantillas(baseId: string): Promise<Plantilla[]>;
   /** Once saved, only the name, description and active flag of a template change. */
   savePlantilla(baseId: string, fila: ConVersion<PlantillaData>, user: string): Promise<Plantilla>;
+
+  listEtapas(projectId: string): Promise<Etapa[]>;
+  saveEtapa(projectId: string, fila: ConVersion<EtapaData>, user: string): Promise<Etapa>;
+  listMatriz(projectId: string): Promise<CeldaMatriz[]>;
+  /** All or none; the element and the stage must be the project's ("disciplina-ajena"). */
+  saveMatriz(projectId: string, filas: ConVersion<CeldaData>[], user: string): Promise<CeldaMatriz[]>;
 
   archivos: Archivos;
 }
@@ -286,6 +296,70 @@ const plantillaDeFila = (r: PlantillaRow): Plantilla => ({
   actualizado: r.actualizado,
 });
 
+interface EtapaRow {
+  id: string;
+  codigo: string;
+  nombre: string;
+  fecha: string | null;
+  orden: number;
+  activo: boolean;
+  version: number;
+  actualizado: string;
+  actualizado_por: string | null;
+}
+
+const etapaDeFila = (r: EtapaRow): Etapa => ({
+  id: r.id,
+  codigo: r.codigo,
+  nombre: r.nombre,
+  fecha: r.fecha ? r.fecha.slice(0, 10) : null,
+  orden: r.orden,
+  activo: r.activo,
+  version: r.version,
+  actualizado: r.actualizado,
+  actualizadoPor: r.actualizado_por,
+});
+
+interface CeldaRow {
+  id: string;
+  elemento_id: string;
+  etapa_id: string;
+  lod: number | null;
+  ndi: number | null;
+  propositos: string[];
+  actor: string;
+  nota: string;
+  version: number;
+  actualizado: string;
+  actualizado_por: string | null;
+}
+
+const celdaDeFila = (r: CeldaRow): CeldaMatriz => ({
+  id: r.id,
+  elementoId: r.elemento_id,
+  etapaId: r.etapa_id,
+  lod: r.lod as CeldaMatriz["lod"],
+  ndi: r.ndi as CeldaMatriz["ndi"],
+  propositos: r.propositos ?? [],
+  actor: r.actor,
+  nota: r.nota,
+  version: r.version,
+  actualizado: r.actualizado,
+  actualizadoPor: r.actualizado_por,
+});
+
+const filaDeCelda = (c: ConVersion<CeldaData>) => ({
+  id: c.id,
+  version: c.version,
+  elemento_id: c.elementoId,
+  etapa_id: c.etapaId,
+  lod: c.lod,
+  ndi: c.ndi,
+  propositos: c.propositos,
+  actor: c.actor,
+  nota: c.nota,
+});
+
 // ---------------------------------------------------------------- Supabase
 
 function claveServidor(): { url: string; headers: Record<string, string> } | null {
@@ -448,6 +522,20 @@ function supabaseStore(): LoinStore | null {
       return plantillaDeFila(await rpc<PlantillaRow>("loin_guardar_plantilla", { p_base_id: baseId, p_fila: fila, p_usuario: user }));
     },
 
+    async listEtapas(projectId) {
+      return (await all<EtapaRow>(`/loin_etapas?project_id=${eq(projectId)}&select=*&order=orden.asc,codigo.asc`)).map(etapaDeFila);
+    },
+    async saveEtapa(projectId, e, user) {
+      const fila = { id: e.id, version: e.version, codigo: e.codigo, nombre: e.nombre, fecha: e.fecha, orden: e.orden, activo: e.activo };
+      return etapaDeFila(await rpc<EtapaRow>("loin_guardar_etapa", { p_project_id: projectId, p_fila: fila, p_usuario: user }));
+    },
+    async listMatriz(projectId) {
+      return (await all<CeldaRow>(`/loin_matriz?project_id=${eq(projectId)}&select=*&order=id.asc`)).map(celdaDeFila);
+    },
+    async saveMatriz(projectId, filas, user) {
+      return (await rpc<CeldaRow[]>("loin_guardar_matriz", { p_project_id: projectId, p_filas: filas.map(filaDeCelda), p_usuario: user })).map(celdaDeFila);
+    },
+
     archivos,
   };
 }
@@ -501,6 +589,8 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
   const elementos = new Map<string, Elemento & { projectId: string }>();
   const imagenes = new Map<string, ImagenGuardada & { projectId: string }>();
   const plantillas = new Map<string, Plantilla & { baseId: string }>();
+  const etapas = new Map<string, Etapa & { projectId: string }>();
+  const matriz = new Map<string, CeldaMatriz & { projectId: string }>();
   const ahora = () => new Date().toISOString();
   const rechazo = (motivo: (typeof MOTIVOS)[number]) => new StoreError(motivo, motivo === "disciplina-ajena" ? 400 : 409);
   const sin = <T extends object, K extends string>(x: T, k: K): Omit<T, K> => {
@@ -614,6 +704,40 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
         : { ...structuredClone(datos), baseId, version: 1, creada: ahora(), creadaPor: user, actualizado: ahora() };
       plantillas.set(f.id, p);
       return sin(p, "baseId");
+    },
+
+    async listEtapas(projectId) {
+      return [...etapas.values()].filter((e) => e.projectId === projectId).sort((a, b) => a.orden - b.orden || a.codigo.localeCompare(b.codigo)).map((e) => sin(e, "projectId"));
+    },
+    async saveEtapa(projectId, f, user) {
+      const actual = revisarVersion(etapas, f.id, f.version, (e) => e.projectId === projectId);
+      if ([...etapas.values()].some((e) => e.projectId === projectId && e.id !== f.id && codigoClave(e.codigo) === codigoClave(f.codigo))) throw rechazo("duplicate-code");
+      const { version: _, ...datos } = f;
+      const e = { ...structuredClone(datos), projectId, version: (actual?.version ?? 0) + 1, actualizado: ahora(), actualizadoPor: user };
+      etapas.set(f.id, e);
+      return sin(e, "projectId");
+    },
+    async listMatriz(projectId) {
+      return [...matriz.values()].filter((c) => c.projectId === projectId).map((c) => sin(c, "projectId"));
+    },
+    async saveMatriz(projectId, filas, user) {
+      // Checked first and applied after: all or none, like the SQL function.
+      const siguiente: (CeldaMatriz & { projectId: string })[] = [];
+      const celdas = new Set([...matriz.values()].map((c) => `${c.elementoId}|${c.etapaId}`));
+      for (const f of filas) {
+        if (elementos.get(f.elementoId)?.projectId !== projectId || etapas.get(f.etapaId)?.projectId !== projectId) throw rechazo("disciplina-ajena");
+        const actual = matriz.get(f.id);
+        if (f.version === 0) {
+          if (actual || celdas.has(`${f.elementoId}|${f.etapaId}`)) throw rechazo("version-conflict");
+          celdas.add(`${f.elementoId}|${f.etapaId}`);
+        } else if (!actual || actual.projectId !== projectId || actual.version !== f.version || actual.elementoId !== f.elementoId || actual.etapaId !== f.etapaId) {
+          throw rechazo("version-conflict");
+        }
+        const { version: _, ...datos } = f;
+        siguiente.push({ ...structuredClone(datos), projectId, version: (actual?.version ?? 0) + 1, actualizado: ahora(), actualizadoPor: user });
+      }
+      for (const c of siguiente) matriz.set(c.id, c);
+      return siguiente.map((c) => sin(c, "projectId"));
     },
 
     archivos,

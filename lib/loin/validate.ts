@@ -6,6 +6,11 @@ import { normalizarNombre } from "./alias";
 import { errorPatron } from "./reglas";
 import {
   Alias,
+  CeldaData,
+  EtapaData,
+  Lod,
+  LODS,
+  MAX_PROPOSITOS,
   DisciplinaData,
   ElementoData,
   GrupoTdi,
@@ -211,6 +216,53 @@ export function leerElemento(v: unknown): ElementoData {
     parametros: leerExigidos(o.parametros),
     orden: o.orden === undefined ? 0 : entero(o.orden, "Orden", -100000, 100000),
     activo: booleano(o.activo, "Elemento", true),
+  };
+}
+
+export function leerEtapa(v: unknown): EtapaData {
+  const o = objeto(v, "Etapa");
+  const codigo = texto(o.codigo, "Código de la etapa", 20, true);
+  if (!/^[\p{L}\p{N}_.-]+$/u.test(codigo)) bad("El código de la etapa solo lleva letras, números, punto, guion o guion bajo (sin espacios).");
+  let fecha: string | null = null;
+  if (o.fecha !== null && o.fecha !== undefined && o.fecha !== "") {
+    fecha = texto(o.fecha, "Fecha de la etapa", 10);
+    const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(fecha);
+    const d = m ? new Date(Date.UTC(+m[1], +m[2] - 1, +m[3])) : null;
+    if (!m || !d || d.getUTCMonth() !== +m[2] - 1 || d.getUTCDate() !== +m[3] || +m[1] < 1900 || +m[1] > 2200) bad("La fecha de la etapa no es válida (DD-MM-AAAA).");
+  }
+  return {
+    codigo,
+    nombre: texto(o.nombre, "Nombre de la etapa", 120, true),
+    fecha,
+    orden: o.orden === undefined ? 0 : entero(o.orden, "Orden", -100000, 100000),
+    activo: booleano(o.activo, "Etapa", true),
+  };
+}
+
+/** One cell of the LOIN matrix. */
+export function leerCelda(v: unknown, donde: string): CeldaData {
+  const o = objeto(v, donde);
+  if (o.lod !== null && o.lod !== undefined && !LODS.includes(o.lod as Lod)) bad(`${donde}: el LOD debe ser ${LODS.join(", ")} o vacío.`);
+  const propositos: string[] = [];
+  if (o.propositos !== undefined) {
+    if (!Array.isArray(o.propositos)) bad(`${donde}: los propósitos deben ser una lista.`);
+    const vistos = new Set<string>();
+    for (const p of o.propositos) {
+      const t = texto(p, `${donde} (propósito)`, 60);
+      if (!t || vistos.has(normalizarNombre(t))) continue;
+      vistos.add(normalizarNombre(t));
+      propositos.push(t);
+    }
+    if (propositos.length > MAX_PROPOSITOS) bad(`${donde}: máximo ${MAX_PROPOSITOS} propósitos.`);
+  }
+  return {
+    elementoId: leerId(o.elementoId, `${donde} (elemento)`),
+    etapaId: leerId(o.etapaId, `${donde} (etapa)`),
+    lod: (o.lod ?? null) as Lod | null,
+    ndi: o.ndi === null || o.ndi === undefined ? null : leerNdi(o.ndi, donde),
+    propositos,
+    actor: texto(o.actor, `${donde} (actor)`, 120),
+    nota: texto(o.nota, `${donde} (nota)`, 500),
   };
 }
 

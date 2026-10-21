@@ -214,6 +214,59 @@ export interface ElementosResponse {
   imagenes: Imagen[];
 }
 
+// ---------------------------------------------------------------- stages and the LOIN matrix
+
+/** Geometric level of development (BIMForum convention). */
+export const LODS = [100, 200, 300, 350, 400, 500] as const;
+export type Lod = (typeof LODS)[number];
+
+export interface EtapaData {
+  codigo: string;
+  nombre: string;
+  /** Milestone date, "AAAA-MM-DD" (shown DD-MM-AAAA); null when not set. */
+  fecha: string | null;
+  orden: number;
+  activo: boolean;
+}
+
+export interface Etapa extends EtapaData {
+  id: string;
+  version: number;
+  actualizado: string;
+  actualizadoPor: string | null;
+}
+
+/** What one element must have at one stage. Both levels null = not required at that stage. */
+export interface Requerimiento {
+  lod: Lod | null;
+  ndi: Ndi | null;
+  /** Coordinación, Cantidades, Licencia… */
+  propositos: string[];
+  /** Who delivers it (the discipline's designer). */
+  actor: string;
+  nota: string;
+}
+
+export interface CeldaData extends Requerimiento {
+  elementoId: string;
+  etapaId: string;
+}
+
+export interface CeldaMatriz extends CeldaData {
+  id: string;
+  version: number;
+  actualizado: string;
+  actualizadoPor: string | null;
+}
+
+export interface MatrizResponse {
+  etapas: Etapa[];
+  celdas: CeldaMatriz[];
+}
+
+export const MAX_CELDAS_POR_ENVIO = 500;
+export const MAX_PROPOSITOS = 12;
+
 export const MAX_EDITORES = 50;
 export const MAX_PARAMETROS_POR_ENVIO = 200;
 export const MAX_PARAMETROS_CATALOGO = 3000;

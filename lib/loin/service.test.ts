@@ -5,8 +5,12 @@ import { entradasDyco, planificarImportacion } from "./importar";
 import {
   aplicarPlantilla,
   cambiarPlantilla,
+  cargarEtapasSugeridas,
   cargarSugeridas,
   crearPlantilla,
+  getMatriz,
+  guardarEtapa,
+  guardarMatriz,
   Ctx,
   eliminarImagen,
   getCatalogo,
@@ -180,6 +184,41 @@ describe("servicio de Requisitos BIM", () => {
     const { imagenes } = await getElementos(ctx(store, ADMIN));
     assert.equal(imagenes.length, 5);
     await rechaza(eliminarImagen(ctx(store, ADMIN), imagen.id), 404);
+  });
+
+  it("las etapas se crean con fecha válida, no repiten código y las sugeridas se cargan una vez", async () => {
+    const store = memoryStore();
+    await rechaza(guardarEtapa(ctx(store, MIEMBRO), { id: uuid(), version: 0, codigo: "ANT", nombre: "Anteproyecto" }), 403, "not-editor");
+    const { etapa } = await guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "ANT", nombre: "Anteproyecto", fecha: "2026-11-30", orden: 1 });
+    assert.equal(etapa.fecha, "2026-11-30");
+    await rechaza(guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "X", nombre: "Mala", fecha: "2026-02-30" }), 400);
+    await rechaza(guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "ant", nombre: "Otra" }), 409, "duplicate-code");
+    const r = await cargarEtapasSugeridas(ctx(store, ADMIN));
+    assert.deepEqual([r.etapas, r.yaExistian], [4, ["ANT"]]);
+    const { etapas } = await getMatriz(ctx(store, MIEMBRO));
+    assert.deepEqual(etapas.map((e) => e.codigo), ["ANT", "PRO", "LIC", "CON", "ASB"]);
+  });
+
+  it("la matriz guarda celdas con versión, todas o ninguna, solo de elementos y etapas del proyecto", async () => {
+    const store = memoryStore();
+    const { disciplina } = await guardarDisciplina(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "ARQ", nombre: "Arquitectura", color: "#2a78d6" });
+    const { elemento } = await guardarElemento(ctx(store, ADMIN), { id: uuid(), version: 0, disciplinaId: disciplina.id, codigo: "MUR", nombre: "Muro" });
+    const { etapa } = await guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "PRO", nombre: "Proyecto" });
+    const celda = { id: uuid(), version: 0, elementoId: elemento.id, etapaId: etapa.id, lod: 300, ndi: 2, propositos: ["Coordinación", "coordinacion", "Cantidades"], actor: "Arquitecto" };
+    const [guardada] = (await guardarMatriz(ctx(store, ADMIN), { celdas: [celda] })).celdas;
+    assert.deepEqual([guardada.lod, guardada.ndi, guardada.propositos, guardada.version], [300, 2, ["Coordinación", "Cantidades"], 1]);
+    await rechaza(guardarMatriz(ctx(store, MIEMBRO), { celdas: [{ ...celda, version: 1 }] }), 403, "not-editor");
+    await rechaza(guardarMatriz(ctx(store, ADMIN), { celdas: [{ ...celda, version: 1, lod: 250 }] }), 400);
+    await rechaza(guardarMatriz(ctx(store, ADMIN), { celdas: [{ ...celda, id: uuid() }] }), 409, "version-conflict");
+    await rechaza(guardarMatriz(ctx(store, ADMIN, "OBRA2"), { celdas: [{ ...celda, id: uuid() }] }), 400, "disciplina-ajena");
+    await rechaza(guardarMatriz(ctx(store, ADMIN), { celdas: [{ ...celda, version: 1 }, { ...celda, version: 1 }] }), 400);
+    // A batch with a stale cell saves nothing.
+    const otra = (await guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "CON", nombre: "Construcción" })).etapa;
+    await rechaza(guardarMatriz(ctx(store, ADMIN), { celdas: [{ ...celda, id: uuid(), etapaId: otra.id }, { ...celda, version: 7 }] }), 409, "version-conflict");
+    assert.equal((await getMatriz(ctx(store, ADMIN))).celdas.length, 1);
+    // "Not required" is a cell without levels, never a deletion.
+    const [vacia] = (await guardarMatriz(ctx(store, ADMIN), { celdas: [{ ...celda, version: 1, lod: null, ndi: null }] })).celdas;
+    assert.deepEqual([vacia.lod, vacia.ndi, vacia.version], [null, null, 2]);
   });
 
   it("una disciplina guardada como plantilla se copia a otro proyecto con la misma base, con sus imágenes", async () => {

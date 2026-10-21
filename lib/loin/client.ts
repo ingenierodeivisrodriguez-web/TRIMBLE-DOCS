@@ -4,6 +4,12 @@ import type { ProjectContacts, Responsable } from "../propiedades/types";
 import type { ConVersion } from "./store";
 import {
   CatalogoResponse,
+  CeldaData,
+  CeldaMatriz,
+  Etapa,
+  EtapaData,
+  MatrizResponse,
+  MAX_CELDAS_POR_ENVIO,
   Disciplina,
   DisciplinaData,
   Elemento,
@@ -37,6 +43,11 @@ export interface LoinApi {
   crearPlantilla(p: { disciplinaId: string; nombre: string; descripcion: string }): Promise<{ plantilla: Plantilla; imagenesOmitidas: number }>;
   cambiarPlantilla(p: { id: string; version: number; nombre?: string; descripcion?: string; activo?: boolean }): Promise<Plantilla>;
   aplicarPlantilla(plantillaId: string): Promise<{ disciplina: Disciplina; elementos: number; parametrosQuitados: number; imagenesOmitidas: number }>;
+  getMatriz(): Promise<MatrizResponse>;
+  guardarEtapa(fila: ConVersion<EtapaData>): Promise<Etapa>;
+  cargarEtapasSugeridas(): Promise<{ etapas: number; yaExistian: string[] }>;
+  /** Several requests when there are many (each one all or none). */
+  guardarMatriz(filas: ConVersion<CeldaData>[], onProgress?: (hechos: number) => void): Promise<CeldaMatriz[]>;
 }
 
 /** Calls /api/loin with the user's Trimble token (asked again once if Trimble rejects it). */
@@ -103,5 +114,17 @@ export function loinApi(projectId: string, auth: TokenSource): LoinApi {
     crearPlantilla: (p) => request("/plantillas", send("POST", p)),
     cambiarPlantilla: (p) => request<{ plantilla: Plantilla }>("/plantillas", send("PUT", p)).then((r) => r.plantilla),
     aplicarPlantilla: (plantillaId) => request("/plantillas/aplicar", send("POST", { plantillaId })),
+    getMatriz: () => request("/matriz"),
+    guardarEtapa: (fila) => request<{ etapa: Etapa }>("/etapas", send("PUT", fila)).then((r) => r.etapa),
+    cargarEtapasSugeridas: () => request("/etapas/sugeridas", { method: "POST" }),
+    async guardarMatriz(filas, onProgress) {
+      const out: CeldaMatriz[] = [];
+      for (let i = 0; i < filas.length; i += MAX_CELDAS_POR_ENVIO) {
+        const lote = filas.slice(i, i + MAX_CELDAS_POR_ENVIO);
+        out.push(...(await request<{ celdas: CeldaMatriz[] }>("/matriz", send("POST", { celdas: lote }))).celdas);
+        onProgress?.(Math.min(i + lote.length, filas.length));
+      }
+      return out;
+    },
   };
 }

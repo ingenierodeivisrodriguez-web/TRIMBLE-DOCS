@@ -1,6 +1,6 @@
 -- Requisitos BIM (LOIN): catálogo de parámetros, disciplinas, elementos a
 -- modelar con sus imágenes de referencia y parámetros exigidos, y plantillas
--- de disciplina. Se puede ejecutar varias veces sin perder datos (Supabase →
+-- de disciplina, etapas y matriz LOIN. Se puede ejecutar varias veces sin perder datos (Supabase →
 -- SQL Editor → pegar y ejecutar).
 --
 -- Reglas que también cumple la base de datos:
@@ -131,7 +131,45 @@ create table if not exists public.loin_plantillas (
 );
 create index if not exists loin_plantillas_base on public.loin_plantillas (base_id);
 
--- Nada del catálogo, disciplinas, elementos ni plantillas se borra: se desactiva.
+-- Etapas o hitos del proyecto (Anteproyecto, Proyecto, Licencia, Construcción, As-built…).
+create table if not exists public.loin_etapas (
+  id              uuid        primary key,
+  project_id      text        not null,
+  codigo          text        not null check (length(btrim(codigo)) between 1 and 20),
+  nombre          text        not null check (length(btrim(nombre)) between 1 and 120),
+  fecha           date,
+  orden           integer     not null default 0,
+  activo          boolean     not null default true,
+  version         integer     not null default 1,
+  creado          timestamptz not null default now(),
+  creado_por      text,
+  actualizado     timestamptz not null default now(),
+  actualizado_por text
+);
+create unique index if not exists loin_etapas_codigo_unico on public.loin_etapas (project_id, lower(btrim(codigo)));
+
+-- Matriz LOIN: lo que cada elemento debe tener en cada etapa. LOD y NDI vacíos
+-- = no se exige en esa etapa (la celda no se borra, se deja sin exigencia).
+create table if not exists public.loin_matriz (
+  id              uuid        primary key,
+  project_id      text        not null,
+  elemento_id     uuid        not null references public.loin_elementos (id),
+  etapa_id        uuid        not null references public.loin_etapas (id),
+  lod             smallint    check (lod is null or lod in (100, 200, 300, 350, 400, 500)),
+  ndi             smallint    check (ndi is null or ndi between 1 and 3),
+  propositos      jsonb       not null default '[]'::jsonb check (jsonb_typeof(propositos) = 'array'),
+  actor           text        not null default '',
+  nota            text        not null default '',
+  version         integer     not null default 1,
+  creado          timestamptz not null default now(),
+  creado_por      text,
+  actualizado     timestamptz not null default now(),
+  actualizado_por text
+);
+create unique index if not exists loin_matriz_celda_unica on public.loin_matriz (elemento_id, etapa_id);
+create index if not exists loin_matriz_proyecto on public.loin_matriz (project_id);
+
+-- Nada del catálogo, disciplinas, elementos, plantillas, etapas ni matriz se borra: se desactiva.
 create or replace function public.loin_sin_borrar()
 returns trigger
 language plpgsql
@@ -149,6 +187,10 @@ drop trigger if exists loin_elementos_sin_borrar on public.loin_elementos;
 create trigger loin_elementos_sin_borrar before delete on public.loin_elementos for each row execute function public.loin_sin_borrar();
 drop trigger if exists loin_plantillas_sin_borrar on public.loin_plantillas;
 create trigger loin_plantillas_sin_borrar before delete on public.loin_plantillas for each row execute function public.loin_sin_borrar();
+drop trigger if exists loin_etapas_sin_borrar on public.loin_etapas;
+create trigger loin_etapas_sin_borrar before delete on public.loin_etapas for each row execute function public.loin_sin_borrar();
+drop trigger if exists loin_matriz_sin_borrar on public.loin_matriz;
+create trigger loin_matriz_sin_borrar before delete on public.loin_matriz for each row execute function public.loin_sin_borrar();
 
 -- Guarda varios parámetros de un catálogo: todos o ninguno. version 0 = nuevo;
 -- si no, solo si sigue en esa versión ('version-conflict'). Código repetido:
@@ -308,6 +350,87 @@ exception when unique_violation then
 end;
 $$;
 
+create or replace function public.loin_guardar_etapa(p_project_id text, p_fila jsonb, p_usuario text)
+returns public.loin_etapas
+language plpgsql
+set search_path = public
+as $$
+declare
+  r public.loin_etapas;
+  v_restriccion text;
+begin
+  if (p_fila ->> 'version')::integer = 0 then
+    insert into public.loin_etapas (id, project_id, codigo, nombre, fecha, orden, activo, creado_por, actualizado_por)
+    values ((p_fila ->> 'id')::uuid, p_project_id, btrim(p_fila ->> 'codigo'), btrim(p_fila ->> 'nombre'), (p_fila ->> 'fecha')::date,
+            coalesce((p_fila ->> 'orden')::integer, 0), coalesce((p_fila ->> 'activo')::boolean, true), p_usuario, p_usuario)
+    returning * into r;
+  else
+    update public.loin_etapas
+       set codigo = btrim(p_fila ->> 'codigo'), nombre = btrim(p_fila ->> 'nombre'), fecha = (p_fila ->> 'fecha')::date,
+           orden = coalesce((p_fila ->> 'orden')::integer, 0), activo = coalesce((p_fila ->> 'activo')::boolean, true),
+           version = version + 1, actualizado = now(), actualizado_por = p_usuario
+     where id = (p_fila ->> 'id')::uuid and project_id = p_project_id and version = (p_fila ->> 'version')::integer
+    returning * into r;
+    if not found then
+      raise exception 'version-conflict';
+    end if;
+  end if;
+  return r;
+exception when unique_violation then
+  get stacked diagnostics v_restriccion = constraint_name;
+  if v_restriccion like '%_pkey' then
+    raise exception 'version-conflict';
+  end if;
+  raise exception 'duplicate-code';
+end;
+$$;
+
+-- Guarda varias celdas de la matriz: todas o ninguna. El elemento y la etapa
+-- deben ser del proyecto ('disciplina-ajena'); una celda creada por otra
+-- persona mientras tanto, o una versión vieja, es 'version-conflict'.
+create or replace function public.loin_guardar_matriz(p_project_id text, p_filas jsonb, p_usuario text)
+returns setof public.loin_matriz
+language plpgsql
+set search_path = public
+as $$
+declare
+  f jsonb;
+  r public.loin_matriz;
+begin
+  for f in select * from jsonb_array_elements(p_filas) loop
+    perform 1 from public.loin_elementos where id = (f ->> 'elemento_id')::uuid and project_id = p_project_id;
+    if not found then
+      raise exception 'disciplina-ajena';
+    end if;
+    perform 1 from public.loin_etapas where id = (f ->> 'etapa_id')::uuid and project_id = p_project_id;
+    if not found then
+      raise exception 'disciplina-ajena';
+    end if;
+    if (f ->> 'version')::integer = 0 then
+      insert into public.loin_matriz (id, project_id, elemento_id, etapa_id, lod, ndi, propositos, actor, nota, creado_por, actualizado_por)
+      values ((f ->> 'id')::uuid, p_project_id, (f ->> 'elemento_id')::uuid, (f ->> 'etapa_id')::uuid, (f ->> 'lod')::smallint, (f ->> 'ndi')::smallint,
+              coalesce(f -> 'propositos', '[]'::jsonb), coalesce(f ->> 'actor', ''), coalesce(f ->> 'nota', ''), p_usuario, p_usuario)
+      returning * into r;
+    else
+      update public.loin_matriz
+         set lod = (f ->> 'lod')::smallint, ndi = (f ->> 'ndi')::smallint, propositos = coalesce(f -> 'propositos', '[]'::jsonb),
+             actor = coalesce(f ->> 'actor', ''), nota = coalesce(f ->> 'nota', ''),
+             version = version + 1, actualizado = now(), actualizado_por = p_usuario
+       where id = (f ->> 'id')::uuid and project_id = p_project_id and version = (f ->> 'version')::integer
+         and elemento_id = (f ->> 'elemento_id')::uuid and etapa_id = (f ->> 'etapa_id')::uuid
+      returning * into r;
+      if not found then
+        raise exception 'version-conflict';
+      end if;
+    end if;
+    return next r;
+  end loop;
+  return;
+exception when unique_violation then
+  raise exception 'version-conflict';
+end;
+$$;
+
 -- Bucket privado de Storage para las imágenes (sin acceso público: el servidor
 -- entrega enlaces firmados que vencen). Solo existe en Supabase.
 do $$
@@ -332,7 +455,11 @@ alter table public.loin_disciplinas enable row level security;
 alter table public.loin_elementos enable row level security;
 alter table public.loin_imagenes enable row level security;
 alter table public.loin_plantillas enable row level security;
+alter table public.loin_etapas enable row level security;
+alter table public.loin_matriz enable row level security;
 revoke all on function public.loin_guardar_parametros(text, jsonb, text) from public;
+revoke all on function public.loin_guardar_etapa(text, jsonb, text) from public;
+revoke all on function public.loin_guardar_matriz(text, jsonb, text) from public;
 revoke all on function public.loin_guardar_disciplina(text, jsonb, text) from public;
 revoke all on function public.loin_guardar_elemento(text, jsonb, text) from public;
 revoke all on function public.loin_guardar_plantilla(text, jsonb, text) from public;
@@ -343,12 +470,16 @@ begin
     revoke all on function public.loin_guardar_disciplina(text, jsonb, text) from anon, authenticated;
     revoke all on function public.loin_guardar_elemento(text, jsonb, text) from anon, authenticated;
     revoke all on function public.loin_guardar_plantilla(text, jsonb, text) from anon, authenticated;
+    revoke all on function public.loin_guardar_etapa(text, jsonb, text) from anon, authenticated;
+    revoke all on function public.loin_guardar_matriz(text, jsonb, text) from anon, authenticated;
   end if;
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     grant execute on function public.loin_guardar_parametros(text, jsonb, text) to service_role;
     grant execute on function public.loin_guardar_disciplina(text, jsonb, text) to service_role;
     grant execute on function public.loin_guardar_elemento(text, jsonb, text) to service_role;
     grant execute on function public.loin_guardar_plantilla(text, jsonb, text) to service_role;
+    grant execute on function public.loin_guardar_etapa(text, jsonb, text) to service_role;
+    grant execute on function public.loin_guardar_matriz(text, jsonb, text) to service_role;
   end if;
 end;
 $$;
