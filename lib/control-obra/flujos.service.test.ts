@@ -4,6 +4,8 @@ import { Caller, ServiceError } from "../propiedades/service";
 import type { ProjectContacts } from "../propiedades/types";
 import { describirFlujo } from "./flujos";
 import { Ctx, getAccesos, getBitacora, getEstado, getFlujos, guardarAdminEmpresa, guardarAsignacion, guardarEmpresa, guardarFlujo, registrarLicencia, vincular } from "./service";
+import { memoriaCompras } from "../lecturas/compras";
+import { memoriaLectura } from "../lecturas/presupuesto";
 import { memoryStore, ObraStore } from "./store";
 import { GrupoLicencia, GRUPOS_LICENCIA } from "./types";
 
@@ -18,7 +20,7 @@ const EQUIPO: ProjectContacts = {
 };
 
 function ctx(store: ObraStore, caller: Caller): Ctx {
-  return { projectId: P1, caller, esAdminTecnico: caller.id === "tec", store, hoy: HOY, deps: { contactos: async () => EQUIPO, projectName: async () => "Torres del Parque" } };
+  return { projectId: P1, caller, esAdminTecnico: caller.id === "tec", store, lecturas: { presupuesto: memoriaLectura(), compras: memoriaCompras() }, hoy: HOY, deps: { contactos: async () => EQUIPO, projectName: async () => "Torres del Parque" } };
 }
 
 async function rechaza(promesa: Promise<unknown>, status: number, code: string) {

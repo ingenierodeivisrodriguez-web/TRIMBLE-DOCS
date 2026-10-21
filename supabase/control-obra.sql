@@ -309,7 +309,10 @@ create table if not exists public.obra_nodos (
   check (inicio is null or fin is null or fin >= inicio),
   check ((responsable_id is null) = (btrim(responsable_nombre) = ''))
 );
-create unique index if not exists obra_nodos_valor on public.obra_nodos (empresa_id, project_id, nivel_clave, lower(btrim(valor)));
+-- Único dentro de su valor superior: Piso 2 de la Torre 1 y Piso 2 de la Torre 2 son lugares distintos
+-- (hasta el bloque 3 era único en todo el nivel).
+drop index if exists public.obra_nodos_valor;
+create unique index if not exists obra_nodos_valor_padre on public.obra_nodos (empresa_id, project_id, nivel_clave, coalesce(padre_id::text, ''), lower(btrim(valor)));
 
 -- ---------------------------------------------------------------- bitácora
 
@@ -962,9 +965,12 @@ as $$
 $$;
 
 -- Guarda la configuración del proyecto (administradores de la empresa o del proyecto).
+-- La firma cambió en el bloque 3 (niveles obligatorios de la ubicación): se quita la anterior.
+alter table public.obra_config add column if not exists ubicacion_obligatoria text[] not null default '{}';
+drop function if exists public.obra_guardar_config(uuid, text, text, text, text, text, numeric, boolean, integer);
 create or replace function public.obra_guardar_config(
   p_empresa_id uuid, p_project_id text, p_actor_id text, p_actor_nombre text,
-  p_responsable_id text, p_responsable_nombre text, p_tolerancia numeric, p_permite_obs boolean, p_version integer)
+  p_responsable_id text, p_responsable_nombre text, p_tolerancia numeric, p_permite_obs boolean, p_ubicacion_obligatoria text[], p_version integer)
 returns integer
 language plpgsql
 security definer
@@ -977,11 +983,15 @@ begin
   if not public.obra_es_admin_empresa(p_empresa_id, p_actor_id) and not public.obra_es_admin_proyecto(p_empresa_id, p_project_id, p_actor_id) then
     raise exception 'obra:no-admin';
   end if;
+  if exists (select 1 from unnest(coalesce(p_ubicacion_obligatoria, '{}'::text[])) k where k !~ '^[a-z][a-z0-9_]{1,39}$') then
+    raise exception 'obra:datos';
+  end if;
   select * into v_antes from public.obra_config where empresa_id = p_empresa_id and project_id = p_project_id for update;
   if found then
     update public.obra_config
        set responsable_tecnico_id = p_responsable_id, responsable_tecnico_nombre = coalesce(p_responsable_nombre, ''),
            tolerancia_verificacion_pct = p_tolerancia, permite_aceptado_con_observaciones = p_permite_obs,
+           ubicacion_obligatoria = coalesce(p_ubicacion_obligatoria, '{}'::text[]),
            version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre
      where empresa_id = p_empresa_id and project_id = p_project_id and version = p_version
     returning version into v_version;
@@ -992,15 +1002,17 @@ begin
     if p_version <> 0 then
       raise exception 'version-conflict';
     end if;
-    insert into public.obra_config (empresa_id, project_id, responsable_tecnico_id, responsable_tecnico_nombre, tolerancia_verificacion_pct, permite_aceptado_con_observaciones, actualizado_por)
-    values (p_empresa_id, p_project_id, p_responsable_id, coalesce(p_responsable_nombre, ''), p_tolerancia, p_permite_obs, p_actor_nombre);
+    insert into public.obra_config (empresa_id, project_id, responsable_tecnico_id, responsable_tecnico_nombre, tolerancia_verificacion_pct, permite_aceptado_con_observaciones,
+                                   ubicacion_obligatoria, actualizado_por)
+    values (p_empresa_id, p_project_id, p_responsable_id, coalesce(p_responsable_nombre, ''), p_tolerancia, p_permite_obs, coalesce(p_ubicacion_obligatoria, '{}'::text[]), p_actor_nombre);
     v_version := 1;
   end if;
   perform public.obra_registrar(p_empresa_id, p_project_id, p_actor_id, p_actor_nombre, 'config.cambiar', 'estructura', 'proyecto', p_project_id,
     jsonb_build_object(
       'responsableTecnico', jsonb_build_array(v_antes.responsable_tecnico_nombre, coalesce(p_responsable_nombre, '')),
       'toleranciaVerificacionPct', jsonb_build_array(v_antes.tolerancia_verificacion_pct, p_tolerancia),
-      'permiteAceptadoConObservaciones', jsonb_build_array(v_antes.permite_aceptado_con_observaciones, p_permite_obs)));
+      'permiteAceptadoConObservaciones', jsonb_build_array(v_antes.permite_aceptado_con_observaciones, p_permite_obs),
+      'ubicacionObligatoria', jsonb_build_array(to_jsonb(v_antes.ubicacion_obligatoria), to_jsonb(coalesce(p_ubicacion_obligatoria, '{}'::text[])))));
   return v_version;
 end;
 $$;
@@ -1213,7 +1225,7 @@ revoke all on function public.obra_guardar_rol(uuid, text, text, uuid, text, tex
 revoke all on function public.obra_guardar_asignacion(uuid, text, text, text, text, text, text, uuid, boolean, date, date, boolean, integer) from public, anon, authenticated;
 revoke all on function public.obra_guardar_usuario(uuid, text, text, uuid, boolean, integer) from public, anon, authenticated;
 revoke all on function public.obra_nivel_efectivo(uuid, text, text) from public, anon, authenticated;
-revoke all on function public.obra_guardar_config(uuid, text, text, text, text, text, numeric, boolean, integer) from public, anon, authenticated;
+revoke all on function public.obra_guardar_config(uuid, text, text, text, text, text, numeric, boolean, text[], integer) from public, anon, authenticated;
 revoke all on function public.obra_guardar_nivel(uuid, text, text, text, uuid, text, text, integer, text, text, text, boolean, integer) from public, anon, authenticated;
 revoke all on function public.obra_guardar_nodo(uuid, text, text, text, uuid, text, text, uuid, text, text, date, date, text, text, integer) from public, anon, authenticated;
 grant execute on function public.obra_permisos_validos() to service_role;
@@ -1238,7 +1250,7 @@ grant execute on function public.obra_guardar_rol(uuid, text, text, uuid, text, 
 grant execute on function public.obra_guardar_asignacion(uuid, text, text, text, text, text, text, uuid, boolean, date, date, boolean, integer) to service_role;
 grant execute on function public.obra_guardar_usuario(uuid, text, text, uuid, boolean, integer) to service_role;
 grant execute on function public.obra_nivel_efectivo(uuid, text, text) to service_role;
-grant execute on function public.obra_guardar_config(uuid, text, text, text, text, text, numeric, boolean, integer) to service_role;
+grant execute on function public.obra_guardar_config(uuid, text, text, text, text, text, numeric, boolean, text[], integer) to service_role;
 grant execute on function public.obra_guardar_nivel(uuid, text, text, text, uuid, text, text, integer, text, text, text, boolean, integer) to service_role;
 grant execute on function public.obra_guardar_nodo(uuid, text, text, text, uuid, text, text, uuid, text, text, date, date, text, text, integer) to service_role;
 
@@ -1608,4 +1620,455 @@ grant execute on function public.obra_guardar_flujo(uuid, text, text, text, text
 
 insert into public.obra_migraciones (bloque, descripcion)
 values (2, 'Flujos de aprobación por proyecto y tipo de documento; roles de interventoría y almacenista; módulos de actas y almacén')
+on conflict (bloque) do nothing;
+
+-- ================================================================ bloque 3: ubicaciones y mediciones de obra
+--
+-- Una medición es de UNA partida del presupuesto, en UNA ubicación (un valor de cada
+-- nivel de la estructura de obra) y la hizo un contrato aprobado de Compras o la obra
+-- con su personal. Desde el modelo: elementos asociados a esa partida en Presupuesto,
+-- cada uno con el % medido; por elemento y partida, lo medido (sin anular) no pasa del
+-- 100 % (revisado en la función con bloqueo y otra vez en un trigger diferido). A mano:
+-- una memoria de cantidades (veces × largo × ancho × alto, sin contar lo vacío).
+-- Nada de esto escribe en presupuesto_* ni compras_*: la partida y el contrato llegan
+-- del servidor, que los leyó, y aquí se guardan como copia.
+
+-- Los permisos vigentes de una persona incluyen este ("cantidades.crear").
+create or replace function public.obra_tiene_permiso(p_empresa_id uuid, p_project_id text, p_user_id text, p_permiso text)
+returns boolean
+language sql
+stable
+set search_path = public
+as $$
+  select p_permiso = any (public.obra_permisos_de(p_empresa_id, p_project_id, p_user_id))
+$$;
+
+-- Consecutivos por proyecto y tipo de documento (MED-0001…).
+create table if not exists public.obra_consecutivos (
+  empresa_id uuid    not null,
+  project_id text    not null,
+  tipo       text    not null check (tipo ~ '^[a-z_]{2,30}$'),
+  ultimo     integer not null default 0 check (ultimo >= 0),
+  primary key (empresa_id, project_id, tipo),
+  foreign key (empresa_id, project_id) references public.obra_empresa_proyectos (empresa_id, project_id)
+);
+
+create or replace function public.obra_siguiente_numero(p_empresa_id uuid, p_project_id text, p_tipo text)
+returns integer
+language sql
+set search_path = public
+as $$
+  insert into public.obra_consecutivos as c (empresa_id, project_id, tipo, ultimo)
+  values (p_empresa_id, p_project_id, p_tipo, 1)
+  on conflict (empresa_id, project_id, tipo) do update set ultimo = c.ultimo + 1
+  returning ultimo
+$$;
+
+create table if not exists public.obra_mediciones (
+  id                  uuid          primary key,
+  empresa_id          uuid          not null,
+  project_id          text          not null,
+  numero              integer       not null check (numero > 0),
+  partida_id          text          not null check (char_length(partida_id) between 1 and 100),
+  partida_numero      text          not null default '' check (char_length(partida_numero) <= 40),
+  partida_descripcion text          not null default '' check (char_length(partida_descripcion) <= 300),
+  partida_unidad      text          not null default '' check (char_length(partida_unidad) <= 20),
+  contrato_id         uuid,
+  contrato_numero     integer,
+  proveedor           text          not null default '' check (char_length(proveedor) <= 300),
+  ubicacion           jsonb         not null check (jsonb_typeof(ubicacion) = 'object' and ubicacion <> '{}'::jsonb),
+  ubicacion_texto     text          not null default '' check (char_length(ubicacion_texto) <= 500),
+  fecha               date          not null,
+  origen              text          not null check (origen in ('modelo', 'manual')),
+  cantidad            numeric(18,4) not null default 0,
+  estado              text          not null default 'registrada' check (estado in ('registrada', 'en_acta', 'aprobada', 'anulada')),
+  observaciones       text          not null default '' check (char_length(observaciones) <= 2000),
+  motivo              text          not null default '' check (char_length(motivo) <= 2000),
+  acta_id             uuid,
+  elaborado_por_id    text          not null,
+  elaborado_por       text          not null default '',
+  version             integer       not null default 1,
+  creada              timestamptz   not null default now(),
+  actualizado         timestamptz,
+  actualizado_por     text,
+  unique (empresa_id, project_id, id),
+  unique (empresa_id, project_id, id, partida_id),
+  unique (empresa_id, project_id, numero),
+  foreign key (empresa_id, project_id) references public.obra_empresa_proyectos (empresa_id, project_id),
+  check ((contrato_id is null) = (contrato_numero is null)),
+  check (estado <> 'anulada' or btrim(motivo) <> '')
+);
+create index if not exists obra_mediciones_partida on public.obra_mediciones (empresa_id, project_id, partida_id, fecha);
+
+-- Los elementos del modelo de una medición: el % medido de cada uno y lo que da.
+-- partida_id repite la de la medición (clave compuesta) para revisar el 100 % por partida.
+create table if not exists public.obra_medicion_elementos (
+  empresa_id      uuid          not null,
+  project_id      text          not null,
+  medicion_id     uuid          not null,
+  partida_id      text          not null,
+  model_id        text          not null check (char_length(model_id) between 1 and 100),
+  version_id      text          check (char_length(version_id) <= 100),
+  ifc_guid        text          not null check (ifc_guid ~ '^[0-3][0-9A-Za-z_$]{21}$'),
+  nombre          text          not null default '' check (char_length(nombre) <= 300),
+  porcentaje      numeric(7,4)  not null check (porcentaje > 0 and porcentaje <= 100),
+  cantidad_modelo numeric(18,4) not null,
+  cantidad        numeric(18,4) not null,
+  primary key (medicion_id, ifc_guid),
+  foreign key (empresa_id, project_id, medicion_id, partida_id)
+    references public.obra_mediciones (empresa_id, project_id, id, partida_id) on update cascade
+);
+create index if not exists obra_medicion_elementos_partida on public.obra_medicion_elementos (empresa_id, project_id, partida_id, ifc_guid);
+
+-- La memoria de cantidades de una medición a mano.
+create table if not exists public.obra_medicion_lineas (
+  empresa_id  uuid          not null,
+  project_id  text          not null,
+  medicion_id uuid          not null,
+  orden       integer       not null check (orden between 1 and 200),
+  descripcion text          not null default '' check (char_length(descripcion) <= 200),
+  veces       numeric(18,4) not null,
+  largo       numeric(18,4),
+  ancho       numeric(18,4),
+  alto        numeric(18,4),
+  cantidad    numeric(18,4) not null,
+  primary key (medicion_id, orden),
+  foreign key (empresa_id, project_id, medicion_id) references public.obra_mediciones (empresa_id, project_id, id)
+);
+
+-- Regla del 100 %: por partida y elemento, lo medido en mediciones sin anular no pasa de 100.
+-- Diferido: se revisa al final de la transacción (la función borra y vuelve a escribir los
+-- elementos de la medición), también si alguien escribe directo en la tabla.
+create or replace function public.obra_medicion_elementos_100()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if (select coalesce(sum(e.porcentaje), 0)
+        from public.obra_medicion_elementos e
+        join public.obra_mediciones m on m.id = e.medicion_id
+       where e.empresa_id = new.empresa_id and e.project_id = new.project_id and e.partida_id = new.partida_id
+         and e.ifc_guid = new.ifc_guid and m.estado <> 'anulada') > 100 then
+    raise exception 'obra:supera-100';
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists obra_medicion_elementos_100 on public.obra_medicion_elementos;
+create constraint trigger obra_medicion_elementos_100
+  after insert or update on public.obra_medicion_elementos
+  deferrable initially deferred
+  for each row execute function public.obra_medicion_elementos_100();
+
+-- Una medición anulada no vuelve; la cantidad de la medición es la suma de lo suyo.
+create or replace function public.obra_mediciones_revisar()
+returns trigger
+language plpgsql
+set search_path = public
+as $$
+declare
+  v public.obra_mediciones%rowtype;
+begin
+  if tg_op = 'UPDATE' and old.estado = 'anulada' and new.estado <> 'anulada' then
+    raise exception 'obra:estado-no-permite';
+  end if;
+  -- Deferred: NEW is the row as it was at this event; the check is on the row as it ends.
+  select * into v from public.obra_mediciones where id = new.id;
+  if v.estado <> 'anulada' and v.cantidad <> (
+       select coalesce(sum(e.cantidad), 0) from public.obra_medicion_elementos e where e.medicion_id = v.id)
+     + (select coalesce(sum(l.cantidad), 0) from public.obra_medicion_lineas l where l.medicion_id = v.id) then
+    raise exception 'obra:cantidad-no-valida';
+  end if;
+  return null;
+end;
+$$;
+
+drop trigger if exists obra_mediciones_revisar on public.obra_mediciones;
+create constraint trigger obra_mediciones_revisar
+  after insert or update on public.obra_mediciones
+  deferrable initially deferred
+  for each row execute function public.obra_mediciones_revisar();
+
+-- Crea (versión 0) o cambia una medición registrada. p_m trae los datos ya revisados por el
+-- servidor (partida, contrato y textos copiados) con sus elementos o su memoria; las
+-- cantidades se calculan aquí. Devuelve {version, numero}.
+create or replace function public.obra_guardar_medicion(
+  p_empresa_id uuid, p_project_id text, p_actor_id text, p_actor_nombre text, p_id uuid, p_m jsonb, p_version integer)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_antes public.obra_mediciones%rowtype;
+  v_existia boolean;
+  v_version integer;
+  v_numero integer;
+  v_origen text := p_m ->> 'origen';
+  v_ubic jsonb := coalesce(p_m -> 'ubicacion', '{}'::jsonb);
+  v_elementos jsonb := coalesce(p_m -> 'elementos', '[]'::jsonb);
+  v_lineas jsonb := coalesce(p_m -> 'lineas', '[]'::jsonb);
+  v_k text;
+  v_v text;
+  v_nivel public.obra_niveles%rowtype;
+  v_nodo public.obra_nodos%rowtype;
+  v_cantidad numeric;
+begin
+  perform pg_advisory_xact_lock(hashtext('obra-mediciones:' || p_empresa_id::text || ':' || p_project_id));
+  if not exists (select 1 from public.obra_empresa_proyectos where empresa_id = p_empresa_id and project_id = p_project_id and activo) then
+    raise exception 'obra:sin-empresa';
+  end if;
+  select * into v_antes from public.obra_mediciones where id = p_id for update;
+  v_existia := found;
+  if v_existia then
+    if v_antes.empresa_id <> p_empresa_id or v_antes.project_id <> p_project_id then
+      raise exception 'obra:otra-empresa';
+    end if;
+    if not public.obra_tiene_permiso(p_empresa_id, p_project_id, p_actor_id, 'cantidades.editar') then
+      raise exception 'obra:sin-permiso';
+    end if;
+    if v_antes.estado <> 'registrada' then
+      raise exception 'obra:estado-no-permite';
+    end if;
+    if v_antes.version <> p_version then
+      raise exception 'version-conflict';
+    end if;
+  else
+    if not public.obra_tiene_permiso(p_empresa_id, p_project_id, p_actor_id, 'cantidades.crear') then
+      raise exception 'obra:sin-permiso';
+    end if;
+    if p_version <> 0 then
+      raise exception 'version-conflict';
+    end if;
+  end if;
+
+  if v_origen is null or v_origen not in ('modelo', 'manual') or btrim(coalesce(p_m ->> 'partidaId', '')) = ''
+     or jsonb_typeof(v_elementos) <> 'array' or jsonb_typeof(v_lineas) <> 'array' then
+    raise exception 'obra:datos';
+  end if;
+  if (p_m ->> 'fecha')::date > public.obra_hoy() then
+    raise exception 'obra:fecha-futura';
+  end if;
+  if (v_origen = 'modelo' and (jsonb_array_length(v_elementos) = 0 or jsonb_array_length(v_lineas) > 0))
+     or (v_origen = 'manual' and (jsonb_array_length(v_lineas) = 0 or jsonb_array_length(v_elementos) > 0)) then
+    raise exception 'obra:datos';
+  end if;
+
+  -- The location: a value of each level, active, inside the value chosen above it; the required levels.
+  if jsonb_typeof(v_ubic) <> 'object' or v_ubic = '{}'::jsonb then
+    raise exception 'obra:ubicacion-no-valida';
+  end if;
+  for v_k, v_v in select key, value from jsonb_each_text(v_ubic) loop
+    v_nivel := public.obra_nivel_efectivo(p_empresa_id, p_project_id, v_k);
+    if v_nivel.id is null or not v_nivel.activo or v_v !~ '^[0-9a-fA-F-]{36}$' then
+      raise exception 'obra:ubicacion-no-valida';
+    end if;
+    select * into v_nodo from public.obra_nodos where empresa_id = p_empresa_id and project_id = p_project_id and id = v_v::uuid and nivel_clave = v_k;
+    if not found or v_nodo.estado = 'inactivo'
+       or (v_nodo.padre_id is not null and v_nivel.padre_clave is not null and v_ubic ? v_nivel.padre_clave
+           and v_ubic ->> v_nivel.padre_clave <> v_nodo.padre_id::text) then
+      raise exception 'obra:ubicacion-no-valida';
+    end if;
+  end loop;
+  if exists (select 1 from public.obra_config c, unnest(c.ubicacion_obligatoria) k
+              where c.empresa_id = p_empresa_id and c.project_id = p_project_id and not (v_ubic ? k)) then
+    raise exception 'obra:ubicacion-no-valida';
+  end if;
+
+  if v_existia then
+    update public.obra_mediciones
+       set partida_id = p_m ->> 'partidaId', partida_numero = coalesce(p_m ->> 'partidaNumero', ''),
+           partida_descripcion = coalesce(p_m ->> 'partidaDescripcion', ''), partida_unidad = coalesce(p_m ->> 'partidaUnidad', ''),
+           contrato_id = nullif(p_m ->> 'contratoId', '')::uuid, contrato_numero = (p_m ->> 'contratoNumero')::integer,
+           proveedor = coalesce(p_m ->> 'proveedor', ''), ubicacion = v_ubic, ubicacion_texto = coalesce(p_m ->> 'ubicacionTexto', ''),
+           fecha = (p_m ->> 'fecha')::date, origen = v_origen, observaciones = coalesce(p_m ->> 'observaciones', ''),
+           version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre
+     where id = p_id
+    returning version, numero into v_version, v_numero;
+    delete from public.obra_medicion_elementos where medicion_id = p_id;
+    delete from public.obra_medicion_lineas where medicion_id = p_id;
+  else
+    v_numero := public.obra_siguiente_numero(p_empresa_id, p_project_id, 'medicion');
+    insert into public.obra_mediciones (id, empresa_id, project_id, numero, partida_id, partida_numero, partida_descripcion, partida_unidad,
+                                        contrato_id, contrato_numero, proveedor, ubicacion, ubicacion_texto, fecha, origen, observaciones,
+                                        elaborado_por_id, elaborado_por)
+    values (p_id, p_empresa_id, p_project_id, v_numero, p_m ->> 'partidaId', coalesce(p_m ->> 'partidaNumero', ''),
+            coalesce(p_m ->> 'partidaDescripcion', ''), coalesce(p_m ->> 'partidaUnidad', ''),
+            nullif(p_m ->> 'contratoId', '')::uuid, (p_m ->> 'contratoNumero')::integer, coalesce(p_m ->> 'proveedor', ''),
+            v_ubic, coalesce(p_m ->> 'ubicacionTexto', ''), (p_m ->> 'fecha')::date, v_origen, coalesce(p_m ->> 'observaciones', ''),
+            p_actor_id, p_actor_nombre);
+    v_version := 1;
+  end if;
+
+  if v_origen = 'modelo' then
+    insert into public.obra_medicion_elementos (empresa_id, project_id, medicion_id, partida_id, model_id, version_id, ifc_guid, nombre,
+                                                porcentaje, cantidad_modelo, cantidad)
+    select p_empresa_id, p_project_id, p_id, p_m ->> 'partidaId', e ->> 'modelId', nullif(e ->> 'versionId', ''), e ->> 'ifcGuid',
+           left(coalesce(e ->> 'nombre', ''), 300), round((e ->> 'porcentaje')::numeric, 4), round((e ->> 'cantidadModelo')::numeric, 4),
+           round(round((e ->> 'porcentaje')::numeric, 4) / 100 * round((e ->> 'cantidadModelo')::numeric, 4), 4)
+      from jsonb_array_elements(v_elementos) e;
+    -- The same rule the deferred trigger checks, here to refuse with a clear reason before anything else.
+    if exists (
+      select 1
+        from public.obra_medicion_elementos e
+        join public.obra_mediciones m on m.id = e.medicion_id
+       where e.empresa_id = p_empresa_id and e.project_id = p_project_id and e.partida_id = p_m ->> 'partidaId' and m.estado <> 'anulada'
+         and e.ifc_guid in (select x ->> 'ifcGuid' from jsonb_array_elements(v_elementos) x)
+       group by e.ifc_guid having sum(e.porcentaje) > 100) then
+      raise exception 'obra:supera-100';
+    end if;
+  else
+    insert into public.obra_medicion_lineas (empresa_id, project_id, medicion_id, orden, descripcion, veces, largo, ancho, alto, cantidad)
+    select p_empresa_id, p_project_id, p_id, i, left(coalesce(l ->> 'descripcion', ''), 200), round((l ->> 'veces')::numeric, 4),
+           round((l ->> 'largo')::numeric, 4), round((l ->> 'ancho')::numeric, 4), round((l ->> 'alto')::numeric, 4),
+           round(round((l ->> 'veces')::numeric, 4) * coalesce(round((l ->> 'largo')::numeric, 4), 1)
+                 * coalesce(round((l ->> 'ancho')::numeric, 4), 1) * coalesce(round((l ->> 'alto')::numeric, 4), 1), 4)
+      from jsonb_array_elements(v_lineas) with ordinality t(l, i);
+  end if;
+
+  v_cantidad := (select coalesce(sum(cantidad), 0) from public.obra_medicion_elementos where medicion_id = p_id)
+              + (select coalesce(sum(cantidad), 0) from public.obra_medicion_lineas where medicion_id = p_id);
+  if v_cantidad <= 0 then
+    raise exception 'obra:cantidad-no-valida';
+  end if;
+  update public.obra_mediciones set cantidad = v_cantidad where id = p_id;
+
+  perform public.obra_registrar(p_empresa_id, p_project_id, p_actor_id, p_actor_nombre,
+    case when v_existia then 'mediciones.cambiar' else 'mediciones.crear' end, 'cantidades', 'medicion', p_id::text,
+    jsonb_build_object(
+      'numero', v_numero,
+      'partida', btrim(coalesce(p_m ->> 'partidaNumero', '') || ' ' || coalesce(p_m ->> 'partidaDescripcion', '')),
+      'ubicacion', coalesce(p_m ->> 'ubicacionTexto', ''),
+      'cantidad', v_cantidad,
+      'unidad', coalesce(p_m ->> 'partidaUnidad', ''),
+      'origen', v_origen,
+      'elementos', jsonb_array_length(v_elementos),
+      'contrato', case when nullif(p_m ->> 'contratoId', '') is null then null
+                       else 'CT-' || lpad(p_m ->> 'contratoNumero', 4, '0') || ' ' || coalesce(p_m ->> 'proveedor', '') end,
+      'antes', case when v_existia then jsonb_build_object('cantidad', v_antes.cantidad, 'ubicacion', v_antes.ubicacion_texto, 'fecha', v_antes.fecha) end));
+  return jsonb_build_object('version', v_version, 'numero', v_numero);
+end;
+$$;
+
+-- Anula una medición registrada (con motivo). No se borra; sus elementos dejan de contar en el 100 %.
+create or replace function public.obra_anular_medicion(
+  p_empresa_id uuid, p_project_id text, p_actor_id text, p_actor_nombre text, p_id uuid, p_motivo text, p_version integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_antes public.obra_mediciones%rowtype;
+  v_version integer;
+begin
+  perform pg_advisory_xact_lock(hashtext('obra-mediciones:' || p_empresa_id::text || ':' || p_project_id));
+  select * into v_antes from public.obra_mediciones where id = p_id for update;
+  if not found then
+    raise exception 'obra:no-existe';
+  end if;
+  if v_antes.empresa_id <> p_empresa_id or v_antes.project_id <> p_project_id then
+    raise exception 'obra:otra-empresa';
+  end if;
+  if not public.obra_tiene_permiso(p_empresa_id, p_project_id, p_actor_id, 'cantidades.anular') then
+    raise exception 'obra:sin-permiso';
+  end if;
+  if v_antes.estado <> 'registrada' then
+    raise exception 'obra:estado-no-permite';
+  end if;
+  if btrim(coalesce(p_motivo, '')) = '' then
+    raise exception 'obra:motivo-requerido';
+  end if;
+  update public.obra_mediciones
+     set estado = 'anulada', motivo = btrim(p_motivo), version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre
+   where id = p_id and version = p_version
+  returning version into v_version;
+  if v_version is null then
+    raise exception 'version-conflict';
+  end if;
+  perform public.obra_registrar(p_empresa_id, p_project_id, p_actor_id, p_actor_nombre, 'mediciones.anular', 'cantidades', 'medicion', p_id::text,
+    jsonb_build_object('numero', v_antes.numero, 'partida', btrim(v_antes.partida_numero || ' ' || v_antes.partida_descripcion),
+                       'ubicacion', v_antes.ubicacion_texto, 'cantidad', v_antes.cantidad, 'unidad', v_antes.partida_unidad),
+    btrim(p_motivo));
+  return v_version;
+end;
+$$;
+
+-- Lo que el panel del visor debe seleccionar al abrirse, pedido desde el menú del proyecto
+-- (una por persona, se toma una sola vez y vence a los 30 minutos).
+create table if not exists public.obra_vistas (
+  empresa_id uuid        not null,
+  project_id text        not null,
+  user_id    text        not null,
+  partida_id text,
+  elementos  jsonb       not null check (jsonb_typeof(elementos) = 'array' and jsonb_array_length(elementos) <= 5000),
+  creado     timestamptz not null default now(),
+  primary key (empresa_id, project_id, user_id),
+  foreign key (empresa_id, project_id) references public.obra_empresa_proyectos (empresa_id, project_id)
+);
+
+create or replace function public.obra_pedir_vista(p_empresa_id uuid, p_project_id text, p_user_id text, p_partida_id text, p_elementos jsonb)
+returns void
+language plpgsql
+security definer
+set search_path = public
+as $$
+begin
+  if not public.obra_tiene_permiso(p_empresa_id, p_project_id, p_user_id, 'cantidades.ver') then
+    raise exception 'obra:sin-permiso';
+  end if;
+  insert into public.obra_vistas (empresa_id, project_id, user_id, partida_id, elementos)
+  values (p_empresa_id, p_project_id, p_user_id, p_partida_id, p_elementos)
+  on conflict (empresa_id, project_id, user_id) do update set partida_id = excluded.partida_id, elementos = excluded.elementos, creado = now();
+end;
+$$;
+
+create or replace function public.obra_tomar_vista(p_empresa_id uuid, p_project_id text, p_user_id text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v public.obra_vistas%rowtype;
+begin
+  delete from public.obra_vistas where empresa_id = p_empresa_id and project_id = p_project_id and user_id = p_user_id returning * into v;
+  if v.user_id is null or v.creado < now() - interval '30 minutes' then
+    return null;
+  end if;
+  return jsonb_build_object('partidaId', v.partida_id, 'elementos', v.elementos);
+end;
+$$;
+
+-- ---------------------------------------------------------------- seguridad del bloque 3
+
+alter table public.obra_consecutivos enable row level security;
+alter table public.obra_mediciones enable row level security;
+alter table public.obra_medicion_elementos enable row level security;
+alter table public.obra_medicion_lineas enable row level security;
+alter table public.obra_vistas enable row level security;
+revoke all on table public.obra_consecutivos, public.obra_mediciones, public.obra_medicion_elementos, public.obra_medicion_lineas, public.obra_vistas
+  from anon, authenticated;
+revoke insert, update, delete, truncate on table public.obra_consecutivos, public.obra_mediciones, public.obra_medicion_elementos,
+  public.obra_medicion_lineas, public.obra_vistas from public, anon, authenticated, service_role;
+grant select on table public.obra_mediciones, public.obra_medicion_elementos, public.obra_medicion_lineas to service_role;
+
+revoke all on function public.obra_tiene_permiso(uuid, text, text, text) from public, anon, authenticated;
+revoke all on function public.obra_siguiente_numero(uuid, text, text) from public, anon, authenticated, service_role;
+revoke all on function public.obra_medicion_elementos_100() from public, anon, authenticated, service_role;
+revoke all on function public.obra_mediciones_revisar() from public, anon, authenticated, service_role;
+revoke all on function public.obra_guardar_medicion(uuid, text, text, text, uuid, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.obra_anular_medicion(uuid, text, text, text, uuid, text, integer) from public, anon, authenticated;
+revoke all on function public.obra_pedir_vista(uuid, text, text, text, jsonb) from public, anon, authenticated;
+revoke all on function public.obra_tomar_vista(uuid, text, text) from public, anon, authenticated;
+grant execute on function public.obra_tiene_permiso(uuid, text, text, text) to service_role;
+grant execute on function public.obra_guardar_medicion(uuid, text, text, text, uuid, jsonb, integer) to service_role;
+grant execute on function public.obra_anular_medicion(uuid, text, text, text, uuid, text, integer) to service_role;
+grant execute on function public.obra_pedir_vista(uuid, text, text, text, jsonb) to service_role;
+grant execute on function public.obra_tomar_vista(uuid, text, text) to service_role;
+
+insert into public.obra_migraciones (bloque, descripcion)
+values (3, 'Ubicaciones y mediciones de obra (modelo y memoria de cantidades), regla del 100 % por elemento y partida, tarea para el visor')
 on conflict (bloque) do nothing;

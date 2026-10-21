@@ -326,6 +326,8 @@ export interface ConfigProyecto {
   toleranciaVerificacionPct: number;
   /** Inspections may end "aceptado con observaciones" (doc §7.4, off by default). */
   permiteAceptadoConObservaciones: boolean;
+  /** Level keys every measurement must give (at least one level is always needed). */
+  ubicacionObligatoria: string[];
   version: number;
 }
 
@@ -334,6 +336,7 @@ export const CONFIG_INICIAL: ConfigProyecto = {
   responsableTecnicoNombre: "",
   toleranciaVerificacionPct: 0,
   permiteAceptadoConObservaciones: false,
+  ubicacionObligatoria: [],
   version: 0,
 };
 
@@ -480,6 +483,173 @@ export interface FlujosResponse {
   /** The flows suggested from the initial roles, to start from. */
   sugeridos: Partial<Record<TipoFlujo, PasoFlujo[]>>;
   puedeEditar: boolean;
+}
+
+// ---------------------------------------------------------------- measurements (mediciones de obra)
+
+/** registrada: editable; en_acta: in an acta in process (phase 4); aprobada: its acta al cliente was approved; anulada. */
+export type EstadoMedicion = "registrada" | "en_acta" | "aprobada" | "anulada";
+/** modelo: elements selected in the 3D viewer; manual: a memoria de cantidades (largo × ancho × alto × veces). */
+export type OrigenMedicion = "modelo" | "manual";
+
+/** Where a measurement is: the value (node id) of each level of the structure, by level key ("torre", "nivel"…). */
+export type Ubicacion = Record<string, string>;
+
+export const MAX_ELEMENTOS_MEDICION = 5000;
+export const MAX_LINEAS_MEDICION = 200;
+
+/** An element of the model in a measurement: which part of it (%) and the quantity that gives. */
+export interface ElementoMedido {
+  /** The model's file id (as Presupuesto keeps it). */
+  modelId: string;
+  /** The version of the model loaded when it was measured. */
+  versionId: string | null;
+  ifcGuid: string;
+  nombre: string;
+  /** 0 < % ≤ 100; per element and partida, all the measurements together never go over 100. */
+  porcentaje: number;
+  /** What the model gives this element in this partida (Presupuesto's metrado rule), copied when measured. */
+  cantidadModelo: number;
+  /** porcentaje × cantidadModelo, 4 decimals. */
+  cantidad: number;
+}
+
+/** A line of the memoria de cantidades: veces × the dimensions written (empty ones don't count). */
+export interface LineaMemoria {
+  descripcion: string;
+  veces: number;
+  largo: number | null;
+  ancho: number | null;
+  alto: number | null;
+  cantidad: number;
+}
+
+export interface MedicionObra {
+  id: string;
+  /** MED-0001, per project. */
+  numero: number;
+  partidaId: string;
+  /** Copy of the partida when it was measured. */
+  partidaNumero: string;
+  partidaDescripcion: string;
+  partidaUnidad: string;
+  /** The approved contract of Compras that did the work; null: own crews (no subcontract acta). */
+  contratoId: string | null;
+  contratoNumero: number | null;
+  proveedor: string;
+  ubicacion: Ubicacion;
+  /** "Torre 1 · Piso 2", as it read when it was saved. */
+  ubicacionTexto: string;
+  /** YYYY-MM-DD, never in the future. */
+  fecha: string;
+  origen: OrigenMedicion;
+  cantidad: number;
+  estado: EstadoMedicion;
+  observaciones: string;
+  /** Why it was cancelled. */
+  motivo: string;
+  elaboradoPorId: string;
+  elaboradoPor: string;
+  elementos: ElementoMedido[];
+  lineas: LineaMemoria[];
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+/** What the screen sends; the server fills in the partida, the contract, the location's text and the model's quantities. */
+export interface CambioMedicion {
+  id?: string;
+  partidaId: string;
+  contratoId: string | null;
+  ubicacion: Ubicacion;
+  fecha: string;
+  origen: OrigenMedicion;
+  observaciones: string;
+  elementos: { modelId: string; versionId: string | null; ifcGuid: string; nombre: string; porcentaje: number }[];
+  lineas: { descripcion: string; veces: number; largo: number | null; ancho: number | null; alto: number | null }[];
+  /** 0: a new one. */
+  version: number;
+}
+
+/** A partida of the budget as Control de Obra measures it. */
+export interface PartidaMedible {
+  id: string;
+  /** "1.1" */
+  numero: string;
+  descripcion: string;
+  unidad: string;
+  subpresupuesto: string;
+  /** The títulos above it: "ESTRUCTURA › PISO 2". */
+  capitulo: string;
+  /** Contracted quantity: the typed metrado or the model's. */
+  metrado: number;
+  /** Subcontract and labor resources of its APU (going into subpartidas): the contracts that can do it. */
+  insumosContrato: string[];
+  /** Deactivated in Presupuesto: no new measurements. */
+  inactiva: boolean;
+}
+
+/** An approved contract of Compras as the measurements see it (no prices). */
+export interface ContratoMedible {
+  id: string;
+  numero: number;
+  revision: number;
+  proveedor: string;
+  nit: string;
+  insumos: { insumoId: string; descripcion: string; unidad: string; partidaItemId: string | null }[];
+}
+
+export interface MedicionesResponse {
+  mediciones: MedicionObra[];
+  partidas: PartidaMedible[];
+  contratos: ContratoMedible[];
+  /** The levels in force in the project and their active values, to choose the location. */
+  niveles: Nivel[];
+  nodos: Nodo[];
+  /** Level keys every measurement must have. */
+  ubicacionObligatoria: string[];
+  /** The budget read (null: the project has no saved budget). */
+  presupuesto: { version: number; actualizado: string | null } | null;
+  puede: { crear: boolean; editar: boolean; anular: boolean };
+  hoy: string;
+}
+
+/** One selected element as a partida can measure it. */
+export interface ElementoMedible {
+  ifcGuid: string;
+  modelId: string;
+  /** Linked to the partida in Presupuesto: only then it is measured from the model. */
+  asociado: boolean;
+  cantidadModelo: number | null;
+  /** % already measured of it in this partida (other measurements not cancelled). */
+  medido: number;
+  /** The location its memoria points to (values of levels that exist in the structure). */
+  ubicacion: Ubicacion;
+}
+
+export interface ElementosMediblesResponse {
+  elementos: ElementoMedible[];
+  /** The same location for all of them, when they agree. */
+  ubicacionComun: Ubicacion | null;
+  /** How many elements in each location (to show when they don't agree). */
+  ubicaciones: { texto: string; elementos: number }[];
+}
+
+/** A value for the structure found in the schedule's EDT (location filters of its work packages). */
+export interface PropuestaUbicacion {
+  nivelClave: string;
+  nivelNombre: string;
+  valor: string;
+  /** Already a value of that level. */
+  existe: boolean;
+}
+
+/** Elements to select in the 3D viewer, asked from the project's menu (one use, 30 minutes). */
+export interface VistaObra {
+  partidaId: string | null;
+  elementos: { modelId: string; ifcGuid: string }[];
 }
 
 // ---------------------------------------------------------------- API responses

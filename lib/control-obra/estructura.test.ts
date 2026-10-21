@@ -105,8 +105,11 @@ describe("valores de los niveles", () => {
     assert.equal(revisarNodo(nuevo({ nivelClave: "torre", valor: "Torre 2", padreId: null }), plantilla, nodos), null);
   });
 
-  it("un valor repetido en el mismo nivel (sin importar mayúsculas) se rechaza", () => {
+  it("un valor repetido en el mismo nivel y dentro del mismo valor superior (sin importar mayúsculas) se rechaza", () => {
     assert.equal(revisarNodo(nuevo({ valor: " piso 5 " }), plantilla, nodos), "valor-repetido");
+    // Piso 5 of another tower is another place.
+    const conTorre2 = [...nodos, { ...nodos[0], id: "t2", valor: "Torre 2" }];
+    assert.equal(revisarNodo(nuevo({ valor: "Piso 5", padreId: "t2" }), plantilla, conTorre2), null);
   });
 
   it("nivel inexistente, fechas al revés y responsable a medias se rechazan", () => {

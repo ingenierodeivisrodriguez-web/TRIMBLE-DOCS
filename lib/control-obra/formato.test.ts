@@ -94,4 +94,19 @@ describe("cómo se lee la bitácora", () => {
     assert.equal(detalleEntrada(e), "Paso Aprueba: queda en aprobación. Motivo: Revisar el Piso 2");
     assert.equal(sobreQue(e), "Actas al cliente: 4f1c2a9e");
   });
+
+  it("una medición dice partida, cantidad, ubicación, origen y contrato", () => {
+    const e = fila({
+      accion: "mediciones.crear",
+      modulo: "cantidades",
+      objetoTipo: "medicion",
+      cambios: { numero: 1, partida: "1.1 Muro en bloque No. 5", ubicacion: "Torre 1 · Piso 2", cantidad: 80, unidad: "M2", origen: "modelo", elementos: 12, contrato: "CT-0001 Pedro Pérez" },
+    });
+    assert.equal(sobreQue(e), "MED-0001 1.1 Muro en bloque No. 5");
+    assert.equal(detalleEntrada(e), "80.0000 M2; Torre 1 · Piso 2; 12 elemento(s) del modelo; CT-0001 Pedro Pérez");
+    const anulada = fila({ ...e, accion: "mediciones.anular", cambios: { ...e.cambios, origen: undefined }, motivo: "Duplicada" });
+    assert.equal(detalleEntrada(anulada), "80.0000 M2; Torre 1 · Piso 2. Motivo: Duplicada");
+    const config = fila({ accion: "config.cambiar", cambios: { ubicacionObligatoria: [[], ["torre", "nivel"]] } });
+    assert.equal(detalleEntrada(config), "Niveles obligatorios de la ubicación: ninguno → torre, nivel");
+  });
 });

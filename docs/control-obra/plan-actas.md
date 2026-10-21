@@ -91,7 +91,7 @@ despliegue. El dueño ejecuta el SQL.
 | Fase | Contenido | Estado |
 |---|---|---|
 | 1 | Roles nuevos (Interventoría, Almacenista), módulos de actas y almacén, flujos de aprobación configurables (`obra_flujos`, `obra_aprobaciones`, `obra_guardar_flujo`, `obra_flujo_accion`), pestaña Flujos de aprobación | Hecha (21-10-2026) |
-| 2 | Ubicaciones (de la estructura de obra; "Traer de la EDT") y mediciones (`obra_mediciones`, `obra_medicion_elementos`, `obra_medicion_lineas`), regla del 100 % por elemento y partida (función con bloqueo + trigger diferido), primera versión del panel del visor | |
+| 2 | Ubicaciones (de la estructura de obra; "Traer de la EDT") y mediciones (`obra_mediciones`, `obra_medicion_elementos`, `obra_medicion_lineas`), regla del 100 % por elemento y partida (función con bloqueo + trigger diferido), primera versión del panel del visor | Hecha (21-10-2026). Ajuste: un valor de la estructura es único dentro de su valor superior (Piso 2 en cada torre) |
 | 3 | CDE compartido, plantillas de chequeo, inspecciones, no conformidades (abierta → en corrección → por verificar → cerrada / reabierta), "requiere inspección para pagar" | |
 | 4 | Actas al cliente y de subcontratistas, copias congeladas, avisos de cambios, mayor cantidad, PDF reproducible al CDE y Excel | |
 | 5 | Enlace con Presupuesto (vistas SQL + cambios de arriba) | |

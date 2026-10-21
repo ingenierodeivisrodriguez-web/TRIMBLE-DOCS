@@ -87,8 +87,9 @@ export function revisarNodo(cambio: CambioNodo, efectivos: Nivel[], nodos: Nodo[
   const antes = cambio.id ? nodos.find((n) => n.id === cambio.id) : undefined;
   if (cambio.id && !antes) return "no-existe";
   if (antes && antes.nivelClave !== cambio.nivelClave) return "datos";
+  // Unique inside the value above it: Piso 2 of Torre 1 and Piso 2 of Torre 2 are different places.
   const v = valor.toLowerCase();
-  if (nodos.some((n) => n.id !== cambio.id && n.nivelClave === cambio.nivelClave && n.valor.trim().toLowerCase() === v)) return "valor-repetido";
+  if (nodos.some((n) => n.id !== cambio.id && n.nivelClave === cambio.nivelClave && n.padreId === cambio.padreId && n.valor.trim().toLowerCase() === v)) return "valor-repetido";
   if (cambio.padreId !== null) {
     const padre = nodos.find((n) => n.id === cambio.padreId);
     if (!padre || nivel.padreClave === null || padre.nivelClave !== nivel.padreClave) return "padre-no-valido";

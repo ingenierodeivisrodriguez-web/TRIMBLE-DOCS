@@ -3,7 +3,7 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import type { ObraApi } from "../../lib/control-obra/client";
 import { claveDe, ESTADOS_NODO, FUENTES_NIVEL, rutaNodo } from "../../lib/control-obra/estructura";
-import { CambioNivel, ConfigProyecto, EstadoNodo, EstructuraResponse, FuenteNivel, Nivel, NIVELES_PRESUPUESTO, Nodo } from "../../lib/control-obra/types";
+import { CambioNivel, ConfigProyecto, EstadoNodo, EstructuraResponse, FuenteNivel, Nivel, NIVELES_PRESUPUESTO, Nodo, PropuestaUbicacion } from "../../lib/control-obra/types";
 import { fecha } from "../../lib/compras/formato";
 import { ApiError } from "../../lib/propiedades/client";
 import type { ProjectContacts } from "../../lib/propiedades/types";
@@ -86,15 +86,18 @@ function ConfigProyectoSeccion({ api, datos, contactos, onDatos, onRecargar, onS
   const [responsable, setResponsable] = useState(c.responsableTecnicoId ?? "");
   const [tolerancia, setTolerancia] = useState(String(c.toleranciaVerificacionPct));
   const [conObs, setConObs] = useState(c.permiteAceptadoConObservaciones);
+  const [obligatorios, setObligatorios] = useState<string[]>(c.ubicacionObligatoria);
   const { busy, error, guardar } = useGuardar(onRecargar, onSinAcceso);
   useEffect(() => {
     setResponsable(c.responsableTecnicoId ?? "");
     setTolerancia(String(c.toleranciaVerificacionPct));
     setConObs(c.permiteAceptadoConObservaciones);
+    setObligatorios(c.ubicacionObligatoria);
   }, [c]);
   const tol = Number(tolerancia.replace(",", "."));
   const tolMal = !Number.isFinite(tol) || tol < 0 || tol > 100;
-  const cambio = (responsable || null) !== c.responsableTecnicoId || tol !== c.toleranciaVerificacionPct || conObs !== c.permiteAceptadoConObservaciones;
+  const mismosObligatorios = obligatorios.length === c.ubicacionObligatoria.length && obligatorios.every((k) => c.ubicacionObligatoria.includes(k));
+  const cambio = (responsable || null) !== c.responsableTecnicoId || tol !== c.toleranciaVerificacionPct || conObs !== c.permiteAceptadoConObservaciones || !mismosObligatorios;
   const nombreDe = (id: string) => contactos?.users.find((u) => u.id === id)?.name ?? (id === c.responsableTecnicoId ? c.responsableTecnicoNombre : id);
   const editable = datos.puedeEditarProyecto;
 
@@ -140,6 +143,23 @@ function ConfigProyectoSeccion({ api, datos, contactos, onDatos, onRecargar, onS
             </span>
           </label>
         </div>
+        <div>
+          <span style={labelStyle}>Ubicación de las mediciones: niveles obligatorios</span>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap" }}>
+            {datos.niveles.map((n) => (
+              <label key={n.clave} style={{ fontSize: 13.5, display: "flex", gap: 5, alignItems: "center" }}>
+                <input
+                  type="checkbox"
+                  checked={obligatorios.includes(n.clave)}
+                  disabled={!editable}
+                  onChange={(e) => setObligatorios((l) => (e.target.checked ? [...l, n.clave] : l.filter((k) => k !== n.clave)))}
+                />
+                {n.nombre}
+              </label>
+            ))}
+          </div>
+          <p style={{ fontSize: 12, color: "var(--tc-gray-500)", margin: "4px 0 0" }}>Toda medición indica al menos un nivel; los marcados son obligatorios (por ejemplo, torre y nivel).</p>
+        </div>
       </div>
       {error && <Notice kind="error" style={{ marginTop: 12 }}>{error}</Notice>}
       {editable && (
@@ -155,6 +175,7 @@ function ConfigProyectoSeccion({ api, datos, contactos, onDatos, onRecargar, onS
                   responsableTecnicoNombre: responsable ? nombreDe(responsable) : "",
                   toleranciaVerificacionPct: tol,
                   permiteAceptadoConObservaciones: conObs,
+                  ubicacionObligatoria: obligatorios.filter((k) => datos.niveles.some((n) => n.clave === k)),
                   version: c.version,
                 };
                 onDatos(await api.guardarConfig(nuevo));
@@ -202,7 +223,8 @@ function Niveles({ api, datos, onDatos, onRecargar, onSinAcceso }: SeccionProps)
       </div>
       <p style={{ ...texto, fontSize: 13 }}>
         Los proyectos heredan la plantilla de la empresa. Un nivel propio del proyecto con la misma clave reemplaza al de la plantilla solo aquí. Del modelo solo se
-        lee: los valores se toman de la propiedad del modelo o del atributo de Propiedades al leer cada versión (fase siguiente); nada se escribe en el modelo.
+        lee: al medir desde el visor, la ubicación se sugiere con la memoria de cantidades de Presupuesto (la columna con la misma propiedad o el mismo nombre
+        que el nivel); nada se escribe en el modelo.
       </p>
       <div style={{ overflow: "auto" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -462,6 +484,7 @@ function NivelDialog({
 function Valores({ api, datos, contactos, onDatos, onRecargar, onSinAcceso }: SeccionProps & { contactos: ProjectContacts | null }) {
   const [nivelClave, setNivelClave] = useState(datos.niveles[0]?.clave ?? "");
   const [editar, setEditar] = useState<{ nodo: Nodo | null } | null>(null);
+  const [traer, setTraer] = useState(false);
   const nivel = datos.niveles.find((n) => n.clave === nivelClave) ?? datos.niveles[0];
   const nodos = useMemo(
     () => datos.nodos.filter((n) => n.nivelClave === nivel?.clave).sort((a, b) => rutaNodo(a, datos.nodos).localeCompare(rutaNodo(b, datos.nodos), "es", { numeric: true })),
@@ -481,16 +504,20 @@ function Valores({ api, datos, contactos, onDatos, onRecargar, onSinAcceso }: Se
         </select>
         <span style={{ flex: 1 }} />
         {datos.puedeEditarProyecto && (
+          <button type="button" onClick={() => setTraer(true)} style={{ ...botonSecundario, padding: "6px 14px", fontSize: 14 }} title="Los valores de los paquetes por ubicación de la EDT de la programación">
+            Traer ubicaciones de la EDT
+          </button>
+        )}
+        {datos.puedeEditarProyecto && (
           <button type="button" onClick={() => setEditar({ nodo: null })} style={{ ...acceptButton, padding: "6px 14px", fontSize: 14 }}>
             ＋ {nivel.nombre}
           </button>
         )}
       </div>
+      {traer && <TraerDeEdt api={api} datos={datos} onDatos={onDatos} onCerrar={() => setTraer(false)} />}
       <p style={{ ...texto, fontSize: 13 }}>
-        {nivel.fuente === "manual"
-          ? "Valores que se asignan a mano a los elementos."
-          : "Los valores que aparezcan en el modelo se agregan solos al leer cada versión (fase siguiente); aquí se les da responsable, fechas y estado."}{" "}
-        Un valor no se borra: se deja inactivo.
+        Los valores son los lugares de la obra que usan las mediciones (Torre 1, Piso 2…). Un valor puede repetirse dentro de otro valor superior (el Piso 2 de
+        cada torre). Se crean aquí o con «Traer ubicaciones de la EDT». Un valor no se borra: se deja inactivo.
       </p>
       <div style={{ overflow: "auto" }}>
         <table style={{ borderCollapse: "collapse", width: "100%" }}>
@@ -718,3 +745,128 @@ function NodoDialog({
 }
 
 const accion: CSSProperties = { ...linkButton, color: "var(--tc-blue-700)", fontSize: 13, padding: "2px 6px" };
+
+// ---------------------------------------------------------------- values from the schedule's EDT
+
+/** Proposes the values of the structure that the EDT's work packages by location use; nothing is created until the person chooses. */
+function TraerDeEdt({ api, datos, onDatos, onCerrar }: { api: ObraApi; datos: EstructuraResponse; onDatos: (d: EstructuraResponse) => void; onCerrar: () => void }) {
+  const [r, setR] = useState<{ propuestas: PropuestaUbicacion[]; columnasSinNivel: string[]; hayEdt: boolean } | null>(null);
+  const [elegidas, setElegidas] = useState<Record<string, { si: boolean; padreId: string }>>({});
+  const [busy, setBusy] = useState("");
+  const [error, setError] = useState("");
+  const clave = (p: PropuestaUbicacion) => `${p.nivelClave}|${p.valor}`;
+  const padresDe = (nivelClave: string) => {
+    const n = datos.niveles.find((x) => x.clave === nivelClave);
+    return n?.padreClave ? datos.nodos.filter((x) => x.nivelClave === n.padreClave && x.estado !== "inactivo") : [];
+  };
+
+  useEffect(() => {
+    api.propuestasUbicacion().then(
+      (x) => {
+        setR(x);
+        setElegidas(Object.fromEntries(x.propuestas.filter((p) => !p.existe).map((p) => [clave(p), { si: true, padreId: padresDe(p.nivelClave).length === 1 ? padresDe(p.nivelClave)[0].id : "" }])));
+      },
+      (err) => setError(message(err))
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [api]);
+
+  const nuevas = (r?.propuestas ?? []).filter((p) => !p.existe && elegidas[clave(p)]?.si);
+
+  async function crear() {
+    setError("");
+    let ultima: EstructuraResponse | null = null;
+    try {
+      for (const [i, p] of nuevas.entries()) {
+        setBusy(`Creando ${i + 1} de ${nuevas.length}…`);
+        ultima = await api.guardarNodo({
+          nivelClave: p.nivelClave, valor: p.valor, padreId: elegidas[clave(p)].padreId || null, responsableId: null, responsableNombre: "",
+          inicio: null, fin: null, estado: "activo", nota: "Traído de la EDT de la programación", version: 0,
+        });
+      }
+      if (ultima) onDatos(ultima);
+      onCerrar();
+    } catch (err) {
+      if (ultima) onDatos(ultima);
+      setError(message(err));
+      setBusy("");
+    }
+  }
+
+  return (
+    <Modal
+      title="Traer ubicaciones de la EDT"
+      width={720}
+      onClose={() => !busy && onCerrar()}
+      footer={
+        <>
+          <button type="button" onClick={onCerrar} disabled={!!busy} style={botonSecundario}>
+            Cancelar
+          </button>
+          <button type="button" onClick={crear} disabled={!!busy || !nuevas.length} style={{ ...acceptButton, opacity: nuevas.length ? 1 : 0.5 }}>
+            {busy || `Crear ${nuevas.length} valor(es)`}
+          </button>
+        </>
+      }
+    >
+      <div style={{ padding: 16, display: "grid", gap: 10, fontSize: 14 }}>
+        <p style={{ margin: 0, color: "var(--tc-gray-700)" }}>
+          Los paquetes de trabajo de la EDT de la programación filtran el modelo por columnas de la memoria de cantidades (Nivel = PISO 2). Cada columna que
+          corresponde a un nivel de la estructura (por la misma propiedad o el mismo nombre) propone sus valores. Nada se crea hasta que lo confirmes.
+        </p>
+        {!r && !error && <p style={{ color: "var(--tc-gray-500)" }}>Leyendo la programación…</p>}
+        {r && !r.hayEdt && <Notice kind="info">La programación de este proyecto todavía no tiene EDT con ubicaciones.</Notice>}
+        {r && r.columnasSinNivel.length > 0 && (
+          <Notice kind="info">Estas columnas de la EDT no corresponden a ningún nivel de la estructura y no se proponen: {r.columnasSinNivel.join(", ")}.</Notice>
+        )}
+        {r && r.propuestas.length > 0 && (
+          <table style={{ borderCollapse: "collapse", width: "100%" }}>
+            <thead>
+              <tr>
+                <th style={th} aria-label="Crear" />
+                <th style={th}>Nivel</th>
+                <th style={th}>Valor</th>
+                <th style={th}>Dentro de</th>
+              </tr>
+            </thead>
+            <tbody>
+              {r.propuestas.map((p) => {
+                const e = elegidas[clave(p)];
+                const padres = padresDe(p.nivelClave);
+                return (
+                  <tr key={clave(p)} style={{ color: p.existe ? "var(--tc-gray-500)" : undefined }}>
+                    <td style={td}>
+                      {p.existe ? (
+                        "Ya existe"
+                      ) : (
+                        <input type="checkbox" checked={!!e?.si} onChange={(ev) => setElegidas((x) => ({ ...x, [clave(p)]: { ...x[clave(p)], si: ev.target.checked } }))} aria-label={`Crear ${p.valor}`} />
+                      )}
+                    </td>
+                    <td style={td}>{p.nivelNombre}</td>
+                    <td style={td}>{p.valor}</td>
+                    <td style={td}>
+                      {!p.existe && padres.length > 0 ? (
+                        <select value={e?.padreId ?? ""} onChange={(ev) => setElegidas((x) => ({ ...x, [clave(p)]: { ...x[clave(p)], padreId: ev.target.value } }))} style={select}>
+                          <option value="">(sin valor superior)</option>
+                          {padres.map((x) => (
+                            <option key={x.id} value={x.id}>
+                              {x.valor}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        "—"
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        )}
+        {r && r.hayEdt && r.propuestas.length === 0 && <p style={{ margin: 0 }}>La EDT no tiene ubicaciones que correspondan a la estructura.</p>}
+        {error && <Notice kind="error">{error}</Notice>}
+      </div>
+    </Modal>
+  );
+}

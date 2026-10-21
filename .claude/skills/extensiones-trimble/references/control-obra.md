@@ -15,7 +15,7 @@ Desde el 21-10-2026 el resto sigue el **plan de actas**
 (`docs/control-obra/plan-actas.md`, léelo entero: decisiones, lecturas de
 Presupuesto y Compras, cambios autorizados en Presupuesto, fases y prueba de
 aceptación), que reemplazó las fases 4–8 del diseño: **1 flujos de
-aprobación y roles (hecha)**, 2 ubicaciones y mediciones, 3 calidad,
+aprobación y roles (hecha)**, **2 ubicaciones y mediciones (hecha)**, 3 calidad,
 4 actas, 5 enlace con Presupuesto, 6 almacén, 7 costo real, 8 panel y visor.
 Una fase por vez, subirla y esperar "sigue con la siguiente fase".
 
@@ -86,11 +86,37 @@ Compras).
   crean en las empresas existentes con un bloque `do` del SQL; a los viejos
   se les ofrecen con `permisosSugeridos` (aviso "Marcarlos" en Roles).
 
+## Mediciones (plan de actas, fase 2)
+
+- `lib/control-obra/mediciones.ts`: cantidades (`cantidadLinea`,
+  `cantidadElemento`), regla del 100 % (`medidoPorElemento`, `superan100`),
+  `partidasMedibles` (número, capítulo, metrado efectivo, insumos SC/MO del
+  APU con subpartidas), `contratosDePartida`, ubicación (`revisarUbicacion`,
+  `textoUbicacion`, `nivelDeColumna`, `ubicacionDeMemoria` que desambigua
+  "Piso 2" por la torre, `ubicacionComun`, `propuestasDesdeEdt`).
+- Lecturas en `lib/lecturas/` (solo GET): `presupuesto.ts` (antes
+  `lib/compras/presupuestoLectura.ts`, que ahora reexporta; agrega
+  `elementosDePartida`, `columnasMemoria`, `programacion`), `compras.ts`
+  (contratos aprobados por `requisicion_linea_id`, sin Compras = []),
+  `metrado.ts` (`metradosDelModelo`, `esDocumento`). `Ctx.lecturas` en el
+  servicio; en pruebas `memoriaLectura()` y `memoriaCompras()`.
+- SQL bloque 3: `obra_guardar_medicion(p_m jsonb)` calcula las cantidades;
+  triggers diferidos de constraint releen la fila (NEW es la del evento, no
+  la final). `obra_guardar_config` cambió de firma (se hace `drop` de la
+  vieja). Índice de valores de la estructura por `(nivel, padre, valor)`.
+- Panel del visor: `components/control-obra/PanelControl.tsx`,
+  `app/control-obra/visor/page.tsx`, `ControlObraShell forceHost`.
+  `UbicacionSelector` lo comparten menú y visor.
+
 ## Probar
 
-- `npx tsx --test lib/control-obra/*.test.ts` (96 pruebas tras la fase 1
-  del plan de actas, con acceso cruzado entre dos empresas en
-  `service.test.ts`).
+- `npx tsx --test lib/control-obra/*.test.ts lib/lecturas/*.test.ts` (121
+  pruebas tras la fase 2 del plan de actas, con acceso cruzado entre dos
+  empresas en `service.test.ts`).
+- Página temporal: el visor se prueba con un visor falso (getModels,
+  getSelection, getObjectProperties, convertToObjectIds) y botones que
+  cambian la selección y avisan `viewer.onSelectionChanged`; una barra para
+  pasar entre menú y visor sin recargar (recargar vuelve a sembrar la memoria).
 - Para probar un cambio del SQL sobre la base como está en producción: correr
   primero `git show HEAD~N:supabase/control-obra.sql` (el viejo), sembrar una
   empresa con sus funciones, y luego el nuevo dos veces encima.

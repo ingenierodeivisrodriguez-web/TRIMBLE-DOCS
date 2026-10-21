@@ -52,7 +52,14 @@ export type MotivoRechazo =
   | "flujo-no-valido"
   | "paso-ajeno"
   | "auto-aprobacion"
-  | "estado-no-permite";
+  | "estado-no-permite"
+  | "fecha-futura"
+  | "ubicacion-no-valida"
+  | "supera-100"
+  | "cantidad-no-valida"
+  | "partida-no-valida"
+  | "contrato-no-valido"
+  | "elemento-no-asociado";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Control de Obra en este proyecto. Pídeselo a un administrador.",
@@ -79,7 +86,7 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "nit-repetido": "Ya hay una empresa con ese NIT.",
   "correo-repetido": "Ese correo ya está registrado en la empresa.",
   "clave-repetida": "Ya hay un nivel con esa clave.",
-  "valor-repetido": "Ese valor ya existe en ese nivel.",
+  "valor-repetido": "Ese valor ya existe en ese nivel (dentro del mismo valor superior).",
   "nivel-no-valido": "El nivel no existe en este proyecto o está desactivado.",
   "padre-no-valido": "El valor superior no es del nivel superior o crearía un ciclo.",
   "version-conflict": "Otra persona cambió esto mientras lo editabas. Se recargó: revisa y vuelve a guardar.",
@@ -91,6 +98,13 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "paso-ajeno": "Este paso del flujo lo atiende otro rol.",
   "auto-aprobacion": "Quien elabora un documento no lo aprueba, y una misma persona no firma dos pasos del mismo documento.",
   "estado-no-permite": "El documento no está en un estado que permita esa acción.",
+  "fecha-futura": "La fecha no puede ser futura.",
+  "ubicacion-no-valida": "La ubicación no es válida: revisa que cada valor exista, esté activo, pertenezca al de arriba y que estén los niveles obligatorios.",
+  "supera-100": "Con esta medición, algún elemento pasaría del 100 % medido en esta partida.",
+  "cantidad-no-valida": "La cantidad medida debe ser mayor que cero.",
+  "partida-no-valida": "La partida no existe en el presupuesto guardado o está desactivada.",
+  "contrato-no-valido": "El contrato no está aprobado en Compras o no incluye un insumo de esta partida.",
+  "elemento-no-asociado": "Algún elemento no está asociado a esta partida en Presupuesto: asócialo allí o mídelo a mano.",
 };
 
 export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
@@ -130,6 +144,13 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "paso-ajeno": 403,
   "auto-aprobacion": 403,
   "estado-no-permite": 409,
+  "fecha-futura": 400,
+  "ubicacion-no-valida": 400,
+  "supera-100": 409,
+  "cantidad-no-valida": 400,
+  "partida-no-valida": 400,
+  "contrato-no-valido": 400,
+  "elemento-no-asociado": 400,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {

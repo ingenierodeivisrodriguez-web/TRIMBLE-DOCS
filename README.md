@@ -2649,8 +2649,9 @@ los elementos de los modelos 3D por IFCGUID + modelo + versión, con
 empresas, licencias, roles y permisos, estructura de obra y bitácora de
 auditoría. Es un producto **comercial y multiempresa**: cada empresa cliente
 tiene su licencia y registra sus proyectos de Trimble Connect. Aparece en el
-menú lateral del proyecto (`/control-obra`, `manifest-control-obra.json`);
-el panel del visor 3D llega con las mediciones.
+menú lateral del proyecto (`/control-obra`, `manifest-control-obra.json`) y
+como panel del visor 3D (`/control-obra/visor`, `manifest-control-obra-visor.json`)
+para medir desde el modelo.
 
 La base se construyó según el diagnóstico y el diseño aprobados
 ([`docs/control-obra/diagnostico.md`](docs/control-obra/diagnostico.md) y
@@ -2659,7 +2660,7 @@ licencias, personas, roles, accesos, estructura de obra y bitácora. Desde el
 21-10-2026 el resto sigue el **plan de actas**
 ([`docs/control-obra/plan-actas.md`](docs/control-obra/plan-actas.md)), que
 reemplazó las fases 4 a 8 del diseño: 1) flujos de aprobación y roles
-(**hecha**), 2) ubicaciones y mediciones, 3) calidad, 4) actas al cliente y a
+(**hecha**), 2) ubicaciones y mediciones (**hecha**), 3) calidad, 4) actas al cliente y a
 subcontratistas, 5) enlace con Presupuesto, 6) almacén, 7) costo real,
 8) panel y estados en el visor.
 
@@ -2806,6 +2807,57 @@ de proyecto (preaprueba) → Interventoría (aprueba).
   aprobación. Los documentos llegan en las fases siguientes (inspecciones y
   cierre de no conformidades en la 3, actas en la 4, vales en la 6).
 
+### Mediciones de obra
+
+Lo ejecutado se mide por partida del presupuesto, con su ubicación y quién lo
+hizo. Pestaña **Mediciones de obra** (permiso Mediciones de obra: ver) y panel
+**Control de Obra** del visor 3D.
+
+- **Desde el modelo** (panel del visor): se busca la partida, se seleccionan
+  los elementos y la tabla muestra lo que da cada uno según Presupuesto (la
+  misma regla de metrado: la cantidad que tiene el elemento en esa partida),
+  cuánto lleva medido y el % que se mide ahora (por defecto lo que le falta;
+  "Mismo % para todos" lo aplica a la vez). Solo se miden elementos
+  **asociados a esa partida en Presupuesto**; los demás se avisan ("asócialos
+  allí o mídelos a mano"), y los que ya están al 100 % se dejan fuera.
+- **A mano** (botón **＋ Medición a mano**): para lo que no está modelado, con
+  memoria de cantidades: cada línea es veces × largo × ancho × alto, sin
+  contar las dimensiones vacías (solo veces = un conteo; veces negativo
+  descuenta un vano).
+- **Ubicación obligatoria**: un valor de cada nivel de la estructura de obra
+  (Torre 1 · Piso 2). Un piso solo se puede elegir dentro de su torre. En
+  Proyecto y estructura de obra se marcan los niveles que toda medición debe
+  indicar. Desde el modelo, la ubicación se sugiere con la memoria de
+  cantidades de Presupuesto (la columna con la misma propiedad del modelo o el
+  mismo nombre que el nivel); si los elementos están en ubicaciones distintas
+  se avisa: una medición tiene una sola ubicación.
+- **Quién la ejecutó**: un contrato aprobado en Compras que tenga un insumo de
+  subcontrato o mano de obra del APU de la partida (también dentro de
+  subpartidas, y no destinado a otra partida), o **obra propia**. Una partida
+  puede tener varios subcontratistas (por pisos, por ejemplo): cada medición
+  dice el suyo.
+- **Regla del 100 %**: un elemento se puede medir por partes (50 % y luego
+  50 %) y pagar en varias partidas (1.1 Muros y 2.1 Lavada de muro), pero por
+  elemento y partida lo medido en mediciones sin anular nunca pasa del 100 %.
+  Se revisa en el servidor, en la función de la base de datos con un bloqueo
+  por proyecto y otra vez con un trigger que revisa al final de la
+  transacción, aunque alguien escriba directo en la tabla.
+- Cada medición se numera (MED-0001), copia la partida (número, descripción,
+  unidad), el contrato y el texto de la ubicación con que se registró, y el
+  modelo y su versión de cada elemento. Las cantidades las calcula la base de
+  datos (4 decimales). La fecha no puede ser futura.
+- **Estados**: registrada (se puede cambiar, con versión), en acta y aprobada
+  (llegan con las actas, fase 4), anulada (con motivo; no se borra y sus
+  elementos vuelven a quedar disponibles). Permisos: crear para registrar,
+  editar para cambiar, anular para anular (el residente registra; el
+  director anula).
+- **Por partida**: contratado (metrado del presupuesto), medido y %; lo que
+  pasa del 100 % se ve en rojo (mayor cantidad).
+- **Ver en 3D** abre el visor y su panel selecciona los elementos de la
+  medición (tarea de un solo uso, 30 minutos).
+- Todo queda en la bitácora; nada se escribe en el modelo, en Presupuesto ni
+  en Compras.
+
 ### Estructura de obra
 
 Pestaña **Proyecto y estructura de obra** (permiso Estructura: ver; la
@@ -2824,8 +2876,15 @@ cambian los administradores):
   asignación a mano. Un nivel no puede ser su propio superior.
 - **Valores** de cada nivel (Torre 1, Piso 5…), dentro de su valor superior,
   con responsable (del equipo del proyecto), inicio, fin, estado y nota. Un
-  valor no se repite en su nivel (sin importar mayúsculas) y no se borra: se
-  deja inactivo.
+  valor no se repite dentro del mismo valor superior (sin importar
+  mayúsculas): el Piso 2 de cada torre es otro lugar. No se borra: se deja
+  inactivo.
+- **Traer ubicaciones de la EDT**: los paquetes de trabajo por ubicación de la
+  EDT de la programación (Nivel = PISO 2) proponen los valores que faltan en
+  el nivel que corresponde a esa columna de la memoria; se marca cuáles crear
+  y dentro de qué valor superior. Nada se crea sin confirmar.
+- **Niveles obligatorios de la ubicación** de las mediciones, en la
+  configuración del proyecto.
 
 ### Bitácora
 
@@ -2861,6 +2920,11 @@ ejecutar sin perder datos; va por bloques numerados y cada bloque queda en
 | `obra_config` | Por proyecto: responsable técnico, tolerancia, aceptado con observaciones |
 | `obra_niveles` / `obra_nodos` | Niveles de la estructura (plantilla o proyecto) y sus valores |
 | `obra_bitacora` | La bitácora encadenada (solo inserción) |
+| `obra_mediciones` | Mediciones: número, partida (copia), contrato o obra propia, ubicación (valor de cada nivel y su texto), fecha, origen, cantidad, estado, motivo, versión |
+| `obra_medicion_elementos` | Elementos del modelo de cada medición: modelo, versión, IFCGUID, % medido, cantidad del modelo y cantidad (la partida repetida con clave compuesta, para la regla del 100 %) |
+| `obra_medicion_lineas` | La memoria de cantidades de las mediciones a mano |
+| `obra_consecutivos` | Último número por proyecto y tipo de documento |
+| `obra_vistas` | Lo que el panel del visor debe seleccionar al abrirse (un uso, 30 minutos) |
 | `obra_flujos` | Por proyecto y tipo de documento: los pasos del flujo de aprobación (nombre y rol), versión |
 | `obra_aprobaciones` | Cada envío, aprobación, devolución o anulación de un documento (solo inserción; devolver y anular con motivo) |
 | `obra_migraciones` | Los bloques del SQL ya ejecutados |
@@ -2868,6 +2932,8 @@ ejecutar sin perder datos; va por bloques numerados y cada bloque queda en
 | `obra_licencia_usable`, `obra_es_admin_empresa`, `obra_es_admin_proyecto` | Las condiciones que revisan las funciones |
 | `obra_guardar_*`, `obra_registrar_licencia`, `obra_vincular_*`, `obra_desvincular_proyecto` | Los cambios, con sus reglas y su fila de bitácora |
 | `obra_bitacora_verificar(cadena)` | Recalcula una cadena y dice dónde se rompe |
+| `obra_guardar_medicion`, `obra_anular_medicion` | Registrar, cambiar o anular una medición, con permisos, ubicación, cantidades y la regla del 100 % |
+| `obra_medicion_elementos_100`, `obra_mediciones_revisar` | Triggers diferidos: el 100 % por elemento y partida, la cantidad igual a la suma, una anulada no vuelve |
 | `obra_guardar_flujo` | Guarda un flujo revisando roles activos con el permiso del módulo y la licencia |
 | `obra_flujo_accion` | El recorrido de un documento por su flujo (lo usan las funciones de cada documento; el servidor no la llama directo) |
 
@@ -2887,6 +2953,11 @@ Todas bajo `/api/control-obra`, con `?projectId=` y el token de Trimble
 | `GET estructura` | Niveles, plantilla, valores y configuración | Estructura: ver o administradores |
 | `PUT estructura/niveles` / `PUT estructura/nodos` / `PUT config` | Cambiar la estructura y la configuración | Administradores (la plantilla, solo el de la empresa) |
 | `GET bitacora` / `POST bitacora/verificar` | Consultar y verificar | Bitácora: ver o administrador de la empresa |
+| `GET mediciones` / `PUT mediciones` | Mediciones con las partidas del presupuesto, los contratos aprobados y la estructura / registrar o cambiar | Mediciones: ver / crear o editar |
+| `POST mediciones/anular` | Anular con motivo | Mediciones: anular |
+| `POST mediciones/elementos` | Los elementos seleccionados según la partida: asociados, cantidad, % medido, ubicación sugerida | Mediciones: crear |
+| `GET vistas` / `POST vistas` | Tomar o pedir los elementos a seleccionar en el visor | Mediciones: ver |
+| `GET estructura/edt` | Valores de la estructura propuestos por la EDT | Administradores |
 | `GET flujos` / `PUT flujos` | Consultar los flujos de aprobación / guardar el de un tipo de documento | Accesos: ver o administradores / administradores |
 | `GET/PUT admin/empresas`, `GET/POST admin/licencias`, `PUT admin/administradores`, `GET admin/bitacora`, `POST admin/bitacora/verificar` | Empresas, licencias y administradores | Administrador técnico |
 
@@ -2896,14 +2967,20 @@ Errores (`code`): `sin-acceso`, `sin-permiso`, `no-admin`,
 `otra-empresa`, `paso-ajeno`, `auto-aprobacion` (403); `ya-vinculado`,
 `cupo-proyectos`, `cupo-usuarios`, `usuario-inactivo`, `nombre-repetido`,
 `nit-repetido`, `clave-repetida`, `valor-repetido`, `version-conflict`,
-`sin-flujo`, `estado-no-permite` (409); `datos`, `no-miembro`,
+`sin-flujo`, `estado-no-permite`, `supera-100` (409); `datos`, `no-miembro`,
 `rol-no-valido`, `nivel-no-valido`, `padre-no-valido`, `motivo-requerido`,
-`flujo-no-valido` (400); `sin-empresa` (404); `trimble-session` (401: recargar Trimble Connect).
+`flujo-no-valido`, `fecha-futura`, `ubicacion-no-valida`,
+`cantidad-no-valida`, `partida-no-valida`, `contrato-no-valido`,
+`elemento-no-asociado` (400); `sin-empresa` (404); `trimble-session` (401: recargar Trimble Connect).
 
 El código está en `lib/control-obra/` (`types`, `roles`, `licencias`,
-`accesos`, `estructura` y `flujos` con las reglas puras, `bitacora` (la cadena),
+`accesos`, `estructura`, `flujos` y `mediciones` con las reglas puras, `bitacora` (la cadena),
 `formato`, `validate`, `store` con Supabase o memoria, `service`, `routes`,
-`client`, con sus pruebas) y `components/control-obra/`.
+`client`, con sus pruebas) y `components/control-obra/` (`PanelControl` es el
+panel del visor). Lo que se lee de Presupuesto y de Compras está en
+`lib/lecturas/` (`presupuesto.ts`, `compras.ts`, `metrado.ts`): solo
+consultas GET, con una prueba que lo verifica; Compras usa el mismo lector
+del presupuesto.
 
 ### Instalar y poner en marcha
 
@@ -2914,7 +2991,9 @@ El código está en `lib/control-obra/` (`types`, `roles`, `licencias`,
    separados por coma) y vuelve a desplegar.
 3. Instala `https://trimble-docs.vercel.app/manifest-control-obra.json` en
    el proyecto (Configuración del proyecto → Apps & Capabilities → Add
-   Custom).
+   Custom) y, para medir desde el modelo,
+   `https://trimble-docs.vercel.app/manifest-control-obra-visor.json` (panel
+   del visor 3D).
 4. Ábrelo: en **Empresas y licencias** crea la empresa, registra la
    activación de su licencia y nombra a su administrador por correo.
 5. El administrador de la empresa abre Control de Obra en un proyecto donde

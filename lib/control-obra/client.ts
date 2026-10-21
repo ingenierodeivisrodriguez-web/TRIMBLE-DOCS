@@ -5,10 +5,12 @@ import type {
   CambioAsignacion,
   CambioEmpresa,
   CambioFlujo,
+  CambioMedicion,
   CambioNivel,
   CambioNodo,
   CambioRol,
   ConfigProyecto,
+  ElementosMediblesResponse,
   EmpresasResponse,
   EntradaBitacora,
   EstadoResponse,
@@ -16,8 +18,11 @@ import type {
   FiltroBitacora,
   FlujosResponse,
   Licencia,
+  MedicionesResponse,
   NuevaLicencia,
+  PropuestaUbicacion,
   VerificacionBitacora,
+  VistaObra,
 } from "./types";
 
 /** What the Control de Obra screens need from the data service. */
@@ -36,6 +41,13 @@ export interface ObraApi {
   guardarConfig(config: ConfigProyecto): Promise<EstructuraResponse>;
   getFlujos(): Promise<FlujosResponse>;
   guardarFlujo(cambio: CambioFlujo): Promise<FlujosResponse>;
+  getMediciones(): Promise<MedicionesResponse>;
+  guardarMedicion(cambio: CambioMedicion): Promise<MedicionesResponse>;
+  anularMedicion(a: { id: string; motivo: string; version: number }): Promise<MedicionesResponse>;
+  elementosMedibles(q: { partidaId: string; ifcGuids: string[]; medicionId?: string | null }): Promise<ElementosMediblesResponse>;
+  pedirVista(v: VistaObra): Promise<{ elementos: number }>;
+  tomarVista(): Promise<VistaObra | null>;
+  propuestasUbicacion(): Promise<{ propuestas: PropuestaUbicacion[]; columnasSinNivel: string[]; hayEdt: boolean }>;
   getBitacora(filtro: FiltroBitacora): Promise<{ entradas: EntradaBitacora[]; todaLaEmpresa: boolean }>;
   verificarBitacora(): Promise<VerificacionBitacora>;
   admin: {
@@ -84,6 +96,13 @@ export function obraApi(projectId: string, auth: TokenSource): ObraApi {
     guardarConfig: (config) => put<EstructuraResponse>("/config", config),
     getFlujos: () => request<FlujosResponse>("/flujos"),
     guardarFlujo: (cambio) => put<FlujosResponse>("/flujos", cambio),
+    getMediciones: () => request<MedicionesResponse>("/mediciones"),
+    guardarMedicion: (cambio) => put<MedicionesResponse>("/mediciones", cambio),
+    anularMedicion: (a) => post<MedicionesResponse>("/mediciones/anular", a),
+    elementosMedibles: (q) => post<ElementosMediblesResponse>("/mediciones/elementos", q),
+    pedirVista: (v) => post<{ elementos: number }>("/vistas", v),
+    tomarVista: () => request<{ vista: VistaObra | null }>("/vistas").then((r) => r.vista),
+    propuestasUbicacion: () => request<{ propuestas: PropuestaUbicacion[]; columnasSinNivel: string[]; hayEdt: boolean }>("/estructura/edt"),
     getBitacora: (f) => request<{ entradas: EntradaBitacora[]; todaLaEmpresa: boolean }>(`/bitacora${consultaBitacora(f)}`),
     verificarBitacora: () => post<VerificacionBitacora>("/bitacora/verificar"),
     admin: {

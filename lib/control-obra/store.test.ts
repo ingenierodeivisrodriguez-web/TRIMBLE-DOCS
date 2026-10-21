@@ -82,7 +82,7 @@ describe("aislamiento en cada consulta a Supabase", () => {
   it("todo cambio de un proyecto lleva la empresa y el proyecto a la función de la base de datos", async () => {
     const cambios: [string, () => Promise<unknown>][] = [
       ["guardarAsignacion", () => store.guardarAsignacion(A, actor, { nombre: "Luis", email: "luis@obra.co" }, { userId: "luis", rolId: E, adminProyecto: false, desde: "2026-01-01", hasta: null, activo: true, version: 0 })],
-      ["guardarConfig", () => store.guardarConfig(A, actor, { responsableTecnicoId: null, responsableTecnicoNombre: "", toleranciaVerificacionPct: 0, permiteAceptadoConObservaciones: false }, 0)],
+      ["guardarConfig", () => store.guardarConfig(A, actor, { responsableTecnicoId: null, responsableTecnicoNombre: "", toleranciaVerificacionPct: 0, permiteAceptadoConObservaciones: false, ubicacionObligatoria: [] }, 0)],
       ["guardarNodo", () => store.guardarNodo(A, actor, { id: E, nivelClave: "torre", valor: "T1", padreId: null, responsableId: null, responsableNombre: "", inicio: null, fin: null, estado: "activo", nota: "", version: 0 })],
       ["desvincularProyecto", () => store.desvincularProyecto(A, actor, "fin")],
       ["guardarFlujo", () => store.guardarFlujo(A, actor, { tipo: "acta_cliente", pasos: [{ nombre: "Elabora", rolId: E }, { nombre: "Aprueba", rolId: E }], version: 0 })],
@@ -100,6 +100,29 @@ describe("aislamiento en cada consulta a Supabase", () => {
     ] as const) {
       await cambiar();
       assert.equal(ultima().body?.p_empresa_id, E, nombre);
+    }
+  });
+
+  it("las mediciones se leen y se cambian siempre con la empresa y el proyecto", async () => {
+    await store.listMediciones(A);
+    assert.equal(llamadas.length, 3);
+    for (const l of llamadas) {
+      assert.match(l.url, new RegExp(`empresa_id=eq\\.${E}`), l.url);
+      assert.match(l.url, new RegExp(`project_id=eq\\.${P}`), l.url);
+    }
+    const medicion = {
+      partidaId: "p11", partidaNumero: "1.1", partidaDescripcion: "Muro", partidaUnidad: "M2", contratoId: null, contratoNumero: null, proveedor: "",
+      ubicacion: { torre: E }, ubicacionTexto: "Torre 1", fecha: "2026-10-15", origen: "manual" as const, observaciones: "", elementos: [], lineas: [{ descripcion: "", veces: 1, largo: 2, ancho: null, alto: null }],
+    };
+    for (const [nombre, cambiar] of [
+      ["guardarMedicion", () => store.guardarMedicion(A, actor, E, medicion, 0)],
+      ["anularMedicion", () => store.anularMedicion(A, actor, E, "x", 1)],
+      ["pedirVista", () => store.pedirVista(A, "ana", { partidaId: null, elementos: [] })],
+      ["tomarVista", () => store.tomarVista(A, "ana")],
+    ] as const) {
+      await cambiar();
+      assert.equal(ultima().body?.p_empresa_id, E, nombre);
+      assert.equal(ultima().body?.p_project_id, P, nombre);
     }
   });
 

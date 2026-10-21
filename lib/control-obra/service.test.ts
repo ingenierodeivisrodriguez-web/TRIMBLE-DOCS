@@ -24,6 +24,8 @@ import {
   verificarBitacora,
   vincular,
 } from "./service";
+import { memoriaCompras } from "../lecturas/compras";
+import { memoriaLectura } from "../lecturas/presupuesto";
 import { memoryStore, ObraStore } from "./store";
 import { GrupoLicencia } from "./types";
 
@@ -50,6 +52,7 @@ function ctx(store: ObraStore, caller: Caller, projectId = P1): Ctx {
     caller,
     esAdminTecnico: caller.id === "tec",
     store,
+    lecturas: { presupuesto: memoriaLectura(), compras: memoriaCompras() },
     hoy: HOY,
     deps: { contactos: async () => EQUIPOS[projectId] ?? equipo(), projectName: async () => (projectId === P1 ? "Torres del Parque" : "Bodega") },
   };

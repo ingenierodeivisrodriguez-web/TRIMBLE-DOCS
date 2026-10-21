@@ -1,9 +1,12 @@
 import { StoreError } from "../propiedades/store";
 import { hoyIso } from "../manuales/licencia";
+import { redondear } from "../presupuesto/calc";
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { asignacionVigente, esMotivo, ESTADO_HTTP, estadoAsignacion, MotivoRechazo, superaCupoUsuarios, usuarioDe } from "./accesos";
 import { cadenaDe, HASH_INICIAL, hashDe, verificarCadena } from "./bitacora";
+import { nivelesEfectivos } from "./estructura";
 import { permisoDePaso } from "./flujos";
+import { cantidadElemento, cantidadLinea, medidoPorElemento, revisarUbicacion, superan100 } from "./mediciones";
 import { licenciaPermiteTrabajar, licenciaVigente, estadoLicencia, modulosHabilitados, permisosContratados } from "./licencias";
 import { ordenar, RolInicial } from "./roles";
 import {
@@ -22,7 +25,9 @@ import {
   Flujo,
   GrupoLicencia,
   Licencia,
+  LineaMemoria,
   MAX_BITACORA,
+  MedicionObra,
   Nivel,
   Nodo,
   NuevaEntrada,
@@ -32,8 +37,10 @@ import {
   Rol,
   TIPOS_FLUJO,
   TipoFlujo,
+  Ubicacion,
   UsuarioEmpresa,
   VerificacionBitacora,
+  VistaObra,
 } from "./types";
 
 /**
@@ -67,6 +74,24 @@ export interface PersonaAsignada {
 export type EmpresaGuardada = Omit<CambioEmpresa, "nit" | "id"> & { id: string; nit: string; dv: number | null };
 
 export type NivelInicial = Omit<CambioNivel, "projectId" | "version">;
+
+/** A measurement as the service saves it: checked, with the partida, contract and location's text copied and the model's quantities. */
+export interface MedicionParaGuardar {
+  partidaId: string;
+  partidaNumero: string;
+  partidaDescripcion: string;
+  partidaUnidad: string;
+  contratoId: string | null;
+  contratoNumero: number | null;
+  proveedor: string;
+  ubicacion: Ubicacion;
+  ubicacionTexto: string;
+  fecha: string;
+  origen: MedicionObra["origen"];
+  observaciones: string;
+  elementos: { modelId: string; versionId: string | null; ifcGuid: string; nombre: string; porcentaje: number; cantidadModelo: number }[];
+  lineas: Omit<LineaMemoria, "cantidad">[];
+}
 
 export interface ObraStore {
   /** The company a project is registered to now (null: none). */
@@ -109,6 +134,15 @@ export interface ObraStore {
   listFlujos(a: Alcance): Promise<Flujo[]>;
   /** Creates (version 0) or changes the flow of a kind of document; returns its new version. */
   guardarFlujo(a: Alcance, actor: Actor, cambio: CambioFlujo): Promise<number>;
+
+  /** The project's measurements, newest first, with their elements and memoria. */
+  listMediciones(a: Alcance): Promise<MedicionObra[]>;
+  /** Creates (version 0) or changes a registered measurement; the quantities are computed by the database. */
+  guardarMedicion(a: Alcance, actor: Actor, id: string, m: MedicionParaGuardar, version: number): Promise<{ version: number; numero: number }>;
+  anularMedicion(a: Alcance, actor: Actor, id: string, motivo: string, version: number): Promise<number>;
+  /** What the viewer panel of this person must select when it opens (one use, 30 minutes). */
+  pedirVista(a: Alcance, userId: string, vista: VistaObra): Promise<void>;
+  tomarVista(a: Alcance, userId: string): Promise<VistaObra | null>;
 
   /** Adds a row to the bitácora (its position and hashes are set by the database). */
   registrar(e: NuevaEntrada): Promise<void>;
@@ -234,6 +268,51 @@ interface NodoRow {
   nota: string;
   version: number;
 }
+interface MedicionRow {
+  id: string;
+  numero: number;
+  partida_id: string;
+  partida_numero: string;
+  partida_descripcion: string;
+  partida_unidad: string;
+  contrato_id: string | null;
+  contrato_numero: number | null;
+  proveedor: string;
+  ubicacion: Ubicacion;
+  ubicacion_texto: string;
+  fecha: string;
+  origen: MedicionObra["origen"];
+  cantidad: number | string;
+  estado: MedicionObra["estado"];
+  observaciones: string;
+  motivo: string;
+  elaborado_por_id: string;
+  elaborado_por: string;
+  version: number;
+  creada: string;
+  actualizado: string | null;
+  actualizado_por: string | null;
+}
+interface MedicionElementoRow {
+  medicion_id: string;
+  model_id: string;
+  version_id: string | null;
+  ifc_guid: string;
+  nombre: string;
+  porcentaje: number | string;
+  cantidad_modelo: number | string;
+  cantidad: number | string;
+}
+interface MedicionLineaRow {
+  medicion_id: string;
+  orden: number;
+  descripcion: string;
+  veces: number | string;
+  largo: number | string | null;
+  ancho: number | string | null;
+  alto: number | string | null;
+  cantidad: number | string;
+}
 interface FlujoRow {
   tipo: TipoFlujo;
   pasos: { nombre: string; rolId: string }[];
@@ -356,6 +435,48 @@ const SEL_ASIGNACION = "project_id,user_id,nombre,email,rol_id,admin_proyecto,de
 const SEL_NIVEL = "id,project_id,clave,nombre,orden,padre_clave,fuente,clave_fuente,activo,version";
 const SEL_NODO = "id,nivel_clave,valor,padre_id,responsable_id,responsable_nombre,inicio,fin,estado,nota,version";
 const SEL_FLUJO = "tipo,pasos,version,actualizado,actualizado_por";
+const SEL_MEDICION =
+  "id,numero,partida_id,partida_numero,partida_descripcion,partida_unidad,contrato_id,contrato_numero,proveedor,ubicacion,ubicacion_texto,fecha,origen,cantidad,estado,observaciones,motivo,elaborado_por_id,elaborado_por,version,creada,actualizado,actualizado_por";
+const num = (x: number | string | null) => (x === null ? null : Number(x));
+function medicionDeFilas(r: MedicionRow, elementos: MedicionElementoRow[], lineas: MedicionLineaRow[]): MedicionObra {
+  return {
+    id: r.id,
+    numero: r.numero,
+    partidaId: r.partida_id,
+    partidaNumero: r.partida_numero,
+    partidaDescripcion: r.partida_descripcion,
+    partidaUnidad: r.partida_unidad,
+    contratoId: r.contrato_id,
+    contratoNumero: r.contrato_numero,
+    proveedor: r.proveedor,
+    ubicacion: r.ubicacion,
+    ubicacionTexto: r.ubicacion_texto,
+    fecha: r.fecha,
+    origen: r.origen,
+    cantidad: Number(r.cantidad),
+    estado: r.estado,
+    observaciones: r.observaciones,
+    motivo: r.motivo,
+    elaboradoPorId: r.elaborado_por_id,
+    elaboradoPor: r.elaborado_por,
+    elementos: elementos.map((e) => ({
+      modelId: e.model_id,
+      versionId: e.version_id,
+      ifcGuid: e.ifc_guid,
+      nombre: e.nombre,
+      porcentaje: Number(e.porcentaje),
+      cantidadModelo: Number(e.cantidad_modelo),
+      cantidad: Number(e.cantidad),
+    })),
+    lineas: [...lineas]
+      .sort((x, y) => x.orden - y.orden)
+      .map((l) => ({ descripcion: l.descripcion, veces: Number(l.veces), largo: num(l.largo), ancho: num(l.ancho), alto: num(l.alto), cantidad: Number(l.cantidad) })),
+    version: r.version,
+    creada: r.creada,
+    actualizado: r.actualizado,
+    actualizadoPor: r.actualizado_por,
+  };
+}
 const flujoDeFila = (r: FlujoRow): Flujo => ({ tipo: r.tipo, pasos: r.pasos, version: r.version, actualizado: r.actualizado, actualizadoPor: r.actualizado_por });
 const SEL_BITACORA = "n,cadena,creado,empresa_id,project_id,actor_id,actor_nombre,accion,modulo,objeto_tipo,objeto_id,cambios,motivo,resultado,origen,hash_anterior,hash";
 
@@ -433,8 +554,15 @@ export function supabaseStore(): ObraStore | null {
     },
     async getConfig(a) {
       const rows = await json<
-        { responsable_tecnico_id: string | null; responsable_tecnico_nombre: string; tolerancia_verificacion_pct: number | string; permite_aceptado_con_observaciones: boolean; version: number }[]
-      >(`/obra_config?${deAlcance(a)}&select=responsable_tecnico_id,responsable_tecnico_nombre,tolerancia_verificacion_pct,permite_aceptado_con_observaciones,version`);
+        {
+          responsable_tecnico_id: string | null;
+          responsable_tecnico_nombre: string;
+          tolerancia_verificacion_pct: number | string;
+          permite_aceptado_con_observaciones: boolean;
+          ubicacion_obligatoria: string[] | null;
+          version: number;
+        }[]
+      >(`/obra_config?${deAlcance(a)}&select=responsable_tecnico_id,responsable_tecnico_nombre,tolerancia_verificacion_pct,permite_aceptado_con_observaciones,ubicacion_obligatoria,version`);
       const r = rows[0];
       return r
         ? {
@@ -442,6 +570,7 @@ export function supabaseStore(): ObraStore | null {
             responsableTecnicoNombre: r.responsable_tecnico_nombre,
             toleranciaVerificacionPct: Number(r.tolerancia_verificacion_pct),
             permiteAceptadoConObservaciones: r.permite_aceptado_con_observaciones,
+            ubicacionObligatoria: r.ubicacion_obligatoria ?? [],
             version: r.version,
           }
         : { ...CONFIG_INICIAL };
@@ -497,6 +626,7 @@ export function supabaseStore(): ObraStore | null {
         p_responsable_nombre: c.responsableTecnicoNombre,
         p_tolerancia: c.toleranciaVerificacionPct,
         p_permite_obs: c.permiteAceptadoConObservaciones,
+        p_ubicacion_obligatoria: c.ubicacionObligatoria,
         p_version: version,
       }),
     guardarNivel: (empresaId, projectId, actor, c) =>
@@ -547,6 +677,37 @@ export function supabaseStore(): ObraStore | null {
         p_pasos: c.pasos.map((x) => ({ nombre: x.nombre, rolId: x.rolId })),
         p_version: c.version,
       }),
+
+    async listMediciones(a) {
+      const [filas, elementos, lineas] = await Promise.all([
+        all<MedicionRow>(`/obra_mediciones?${deAlcance(a)}&select=${SEL_MEDICION}&order=numero.desc`),
+        all<MedicionElementoRow>(`/obra_medicion_elementos?${deAlcance(a)}&select=medicion_id,model_id,version_id,ifc_guid,nombre,porcentaje,cantidad_modelo,cantidad&order=medicion_id.asc`),
+        all<MedicionLineaRow>(`/obra_medicion_lineas?${deAlcance(a)}&select=medicion_id,orden,descripcion,veces,largo,ancho,alto,cantidad&order=medicion_id.asc,orden.asc`),
+      ]);
+      const deMedicion = <T extends { medicion_id: string }>(l: T[]) => {
+        const m = new Map<string, T[]>();
+        for (const x of l) m.set(x.medicion_id, [...(m.get(x.medicion_id) ?? []), x]);
+        return m;
+      };
+      const els = deMedicion(elementos);
+      const lins = deMedicion(lineas);
+      return filas.map((r) => medicionDeFilas(r, els.get(r.id) ?? [], lins.get(r.id) ?? []));
+    },
+    guardarMedicion: (a, actor, id, m, version) =>
+      rpc<{ version: number; numero: number }>("obra_guardar_medicion", {
+        p_empresa_id: a.empresaId,
+        p_project_id: a.projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_id: id,
+        p_m: m,
+        p_version: version,
+      }),
+    anularMedicion: (a, actor, id, motivo, version) =>
+      rpc<number>("obra_anular_medicion", { p_empresa_id: a.empresaId, p_project_id: a.projectId, p_actor_id: actor.id, p_actor_nombre: actor.nombre, p_id: id, p_motivo: motivo, p_version: version }),
+    pedirVista: (a, userId, v) =>
+      rpcVoid("obra_pedir_vista", { p_empresa_id: a.empresaId, p_project_id: a.projectId, p_user_id: userId, p_partida_id: v.partidaId, p_elementos: v.elementos }),
+    tomarVista: (a, userId) => rpc<VistaObra | null>("obra_tomar_vista", { p_empresa_id: a.empresaId, p_project_id: a.projectId, p_user_id: userId }),
 
     async registrar(e) {
       await call("/obra_bitacora", {
@@ -645,6 +806,9 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
   const niveles = new Map<string, Nivel & { empresaId: string }>();
   const nodos = new Map<string, Nodo & { empresaId: string; projectId: string }>();
   const flujos = new Map<string, Flujo & { empresaId: string; projectId: string }>();
+  const mediciones = new Map<string, MedicionObra & { empresaId: string; projectId: string }>();
+  const consecutivos = new Map<string, number>();
+  const vistas = new Map<string, VistaObra & { creado: number }>();
   const bitacora: EntradaBitacora[] = [];
   /** One insertion at a time per chain (like the advisory lock of the SQL trigger). */
   const colas = new Map<string, Promise<void>>();
@@ -677,6 +841,13 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
   const esAdminP = (a: Alcance, userId: string) =>
     usable(a.empresaId) && vinculado(a) && !!asignacionVigente(userId, asignacionesDeProyecto(a), usuariosDe(a.empresaId), hoy())?.adminProyecto;
   const maxUsuarios = (empresaId: string) => licenciaVigente(licenciasDe(empresaId))?.maxUsuarios ?? 0;
+  /** The operational permissions in force (like obra_permisos_de). */
+  const permisosDe = (a: Alcance, userId: string) => {
+    const e = empresas.get(a.empresaId);
+    if (!e || !vinculado(a)) return [];
+    return permisosEfectivos(userId, { asignaciones: asignacionesDeProyecto(a), usuarios: usuariosDe(a.empresaId), roles: rolesDe(a.empresaId), licencias: licenciasDe(a.empresaId), empresaActiva: e.activa }, hoy());
+  };
+  const deProyecto = <T extends { empresaId: string; projectId: string }>(x: T, a: Alcance) => x.empresaId === a.empresaId && x.projectId === a.projectId;
 
   async function registrar(e: NuevaEntrada) {
     const cadena = cadenaDe(e.empresaId);
@@ -879,6 +1050,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
         responsableTecnico: [antes?.responsableTecnicoNombre ?? null, c.responsableTecnicoNombre],
         toleranciaVerificacionPct: [antes?.toleranciaVerificacionPct ?? null, c.toleranciaVerificacionPct],
         permiteAceptadoConObservaciones: [antes?.permiteAceptadoConObservaciones ?? null, c.permiteAceptadoConObservaciones],
+        ubicacionObligatoria: [antes?.ubicacionObligatoria ?? null, c.ubicacionObligatoria],
       });
       return version + 1;
     },
@@ -935,7 +1107,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
       if (antes && (antes.empresaId !== a.empresaId || antes.projectId !== a.projectId)) throw rechazo("otra-empresa");
       if (antes && antes.nivelClave !== c.nivelClave) throw rechazo("datos");
       const v = c.valor.trim().toLowerCase();
-      if ([...nodos.values()].some((n) => n.id !== c.id && n.empresaId === a.empresaId && n.projectId === a.projectId && n.nivelClave === c.nivelClave && n.valor.trim().toLowerCase() === v)) {
+      if ([...nodos.values()].some((n) => n.id !== c.id && n.empresaId === a.empresaId && n.projectId === a.projectId && n.nivelClave === c.nivelClave && n.padreId === c.padreId && n.valor.trim().toLowerCase() === v)) {
         throw rechazo("valor-repetido");
       }
       if ((antes?.version ?? 0) !== c.version) throw rechazo("version-conflict");
@@ -980,6 +1152,120 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
       const nombres = (l: { nombre: string; rolId: string }[]) => l.map((x) => ({ nombre: x.nombre, rol: roles.get(x.rolId)?.nombre ?? "" }));
       await ok(a.empresaId, a.projectId, actor, "flujos.cambiar", tipo.modulo, "flujo", c.tipo, { tipo: c.tipo, antes: antes ? nombres(antes.pasos) : null, despues: nombres(pasos) });
       return version;
+    },
+
+    async listMediciones(a) {
+      return [...mediciones.values()]
+        .filter((m) => deProyecto(m, a))
+        .sort((x, y) => y.numero - x.numero)
+        .map((m) => sin(m, "empresaId", "projectId"));
+    },
+    async guardarMedicion(a, actor, id, m, version) {
+      if (!vinculado(a)) throw rechazo("sin-empresa");
+      const antes = mediciones.get(id);
+      if (antes && !deProyecto(antes, a)) throw rechazo("otra-empresa");
+      if (!permisosDe(a, actor.id).includes(antes ? "cantidades.editar" : "cantidades.crear")) throw rechazo("sin-permiso");
+      if (antes && antes.estado !== "registrada") throw rechazo("estado-no-permite");
+      if ((antes?.version ?? 0) !== version) throw rechazo("version-conflict");
+      if (m.fecha > hoy()) throw rechazo("fecha-futura");
+      if ((m.origen === "modelo" && (!m.elementos.length || m.lineas.length)) || (m.origen === "manual" && (!m.lineas.length || m.elementos.length))) throw rechazo("datos");
+      const efectivos = nivelesEfectivos(
+        [...niveles.values()].filter((n) => n.empresaId === a.empresaId && n.projectId === null),
+        [...niveles.values()].filter((n) => n.empresaId === a.empresaId && n.projectId === a.projectId)
+      );
+      const config = configs.get(`${a.empresaId}|${a.projectId}`) ?? CONFIG_INICIAL;
+      const delProyecto = [...nodos.values()].filter((n) => deProyecto(n, a));
+      if (revisarUbicacion(m.ubicacion, efectivos, delProyecto, config.ubicacionObligatoria)) throw rechazo("ubicacion-no-valida");
+      const elementos = m.elementos.map((e) => {
+        const porcentaje = redondear(e.porcentaje, 4);
+        const cantidadModelo = redondear(e.cantidadModelo, 4);
+        return { modelId: e.modelId, versionId: e.versionId, ifcGuid: e.ifcGuid, nombre: e.nombre.slice(0, 300), porcentaje, cantidadModelo, cantidad: cantidadElemento(porcentaje, cantidadModelo) };
+      });
+      const otras = [...mediciones.values()].filter((x) => deProyecto(x, a));
+      if (superan100(medidoPorElemento(otras, m.partidaId, id), elementos).length) throw rechazo("supera-100");
+      const lineas = m.lineas.map((l) => {
+        const r = { descripcion: l.descripcion.slice(0, 200), veces: redondear(l.veces, 4), largo: l.largo === null ? null : redondear(l.largo, 4), ancho: l.ancho === null ? null : redondear(l.ancho, 4), alto: l.alto === null ? null : redondear(l.alto, 4) };
+        return { ...r, cantidad: cantidadLinea(r) };
+      });
+      const cantidad = redondear([...elementos.map((e) => e.cantidad), ...lineas.map((l) => l.cantidad)].reduce((x, y) => x + y, 0), 4);
+      if (!(cantidad > 0)) throw rechazo("cantidad-no-valida");
+      let numero = antes?.numero ?? 0;
+      if (!antes) {
+        const k = `${a.empresaId}|${a.projectId}|medicion`;
+        numero = (consecutivos.get(k) ?? 0) + 1;
+        consecutivos.set(k, numero);
+      }
+      const nueva: MedicionObra & { empresaId: string; projectId: string } = {
+        empresaId: a.empresaId,
+        projectId: a.projectId,
+        id,
+        numero,
+        partidaId: m.partidaId,
+        partidaNumero: m.partidaNumero,
+        partidaDescripcion: m.partidaDescripcion,
+        partidaUnidad: m.partidaUnidad,
+        contratoId: m.contratoId,
+        contratoNumero: m.contratoNumero,
+        proveedor: m.proveedor,
+        ubicacion: copia(m.ubicacion),
+        ubicacionTexto: m.ubicacionTexto,
+        fecha: m.fecha,
+        origen: m.origen,
+        cantidad,
+        estado: "registrada",
+        observaciones: m.observaciones,
+        motivo: "",
+        elaboradoPorId: antes?.elaboradoPorId ?? actor.id,
+        elaboradoPor: antes?.elaboradoPor ?? actor.nombre,
+        elementos,
+        lineas,
+        version: version + 1,
+        creada: antes?.creada ?? ahora(),
+        actualizado: antes ? ahora() : null,
+        actualizadoPor: antes ? actor.nombre : null,
+      };
+      mediciones.set(id, nueva);
+      await ok(a.empresaId, a.projectId, actor, antes ? "mediciones.cambiar" : "mediciones.crear", "cantidades", "medicion", id, {
+        numero,
+        partida: `${m.partidaNumero} ${m.partidaDescripcion}`.trim(),
+        ubicacion: m.ubicacionTexto,
+        cantidad,
+        unidad: m.partidaUnidad,
+        origen: m.origen,
+        elementos: elementos.length,
+        contrato: m.contratoId ? `CT-${String(m.contratoNumero).padStart(4, "0")} ${m.proveedor}` : null,
+        antes: antes ? { cantidad: antes.cantidad, ubicacion: antes.ubicacionTexto, fecha: antes.fecha } : null,
+      });
+      return { version: version + 1, numero };
+    },
+    async anularMedicion(a, actor, id, motivo, version) {
+      const m = mediciones.get(id);
+      if (!m) throw rechazo("no-existe");
+      if (!deProyecto(m, a)) throw rechazo("otra-empresa");
+      if (!permisosDe(a, actor.id).includes("cantidades.anular")) throw rechazo("sin-permiso");
+      if (m.estado !== "registrada") throw rechazo("estado-no-permite");
+      if (!motivo.trim()) throw rechazo("motivo-requerido");
+      if (m.version !== version) throw rechazo("version-conflict");
+      Object.assign(m, { estado: "anulada", motivo: motivo.trim(), version: version + 1, actualizado: ahora(), actualizadoPor: actor.nombre });
+      await ok(a.empresaId, a.projectId, actor, "mediciones.anular", "cantidades", "medicion", id, {
+        numero: m.numero,
+        partida: `${m.partidaNumero} ${m.partidaDescripcion}`.trim(),
+        ubicacion: m.ubicacionTexto,
+        cantidad: m.cantidad,
+        unidad: m.partidaUnidad,
+      }, motivo.trim());
+      return version + 1;
+    },
+    async pedirVista(a, userId, v) {
+      if (!permisosDe(a, userId).includes("cantidades.ver")) throw rechazo("sin-permiso");
+      vistas.set(`${a.empresaId}|${a.projectId}|${userId}`, { ...copia(v), creado: Date.now() });
+    },
+    async tomarVista(a, userId) {
+      const k = `${a.empresaId}|${a.projectId}|${userId}`;
+      const v = vistas.get(k);
+      vistas.delete(k);
+      if (!v || Date.now() - v.creado > 30 * 60_000) return null;
+      return { partidaId: v.partidaId, elementos: v.elementos };
     },
 
     registrar,

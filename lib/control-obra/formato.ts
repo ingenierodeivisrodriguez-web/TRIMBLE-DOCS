@@ -1,4 +1,5 @@
 import { fecha } from "../compras/formato";
+import { fmt } from "../presupuesto/format";
 import { esMotivo, MENSAJES } from "./accesos";
 import { EVENTOS_LICENCIA } from "./licencias";
 import { ACCIONES, EntradaBitacora, EstadoFlujo, GRUPOS_LICENCIA, MODULOS, TIPOS_FLUJO } from "./types";
@@ -48,6 +49,15 @@ const ACCIONES_BITACORA: Record<string, string> = {
   "flujo.aprobar": "Aprobar",
   "flujo.devolver": "Devolver al paso anterior",
   "flujo.anular": "Anular",
+  "mediciones.consultar": "Consultar mediciones",
+  "mediciones.guardar": "Registrar o cambiar una medición",
+  "mediciones.crear": "Registrar medición",
+  "mediciones.cambiar": "Cambiar medición",
+  "mediciones.anular": "Anular medición",
+  "mediciones.elementos": "Revisar elementos para medir",
+  "vistas.pedir": "Pedir ver elementos en el visor",
+  "vistas.tomar": "Abrir elementos en el visor",
+  "estructura.edt": "Consultar ubicaciones de la EDT",
 };
 
 export const ESTADOS_FLUJO: Record<EstadoFlujo, { texto: string; color: string; fondo: string }> = {
@@ -56,6 +66,13 @@ export const ESTADOS_FLUJO: Record<EstadoFlujo, { texto: string; color: string; 
   en_tramite: { texto: "En aprobación", color: "#1d4f91", fondo: "#e3edfb" },
   aprobado: { texto: "Aprobado", color: "#2e6b22", fondo: "#e3f3de" },
   anulado: { texto: "Anulado", color: "#b3261e", fondo: "#fbe4e2" },
+};
+
+export const ESTADOS_MEDICION: Record<"registrada" | "en_acta" | "aprobada" | "anulada", { texto: string; color: string; fondo: string }> = {
+  registrada: { texto: "Registrada", color: "#1d4f91", fondo: "#e3edfb" },
+  en_acta: { texto: "En acta", color: "#7a5a00", fondo: "#fff4d1" },
+  aprobada: { texto: "Aprobada", color: "#2e6b22", fondo: "#e3f3de" },
+  anulada: { texto: "Anulada", color: "#b3261e", fondo: "#fbe4e2" },
 };
 
 const nombreTipo = (tipo: unknown) => TIPOS_FLUJO.find((t) => t.id === tipo)?.nombre ?? String(tipo ?? "");
@@ -98,9 +115,11 @@ const CAMPOS: Record<string, string> = {
   responsableTecnico: "Responsable técnico",
   toleranciaVerificacionPct: "Tolerancia (%)",
   permiteAceptadoConObservaciones: "Aceptado con observaciones",
+  ubicacionObligatoria: "Niveles obligatorios de la ubicación",
 };
 
-const valor = (x: unknown) => (x === null || x === undefined || x === "" ? "—" : typeof x === "boolean" ? (x ? "sí" : "no") : String(x));
+const valor = (x: unknown): string =>
+  x === null || x === undefined || x === "" ? "—" : typeof x === "boolean" ? (x ? "sí" : "no") : Array.isArray(x) ? x.map(valor).join(", ") || "ninguno" : String(x);
 const par = (x: unknown) => (Array.isArray(x) && x.length === 2 ? `${valor(x[0])} → ${valor(x[1])}` : valor(x));
 
 /** What a row is about, in words ("Luis Pérez", "Torre 1", "El proyecto"), not internal ids. */
@@ -126,6 +145,8 @@ export function sobreQue(e: EntradaBitacora): string {
       return texto(d.valor) ?? "Valor de un nivel";
     case "flujo":
       return `Flujo de ${nombreTipo(e.objetoId).toLowerCase()}`;
+    case "medicion":
+      return typeof d.numero === "number" ? `MED-${String(d.numero).padStart(4, "0")}${texto(d.partida) ? ` ${d.partida}` : ""}` : "Medición";
     default:
       if (TIPOS_FLUJO.some((t) => t.id === e.objetoTipo)) return `${nombreTipo(e.objetoTipo)}: ${texto(d.documento) ?? e.objetoId.slice(0, 8)}`;
       return `${e.objetoTipo} ${e.objetoId}`.trim();
@@ -181,6 +202,16 @@ export function detalleEntrada(e: EntradaBitacora): string {
   if (e.accion.startsWith("estructura.nodo.")) {
     const antes = d.antes as { valor?: unknown; estado?: unknown } | null;
     return `${valor(d.nivel)}: ${antes && antes.valor !== d.valor ? `${valor(antes.valor)} → ` : ""}${valor(d.valor)}${d.responsable ? `, responsable ${valor(d.responsable)}` : ""}, ${valor(d.estado)}`;
+  }
+  if (/^mediciones\.(crear|cambiar|anular)$/.test(e.accion)) {
+    const cantidad = typeof d.cantidad === "number" ? `${fmt(d.cantidad, 4)} ${valor(d.unidad)}` : "";
+    const partes = [cantidad, valor(d.ubicacion)];
+    if (d.origen === "modelo") partes.push(`${valor(d.elementos)} elemento(s) del modelo`);
+    if (d.origen === "manual") partes.push("a mano");
+    if (e.accion !== "mediciones.anular") partes.push(typeof d.contrato === "string" ? d.contrato : "obra propia");
+    const antes = d.antes as { cantidad?: unknown } | null | undefined;
+    if (antes && typeof antes.cantidad === "number") partes.push(`antes ${fmt(antes.cantidad, 4)}`);
+    return conMotivo(partes.filter((x) => x && x !== "—").join("; "));
   }
   if (e.accion === "flujos.cambiar") {
     const antes = pasosEnPalabras(d.antes);

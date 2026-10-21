@@ -1,3 +1,9 @@
+import type { LecturaCompras } from "../lecturas/compras";
+import { esDocumento, metradosDelModelo } from "../lecturas/metrado";
+import type { LecturaPresupuesto } from "../lecturas/presupuesto";
+import { redondear } from "../presupuesto/calc";
+import { columnasMemoria } from "../presupuesto/memoria";
+import type { Programacion } from "../presupuesto/types";
 import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
 import type { ProjectContacts } from "../propiedades/types";
@@ -21,6 +27,19 @@ import {
 import { cadenaDe } from "./bitacora";
 import { flujosSugeridos, personasPorRol, revisarPasos, tipoFlujo } from "./flujos";
 import { nivelesEfectivos, revisarNivel, revisarNodo } from "./estructura";
+import {
+  contratosDePartida,
+  contratosMedibles,
+  medidoPorElemento,
+  partidasMedibles,
+  propuestasDesdeEdt,
+  revisarForma,
+  revisarUbicacion,
+  superan100,
+  textoUbicacion,
+  ubicacionComun,
+  ubicacionDeMemoria,
+} from "./mediciones";
 import { estadoLicencia, licenciaPermiteTrabajar, licenciaVigente, modulosHabilitados, permisosContratados, revisarLicencia } from "./licencias";
 import { ROLES_INICIALES } from "./roles";
 import type { Actor, Alcance, ObraStore } from "./store";
@@ -33,34 +52,43 @@ import {
   EntradaBitacora,
   EstadoLicencia,
   EstadoResponse,
+  ElementosMediblesResponse,
   EstructuraResponse,
   FlujosResponse,
   Licencia,
+  MedicionesResponse,
   Modulo,
   NIVELES_INICIALES,
   NuevaEntrada,
+  PartidaMedible,
   Permiso,
+  PropuestaUbicacion,
   ProyectoEmpresa,
   Rol,
   TIPOS_FLUJO,
   UsuarioEmpresa,
   VerificacionBitacora,
+  VistaObra,
 } from "./types";
 import {
   leerAdminEmpresa,
+  leerAnularMedicion,
   leerCambioAsignacion,
   leerCambioEmpresa,
   leerCambioFlujo,
+  leerCambioMedicion,
   leerCambioNivel,
   leerCambioNodo,
   leerCambioRol,
   leerCambioUsuario,
   leerConfig,
+  leerElementosMedibles,
   leerEmpresaOpcional,
   leerFiltroBitacora,
   leerMotivo,
   leerNuevaLicencia,
   leerVincular,
+  leerVista,
 } from "./validate";
 
 /** Everything an operation needs: who calls, in which project, and today (Colombia). */
@@ -71,6 +99,8 @@ export interface Ctx {
   /** Listed in CONTROL_OBRA_ADMINS (Vercel). */
   esAdminTecnico: boolean;
   store: ObraStore;
+  /** Presupuesto and Compras, read only (GET): never written by Control de Obra. */
+  lecturas: { presupuesto: LecturaPresupuesto; compras: LecturaCompras };
   /** YYYY-MM-DD in Colombia. */
   hoy: string;
   deps: {
@@ -498,6 +528,198 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<FlujosRespo
   await guardando(ctx, c, "flujos.guardar", t.modulo, () => ctx.store.guardarFlujo(c.alcance, actor(ctx), cambio), audit);
   return respuestaFlujos(ctx, c);
 }
+
+// ---------------------------------------------------------------- measurements
+
+/** The budget's partidas as Control de Obra measures them (null: no saved budget). */
+async function presupuestoMedible(ctx: Ctx): Promise<{ partidas: PartidaMedible[]; version: number; actualizado: string | null } | null> {
+  const doc = await ctx.lecturas.presupuesto.documento(ctx.projectId);
+  if (!doc || !esDocumento(doc.data)) return null;
+  const [mediciones, resumen] = await Promise.all([ctx.lecturas.presupuesto.mediciones(ctx.projectId), ctx.lecturas.presupuesto.resumenElementos(ctx.projectId)]);
+  return { partidas: partidasMedibles(doc.data, metradosDelModelo(doc.data, mediciones, resumen)), version: doc.version, actualizado: doc.updatedAt };
+}
+
+/** The structure in force: active levels (template plus the project's own) and the project's values. */
+async function estructuraVigente(ctx: Ctx, c: Contexto & { alcance: Alcance }) {
+  const [plantilla, propios, nodos, config] = await Promise.all([
+    ctx.store.listPlantilla(c.alcance.empresaId),
+    ctx.store.listNivelesProyecto(c.alcance),
+    ctx.store.listNodos(c.alcance),
+    ctx.store.getConfig(c.alcance),
+  ]);
+  return { niveles: nivelesEfectivos(plantilla, propios).map(({ heredado: _, ...n }) => n), nodos, config };
+}
+
+async function respuestaMediciones(ctx: Ctx, c: Contexto & { alcance: Alcance }): Promise<MedicionesResponse> {
+  const [mediciones, presupuesto, contratos, e] = await Promise.all([
+    ctx.store.listMediciones(c.alcance),
+    presupuestoMedible(ctx),
+    ctx.lecturas.compras.contratos(ctx.projectId),
+    estructuraVigente(ctx, c),
+  ]);
+  return {
+    mediciones,
+    partidas: presupuesto?.partidas ?? [],
+    contratos: contratosMedibles(contratos),
+    niveles: e.niveles,
+    nodos: e.nodos,
+    ubicacionObligatoria: e.config.ubicacionObligatoria,
+    presupuesto: presupuesto ? { version: presupuesto.version, actualizado: presupuesto.actualizado } : null,
+    puede: { crear: tiene(c.permisos, "cantidades", "crear"), editar: tiene(c.permisos, "cantidades", "editar"), anular: tiene(c.permisos, "cantidades", "anular") },
+    hoy: ctx.hoy,
+  };
+}
+
+/** The project's measurements, with the budget's partidas, the approved contracts and the structure to measure. */
+export async function getMediciones(ctx: Ctx): Promise<MedicionesResponse> {
+  const c = await requerir(ctx, "cantidades", "ver", "mediciones.consultar");
+  return respuestaMediciones(ctx, c);
+}
+
+const lista = (nombres: string[]) => (nombres.length > 5 ? `${nombres.slice(0, 5).join(", ")} y ${nombres.length - 5} más` : nombres.join(", "));
+
+/** Registers (version 0) or changes a measurement: the partida, the contract, the location and the elements are checked against their sources. */
+export async function guardarMedicion(ctx: Ctx, body: unknown): Promise<MedicionesResponse> {
+  const cambio = leerCambioMedicion(body);
+  const c = await requerir(ctx, "cantidades", cambio.id ? "editar" : "crear", "mediciones.guardar");
+  const forma = revisarForma(cambio, ctx.hoy);
+  if (forma) throw new ServiceError(forma, 400, "datos");
+  const [mediciones, presupuesto, e] = await Promise.all([ctx.store.listMediciones(c.alcance), presupuestoMedible(ctx), estructuraVigente(ctx, c)]);
+  if (cambio.id) {
+    const antes = mediciones.find((m) => m.id === cambio.id);
+    if (!antes) throw rechazo("no-existe");
+    if (antes.estado !== "registrada") throw rechazo("estado-no-permite");
+  }
+
+  const partida = presupuesto?.partidas.find((p) => p.id === cambio.partidaId);
+  if (!partida || partida.inactiva) throw rechazo("partida-no-valida");
+  let contrato: { id: string; numero: number; proveedor: string } | null = null;
+  if (cambio.contratoId) {
+    contrato = contratosDePartida(partida, contratosMedibles(await ctx.lecturas.compras.contratos(ctx.projectId))).find((x) => x.id === cambio.contratoId) ?? null;
+    if (!contrato) throw rechazo("contrato-no-valido");
+  }
+  const problema = revisarUbicacion(cambio.ubicacion, e.niveles, e.nodos, e.config.ubicacionObligatoria);
+  if (problema) throw new ServiceError(problema, 400, "ubicacion-no-valida");
+
+  // From the model: only elements linked to this partida in Presupuesto, with the quantity the model gives them there.
+  let elementos: { modelId: string; versionId: string | null; ifcGuid: string; nombre: string; porcentaje: number; cantidadModelo: number }[] = [];
+  if (cambio.origen === "modelo") {
+    const vinculados = new Map((await ctx.lecturas.presupuesto.elementosDePartida(ctx.projectId, partida.id)).map((x) => [x.ifcGuid, x]));
+    const fuera = cambio.elementos.filter((x) => vinculados.get(x.ifcGuid)?.cantidad == null);
+    if (fuera.length) {
+      throw new ServiceError(
+        `${fuera.length} elemento(s) no están asociados a ${partida.numero} ${partida.descripcion} en Presupuesto o no tienen cantidad (${lista(fuera.map((x) => x.nombre || x.ifcGuid))}). Asócialos allí o mídelos a mano.`,
+        400,
+        "elemento-no-asociado"
+      );
+    }
+    elementos = cambio.elementos.map((x) => ({ ...x, cantidadModelo: redondear(vinculados.get(x.ifcGuid)!.cantidad!, 4) }));
+    const pasan = superan100(medidoPorElemento(mediciones, partida.id, cambio.id), elementos);
+    if (pasan.length) {
+      throw new ServiceError(
+        `Pasarían del 100 % medido en esta partida: ${lista(pasan.map((x) => `${x.nombre || x.ifcGuid} (${redondear(x.total, 4)} %)`))}. Mide solo lo que falta.`,
+        409,
+        "supera-100"
+      );
+    }
+  }
+
+  const id = cambio.id ?? globalThis.crypto.randomUUID();
+  await guardando(
+    ctx,
+    c,
+    "mediciones.guardar",
+    "cantidades",
+    () =>
+      ctx.store.guardarMedicion(
+        c.alcance,
+        actor(ctx),
+        id,
+        {
+          partidaId: partida.id,
+          partidaNumero: partida.numero,
+          partidaDescripcion: partida.descripcion,
+          partidaUnidad: partida.unidad,
+          contratoId: contrato?.id ?? null,
+          contratoNumero: contrato?.numero ?? null,
+          proveedor: contrato?.proveedor ?? "",
+          ubicacion: cambio.ubicacion,
+          ubicacionTexto: textoUbicacion(cambio.ubicacion, e.niveles, e.nodos),
+          fecha: cambio.fecha,
+          origen: cambio.origen,
+          observaciones: cambio.observaciones.trim(),
+          elementos,
+          lineas: cambio.lineas,
+        },
+        cambio.version
+      ),
+    { objetoTipo: "medicion", objetoId: id }
+  );
+  return respuestaMediciones(ctx, c);
+}
+
+export async function anularMedicion(ctx: Ctx, body: unknown): Promise<MedicionesResponse> {
+  const { id, motivo, version } = leerAnularMedicion(body);
+  const c = await requerir(ctx, "cantidades", "anular", "mediciones.anular");
+  if (!motivo) throw rechazo("motivo-requerido");
+  await guardando(ctx, c, "mediciones.anular", "cantidades", () => ctx.store.anularMedicion(c.alcance, actor(ctx), id, motivo, version), { objetoTipo: "medicion", objetoId: id });
+  return respuestaMediciones(ctx, c);
+}
+
+/** The selected elements as a partida measures them: linked in Presupuesto, the model's quantity, % already measured and the location their memoria gives. */
+export async function elementosMedibles(ctx: Ctx, body: unknown): Promise<ElementosMediblesResponse> {
+  const { partidaId, ifcGuids, medicionId } = leerElementosMedibles(body);
+  const c = await requerir(ctx, "cantidades", "crear", "mediciones.elementos");
+  const [vinculados, columnas, mediciones, e] = await Promise.all([
+    ctx.lecturas.presupuesto.elementosDePartida(ctx.projectId, partidaId),
+    ctx.lecturas.presupuesto.columnasMemoria(ctx.projectId),
+    ctx.store.listMediciones(c.alcance),
+    estructuraVigente(ctx, c),
+  ]);
+  const porGuid = new Map(vinculados.map((x) => [x.ifcGuid, x]));
+  const medido = medidoPorElemento(mediciones, partidaId, medicionId ?? undefined);
+  const cols = columnasMemoria(columnas);
+  const elementos = ifcGuids.map((g) => {
+    const v = porGuid.get(g);
+    return {
+      ifcGuid: g,
+      modelId: v?.modelId ?? "",
+      asociado: !!v && v.cantidad !== null,
+      cantidadModelo: v?.cantidad === null || v?.cantidad === undefined ? null : redondear(v.cantidad, 4),
+      medido: medido.get(g) ?? 0,
+      ubicacion: v ? ubicacionDeMemoria(v.memoria, cols, e.niveles, e.nodos) : {},
+    };
+  });
+  const comun = ubicacionComun(elementos.filter((x) => x.asociado).map((x) => x.ubicacion), e.niveles, e.nodos);
+  return { elementos, ubicacionComun: comun.comun, ubicaciones: comun.grupos };
+}
+
+/** Asks this person's viewer panel to select some elements when it opens (from the project's menu). */
+export async function pedirVista(ctx: Ctx, body: unknown): Promise<{ elementos: number }> {
+  const v = leerVista(body);
+  const c = await requerir(ctx, "cantidades", "ver", "vistas.pedir");
+  await ctx.store.pedirVista(c.alcance, ctx.caller.id, v);
+  return { elementos: v.elementos.length };
+}
+
+export async function tomarVista(ctx: Ctx): Promise<{ vista: VistaObra | null }> {
+  const c = await requerir(ctx, "cantidades", "ver", "vistas.tomar");
+  return { vista: await ctx.store.tomarVista(c.alcance, ctx.caller.id) };
+}
+
+/** The values the schedule's EDT gives the structure (to create the ones that are missing, after choosing). */
+export async function propuestasUbicacion(ctx: Ctx): Promise<{ propuestas: PropuestaUbicacion[]; columnasSinNivel: string[]; hayEdt: boolean }> {
+  const c = await requerirAdmin(ctx, "estructura.edt", "estructura");
+  const [programacion, columnas, e] = await Promise.all([
+    ctx.lecturas.presupuesto.programacion(ctx.projectId),
+    ctx.lecturas.presupuesto.columnasMemoria(ctx.projectId),
+    estructuraVigente(ctx, c),
+  ]);
+  const data = programacion?.data as Programacion | null | undefined;
+  const r = propuestasDesdeEdt(data ?? null, columnasMemoria(columnas), e.niveles, e.nodos);
+  return { ...r, hayEdt: !!data?.edt?.length };
+}
+
 
 // ---------------------------------------------------------------- bitácora
 

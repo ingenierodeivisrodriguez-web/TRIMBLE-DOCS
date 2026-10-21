@@ -1,5 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, isValidProjectId } from "../access";
+import { lecturaCompras } from "../lecturas/compras";
+import { lecturaPresupuesto } from "../lecturas/presupuesto";
 import { hoyIso } from "../manuales/licencia";
 import { projectContacts, resolveCaller } from "../propiedades/caller";
 import { ServiceError } from "../propiedades/service";
@@ -44,6 +46,7 @@ export async function handle(req: NextRequest, run: (ctx: Ctx) => Promise<NextRe
       caller,
       esAdminTecnico: esAdminTecnico(caller.id),
       store: obraStore(),
+      lecturas: { presupuesto: lecturaPresupuesto(), compras: lecturaCompras() },
       hoy: hoyIso(),
       deps: {
         contactos: () => projectContacts(accessToken, projectId),

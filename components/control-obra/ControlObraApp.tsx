@@ -13,11 +13,23 @@ import Bitacora from "./Bitacora";
 import EmpresasLicencias from "./EmpresasLicencias";
 import Estructura from "./Estructura";
 import Flujos from "./Flujos";
+import Mediciones from "./Mediciones";
 
-type Pestana = "inicio" | "estructura" | "flujos" | "bitacora" | "administracion" | "empresas";
+type Pestana = "inicio" | "mediciones" | "estructura" | "flujos" | "bitacora" | "administracion" | "empresas";
 
 /** "Control de Obra" in the project menu: who you are, the company and its license, and what you may open. */
-export default function ControlObraApp({ api, projectId, projectName }: { api: ObraApi; projectId: string; projectName: string }) {
+export default function ControlObraApp({
+  api,
+  projectId,
+  projectName,
+  abrirVisor,
+}: {
+  api: ObraApi;
+  projectId: string;
+  projectName: string;
+  /** Opens the 3D viewer (only inside Trimble Connect). */
+  abrirVisor?: (params: { modelId?: string; versionId?: string }) => Promise<boolean>;
+}) {
   const [estado, setEstado] = useState<EstadoResponse | null>(null);
   const [error, setError] = useState("");
   const [pestana, setPestana] = useState<Pestana>("inicio");
@@ -49,6 +61,7 @@ export default function ControlObraApp({ api, projectId, projectName }: { api: O
   const conBim = !!estado?.licencia?.grupos.includes("bim");
   const pestanas: { id: Pestana; nombre: string }[] = [
     { id: "inicio", nombre: "Inicio" },
+    ...(puede("cantidades.ver") ? [{ id: "mediciones" as const, nombre: "Mediciones de obra" }] : []),
     ...((puede("estructura.ver") || admin) && conBim ? [{ id: "estructura" as const, nombre: "Proyecto y estructura de obra" }] : []),
     ...(admin || puede("accesos.ver") ? [{ id: "flujos" as const, nombre: "Flujos de aprobación" }] : []),
     ...(puede("bitacora.ver") || estado?.adminEmpresa ? [{ id: "bitacora" as const, nombre: "Bitácora" }] : []),
@@ -101,6 +114,7 @@ export default function ControlObraApp({ api, projectId, projectName }: { api: O
           </nav>
           <main style={{ flex: 1, minHeight: 0, padding: 16 }}>
             {actual === "inicio" && <Inicio api={api} estado={estado} projectName={projectName} onEstado={setEstado} />}
+            {actual === "mediciones" && <Mediciones api={api} abrirVisor={abrirVisor} onSinAcceso={onSinAcceso} />}
             {actual === "estructura" && <Estructura api={api} onSinAcceso={onSinAcceso} />}
             {actual === "flujos" && <Flujos api={api} onSinAcceso={onSinAcceso} />}
             {actual === "bitacora" && <Bitacora api={api} todaLaEmpresa={estado.adminEmpresa} onSinAcceso={onSinAcceso} />}
@@ -304,9 +318,9 @@ function Inicio({ api, estado, projectName, onEstado }: { api: ObraApi; estado: 
       <section style={card}>
         <h2 style={titulo}>Qué viene</h2>
         <p style={{ ...texto, marginBottom: 0 }}>
-          Ya está la base: empresas, licencias, personas, roles, la estructura de obra, la bitácora y los flujos de aprobación. Siguen, por fases: las
-          mediciones de obra (desde el modelo en el visor 3D o a mano, por ubicación y contrato), la calidad (listas de chequeo, inspecciones y no
-          conformidades), las actas al cliente y a los subcontratistas, el avance que lee Presupuesto, el almacén, el costo real y el panel.
+          Ya están la base (empresas, licencias, personas, roles, estructura de obra, bitácora), los flujos de aprobación y las mediciones de obra (desde el
+          modelo en el visor 3D o a mano, por ubicación y contrato). Siguen, por fases: la calidad (listas de chequeo, inspecciones y no conformidades), las
+          actas al cliente y a los subcontratistas, el avance que lee Presupuesto, el almacén, el costo real y el panel.
         </p>
       </section>
     </div>

@@ -7,6 +7,7 @@ import {
   CambioAsignacion,
   CambioEmpresa,
   CambioFlujo,
+  CambioMedicion,
   CambioNivel,
   CambioNodo,
   CambioRol,
@@ -18,10 +19,14 @@ import {
   GRUPOS_LICENCIA,
   GrupoLicencia,
   MAX_BITACORA,
+  MAX_ELEMENTOS_MEDICION,
+  MAX_LINEAS_MEDICION,
   MAX_PASOS,
   MODULOS,
   NuevaLicencia,
   TIPOS_FLUJO,
+  Ubicacion,
+  VistaObra,
 } from "./types";
 
 /** Checks everything that comes from the browser before the rules see it. */
@@ -190,6 +195,13 @@ export function leerCambioUsuario(body: unknown): { id: string; activo: boolean;
   return { id: uuid(o.id, "Persona"), activo: booleano(o.activo, "si la persona queda activa"), version: version(o.version) };
 }
 
+/** Level keys ("torre", "nivel"): no repeated ones. */
+function leerClavesNivel(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length > 20) bad("Los niveles obligatorios deben ser una lista.");
+  const claves = value.map((x) => (typeof x === "string" && /^[a-z][a-z0-9_]{1,39}$/.test(x) ? x : bad("Nivel no válido.")));
+  return [...new Set(claves)];
+}
+
 export function leerConfig(body: unknown): ConfigProyecto {
   const o = objeto(body);
   const responsableTecnicoId = o.responsableTecnicoId === null || o.responsableTecnicoId === undefined ? null : leerUserId(o.responsableTecnicoId);
@@ -200,6 +212,7 @@ export function leerConfig(body: unknown): ConfigProyecto {
     responsableTecnicoNombre: responsableTecnicoId ? texto(o.responsableTecnicoNombre, "Responsable técnico", 200).trim() : "",
     toleranciaVerificacionPct: Math.round(tol * 100) / 100,
     permiteAceptadoConObservaciones: booleano(o.permiteAceptadoConObservaciones, "si se permite aceptar con observaciones"),
+    ubicacionObligatoria: leerClavesNivel(o.ubicacionObligatoria ?? []),
     version: version(o.version),
   };
 }
@@ -301,4 +314,118 @@ export function leerCambioFlujo(body: unknown): CambioFlujo {
     return { nombre: texto(p.nombre, `Paso ${i + 1}`, 40).trim(), rolId: p.rolId };
   });
   return { tipo, pasos, version: version(o.version) };
+}
+
+// ---------------------------------------------------------------- measurements
+
+const IFC_GUID_RE = /^[0-3][0-9A-Za-z_$]{21}$/;
+const CLAVE_NIVEL_RE = /^[a-z][a-z0-9_]{1,39}$/;
+const MAX_MEDIDA = 1_000_000_000;
+
+function numero(value: unknown, what: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || Math.abs(value) > MAX_MEDIDA) bad(`${what}: número no válido.`);
+  return value;
+}
+
+function numeroOpcional(value: unknown, what: string): number | null {
+  return value === null || value === undefined || value === "" ? null : numero(value, what);
+}
+
+function partidaId(value: unknown): string {
+  const id = texto(value, "Partida", 100).trim();
+  if (!id) bad("Elige la partida.");
+  return id;
+}
+
+function ifcGuid(value: unknown): string {
+  if (typeof value !== "string" || !IFC_GUID_RE.test(value)) bad("IFCGUID no válido.");
+  return value;
+}
+
+function modelId(value: unknown): string {
+  const id = texto(value, "Modelo", 100).trim();
+  if (!id) bad("Falta el modelo del elemento.");
+  return id;
+}
+
+/** { torre: <id del valor>, nivel: <id del valor> } */
+export function leerUbicacion(value: unknown): Ubicacion {
+  const o = objeto(value ?? {});
+  const entradas = Object.entries(o);
+  if (entradas.length > 20) bad("Demasiados niveles en la ubicación.");
+  const u: Ubicacion = {};
+  for (const [k, v] of entradas) {
+    if (!CLAVE_NIVEL_RE.test(k)) bad("Nivel de la ubicación no válido.");
+    if (typeof v !== "string" || !UUID_RE.test(v)) bad("Valor de la ubicación no válido.");
+    u[k] = v;
+  }
+  return u;
+}
+
+export function leerCambioMedicion(body: unknown): CambioMedicion {
+  const o = objeto(body);
+  const origen = o.origen === "modelo" || o.origen === "manual" ? o.origen : bad("Origen de la medición no válido.");
+  const elementos = Array.isArray(o.elementos) ? o.elementos : bad("Faltan los elementos (lista vacía si es a mano).");
+  const lineas = Array.isArray(o.lineas) ? o.lineas : bad("Falta la memoria (lista vacía si es del modelo).");
+  if (elementos.length > MAX_ELEMENTOS_MEDICION) bad(`Una medición admite hasta ${MAX_ELEMENTOS_MEDICION} elementos.`);
+  if (lineas.length > MAX_LINEAS_MEDICION) bad(`La memoria admite hasta ${MAX_LINEAS_MEDICION} líneas.`);
+  return {
+    ...(o.id === undefined ? {} : { id: uuid(o.id, "Medición") }),
+    partidaId: partidaId(o.partidaId),
+    contratoId: o.contratoId === null || o.contratoId === undefined || o.contratoId === "" ? null : uuid(o.contratoId, "Contrato"),
+    ubicacion: leerUbicacion(o.ubicacion),
+    fecha: fecha(o.fecha, "Fecha"),
+    origen,
+    observaciones: texto(o.observaciones ?? "", "Observaciones", 2000),
+    elementos: elementos.map((x) => {
+      const e = objeto(x);
+      return {
+        modelId: modelId(e.modelId),
+        versionId: e.versionId === null || e.versionId === undefined || e.versionId === "" ? null : texto(e.versionId, "Versión del modelo", 100),
+        ifcGuid: ifcGuid(e.ifcGuid),
+        nombre: typeof e.nombre === "string" ? e.nombre.slice(0, 300) : "",
+        porcentaje: numero(e.porcentaje, "Porcentaje"),
+      };
+    }),
+    lineas: lineas.map((x, i) => {
+      const l = objeto(x);
+      const n = `Línea ${i + 1}`;
+      return {
+        descripcion: texto(l.descripcion ?? "", `${n}: descripción`, 200),
+        veces: numero(l.veces, `${n}: veces`),
+        largo: numeroOpcional(l.largo, `${n}: largo`),
+        ancho: numeroOpcional(l.ancho, `${n}: ancho`),
+        alto: numeroOpcional(l.alto, `${n}: alto`),
+      };
+    }),
+    version: version(o.version),
+  };
+}
+
+export function leerAnularMedicion(body: unknown): { id: string; motivo: string; version: number } {
+  const o = objeto(body);
+  return { id: uuid(o.id, "Medición"), motivo: texto(o.motivo, "Motivo", 2000).trim(), version: version(o.version) };
+}
+
+/** The partida and the selected elements' IFCGUIDs (and the measurement being edited, if any). */
+export function leerElementosMedibles(body: unknown): { partidaId: string; ifcGuids: string[]; medicionId: string | null } {
+  const o = objeto(body);
+  if (!Array.isArray(o.ifcGuids) || o.ifcGuids.length > MAX_ELEMENTOS_MEDICION) bad("Lista de elementos no válida.");
+  return {
+    partidaId: partidaId(o.partidaId),
+    ifcGuids: [...new Set(o.ifcGuids.map(ifcGuid))],
+    medicionId: o.medicionId === null || o.medicionId === undefined ? null : uuid(o.medicionId, "Medición"),
+  };
+}
+
+export function leerVista(body: unknown): VistaObra {
+  const o = objeto(body);
+  if (!Array.isArray(o.elementos) || o.elementos.length > MAX_ELEMENTOS_MEDICION) bad("Lista de elementos no válida.");
+  return {
+    partidaId: o.partidaId === null || o.partidaId === undefined ? null : partidaId(o.partidaId),
+    elementos: o.elementos.map((x) => {
+      const e = objeto(x);
+      return { modelId: modelId(e.modelId), ifcGuid: ifcGuid(e.ifcGuid) };
+    }),
+  };
 }

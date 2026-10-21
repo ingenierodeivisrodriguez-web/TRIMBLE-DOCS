@@ -1,0 +1,10 @@
+{
+  "url": "https://trimble-docs.vercel.app/control-obra/visor",
+  "title": "Control de Obra",
+  "description": "Mide lo ejecutado por partida seleccionando elementos del modelo en el visor 3D (por IFCGUID); la cantidad sale del metrado de Presupuesto. Nunca escribe en el modelo.",
+  "icon": "https://trimble-docs.vercel.app/icon-control-obra.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "panel",
+  "enabled": true
+}
