@@ -105,7 +105,7 @@ Lee el archivo de referencia que corresponda antes de cambiar esa área:
 | Gantt, ruta crítica, calendario, EDT de la programación (PMI), actividades, regla del 100 %, división por ubicación, línea de balance, línea base, cortes, valor ganado, avance en el visor | `references/programacion-avance.md` |
 | Asistente IA: fases, proveedores, cupos, borradores, validaciones, versiones de instrucciones | `references/asistente-ia.md` |
 | Compras y Contratación: restricciones del dueño, decisiones aprobadas, roles y permisos, estados, reglas críticas (servicio + SQL + triggers), documentos en el CDE (API Core de Trimble), PDF, panel | `references/compras.md` |
-| Control de Obra: fases, decisiones D1–D13, empresas, licencias, administradores, aislamiento por empresa, bitácora encadenada, cómo probarlo | `references/control-obra.md` |
+| Control de Obra: fases, decisiones D1–D13 y plan de actas, empresas, licencias, administradores, aislamiento por empresa, bitácora encadenada, flujos de aprobación, cómo probarlo | `references/control-obra.md` (y `docs/control-obra/plan-actas.md`) |
 | Pruebas, página de prueba con API falsa, navegador, despliegue, SQL, trucos de Windows | `references/flujo-desarrollo.md` |
 | Responder preguntas de uso: URLs de instalación, orden de trabajo, textos para el asistente, explicar cuadrillas | `references/guia-usuario.md` |
 

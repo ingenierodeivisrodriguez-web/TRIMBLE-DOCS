@@ -12,8 +12,9 @@ import Administracion from "./Administracion";
 import Bitacora from "./Bitacora";
 import EmpresasLicencias from "./EmpresasLicencias";
 import Estructura from "./Estructura";
+import Flujos from "./Flujos";
 
-type Pestana = "inicio" | "estructura" | "bitacora" | "administracion" | "empresas";
+type Pestana = "inicio" | "estructura" | "flujos" | "bitacora" | "administracion" | "empresas";
 
 /** "Control de Obra" in the project menu: who you are, the company and its license, and what you may open. */
 export default function ControlObraApp({ api, projectId, projectName }: { api: ObraApi; projectId: string; projectName: string }) {
@@ -49,6 +50,7 @@ export default function ControlObraApp({ api, projectId, projectName }: { api: O
   const pestanas: { id: Pestana; nombre: string }[] = [
     { id: "inicio", nombre: "Inicio" },
     ...((puede("estructura.ver") || admin) && conBim ? [{ id: "estructura" as const, nombre: "Proyecto y estructura de obra" }] : []),
+    ...(admin || puede("accesos.ver") ? [{ id: "flujos" as const, nombre: "Flujos de aprobación" }] : []),
     ...(puede("bitacora.ver") || estado?.adminEmpresa ? [{ id: "bitacora" as const, nombre: "Bitácora" }] : []),
     ...(admin || puede("accesos.ver") ? [{ id: "administracion" as const, nombre: "Administración" }] : []),
     ...(estado?.esAdminTecnico ? [{ id: "empresas" as const, nombre: "Empresas y licencias" }] : []),
@@ -100,6 +102,7 @@ export default function ControlObraApp({ api, projectId, projectName }: { api: O
           <main style={{ flex: 1, minHeight: 0, padding: 16 }}>
             {actual === "inicio" && <Inicio api={api} estado={estado} projectName={projectName} onEstado={setEstado} />}
             {actual === "estructura" && <Estructura api={api} onSinAcceso={onSinAcceso} />}
+            {actual === "flujos" && <Flujos api={api} onSinAcceso={onSinAcceso} />}
             {actual === "bitacora" && <Bitacora api={api} todaLaEmpresa={estado.adminEmpresa} onSinAcceso={onSinAcceso} />}
             {actual === "administracion" && <Administracion api={api} estado={estado} projectName={projectName} onEstado={setEstado} onSinAcceso={onSinAcceso} />}
             {actual === "empresas" && <EmpresasLicencias api={api} />}
@@ -301,9 +304,9 @@ function Inicio({ api, estado, projectName, onEstado }: { api: ObraApi; estado: 
       <section style={card}>
         <h2 style={titulo}>Qué viene</h2>
         <p style={{ ...texto, marginBottom: 0 }}>
-          Esta primera parte deja lista la base: empresas, licencias, personas, roles, la estructura de obra y la bitácora. En las siguientes fases llegan el panel
-          del visor 3D (elementos por IFCGUID y versiones del modelo), las cantidades, costos y avance, la calidad (ensayos, inspecciones, no conformidades y
-          aceptación) y los documentos en el CDE.
+          Ya está la base: empresas, licencias, personas, roles, la estructura de obra, la bitácora y los flujos de aprobación. Siguen, por fases: las
+          mediciones de obra (desde el modelo en el visor 3D o a mano, por ubicación y contrato), la calidad (listas de chequeo, inspecciones y no
+          conformidades), las actas al cliente y a los subcontratistas, el avance que lee Presupuesto, el almacén, el costo real y el panel.
         </p>
       </section>
     </div>

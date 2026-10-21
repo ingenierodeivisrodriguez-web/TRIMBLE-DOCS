@@ -1,5 +1,5 @@
 -- Servicio de datos de "Control de Obra": empresas, licencias, personas, roles, accesos
--- por proyecto, estructura de obra y la bitácora de auditoría.
+-- por proyecto, estructura de obra, bitácora de auditoría y flujos de aprobación.
 -- Ejecútalo en Supabase → SQL Editor. Es seguro volver a ejecutarlo: no borra datos.
 --
 -- Solo el servidor de la app (clave de servicio) lee y escribe: RLS activado sin
@@ -33,18 +33,24 @@ as $$
     'panel.ver', 'estructura.ver', 'modelos.ver', 'modelos.crear', 'modelos.verificar',
     'cantidades.ver', 'cantidades.crear', 'cantidades.editar', 'cantidades.verificar', 'cantidades.aprobar',
     'cantidades.anular', 'cantidades.documentos', 'cantidades.exportar',
-    'avance.ver', 'avance.crear', 'avance.editar', 'avance.aprobar', 'avance.anular', 'avance.documentos', 'avance.exportar',
-    'costos.ver', 'costos.crear', 'costos.editar', 'costos.aprobar', 'costos.anular', 'costos.documentos', 'costos.exportar',
-    'criterios.ver', 'criterios.crear', 'criterios.editar', 'criterios.aprobar', 'criterios.anular', 'criterios.administrar',
-    'lotes.ver', 'lotes.crear', 'lotes.editar', 'lotes.aprobar', 'lotes.anular', 'lotes.documentos',
-    'ensayos.ver', 'ensayos.crear', 'ensayos.editar', 'ensayos.verificar', 'ensayos.aprobar', 'ensayos.anular',
-    'ensayos.documentos', 'ensayos.exportar',
-    'inspecciones.ver', 'inspecciones.crear', 'inspecciones.editar', 'inspecciones.verificar', 'inspecciones.aprobar',
-    'inspecciones.anular', 'inspecciones.documentos', 'inspecciones.exportar', 'inspecciones.administrar',
+    'avance.ver', 'avance.crear', 'avance.editar', 'avance.aprobar', 'avance.anular', 'avance.documentos',
+    'avance.exportar', 'actas_cliente.ver', 'actas_cliente.crear', 'actas_cliente.editar',
+    'actas_cliente.aprobar', 'actas_cliente.anular', 'actas_cliente.documentos', 'actas_cliente.exportar',
+    'actas_sub.ver', 'actas_sub.crear', 'actas_sub.editar', 'actas_sub.aprobar', 'actas_sub.anular',
+    'actas_sub.documentos', 'actas_sub.exportar', 'costos.ver', 'costos.crear', 'costos.editar',
+    'costos.aprobar', 'costos.anular', 'costos.documentos', 'costos.exportar',
+    'almacen.ver', 'almacen.crear', 'almacen.editar', 'almacen.aprobar', 'almacen.anular', 'almacen.exportar',
+    'criterios.ver', 'criterios.crear', 'criterios.editar', 'criterios.aprobar', 'criterios.anular',
+    'criterios.administrar', 'lotes.ver', 'lotes.crear', 'lotes.editar', 'lotes.aprobar', 'lotes.anular',
+    'lotes.documentos', 'ensayos.ver', 'ensayos.crear', 'ensayos.editar', 'ensayos.verificar', 'ensayos.aprobar',
+    'ensayos.anular', 'ensayos.documentos', 'ensayos.exportar', 'inspecciones.ver', 'inspecciones.crear',
+    'inspecciones.editar', 'inspecciones.verificar', 'inspecciones.aprobar', 'inspecciones.anular',
+    'inspecciones.documentos', 'inspecciones.exportar', 'inspecciones.administrar',
     'nc.ver', 'nc.crear', 'nc.editar', 'nc.aprobar', 'nc.anular', 'nc.documentos', 'nc.exportar',
     'aceptacion.ver', 'aceptacion.aprobar', 'aceptacion.anular',
     'documentos.ver', 'documentos.documentos', 'documentos.anular', 'documentos.administrar',
-    'reportes.ver', 'reportes.exportar', 'bitacora.ver', 'bitacora.exportar', 'accesos.ver'
+    'reportes.ver', 'reportes.exportar', 'bitacora.ver', 'bitacora.exportar',
+    'accesos.ver'
   ]::text[]
 $$;
 
@@ -55,7 +61,7 @@ language sql
 immutable
 set search_path = public
 as $$
-  select array['bim', 'cantidades', 'costos', 'calidad', 'documentos', 'reportes']::text[]
+  select array['bim', 'cantidades', 'costos', 'almacen', 'calidad', 'documentos', 'reportes']::text[]
 $$;
 
 -- El grupo de la licencia al que pertenece un módulo (null: viene con toda licencia).
@@ -67,8 +73,9 @@ set search_path = public
 as $$
   select case
     when p_modulo in ('estructura', 'modelos') then 'bim'
-    when p_modulo in ('cantidades', 'avance') then 'cantidades'
+    when p_modulo in ('cantidades', 'avance', 'actas_cliente', 'actas_sub') then 'cantidades'
     when p_modulo = 'costos' then 'costos'
+    when p_modulo = 'almacen' then 'almacen'
     when p_modulo in ('criterios', 'lotes', 'ensayos', 'inspecciones', 'nc', 'aceptacion') then 'calidad'
     when p_modulo = 'documentos' then 'documentos'
     when p_modulo = 'reportes' then 'reportes'
@@ -1237,4 +1244,368 @@ grant execute on function public.obra_guardar_nodo(uuid, text, text, text, uuid,
 
 insert into public.obra_migraciones (bloque, descripcion)
 values (1, 'Base comercial: empresas, licencias, personas, roles, accesos, estructura de obra y bitácora')
+on conflict (bloque) do nothing;
+
+-- ================================================================ bloque 2: flujos de aprobación, interventoría y almacén
+--
+-- Cada proyecto configura, por tipo de documento (actas al cliente, actas de
+-- subcontratistas, inspecciones, cierre de no conformidades, vales de salida), los
+-- pasos de su aprobación y el rol que atiende cada paso. Reglas (también en
+-- lib/control-obra/flujos.ts): el paso 0 elabora y envía; los demás aprueban, el
+-- último en firme; devolver exige motivo y regresa UN paso; quien elabora no aprueba
+-- y una persona firma un solo paso del mismo documento; el documento guarda la copia
+-- del flujo con que se envió la primera vez.
+
+-- Los tipos de documento con flujo y el módulo cuyos permisos usan sus pasos
+-- (lib/control-obra/types.ts, TIPOS_FLUJO; una prueba verifica que coincidan).
+create or replace function public.obra_tipos_flujo()
+returns text[]
+language sql
+immutable
+set search_path = public
+as $$
+  select array['acta_cliente', 'acta_subcontrato', 'inspeccion', 'cierre_nc', 'vale_salida']::text[]
+$$;
+
+create or replace function public.obra_modulo_de_flujo(p_tipo text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case p_tipo
+    when 'acta_cliente' then 'actas_cliente'
+    when 'acta_subcontrato' then 'actas_sub'
+    when 'inspeccion' then 'inspecciones'
+    when 'cierre_nc' then 'nc'
+    when 'vale_salida' then 'almacen'
+  end
+$$;
+
+-- Lo que necesita el rol del primer paso (quien elabora y envía); los demás, "aprobar".
+create or replace function public.obra_accion_inicial_flujo(p_tipo text)
+returns text
+language sql
+immutable
+set search_path = public
+as $$
+  select case p_tipo when 'cierre_nc' then 'editar' else 'crear' end
+$$;
+
+-- Los roles que se agregaron después de crear las primeras empresas (interventoría y
+-- almacenista, lib/control-obra/roles.ts) se crean en cada empresa que no los tenga.
+-- A los roles que ya existían no se les cambia nada: la pantalla de roles ofrece los
+-- permisos nuevos y un administrador decide.
+do $$
+declare
+  e record;
+  r record;
+  v_id uuid;
+begin
+  for e in select id from public.obra_empresas loop
+    for r in
+      select * from (values
+        ('interventoria', 'Interventoría', 'Interventoría o cliente: consulta y aprueba en su paso las actas al cliente y el cierre de no conformidades.',
+         array['panel.ver', 'estructura.ver', 'cantidades.ver', 'avance.ver', 'actas_cliente.ver', 'actas_cliente.aprobar', 'actas_cliente.exportar',
+               'inspecciones.ver', 'inspecciones.exportar', 'nc.ver', 'nc.aprobar', 'nc.exportar', 'documentos.ver', 'reportes.ver', 'reportes.exportar']),
+        ('almacenista', 'Almacenista', 'Elabora los vales de salida de material y consulta existencias y consumos.',
+         array['panel.ver', 'estructura.ver', 'almacen.ver', 'almacen.crear', 'almacen.editar', 'almacen.exportar', 'documentos.ver', 'documentos.documentos'])
+      ) x(clave, nombre, descripcion, permisos)
+    loop
+      if not exists (select 1 from public.obra_roles o
+                      where o.empresa_id = e.id and (o.clave = r.clave or lower(btrim(o.nombre)) = lower(r.nombre))) then
+        v_id := gen_random_uuid();
+        insert into public.obra_roles (id, empresa_id, clave, nombre, descripcion, sistema, activo, permisos, actualizado_por)
+        values (v_id, e.id, r.clave, r.nombre, r.descripcion, true, true, r.permisos, 'Actualización de Control de Obra');
+        perform public.obra_registrar(e.id, null, 'sistema', 'Actualización de Control de Obra', 'roles.crear', 'accesos', 'rol', v_id::text,
+          jsonb_build_object('nombre', r.nombre, 'agregados', to_jsonb(r.permisos), 'quitados', '[]'::jsonb, 'activo', true));
+      end if;
+    end loop;
+  end loop;
+end;
+$$;
+
+-- El flujo de cada tipo de documento en cada proyecto: [{nombre, rolId}], de 2 a 6 pasos.
+create table if not exists public.obra_flujos (
+  empresa_id      uuid        not null,
+  project_id      text        not null,
+  tipo            text        not null,
+  pasos           jsonb       not null check (jsonb_typeof(pasos) = 'array' and jsonb_array_length(pasos) between 2 and 6),
+  version         integer     not null default 1,
+  actualizado     timestamptz not null default now(),
+  actualizado_por text,
+  primary key (empresa_id, project_id, tipo),
+  foreign key (empresa_id, project_id) references public.obra_empresa_proyectos (empresa_id, project_id)
+);
+alter table public.obra_flujos drop constraint if exists obra_flujos_tipo_valido;
+alter table public.obra_flujos add constraint obra_flujos_tipo_valido check (tipo = any (public.obra_tipos_flujo()));
+
+-- Cada envío, aprobación, devolución o anulación de un documento con flujo. Solo inserción.
+create table if not exists public.obra_aprobaciones (
+  id             bigint      generated always as identity primary key,
+  empresa_id     uuid        not null,
+  project_id     text        not null,
+  documento_tipo text        not null,
+  documento_id   uuid        not null,
+  accion         text        not null check (accion in ('enviar', 'aprobar', 'devolver', 'anular')),
+  paso_desde     smallint    not null check (paso_desde between 0 and 6),
+  paso_hasta     smallint    not null check (paso_hasta between 0 and 6),
+  paso_nombre    text        not null default '',
+  rol_id         uuid,
+  rol_nombre     text        not null default '',
+  actor_id       text        not null,
+  actor_nombre   text        not null default '',
+  motivo         text        not null default '' check (char_length(motivo) <= 2000),
+  creado         timestamptz not null default now(),
+  foreign key (empresa_id, project_id) references public.obra_empresa_proyectos (empresa_id, project_id),
+  check (accion not in ('devolver', 'anular') or btrim(motivo) <> '')
+);
+alter table public.obra_aprobaciones drop constraint if exists obra_aprobaciones_tipo_valido;
+alter table public.obra_aprobaciones add constraint obra_aprobaciones_tipo_valido check (documento_tipo = any (public.obra_tipos_flujo()));
+create index if not exists obra_aprobaciones_documento on public.obra_aprobaciones (empresa_id, project_id, documento_tipo, documento_id, id);
+
+drop trigger if exists obra_aprobaciones_sin_cambios on public.obra_aprobaciones;
+create trigger obra_aprobaciones_sin_cambios
+  before update or delete on public.obra_aprobaciones
+  for each row execute function public.obra_solo_insercion();
+drop trigger if exists obra_aprobaciones_sin_vaciar on public.obra_aprobaciones;
+create trigger obra_aprobaciones_sin_vaciar
+  before truncate on public.obra_aprobaciones
+  for each statement execute function public.obra_solo_insercion();
+
+-- Guarda el flujo de un tipo de documento en el proyecto (administradores de la empresa o
+-- del proyecto). Cada paso necesita un rol activo de la empresa con el permiso del módulo:
+-- el del primer paso, crear (editar en el cierre de no conformidades); los demás, aprobar.
+-- Devuelve la nueva versión.
+create or replace function public.obra_guardar_flujo(
+  p_empresa_id uuid, p_project_id text, p_actor_id text, p_actor_nombre text, p_tipo text, p_pasos jsonb, p_version integer)
+returns integer
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_modulo text := public.obra_modulo_de_flujo(p_tipo);
+  v_grupo text;
+  v_antes public.obra_flujos%rowtype;
+  v_existia boolean;
+  v_version integer;
+  v_pasos jsonb := '[]'::jsonb;
+  v_rol public.obra_roles%rowtype;
+  v_paso jsonb;
+  v_i integer := 0;
+  v_nombre text;
+  v_permiso text;
+  v_rol_id uuid;
+begin
+  perform pg_advisory_xact_lock(hashtext('obra-accesos:' || p_empresa_id::text));
+  if not exists (select 1 from public.obra_empresa_proyectos where empresa_id = p_empresa_id and project_id = p_project_id and activo) then
+    raise exception 'obra:sin-empresa';
+  end if;
+  if not public.obra_es_admin_empresa(p_empresa_id, p_actor_id) and not public.obra_es_admin_proyecto(p_empresa_id, p_project_id, p_actor_id) then
+    raise exception 'obra:no-admin';
+  end if;
+  if v_modulo is null then
+    raise exception 'obra:datos';
+  end if;
+  v_grupo := public.obra_grupo_de_modulo(v_modulo);
+  if v_grupo is not null and not (v_grupo = any ((public.obra_licencia_vigente(p_empresa_id)).grupos)) then
+    raise exception 'obra:modulo-no-contratado';
+  end if;
+  if jsonb_typeof(p_pasos) <> 'array' or jsonb_array_length(p_pasos) not between 2 and 6 then
+    raise exception 'obra:flujo-no-valido';
+  end if;
+  for v_paso in select x from jsonb_array_elements(p_pasos) x loop
+    v_nombre := btrim(coalesce(v_paso ->> 'nombre', ''));
+    if v_nombre = '' or char_length(v_nombre) > 40 or coalesce(v_paso ->> 'rolId', '') !~ '^[0-9a-fA-F-]{36}$' then
+      raise exception 'obra:flujo-no-valido';
+    end if;
+    v_rol_id := (v_paso ->> 'rolId')::uuid;
+    v_permiso := v_modulo || '.' || case when v_i = 0 then public.obra_accion_inicial_flujo(p_tipo) else 'aprobar' end;
+    select * into v_rol from public.obra_roles where empresa_id = p_empresa_id and id = v_rol_id;
+    if not found or not v_rol.activo or not (v_permiso = any (v_rol.permisos)) then
+      raise exception 'obra:flujo-no-valido';
+    end if;
+    v_pasos := v_pasos || jsonb_build_array(jsonb_build_object('nombre', v_nombre, 'rolId', v_rol_id::text));
+    v_i := v_i + 1;
+  end loop;
+
+  select * into v_antes from public.obra_flujos where empresa_id = p_empresa_id and project_id = p_project_id and tipo = p_tipo for update;
+  v_existia := found;
+  if v_existia then
+    update public.obra_flujos
+       set pasos = v_pasos, version = version + 1, actualizado = now(), actualizado_por = p_actor_nombre
+     where empresa_id = p_empresa_id and project_id = p_project_id and tipo = p_tipo and version = p_version
+    returning version into v_version;
+    if v_version is null then
+      raise exception 'version-conflict';
+    end if;
+  else
+    if p_version <> 0 then
+      raise exception 'version-conflict';
+    end if;
+    insert into public.obra_flujos (empresa_id, project_id, tipo, pasos, actualizado_por)
+    values (p_empresa_id, p_project_id, p_tipo, v_pasos, p_actor_nombre);
+    v_version := 1;
+  end if;
+
+  perform public.obra_registrar(p_empresa_id, p_project_id, p_actor_id, p_actor_nombre, 'flujos.cambiar', v_modulo, 'flujo', p_tipo,
+    jsonb_build_object(
+      'tipo', p_tipo,
+      'antes', case when v_existia then (
+        select jsonb_agg(jsonb_build_object('nombre', x ->> 'nombre', 'rol', coalesce(r.nombre, '')) order by i)
+          from jsonb_array_elements(v_antes.pasos) with ordinality t(x, i)
+          left join public.obra_roles r on r.empresa_id = p_empresa_id and r.id::text = x ->> 'rolId') end,
+      'despues', (
+        select jsonb_agg(jsonb_build_object('nombre', x ->> 'nombre', 'rol', coalesce(r.nombre, '')) order by i)
+          from jsonb_array_elements(v_pasos) with ordinality t(x, i)
+          left join public.obra_roles r on r.empresa_id = p_empresa_id and r.id::text = x ->> 'rolId')));
+  return v_version;
+end;
+$$;
+
+-- Aplica una acción del flujo a un documento y devuelve {estado, flujo}. La llaman las
+-- funciones de cada documento (actas, inspecciones, vales…) dentro de su transacción y
+-- con su bloqueo; no se le da permiso directo al servidor. p_flujo es la copia que guarda
+-- el documento (null hasta su primer envío). Deja la acción en obra_aprobaciones y en la
+-- bitácora.
+create or replace function public.obra_flujo_accion(
+  p_empresa_id uuid, p_project_id text, p_tipo text, p_documento_id uuid, p_estado text, p_flujo jsonb,
+  p_elaborado_por text, p_accion text, p_actor_id text, p_actor_nombre text, p_motivo text)
+returns jsonb
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  v_modulo text := public.obra_modulo_de_flujo(p_tipo);
+  v_rol uuid;
+  v_permisos text[];
+  v_motivo text := btrim(coalesce(p_motivo, ''));
+  v_pasos jsonb;
+  v_paso integer := coalesce((p_flujo ->> 'paso')::integer, 0);
+  v_desde integer;
+  v_hasta integer;
+  v_n integer;
+  v_estado text;
+  v_flujo jsonb;
+  v_paso_obj jsonb;
+begin
+  if v_modulo is null or p_accion not in ('enviar', 'aprobar', 'devolver', 'anular') then
+    raise exception 'obra:datos';
+  end if;
+  select a.rol_id into v_rol from public.obra_asignacion_vigente(p_empresa_id, p_project_id, p_actor_id) a;
+  v_permisos := public.obra_permisos_de(p_empresa_id, p_project_id, p_actor_id);
+
+  if p_accion = 'anular' then
+    if p_estado in ('anulado', 'aprobado') then
+      raise exception 'obra:estado-no-permite';
+    end if;
+    if not ((v_modulo || '.anular') = any (v_permisos)) then
+      raise exception 'obra:sin-permiso';
+    end if;
+    if v_motivo = '' then
+      raise exception 'obra:motivo-requerido';
+    end if;
+    v_estado := 'anulado';
+    v_flujo := p_flujo;
+    v_desde := v_paso;
+    v_hasta := v_paso;
+    v_paso_obj := p_flujo -> 'pasos' -> v_paso;
+
+  elsif p_accion = 'enviar' then
+    if p_estado not in ('borrador', 'devuelto') then
+      raise exception 'obra:estado-no-permite';
+    end if;
+    v_pasos := p_flujo -> 'pasos';
+    if v_pasos is null then
+      -- First sending: the document keeps a copy of the project's flow, with the roles' names.
+      select jsonb_agg(jsonb_build_object('nombre', x ->> 'nombre', 'rolId', x ->> 'rolId', 'rolNombre', coalesce(r.nombre, '')) order by i)
+        into v_pasos
+        from public.obra_flujos f
+        cross join lateral jsonb_array_elements(f.pasos) with ordinality t(x, i)
+        left join public.obra_roles r on r.empresa_id = f.empresa_id and r.id::text = x ->> 'rolId'
+       where f.empresa_id = p_empresa_id and f.project_id = p_project_id and f.tipo = p_tipo;
+    end if;
+    if v_pasos is null or jsonb_array_length(v_pasos) < 2 then
+      raise exception 'obra:sin-flujo';
+    end if;
+    if v_rol is null or v_rol::text <> v_pasos -> 0 ->> 'rolId' then
+      raise exception 'obra:paso-ajeno';
+    end if;
+    if not ((v_modulo || '.' || public.obra_accion_inicial_flujo(p_tipo)) = any (v_permisos)) then
+      raise exception 'obra:sin-permiso';
+    end if;
+    v_estado := 'en_tramite';
+    v_desde := 0;
+    v_hasta := 1;
+    v_flujo := jsonb_build_object('pasos', v_pasos, 'paso', 1, 'firmas', jsonb_build_object('0', p_actor_id));
+    v_paso_obj := v_pasos -> 0;
+
+  else
+    -- aprobar / devolver: the step the document waits for.
+    v_n := coalesce(jsonb_array_length(p_flujo -> 'pasos'), 0);
+    if p_estado <> 'en_tramite' or p_flujo is null or v_paso < 1 or v_paso >= v_n then
+      raise exception 'obra:estado-no-permite';
+    end if;
+    v_paso_obj := p_flujo -> 'pasos' -> v_paso;
+    if v_rol is null or v_rol::text <> v_paso_obj ->> 'rolId' then
+      raise exception 'obra:paso-ajeno';
+    end if;
+    if not ((v_modulo || '.aprobar') = any (v_permisos)) then
+      raise exception 'obra:sin-permiso';
+    end if;
+    if p_actor_id = p_elaborado_por or exists (
+      select 1 from jsonb_each_text(coalesce(p_flujo -> 'firmas', '{}'::jsonb)) f where f.key::integer <> v_paso and f.value = p_actor_id) then
+      raise exception 'obra:auto-aprobacion';
+    end if;
+    v_desde := v_paso;
+    if p_accion = 'aprobar' then
+      v_hasta := v_paso + 1;
+      v_estado := case when v_hasta = v_n then 'aprobado' else 'en_tramite' end;
+      v_flujo := jsonb_set(jsonb_set(p_flujo, '{paso}', to_jsonb(v_hasta)), '{firmas}',
+                           coalesce(p_flujo -> 'firmas', '{}'::jsonb) || jsonb_build_object(v_paso::text, p_actor_id));
+    else
+      if v_motivo = '' then
+        raise exception 'obra:motivo-requerido';
+      end if;
+      -- Back one step: that step's signature no longer counts.
+      v_hasta := v_paso - 1;
+      v_estado := case when v_hasta = 0 then 'devuelto' else 'en_tramite' end;
+      v_flujo := jsonb_set(jsonb_set(p_flujo, '{paso}', to_jsonb(v_hasta)), '{firmas}',
+                           coalesce((select jsonb_object_agg(f.key, f.value) from jsonb_each(coalesce(p_flujo -> 'firmas', '{}'::jsonb)) f
+                                      where v_hasta > 0 and f.key::integer < v_hasta), '{}'::jsonb));
+    end if;
+  end if;
+
+  insert into public.obra_aprobaciones (empresa_id, project_id, documento_tipo, documento_id, accion, paso_desde, paso_hasta, paso_nombre,
+                                        rol_id, rol_nombre, actor_id, actor_nombre, motivo)
+  values (p_empresa_id, p_project_id, p_tipo, p_documento_id, p_accion, v_desde, v_hasta, coalesce(v_paso_obj ->> 'nombre', ''),
+          nullif(v_paso_obj ->> 'rolId', '')::uuid, coalesce(v_paso_obj ->> 'rolNombre', ''), p_actor_id, coalesce(p_actor_nombre, ''), v_motivo);
+  perform public.obra_registrar(p_empresa_id, p_project_id, p_actor_id, p_actor_nombre, 'flujo.' || p_accion, v_modulo, p_tipo, p_documento_id::text,
+    jsonb_build_object('paso', coalesce(v_paso_obj ->> 'nombre', ''), 'desde', v_desde, 'hasta', v_hasta, 'estado', v_estado), v_motivo);
+  return jsonb_build_object('estado', v_estado, 'flujo', v_flujo);
+end;
+$$;
+
+-- ---------------------------------------------------------------- seguridad del bloque 2
+
+alter table public.obra_flujos enable row level security;
+alter table public.obra_aprobaciones enable row level security;
+revoke all on table public.obra_flujos, public.obra_aprobaciones from anon, authenticated;
+revoke insert, update, delete, truncate on table public.obra_flujos, public.obra_aprobaciones from public, anon, authenticated, service_role;
+grant select on table public.obra_flujos, public.obra_aprobaciones to service_role;
+
+revoke all on function public.obra_tipos_flujo() from public, anon, authenticated;
+revoke all on function public.obra_modulo_de_flujo(text) from public, anon, authenticated;
+revoke all on function public.obra_accion_inicial_flujo(text) from public, anon, authenticated;
+revoke all on function public.obra_guardar_flujo(uuid, text, text, text, text, jsonb, integer) from public, anon, authenticated;
+revoke all on function public.obra_flujo_accion(uuid, text, text, uuid, text, jsonb, text, text, text, text, text) from public, anon, authenticated, service_role;
+grant execute on function public.obra_tipos_flujo() to service_role;
+grant execute on function public.obra_modulo_de_flujo(text) to service_role;
+grant execute on function public.obra_accion_inicial_flujo(text) to service_role;
+grant execute on function public.obra_guardar_flujo(uuid, text, text, text, text, jsonb, integer) to service_role;
+
+insert into public.obra_migraciones (bloque, descripcion)
+values (2, 'Flujos de aprobación por proyecto y tipo de documento; roles de interventoría y almacenista; módulos de actas y almacén')
 on conflict (bloque) do nothing;

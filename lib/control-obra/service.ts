@@ -19,6 +19,7 @@ import {
   usuarioDe,
 } from "./accesos";
 import { cadenaDe } from "./bitacora";
+import { flujosSugeridos, personasPorRol, revisarPasos, tipoFlujo } from "./flujos";
 import { nivelesEfectivos, revisarNivel, revisarNodo } from "./estructura";
 import { estadoLicencia, licenciaPermiteTrabajar, licenciaVigente, modulosHabilitados, permisosContratados, revisarLicencia } from "./licencias";
 import { ROLES_INICIALES } from "./roles";
@@ -33,6 +34,7 @@ import {
   EstadoLicencia,
   EstadoResponse,
   EstructuraResponse,
+  FlujosResponse,
   Licencia,
   Modulo,
   NIVELES_INICIALES,
@@ -40,6 +42,7 @@ import {
   Permiso,
   ProyectoEmpresa,
   Rol,
+  TIPOS_FLUJO,
   UsuarioEmpresa,
   VerificacionBitacora,
 } from "./types";
@@ -47,6 +50,7 @@ import {
   leerAdminEmpresa,
   leerCambioAsignacion,
   leerCambioEmpresa,
+  leerCambioFlujo,
   leerCambioNivel,
   leerCambioNodo,
   leerCambioRol,
@@ -176,7 +180,7 @@ async function guardando<T>(ctx: Ctx, c: Pick<Contexto, "empresa"> | null, accio
     return await fn();
   } catch (err) {
     const e = traducir(err);
-    if (e instanceof ServiceError && e.code && esMotivo(e.code) && !["version-conflict", "datos", "nombre-repetido", "clave-repetida", "valor-repetido"].includes(e.code)) {
+    if (e instanceof ServiceError && e.code && esMotivo(e.code) && !["version-conflict", "datos", "nombre-repetido", "clave-repetida", "valor-repetido", "flujo-no-valido"].includes(e.code)) {
       await registrar(ctx, c, { accion, modulo, resultado: "denegado", ...extra, cambios: { motivo: e.code, ...(extra.cambios ?? {}) } });
     }
     throw e;
@@ -455,6 +459,44 @@ export async function guardarConfig(ctx: Ctx, body: unknown): Promise<Estructura
   if (config.responsableTecnicoId && !(await ctx.deps.contactos()).users.some((u) => u.id === config.responsableTecnicoId)) throw rechazo("no-miembro");
   await guardando(ctx, c, "config.guardar", "estructura", () => ctx.store.guardarConfig(c.alcance, actor(ctx), config, version), { objetoTipo: "proyecto", objetoId: ctx.projectId });
   return respuestaEstructura(ctx, c);
+}
+
+// ---------------------------------------------------------------- approval flows
+
+async function respuestaFlujos(ctx: Ctx, c: Contexto & { alcance: Alcance }): Promise<FlujosResponse> {
+  const guardados = await ctx.store.listFlujos(c.alcance);
+  return {
+    // One per kind of document of the modules the license includes; pasos empty: not configured yet.
+    flujos: TIPOS_FLUJO.filter((t) => c.modulos.has(t.modulo)).map(
+      (t) => guardados.find((f) => f.tipo === t.id) ?? { tipo: t.id, pasos: [], version: 0, actualizado: null, actualizadoPor: null }
+    ),
+    roles: c.roles.map((r) => ({ id: r.id, nombre: r.nombre, activo: r.activo, permisos: r.permisos })),
+    personasPorRol: personasPorRol(c.asignaciones, (a) => !!asignacionVigente(a.userId, c.asignaciones, c.usuarios, ctx.hoy)),
+    sugeridos: flujosSugeridos(c.roles),
+    puedeEditar: c.adminEmpresa || c.adminProyecto,
+  };
+}
+
+/** The project's approval flows: administrators configure them; whoever may see the accesses consults them. */
+export async function getFlujos(ctx: Ctx): Promise<FlujosResponse> {
+  const c = await enEmpresa(ctx, "flujos.consultar", "accesos");
+  if (!c.adminEmpresa && !c.adminProyecto && !tiene(c.permisos, "accesos", "ver")) {
+    return denegar(ctx, c, "flujos.consultar", "accesos", c.permisos.length ? "sin-permiso" : "sin-acceso");
+  }
+  return respuestaFlujos(ctx, c);
+}
+
+/** Saves the flow of one kind of document in this project (company or project administrators). */
+export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<FlujosResponse> {
+  const cambio = leerCambioFlujo(body);
+  const t = tipoFlujo(cambio.tipo);
+  const c = await requerirAdmin(ctx, "flujos.guardar", t.modulo);
+  const audit = { objetoTipo: "flujo", objetoId: cambio.tipo };
+  if (!c.modulos.has(t.modulo)) return denegar(ctx, c, "flujos.guardar", t.modulo, "modulo-no-contratado", audit);
+  const problema = revisarPasos(cambio.tipo, cambio.pasos, c.roles);
+  if (problema) throw new ServiceError(problema, 400, "flujo-no-valido");
+  await guardando(ctx, c, "flujos.guardar", t.modulo, () => ctx.store.guardarFlujo(c.alcance, actor(ctx), cambio), audit);
+  return respuestaFlujos(ctx, c);
 }
 
 // ---------------------------------------------------------------- bitácora

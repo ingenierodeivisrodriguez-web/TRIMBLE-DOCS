@@ -2650,19 +2650,23 @@ empresas, licencias, roles y permisos, estructura de obra y bitácora de
 auditoría. Es un producto **comercial y multiempresa**: cada empresa cliente
 tiene su licencia y registra sus proyectos de Trimble Connect. Aparece en el
 menú lateral del proyecto (`/control-obra`, `manifest-control-obra.json`);
-el panel del visor 3D llega en la fase 4.
+el panel del visor 3D llega con las mediciones.
 
-Se construye por fases según el diagnóstico y el diseño aprobados
+La base se construyó según el diagnóstico y el diseño aprobados
 ([`docs/control-obra/diagnostico.md`](docs/control-obra/diagnostico.md) y
-[`docs/control-obra/diseno.md`](docs/control-obra/diseno.md)). **Fase 3
-(hecha): base comercial** — empresas, licencias, personas, roles, accesos,
-estructura de obra y bitácora. Siguen: 4) modelos 3D e IFCGUID,
-5) cantidades, costos y avance, 6) calidad, inspecciones y aceptación,
-7) documentos en el CDE, 8) pruebas finales e instalación.
+[`docs/control-obra/diseno.md`](docs/control-obra/diseno.md)): empresas,
+licencias, personas, roles, accesos, estructura de obra y bitácora. Desde el
+21-10-2026 el resto sigue el **plan de actas**
+([`docs/control-obra/plan-actas.md`](docs/control-obra/plan-actas.md)), que
+reemplazó las fases 4 a 8 del diseño: 1) flujos de aprobación y roles
+(**hecha**), 2) ubicaciones y mediciones, 3) calidad, 4) actas al cliente y a
+subcontratistas, 5) enlace con Presupuesto, 6) almacén, 7) costo real,
+8) panel y estados en el visor.
 
-Presupuesto y Compras son la fuente oficial del presupuesto, la línea base,
-el valor ganado y lo comprometido: Control de Obra solo los lee (desde la
-fase 5) y nunca escribe en `presupuesto_*` ni `compras_*`.
+Presupuesto y Compras son la fuente oficial del presupuesto, los precios y
+los contratos: Control de Obra solo los lee y nunca escribe en
+`presupuesto_*` ni `compras_*`. Con la fase 5, Presupuesto leerá las
+mediciones de las actas aprobadas como fuente de su avance.
 
 ### Quién hace qué
 
@@ -2703,9 +2707,12 @@ piden motivo.
   más adelante, sin licencia, empresa desactivada. **Solo activa, por vencer
   y sin vencimiento dejan trabajar**: en los demás nadie de la empresa entra,
   tampoco sus administradores; los datos se conservan.
-- Los módulos se venden por grupos (estructura y modelos 3D, cantidades y
-  avance, costos, calidad, documentos, reportes); panel, bitácora y accesos
-  vienen siempre. Un permiso de un módulo no contratado no sirve aunque el
+- Los módulos se venden por grupos (estructura y modelos 3D; mediciones,
+  actas y avance físico; costos; almacén y consumo de materiales; calidad;
+  documentos; reportes); panel, bitácora y accesos vienen siempre. El grupo
+  de almacén se agregó con el plan de actas: una licencia registrada antes no
+  lo incluye hasta que el administrador técnico registre un evento "Cambio de
+  plan o límites" con él. Un permiso de un módulo no contratado no sirve aunque el
   rol lo tenga, y la API responde `modulo-no-contratado`.
 - Un proyecto activo pertenece a **una sola empresa**. Registrar un proyecto
   ocupa un cupo; retirarlo (con motivo) lo libera y conserva sus datos.
@@ -2716,10 +2723,12 @@ piden motivo.
 
 Un permiso es un módulo con una acción (ver, crear o reportar, editar,
 verificar, aprobar o aceptar, anular o revocar, adjuntar documentos,
-exportar, configurar): 75 permisos, ya con los módulos de las fases
-siguientes para dejar los roles listos. Cada empresa nace con siete roles
-iniciales (los cinco del documento y dos más); su matriz se puede cambiar,
-se pueden crear otros, y se desactivan, no se borran.
+exportar, configurar): 95 permisos, ya con los módulos de las fases
+siguientes para dejar los roles listos (con el plan de actas llegaron Actas
+al cliente, Actas de subcontratistas y Almacén, y Cantidades pasó a llamarse
+Mediciones de obra). Cada empresa nace con nueve roles iniciales (los cinco
+del documento y cuatro más); su matriz se puede cambiar, se pueden crear
+otros, y se desactivan, no se borran.
 
 | Rol inicial | Para qué |
 |---|---|
@@ -2730,6 +2739,15 @@ se pueden crear otros, y se desactivan, no se borran.
 | Auditor | Consulta todo, incluida la bitácora |
 | Responsable técnico de calidad | Aprueba criterios de aceptación y ensayos; cierra no conformidades |
 | Laboratorio | Muestras y resultados de ensayos |
+| Interventoría | Interventoría o cliente: consulta y aprueba en su paso las actas al cliente y el cierre de no conformidades; no ve subcontratos, costos ni almacén |
+| Almacenista | Elabora los vales de salida y consulta existencias y consumos (no aprueba sus vales) |
+
+Las empresas creadas antes del plan de actas reciben Interventoría y
+Almacenista al volver a ejecutar el SQL (queda en la bitácora como
+"Actualización de Control de Obra"). A sus otros roles **no se les cambia
+nada solo**: en **Administración → Roles y permisos**, un rol inicial al que
+le faltan los permisos de los módulos nuevos muestra un aviso con la lista y
+el botón **Marcarlos**; quedan solo si el administrador de la empresa guarda.
 
 ### Reglas que nadie se salta
 
@@ -2755,6 +2773,38 @@ empresa:
   las reglas (`security definer`), así ni con la clave del servidor se escribe
   saltándose las reglas.
 - Guardar sobre un cambio de otra persona responde 409 `version-conflict`.
+
+### Flujos de aprobación
+
+Pestaña **Flujos de aprobación** (la configuran los administradores de la
+empresa o del proyecto; la consultan quienes tienen Accesos: ver). Por cada
+tipo de documento (actas al cliente, actas de subcontratistas, inspecciones
+de calidad, cierre de no conformidades y vales de salida, los de los módulos
+que tenga la licencia) se definen de 2 a 6 pasos, cada uno con su nombre
+("Elabora", "Preaprueba", "Aprueba") y el rol que lo atiende. Ejemplo
+sugerido para las actas al cliente: Residente de obra (elabora) → Director
+de proyecto (preaprueba) → Interventoría (aprueba).
+
+- **Configurar** propone el flujo sugerido (sale de los roles iniciales); se
+  cambia el nombre o el rol de cada paso, se ordenan, se agregan o se
+  quitan. Muestra quiénes tienen hoy cada rol y avisa si un paso quedaría sin
+  nadie que lo atienda.
+- Cada rol necesita el permiso del módulo: el del primer paso, crear
+  (editar, en el cierre de no conformidades); los demás, aprobar. Si no lo
+  tiene, la pantalla lo dice y no deja guardar ("el rol Residente de obra no
+  tiene permiso de crear en actas al cliente").
+- Reglas al recorrer un flujo (en el servidor y en PostgreSQL): el primer
+  paso elabora y envía; los siguientes aprueban, el último en firme;
+  **devolver exige motivo y regresa al paso anterior**, no al principio (al
+  paso 0 el documento queda devuelto a quien lo elabora); **quien elabora no
+  aprueba lo suyo y una persona firma un solo paso del mismo documento**;
+  un documento enviado guarda la copia del flujo con que salió, así cambiar
+  el flujo no altera lo que ya está en trámite. Cada envío, aprobación,
+  devolución o anulación queda en un historial que no se puede cambiar
+  (`obra_aprobaciones`) y en la bitácora.
+- Sin flujo configurado, ese tipo de documento no se puede enviar a
+  aprobación. Los documentos llegan en las fases siguientes (inspecciones y
+  cierre de no conformidades en la 3, actas en la 4, vales en la 6).
 
 ### Estructura de obra
 
@@ -2811,11 +2861,15 @@ ejecutar sin perder datos; va por bloques numerados y cada bloque queda en
 | `obra_config` | Por proyecto: responsable técnico, tolerancia, aceptado con observaciones |
 | `obra_niveles` / `obra_nodos` | Niveles de la estructura (plantilla o proyecto) y sus valores |
 | `obra_bitacora` | La bitácora encadenada (solo inserción) |
+| `obra_flujos` | Por proyecto y tipo de documento: los pasos del flujo de aprobación (nombre y rol), versión |
+| `obra_aprobaciones` | Cada envío, aprobación, devolución o anulación de un documento (solo inserción; devolver y anular con motivo) |
 | `obra_migraciones` | Los bloques del SQL ya ejecutados |
 | `obra_permisos_de(empresa, proyecto, persona)` | Permisos vigentes hoy, recortados a la licencia |
 | `obra_licencia_usable`, `obra_es_admin_empresa`, `obra_es_admin_proyecto` | Las condiciones que revisan las funciones |
 | `obra_guardar_*`, `obra_registrar_licencia`, `obra_vincular_*`, `obra_desvincular_proyecto` | Los cambios, con sus reglas y su fila de bitácora |
 | `obra_bitacora_verificar(cadena)` | Recalcula una cadena y dice dónde se rompe |
+| `obra_guardar_flujo` | Guarda un flujo revisando roles activos con el permiso del módulo y la licencia |
+| `obra_flujo_accion` | El recorrido de un documento por su flujo (lo usan las funciones de cada documento; el servidor no la llama directo) |
 
 ### API
 
@@ -2833,25 +2887,28 @@ Todas bajo `/api/control-obra`, con `?projectId=` y el token de Trimble
 | `GET estructura` | Niveles, plantilla, valores y configuración | Estructura: ver o administradores |
 | `PUT estructura/niveles` / `PUT estructura/nodos` / `PUT config` | Cambiar la estructura y la configuración | Administradores (la plantilla, solo el de la empresa) |
 | `GET bitacora` / `POST bitacora/verificar` | Consultar y verificar | Bitácora: ver o administrador de la empresa |
+| `GET flujos` / `PUT flujos` | Consultar los flujos de aprobación / guardar el de un tipo de documento | Accesos: ver o administradores / administradores |
 | `GET/PUT admin/empresas`, `GET/POST admin/licencias`, `PUT admin/administradores`, `GET admin/bitacora`, `POST admin/bitacora/verificar` | Empresas, licencias y administradores | Administrador técnico |
 
 Errores (`code`): `sin-acceso`, `sin-permiso`, `no-admin`,
 `solo-admin-tecnico`, `solo-admin-empresa`, `es-administrador`, `propio`,
 `licencia-no-vigente`, `modulo-no-contratado`, `no-admin-trimble`,
-`otra-empresa` (403); `ya-vinculado`, `cupo-proyectos`, `cupo-usuarios`,
-`usuario-inactivo`, `nombre-repetido`, `nit-repetido`, `clave-repetida`,
-`valor-repetido`, `version-conflict` (409); `datos`, `no-miembro`,
-`rol-no-valido`, `nivel-no-valido`, `padre-no-valido`, `motivo-requerido`
-(400); `sin-empresa` (404); `trimble-session` (401: recargar Trimble Connect).
+`otra-empresa`, `paso-ajeno`, `auto-aprobacion` (403); `ya-vinculado`,
+`cupo-proyectos`, `cupo-usuarios`, `usuario-inactivo`, `nombre-repetido`,
+`nit-repetido`, `clave-repetida`, `valor-repetido`, `version-conflict`,
+`sin-flujo`, `estado-no-permite` (409); `datos`, `no-miembro`,
+`rol-no-valido`, `nivel-no-valido`, `padre-no-valido`, `motivo-requerido`,
+`flujo-no-valido` (400); `sin-empresa` (404); `trimble-session` (401: recargar Trimble Connect).
 
 El código está en `lib/control-obra/` (`types`, `roles`, `licencias`,
-`accesos` y `estructura` con las reglas puras, `bitacora` (la cadena),
+`accesos`, `estructura` y `flujos` con las reglas puras, `bitacora` (la cadena),
 `formato`, `validate`, `store` con Supabase o memoria, `service`, `routes`,
 `client`, con sus pruebas) y `components/control-obra/`.
 
 ### Instalar y poner en marcha
 
-1. En Supabase → SQL Editor, ejecuta `supabase/control-obra.sql`.
+1. En Supabase → SQL Editor, ejecuta `supabase/control-obra.sql` (cada vez
+   que cambie: se puede volver a ejecutar sin perder datos).
 2. En Vercel → Settings → Environment Variables, agrega
    `CONTROL_OBRA_ADMINS` con tu ID de usuario de Trimble Connect (varios,
    separados por coma) y vuelve a desplegar.

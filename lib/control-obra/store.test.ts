@@ -45,6 +45,7 @@ describe("aislamiento en cada consulta a Supabase", () => {
       ["getConfig", () => store.getConfig(A)],
       ["listNivelesProyecto", () => store.listNivelesProyecto(A)],
       ["listNodos", () => store.listNodos(A)],
+      ["listFlujos", () => store.listFlujos(A)],
     ];
     for (const [nombre, leer] of lecturas) {
       await leer();
@@ -84,6 +85,7 @@ describe("aislamiento en cada consulta a Supabase", () => {
       ["guardarConfig", () => store.guardarConfig(A, actor, { responsableTecnicoId: null, responsableTecnicoNombre: "", toleranciaVerificacionPct: 0, permiteAceptadoConObservaciones: false }, 0)],
       ["guardarNodo", () => store.guardarNodo(A, actor, { id: E, nivelClave: "torre", valor: "T1", padreId: null, responsableId: null, responsableNombre: "", inicio: null, fin: null, estado: "activo", nota: "", version: 0 })],
       ["desvincularProyecto", () => store.desvincularProyecto(A, actor, "fin")],
+      ["guardarFlujo", () => store.guardarFlujo(A, actor, { tipo: "acta_cliente", pasos: [{ nombre: "Elabora", rolId: E }, { nombre: "Aprueba", rolId: E }], version: 0 })],
     ];
     for (const [nombre, cambiar] of cambios) {
       await cambiar();

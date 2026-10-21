@@ -1,4 +1,4 @@
-import { Accion, ACCIONES_POR_MODULO, Modulo, Permiso, PERMISOS_VALIDOS } from "./types";
+import { Accion, ACCIONES_POR_MODULO, Modulo, Permiso, PERMISOS_VALIDOS, Rol } from "./types";
 
 /** A role as created with a new company. */
 export interface RolInicial {
@@ -26,7 +26,8 @@ function matriz(fila: Partial<Record<Modulo, string>>): Permiso[] {
 
 /**
  * The initial roles of every company (D13): those of the document plus the
- * technical quality lead (approves acceptance criteria) and the laboratory.
+ * technical quality lead (approves acceptance criteria) and the laboratory,
+ * and since the actas plan, the inspection firm (or client) and the warehouse.
  * Each company can change their matrix and create others afterwards.
  */
 export const ROLES_INICIALES: RolInicial[] = [
@@ -35,7 +36,7 @@ export const ROLES_INICIALES: RolInicial[] = [
     nombre: "Director de proyecto",
     descripcion: "Consulta indicadores y aprueba operaciones según sus atribuciones.",
     permisos: matriz({
-      panel: "V", estructura: "V", modelos: "VF", cantidades: "VFANX", avance: "VANX", costos: "VANX", criterios: "V", lotes: "V",
+      panel: "V", estructura: "V", modelos: "VF", cantidades: "VFANX", avance: "VANX", actas_cliente: "VANDX", actas_sub: "VANDX", costos: "VANX", almacen: "VX", criterios: "V", lotes: "V",
       ensayos: "VX", inspecciones: "VX", nc: "VANX", aceptacion: "VAN", documentos: "VD", reportes: "VX", bitacora: "V", accesos: "V",
     }),
   },
@@ -44,7 +45,7 @@ export const ROLES_INICIALES: RolInicial[] = [
     nombre: "Residente de obra",
     descripcion: "Reporta cantidades, avance y observaciones.",
     permisos: matriz({
-      panel: "V", estructura: "V", modelos: "VC", cantidades: "VCEDX", avance: "VCEDX", costos: "V", criterios: "V", lotes: "VCEND",
+      panel: "V", estructura: "V", modelos: "VC", cantidades: "VCEDX", avance: "VCEDX", actas_cliente: "VCEDX", actas_sub: "VCEDX", costos: "V", almacen: "VAX", criterios: "V", lotes: "VCEND",
       ensayos: "V", inspecciones: "VCED", nc: "VCED", aceptacion: "V", documentos: "VD", reportes: "VX",
     }),
   },
@@ -52,7 +53,7 @@ export const ROLES_INICIALES: RolInicial[] = [
     clave: "costos",
     nombre: "Profesional de costos",
     descripcion: "Consulta y gestiona la información de costos autorizada.",
-    permisos: matriz({ panel: "V", estructura: "V", modelos: "V", cantidades: "VX", avance: "VCEX", costos: "VCENDX", documentos: "VD", reportes: "VX" }),
+    permisos: matriz({ panel: "V", estructura: "V", modelos: "V", cantidades: "VX", avance: "VCEX", actas_cliente: "VX", actas_sub: "VX", costos: "VCENDX", almacen: "VX", documentos: "VD", reportes: "VX" }),
   },
   {
     clave: "inspector",
@@ -68,7 +69,7 @@ export const ROLES_INICIALES: RolInicial[] = [
     nombre: "Auditor",
     descripcion: "Consulta la información y la bitácora autorizadas.",
     permisos: matriz({
-      panel: "V", estructura: "V", modelos: "V", cantidades: "VX", avance: "VX", costos: "VX", criterios: "V", lotes: "V", ensayos: "VX",
+      panel: "V", estructura: "V", modelos: "V", cantidades: "VX", avance: "VX", actas_cliente: "VX", actas_sub: "VX", costos: "VX", almacen: "VX", criterios: "V", lotes: "V", ensayos: "VX",
       inspecciones: "VX", nc: "VX", aceptacion: "V", documentos: "V", reportes: "VX", bitacora: "VX", accesos: "V",
     }),
   },
@@ -87,7 +88,37 @@ export const ROLES_INICIALES: RolInicial[] = [
     descripcion: "Registra muestras y resultados de ensayos.",
     permisos: matriz({ panel: "V", criterios: "V", lotes: "VCED", ensayos: "VCEDX", nc: "VC", documentos: "VD" }),
   },
+  {
+    clave: "interventoria",
+    nombre: "Interventoría",
+    descripcion: "Interventoría o cliente: consulta y aprueba en su paso las actas al cliente y el cierre de no conformidades.",
+    permisos: matriz({
+      panel: "V", estructura: "V", cantidades: "V", avance: "V", actas_cliente: "VAX", inspecciones: "VX", nc: "VAX", documentos: "V", reportes: "VX",
+    }),
+  },
+  {
+    clave: "almacenista",
+    nombre: "Almacenista",
+    descripcion: "Elabora los vales de salida de material y consulta existencias y consumos.",
+    permisos: matriz({ panel: "V", estructura: "V", almacen: "VCEX", documentos: "VD" }),
+  },
 ];
+
+/** The modules added after the first companies were created: their permissions are offered to the initial roles, never added silently. */
+export const MODULOS_NUEVOS: Modulo[] = ["actas_cliente", "actas_sub", "almacen"];
+
+/**
+ * The permissions of the new modules that an initial role would have today and
+ * this company's copy lacks (to offer "add the suggested permissions"). Only
+ * the new modules: what an administrator took away from the others stays so.
+ */
+export function permisosSugeridos(rol: Pick<Rol, "clave" | "sistema" | "permisos">): Permiso[] {
+  if (!rol.sistema) return [];
+  const inicial = ROLES_INICIALES.find((r) => r.clave === rol.clave);
+  if (!inicial) return [];
+  const tiene = new Set(rol.permisos);
+  return inicial.permisos.filter((p) => MODULOS_NUEVOS.includes(p.split(".")[0] as Modulo) && !tiene.has(p));
+}
 
 const VALIDOS = new Set<string>(PERMISOS_VALIDOS);
 

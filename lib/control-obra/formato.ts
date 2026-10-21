@@ -1,7 +1,7 @@
 import { fecha } from "../compras/formato";
 import { esMotivo, MENSAJES } from "./accesos";
 import { EVENTOS_LICENCIA } from "./licencias";
-import { ACCIONES, EntradaBitacora, GRUPOS_LICENCIA, MODULOS } from "./types";
+import { ACCIONES, EntradaBitacora, EstadoFlujo, GRUPOS_LICENCIA, MODULOS, TIPOS_FLUJO } from "./types";
 
 /** How the bitácora reads on screen. */
 
@@ -41,7 +41,29 @@ const ACCIONES_BITACORA: Record<string, string> = {
   "config.guardar": "Cambiar la configuración del proyecto",
   "bitacora.consultar": "Consultar la bitácora",
   "bitacora.verificar": "Verificar la integridad de la bitácora",
+  "flujos.consultar": "Consultar los flujos de aprobación",
+  "flujos.guardar": "Cambiar un flujo de aprobación",
+  "flujos.cambiar": "Cambiar un flujo de aprobación",
+  "flujo.enviar": "Enviar a aprobación",
+  "flujo.aprobar": "Aprobar",
+  "flujo.devolver": "Devolver al paso anterior",
+  "flujo.anular": "Anular",
 };
+
+export const ESTADOS_FLUJO: Record<EstadoFlujo, { texto: string; color: string; fondo: string }> = {
+  borrador: { texto: "Borrador", color: "#4b5563", fondo: "#eef1f4" },
+  devuelto: { texto: "Devuelto", color: "#7a5a00", fondo: "#fff4d1" },
+  en_tramite: { texto: "En aprobación", color: "#1d4f91", fondo: "#e3edfb" },
+  aprobado: { texto: "Aprobado", color: "#2e6b22", fondo: "#e3f3de" },
+  anulado: { texto: "Anulado", color: "#b3261e", fondo: "#fbe4e2" },
+};
+
+const nombreTipo = (tipo: unknown) => TIPOS_FLUJO.find((t) => t.id === tipo)?.nombre ?? String(tipo ?? "");
+
+/** "Elabora: Residente de obra → Aprueba: Director de proyecto". */
+function pasosEnPalabras(x: unknown): string {
+  return Array.isArray(x) ? (x as { nombre?: unknown; rol?: unknown }[]).map((p) => `${String(p.nombre ?? "")}: ${String(p.rol ?? "")}`).join(" → ") : "";
+}
 
 export function nombreAccion(accion: string): string {
   return ACCIONES_BITACORA[accion] ?? accion;
@@ -102,7 +124,10 @@ export function sobreQue(e: EntradaBitacora): string {
       return `Nivel ${texto(d.nombre) ?? e.objetoId}`;
     case "nodo":
       return texto(d.valor) ?? "Valor de un nivel";
+    case "flujo":
+      return `Flujo de ${nombreTipo(e.objetoId).toLowerCase()}`;
     default:
+      if (TIPOS_FLUJO.some((t) => t.id === e.objetoTipo)) return `${nombreTipo(e.objetoTipo)}: ${texto(d.documento) ?? e.objetoId.slice(0, 8)}`;
       return `${e.objetoTipo} ${e.objetoId}`.trim();
   }
 }
@@ -156,6 +181,14 @@ export function detalleEntrada(e: EntradaBitacora): string {
   if (e.accion.startsWith("estructura.nodo.")) {
     const antes = d.antes as { valor?: unknown; estado?: unknown } | null;
     return `${valor(d.nivel)}: ${antes && antes.valor !== d.valor ? `${valor(antes.valor)} → ` : ""}${valor(d.valor)}${d.responsable ? `, responsable ${valor(d.responsable)}` : ""}, ${valor(d.estado)}`;
+  }
+  if (e.accion === "flujos.cambiar") {
+    const antes = pasosEnPalabras(d.antes);
+    return `${nombreTipo(d.tipo)}: ${antes ? `antes ${antes}; ahora ` : ""}${pasosEnPalabras(d.despues)}`;
+  }
+  if (e.accion.startsWith("flujo.")) {
+    const estado = ESTADOS_FLUJO[d.estado as EstadoFlujo]?.texto.toLowerCase() ?? valor(d.estado);
+    return conMotivo(`Paso ${valor(d.paso)}: queda ${estado}`);
   }
   if (e.accion === "bitacora.verificar") return d.integra ? `Íntegra (${valor(d.filas)} filas)` : `Rota en la fila ${valor(d.rotaEn)} de ${valor(d.filas)}`;
   return conMotivo("");

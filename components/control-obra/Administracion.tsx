@@ -2,6 +2,8 @@
 
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import { estadoAsignacion, puedeCambiarAsignacion } from "../../lib/control-obra/accesos";
+import { nombrePermiso } from "../../lib/control-obra/formato";
+import { permisosSugeridos } from "../../lib/control-obra/roles";
 import type { ObraApi } from "../../lib/control-obra/client";
 import { AccesosResponse, ACCIONES, ACCIONES_POR_MODULO, Asignacion, EstadoResponse, Permiso, MODULOS, Rol, UsuarioEmpresa } from "../../lib/control-obra/types";
 import { ESTADO_ASIGNACION, fecha, fechaHora } from "../../lib/compras/formato";
@@ -591,9 +593,27 @@ function EditorRol({
     }
   }
 
+  // Initial roles created before the actas and warehouse modules: their new permissions are offered, never added silently.
+  const sugeridos = rol ? permisosSugeridos(rol).filter((p) => !b.permisos.has(p)) : [];
+
   return (
     <div style={{ background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, padding: 14, display: "grid", gap: 12 }}>
       {editableMotivo && <Notice kind="info">{editableMotivo}</Notice>}
+      {sugeridos.length > 0 && (
+        <Notice kind="warning">
+          Este rol se creó antes de los módulos de actas y almacén. Los permisos que el rol inicial tiene ahora en ellos son:{" "}
+          {sugeridos.map(nombrePermiso).join("; ")}.
+          {editable && (
+            <>
+              {" "}
+              <button type="button" style={linkButton} onClick={() => setB((x) => ({ ...x, permisos: new Set([...x.permisos, ...sugeridos]) }))}>
+                Marcarlos
+              </button>{" "}
+              (se ven en amarillo; quedan solo si guardas).
+            </>
+          )}
+        </Notice>
+      )}
       <div style={{ display: "grid", gridTemplateColumns: "minmax(180px, 1fr) 2fr", gap: 12 }}>
         <div>
           <label style={labelStyle} htmlFor="rol-nombre">

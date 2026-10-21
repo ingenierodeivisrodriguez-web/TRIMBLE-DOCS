@@ -3,12 +3,14 @@ import { hoyIso } from "../manuales/licencia";
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { asignacionVigente, esMotivo, ESTADO_HTTP, estadoAsignacion, MotivoRechazo, superaCupoUsuarios, usuarioDe } from "./accesos";
 import { cadenaDe, HASH_INICIAL, hashDe, verificarCadena } from "./bitacora";
-import { licenciaPermiteTrabajar, licenciaVigente, estadoLicencia, permisosContratados } from "./licencias";
+import { permisoDePaso } from "./flujos";
+import { licenciaPermiteTrabajar, licenciaVigente, estadoLicencia, modulosHabilitados, permisosContratados } from "./licencias";
 import { ordenar, RolInicial } from "./roles";
 import {
   Asignacion,
   CambioAsignacion,
   CambioEmpresa,
+  CambioFlujo,
   CambioNivel,
   CambioNodo,
   CambioRol,
@@ -17,6 +19,7 @@ import {
   Empresa,
   EntradaBitacora,
   FiltroBitacora,
+  Flujo,
   GrupoLicencia,
   Licencia,
   MAX_BITACORA,
@@ -27,6 +30,8 @@ import {
   Permiso,
   ProyectoEmpresa,
   Rol,
+  TIPOS_FLUJO,
+  TipoFlujo,
   UsuarioEmpresa,
   VerificacionBitacora,
 } from "./types";
@@ -99,6 +104,11 @@ export interface ObraStore {
   /** projectId null: the company's template. */
   guardarNivel(empresaId: string, projectId: string | null, actor: Actor, cambio: CambioNivel & { id: string }): Promise<number>;
   guardarNodo(a: Alcance, actor: Actor, cambio: CambioNodo & { id: string }): Promise<number>;
+
+  /** The approval flows configured in the project (only the kinds that have one). */
+  listFlujos(a: Alcance): Promise<Flujo[]>;
+  /** Creates (version 0) or changes the flow of a kind of document; returns its new version. */
+  guardarFlujo(a: Alcance, actor: Actor, cambio: CambioFlujo): Promise<number>;
 
   /** Adds a row to the bitácora (its position and hashes are set by the database). */
   registrar(e: NuevaEntrada): Promise<void>;
@@ -224,6 +234,13 @@ interface NodoRow {
   nota: string;
   version: number;
 }
+interface FlujoRow {
+  tipo: TipoFlujo;
+  pasos: { nombre: string; rolId: string }[];
+  version: number;
+  actualizado: string | null;
+  actualizado_por: string | null;
+}
 interface BitacoraRow {
   n: number | string;
   cadena: string;
@@ -338,6 +355,8 @@ const SEL_USUARIO = "id,user_id,email,nombre,admin_empresa,activo,version,otorga
 const SEL_ASIGNACION = "project_id,user_id,nombre,email,rol_id,admin_proyecto,desde,hasta,activo,version,otorgado_por";
 const SEL_NIVEL = "id,project_id,clave,nombre,orden,padre_clave,fuente,clave_fuente,activo,version";
 const SEL_NODO = "id,nivel_clave,valor,padre_id,responsable_id,responsable_nombre,inicio,fin,estado,nota,version";
+const SEL_FLUJO = "tipo,pasos,version,actualizado,actualizado_por";
+const flujoDeFila = (r: FlujoRow): Flujo => ({ tipo: r.tipo, pasos: r.pasos, version: r.version, actualizado: r.actualizado, actualizadoPor: r.actualizado_por });
 const SEL_BITACORA = "n,cadena,creado,empresa_id,project_id,actor_id,actor_nombre,accion,modulo,objeto_tipo,objeto_id,cambios,motivo,resultado,origen,hash_anterior,hash";
 
 const INDICES_UNICOS: [RegExp, MotivoRechazo][] = [
@@ -515,6 +534,20 @@ export function supabaseStore(): ObraStore | null {
         p_version: c.version,
       }),
 
+    async listFlujos(a) {
+      return (await all<FlujoRow>(`/obra_flujos?${deAlcance(a)}&select=${SEL_FLUJO}&order=tipo.asc`)).map(flujoDeFila);
+    },
+    guardarFlujo: (a, actor, c) =>
+      rpc<number>("obra_guardar_flujo", {
+        p_empresa_id: a.empresaId,
+        p_project_id: a.projectId,
+        p_actor_id: actor.id,
+        p_actor_nombre: actor.nombre,
+        p_tipo: c.tipo,
+        p_pasos: c.pasos.map((x) => ({ nombre: x.nombre, rolId: x.rolId })),
+        p_version: c.version,
+      }),
+
     async registrar(e) {
       await call("/obra_bitacora", {
         method: "POST",
@@ -611,6 +644,7 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
   const configs = new Map<string, ConfigProyecto>();
   const niveles = new Map<string, Nivel & { empresaId: string }>();
   const nodos = new Map<string, Nodo & { empresaId: string; projectId: string }>();
+  const flujos = new Map<string, Flujo & { empresaId: string; projectId: string }>();
   const bitacora: EntradaBitacora[] = [];
   /** One insertion at a time per chain (like the advisory lock of the SQL trigger). */
   const colas = new Map<string, Promise<void>>();
@@ -916,6 +950,35 @@ export function memoryStore(hoy: () => string = () => hoyIso()): ObraStore {
         estado: c.estado,
         antes: antes ? { valor: antes.valor, responsable: antes.responsableNombre, inicio: antes.inicio, fin: antes.fin, estado: antes.estado } : null,
       });
+      return version;
+    },
+
+    async listFlujos(a) {
+      return [...flujos.values()]
+        .filter((f) => f.empresaId === a.empresaId && f.projectId === a.projectId)
+        .map((f) => sin(f, "empresaId", "projectId"))
+        .sort((x, y) => x.tipo.localeCompare(y.tipo));
+    },
+    async guardarFlujo(a, actor, c) {
+      if (!vinculado(a)) throw rechazo("sin-empresa");
+      if (!esAdminE(a.empresaId, actor.id) && !esAdminP(a, actor.id)) throw rechazo("no-admin");
+      const tipo = TIPOS_FLUJO.find((t) => t.id === c.tipo);
+      if (!tipo) throw rechazo("datos");
+      if (!modulosHabilitados(licenciaVigente(licenciasDe(a.empresaId))?.grupos ?? []).has(tipo.modulo)) throw rechazo("modulo-no-contratado");
+      if (c.pasos.length < 2 || c.pasos.length > 6) throw rechazo("flujo-no-valido");
+      const pasos = c.pasos.map((x, i) => {
+        const rol = roles.get(x.rolId);
+        const nombre = x.nombre.trim();
+        if (!nombre || nombre.length > 40 || !rol || rol.empresaId !== a.empresaId || !rol.activo || !rol.permisos.includes(permisoDePaso(c.tipo, i))) throw rechazo("flujo-no-valido");
+        return { nombre, rolId: x.rolId };
+      });
+      const k = `${a.empresaId}|${a.projectId}|${c.tipo}`;
+      const antes = flujos.get(k);
+      if ((antes?.version ?? 0) !== c.version) throw rechazo("version-conflict");
+      const version = c.version + 1;
+      flujos.set(k, { empresaId: a.empresaId, projectId: a.projectId, tipo: c.tipo, pasos, version, actualizado: ahora(), actualizadoPor: actor.nombre });
+      const nombres = (l: { nombre: string; rolId: string }[]) => l.map((x) => ({ nombre: x.nombre, rol: roles.get(x.rolId)?.nombre ?? "" }));
+      await ok(a.empresaId, a.projectId, actor, "flujos.cambiar", tipo.modulo, "flujo", c.tipo, { tipo: c.tipo, antes: antes ? nombres(antes.pasos) : null, despues: nombres(pasos) });
       return version;
     },
 

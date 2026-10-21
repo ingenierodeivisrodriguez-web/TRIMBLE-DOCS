@@ -4,6 +4,7 @@ import type {
   AccesosResponse,
   CambioAsignacion,
   CambioEmpresa,
+  CambioFlujo,
   CambioNivel,
   CambioNodo,
   CambioRol,
@@ -13,6 +14,7 @@ import type {
   EstadoResponse,
   EstructuraResponse,
   FiltroBitacora,
+  FlujosResponse,
   Licencia,
   NuevaLicencia,
   VerificacionBitacora,
@@ -32,6 +34,8 @@ export interface ObraApi {
   guardarNivel(cambio: Omit<CambioNivel, "projectId"> & { plantilla: boolean }): Promise<EstructuraResponse>;
   guardarNodo(cambio: CambioNodo): Promise<EstructuraResponse>;
   guardarConfig(config: ConfigProyecto): Promise<EstructuraResponse>;
+  getFlujos(): Promise<FlujosResponse>;
+  guardarFlujo(cambio: CambioFlujo): Promise<FlujosResponse>;
   getBitacora(filtro: FiltroBitacora): Promise<{ entradas: EntradaBitacora[]; todaLaEmpresa: boolean }>;
   verificarBitacora(): Promise<VerificacionBitacora>;
   admin: {
@@ -78,6 +82,8 @@ export function obraApi(projectId: string, auth: TokenSource): ObraApi {
     guardarNivel: (cambio) => put<EstructuraResponse>("/estructura/niveles", cambio),
     guardarNodo: (cambio) => put<EstructuraResponse>("/estructura/nodos", cambio),
     guardarConfig: (config) => put<EstructuraResponse>("/config", config),
+    getFlujos: () => request<FlujosResponse>("/flujos"),
+    guardarFlujo: (cambio) => put<FlujosResponse>("/flujos", cambio),
     getBitacora: (f) => request<{ entradas: EntradaBitacora[]; todaLaEmpresa: boolean }>(`/bitacora${consultaBitacora(f)}`),
     verificarBitacora: () => post<VerificacionBitacora>("/bitacora/verificar"),
     admin: {

@@ -8,6 +8,12 @@ definición funcional, técnica y de implementación", versión 1.0 (octubre de
 **(doc §N)**, donde N es la sección del documento. El dueño aprobó el diseño y
 las decisiones D1 a D13 el 20-10-2026 ("de acuerdo y sigue con la Fase 3").
 
+> **21-10-2026:** el dueño aprobó el **plan de actas**
+> ([`plan-actas.md`](plan-actas.md)), que reemplaza las fases 4 a 8 de este
+> diseño y cambia D1 (Presupuesto lee las actas aprobadas como fuente de su
+> avance) y D9 (costo real = vales de salida + actas de subcontrato). Lo
+> demás de este documento sigue como referencia; donde choque, manda el plan.
+
 ## Contenido
 
 1. Decisiones del dueño

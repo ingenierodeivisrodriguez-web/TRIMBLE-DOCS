@@ -28,7 +28,7 @@ describe("cómo se lee la bitácora", () => {
   it("cada acción y permiso tiene su texto", () => {
     assert.equal(nombreAccion("licencias.registrar"), "Registrar licencia");
     assert.equal(nombreAccion("algo.nuevo"), "algo.nuevo");
-    assert.equal(nombrePermiso("cantidades.verificar"), "Cantidades: Verificar");
+    assert.equal(nombrePermiso("cantidades.verificar"), "Mediciones de obra: Verificar");
   });
 
   it("un acceso dice la persona, el rol y la vigencia antes y después", () => {
@@ -66,5 +66,32 @@ describe("cómo se lee la bitácora", () => {
     const e = fila({ accion: "estructura.nodo.crear", objetoTipo: "nodo", objetoId: "4f1c-…", cambios: { nivel: "nivel", valor: "Piso 5", estado: "activo" } });
     assert.equal(sobreQue(e), "Piso 5");
     assert.equal(detalleEntrada(e), "nivel: Piso 5, activo");
+  });
+
+  it("un cambio de flujo dice los pasos con sus roles, antes y ahora", () => {
+    const e = fila({
+      accion: "flujos.cambiar",
+      modulo: "actas_cliente",
+      objetoTipo: "flujo",
+      objetoId: "acta_cliente",
+      cambios: {
+        tipo: "acta_cliente",
+        antes: [{ nombre: "Elabora", rol: "Residente de obra" }, { nombre: "Aprueba", rol: "Director de proyecto" }],
+        despues: [{ nombre: "Elabora", rol: "Residente de obra" }, { nombre: "Preaprueba", rol: "Director de proyecto" }, { nombre: "Aprueba", rol: "Interventoría" }],
+      },
+    });
+    assert.equal(nombreAccion(e.accion), "Cambiar un flujo de aprobación");
+    assert.equal(sobreQue(e), "Flujo de actas al cliente");
+    assert.equal(
+      detalleEntrada(e),
+      "Actas al cliente: antes Elabora: Residente de obra → Aprueba: Director de proyecto; ahora Elabora: Residente de obra → Preaprueba: Director de proyecto → Aprueba: Interventoría"
+    );
+  });
+
+  it("una devolución en el flujo dice el paso, cómo queda y el motivo", () => {
+    const e = fila({ accion: "flujo.devolver", objetoTipo: "acta_cliente", objetoId: "4f1c2a9e-…", cambios: { paso: "Aprueba", desde: 2, hasta: 1, estado: "en_tramite" }, motivo: "Revisar el Piso 2" });
+    assert.equal(nombreAccion(e.accion), "Devolver al paso anterior");
+    assert.equal(detalleEntrada(e), "Paso Aprueba: queda en aprobación. Motivo: Revisar el Piso 2");
+    assert.equal(sobreQue(e), "Actas al cliente: 4f1c2a9e");
   });
 });

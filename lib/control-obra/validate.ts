@@ -6,6 +6,7 @@ import { esPermisoValido } from "./roles";
 import {
   CambioAsignacion,
   CambioEmpresa,
+  CambioFlujo,
   CambioNivel,
   CambioNodo,
   CambioRol,
@@ -17,8 +18,10 @@ import {
   GRUPOS_LICENCIA,
   GrupoLicencia,
   MAX_BITACORA,
+  MAX_PASOS,
   MODULOS,
   NuevaLicencia,
+  TIPOS_FLUJO,
 } from "./types";
 
 /** Checks everything that comes from the browser before the rules see it. */
@@ -285,4 +288,17 @@ export function leerFiltroBitacora(params: URLSearchParams): FiltroBitacora {
 /** The empresa of the technical administrator's queries (none: the global chain). */
 export function leerEmpresaOpcional(value: string | null): string | null {
   return value ? uuid(value, "Empresa") : null;
+}
+
+/** A project's flow for one kind of document: its steps (the rules check the roles). */
+export function leerCambioFlujo(body: unknown): CambioFlujo {
+  const o = objeto(body);
+  const tipo = TIPOS_FLUJO.find((t) => t.id === o.tipo)?.id ?? bad("Tipo de documento no válido.");
+  if (!Array.isArray(o.pasos) || o.pasos.length > MAX_PASOS) bad(`Los pasos deben ser una lista de hasta ${MAX_PASOS}.`);
+  const pasos = o.pasos.map((x, i) => {
+    const p = objeto(x);
+    if (typeof p.rolId !== "string" || !UUID_RE.test(p.rolId)) bad(`Paso ${i + 1}: rol no válido.`);
+    return { nombre: texto(p.nombre, `Paso ${i + 1}`, 40).trim(), rolId: p.rolId };
+  });
+  return { tipo, pasos, version: version(o.version) };
 }

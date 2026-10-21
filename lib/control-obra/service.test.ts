@@ -106,14 +106,14 @@ describe("administrador técnico", () => {
     );
   });
 
-  it("una empresa nueva trae los 7 roles y la plantilla de niveles; el NIT se valida con su dígito", async () => {
+  it("una empresa nueva trae los 9 roles y la plantilla de niveles; el NIT se valida con su dígito", async () => {
     const { store, A } = await montado();
     const e = (await getEmpresas(ctx(store, tec))).empresas.find((x) => x.id === A)!;
     assert.equal(e.nit, "900123456");
     assert.equal(e.dv, 8);
     assert.equal(e.estadoLicencia, "sin-vencimiento");
     assert.deepEqual(e.administradores.map((u) => [u.email, u.userId]), [["ana@obra.co", "ana"]], "Ana quedó ligada al entrar");
-    assert.equal((await getAccesos(ctx(store, ana))).roles.length, 7);
+    assert.equal((await getAccesos(ctx(store, ana))).roles.length, 9);
     await rechaza(guardarEmpresa(ctx(store, tec), { nombre: "Y", nit: "900123456-1", activa: true, version: 0 }), 400, "datos");
     await rechaza(guardarEmpresa(ctx(store, tec), { nombre: "Z", nit: "900123456-8", activa: true, version: 0 }), 409, "nit-repetido");
   });

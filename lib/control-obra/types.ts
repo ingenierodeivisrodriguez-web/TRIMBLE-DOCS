@@ -14,7 +14,10 @@ export type Modulo =
   | "modelos"
   | "cantidades"
   | "avance"
+  | "actas_cliente"
+  | "actas_sub"
   | "costos"
+  | "almacen"
   | "criterios"
   | "lotes"
   | "ensayos"
@@ -32,12 +35,13 @@ export type Accion = "ver" | "crear" | "editar" | "verificar" | "aprobar" | "anu
 export type Permiso = `${Modulo}.${Accion}`;
 
 /** What the license sells: groups of modules. Panel, bitácora and accesos always come with it. */
-export type GrupoLicencia = "bim" | "cantidades" | "costos" | "calidad" | "documentos" | "reportes";
+export type GrupoLicencia = "bim" | "cantidades" | "costos" | "almacen" | "calidad" | "documentos" | "reportes";
 
 export const GRUPOS_LICENCIA: { id: GrupoLicencia; nombre: string; modulos: Modulo[] }[] = [
   { id: "bim", nombre: "Estructura de obra y modelos 3D", modulos: ["estructura", "modelos"] },
-  { id: "cantidades", nombre: "Cantidades y avance físico", modulos: ["cantidades", "avance"] },
+  { id: "cantidades", nombre: "Mediciones, actas y avance físico", modulos: ["cantidades", "avance", "actas_cliente", "actas_sub"] },
   { id: "costos", nombre: "Costos", modulos: ["costos"] },
+  { id: "almacen", nombre: "Almacén y consumo de materiales", modulos: ["almacen"] },
   { id: "calidad", nombre: "Calidad, inspecciones y aceptación", modulos: ["criterios", "lotes", "ensayos", "inspecciones", "nc", "aceptacion"] },
   { id: "documentos", nombre: "Documentos y CDE", modulos: ["documentos"] },
   { id: "reportes", nombre: "Reportes", modulos: ["reportes"] },
@@ -50,9 +54,12 @@ export const MODULOS: { id: Modulo; nombre: string; ayuda: string }[] = [
   { id: "panel", nombre: "Panel de control", ayuda: "Indicadores del proyecto con su fecha de corte, alcance, fuente y regla." },
   { id: "estructura", nombre: "Estructura de obra", ayuda: "Torres, etapas, zonas, niveles, frentes y disciplinas del proyecto, con responsables y fechas." },
   { id: "modelos", nombre: "Modelos 3D y elementos", ayuda: "Versiones leídas, elementos por IFCGUID e incidencias de identificación." },
-  { id: "cantidades", nombre: "Cantidades", ayuda: "Cantidades reportadas, verificadas, aceptadas y rechazadas." },
+  { id: "cantidades", nombre: "Mediciones de obra", ayuda: "Lo ejecutado por partida, medido desde el modelo o a mano, con su ubicación y su contrato." },
   { id: "avance", nombre: "Avance físico", ayuda: "Cortes de avance: planificado, reportado, verificado y aceptado." },
-  { id: "costos", nombre: "Costos", ayuda: "Costos reales, estimados y comprometidos fuera de Compras." },
+  { id: "actas_cliente", nombre: "Actas al cliente", ayuda: "Actas de obra al cliente a precio de venta, con su flujo de aprobación." },
+  { id: "actas_sub", nombre: "Actas de subcontratistas", ayuda: "Actas de cada contrato de Compras a su precio, con amortización y retención." },
+  { id: "costos", nombre: "Costos", ayuda: "Costo real (materiales consumidos y actas de subcontrato) frente al presupuesto." },
+  { id: "almacen", nombre: "Almacén", ayuda: "Entradas desde Compras, vales de salida, existencias, consumo y desperdicio." },
   { id: "criterios", nombre: "Materiales y criterios", ayuda: "Materiales y criterios de aceptación del proyecto (los aprueba el responsable técnico)." },
   { id: "lotes", nombre: "Lotes y muestras", ayuda: "Lotes de material, sus certificados y las muestras tomadas." },
   { id: "ensayos", nombre: "Ensayos", ayuda: "Resultados de laboratorio evaluados contra el criterio aprobado." },
@@ -84,7 +91,10 @@ export const ACCIONES_POR_MODULO: Record<Modulo, Accion[]> = {
   modelos: ["ver", "crear", "verificar"],
   cantidades: ["ver", "crear", "editar", "verificar", "aprobar", "anular", "documentos", "exportar"],
   avance: ["ver", "crear", "editar", "aprobar", "anular", "documentos", "exportar"],
+  actas_cliente: ["ver", "crear", "editar", "aprobar", "anular", "documentos", "exportar"],
+  actas_sub: ["ver", "crear", "editar", "aprobar", "anular", "documentos", "exportar"],
   costos: ["ver", "crear", "editar", "aprobar", "anular", "documentos", "exportar"],
+  almacen: ["ver", "crear", "editar", "aprobar", "anular", "exportar"],
   criterios: ["ver", "crear", "editar", "aprobar", "anular", "administrar"],
   lotes: ["ver", "crear", "editar", "aprobar", "anular", "documentos"],
   ensayos: ["ver", "crear", "editar", "verificar", "aprobar", "anular", "documentos", "exportar"],
@@ -379,6 +389,97 @@ export interface VerificacionBitacora {
   integra: boolean;
   /** First position whose hash doesn't match, or that doesn't follow the previous one. */
   rotaEn: number | null;
+}
+
+// ---------------------------------------------------------------- approval flows
+
+/** The kinds of documents that go through an approval flow, configured per project. */
+export type TipoFlujo = "acta_cliente" | "acta_subcontrato" | "inspeccion" | "cierre_nc" | "vale_salida";
+
+export const TIPOS_FLUJO: {
+  id: TipoFlujo;
+  nombre: string;
+  /** The module whose permissions the steps need. */
+  modulo: Modulo;
+  /** What the first step (who prepares and sends) needs; the others need "aprobar". */
+  accionInicial: Accion;
+  ayuda: string;
+}[] = [
+  { id: "acta_cliente", nombre: "Actas al cliente", modulo: "actas_cliente", accionInicial: "crear", ayuda: "El acta de obra al cliente; al aprobarse, sus mediciones quedan aprobadas." },
+  { id: "acta_subcontrato", nombre: "Actas de subcontratistas", modulo: "actas_sub", accionInicial: "crear", ayuda: "El acta de cada contrato de Compras." },
+  { id: "inspeccion", nombre: "Inspecciones de calidad", modulo: "inspecciones", accionInicial: "crear", ayuda: "La lista de chequeo de una partida, por elementos o por ubicación." },
+  { id: "cierre_nc", nombre: "Cierre de no conformidades", modulo: "nc", accionInicial: "editar", ayuda: "Quien corrigió la envía a verificar; quien la cierra no puede ser quien corrigió." },
+  { id: "vale_salida", nombre: "Vales de salida de almacén", modulo: "almacen", accionInicial: "crear", ayuda: "El material que sale del almacén a una partida y una ubicación." },
+];
+
+export const MIN_PASOS = 2;
+export const MAX_PASOS = 6;
+
+/** One step: who acts in it (a role of the company) and what it is called ("Preaprueba"). */
+export interface PasoFlujo {
+  nombre: string;
+  rolId: string;
+  /** The role's name when the document was sent (shown even if the role is renamed later). */
+  rolNombre?: string;
+}
+
+/** A project's flow for one kind of document; pasos empty: not configured yet. */
+export interface Flujo {
+  tipo: TipoFlujo;
+  pasos: PasoFlujo[];
+  version: number;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+}
+
+export interface CambioFlujo {
+  tipo: TipoFlujo;
+  pasos: { nombre: string; rolId: string }[];
+  /** 0: the first time. */
+  version: number;
+}
+
+/**
+ * Where a document stands in its flow: borrador (never sent), devuelto (back with
+ * whoever prepares it), en_tramite (waiting for step `paso`), aprobado, anulado.
+ */
+export type EstadoFlujo = "borrador" | "devuelto" | "en_tramite" | "aprobado" | "anulado";
+export type AccionFlujo = "enviar" | "aprobar" | "devolver" | "anular";
+
+/** The flow a document follows: a copy of the project's flow when it was first sent, the step it waits for and who signed each step. */
+export interface FlujoDocumento {
+  pasos: PasoFlujo[];
+  /** The step waiting (1…pasos.length − 1); pasos.length once approved; 0 while with whoever prepares it. */
+  paso: number;
+  /** Who signed each step in force, by step index ("0" sent it). A return to a step removes its signature. */
+  firmas: Record<string, string>;
+}
+
+/** One action of a flow, kept forever (obra_aprobaciones). */
+export interface Aprobacion {
+  documentoTipo: TipoFlujo;
+  documentoId: string;
+  accion: AccionFlujo;
+  pasoDesde: number;
+  pasoHasta: number;
+  pasoNombre: string;
+  rolNombre: string;
+  actorId: string;
+  actorNombre: string;
+  motivo: string;
+  creado: string;
+}
+
+export interface FlujosResponse {
+  /** One per kind of document of the modules the license includes (pasos empty: not configured). */
+  flujos: Flujo[];
+  /** The company's roles (to choose the role of each step). */
+  roles: Pick<Rol, "id" | "nombre" | "activo" | "permisos">[];
+  /** Who holds each role in this project today. */
+  personasPorRol: Record<string, string[]>;
+  /** The flows suggested from the initial roles, to start from. */
+  sugeridos: Partial<Record<TipoFlujo, PasoFlujo[]>>;
+  puedeEditar: boolean;
 }
 
 // ---------------------------------------------------------------- API responses

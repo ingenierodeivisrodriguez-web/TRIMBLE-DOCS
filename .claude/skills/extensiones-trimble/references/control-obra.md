@@ -10,12 +10,16 @@ OBRA — Documento de definición funcional, técnica y de implementación",
 v1.0) **no está en el repositorio** porque el repositorio es público: pedirla
 si hace falta.
 
-Fases: 1–2 diagnóstico y diseño; **3 base comercial (hecha)**; 4 modelos 3D e
-IFCGUID; 5 cantidades, costos y avance; 6 calidad; 7 documentos en el CDE;
-8 pruebas finales e instalación. Una fase por vez, subirla y esperar la
-revisión del dueño ("sigue con la Fase N").
+Fases del diseño: 1–2 diagnóstico y diseño; **3 base comercial (hecha)**.
+Desde el 21-10-2026 el resto sigue el **plan de actas**
+(`docs/control-obra/plan-actas.md`, léelo entero: decisiones, lecturas de
+Presupuesto y Compras, cambios autorizados en Presupuesto, fases y prueba de
+aceptación), que reemplazó las fases 4–8 del diseño: **1 flujos de
+aprobación y roles (hecha)**, 2 ubicaciones y mediciones, 3 calidad,
+4 actas, 5 enlace con Presupuesto, 6 almacén, 7 costo real, 8 panel y visor.
+Una fase por vez, subirla y esperar "sigue con la siguiente fase".
 
-## Decisiones aprobadas (D1–D13)
+## Decisiones aprobadas (D1–D13; D1 y D9 cambiadas por el plan de actas)
 
 No escribe en los cortes de Presupuesto (calcula su propio valor ganado con lo
 aceptado); seguridad en el servidor con claves compuestas (sin políticas RLS
@@ -61,10 +65,35 @@ Compras).
   intentos negados (`denegar()`), salvo la entrada del técnico a un proyecto.
   Cada acción nueva necesita su texto en `formato.ts`.
 
+## Flujos de aprobación (plan de actas, fase 1)
+
+- `lib/control-obra/flujos.ts`: `revisarPasos`, `avisosFlujo`,
+  `flujosSugeridos`, `accionFlujo` (enviar, aprobar, devolver un paso con
+  motivo, anular), `accionesPosibles`. El mismo motor en SQL:
+  `obra_flujo_accion` (interna, sin `grant` al servidor: la llaman las
+  funciones de cada documento dentro de su transacción y bloqueo).
+- Cada documento con flujo guarda `estado` (borrador, devuelto, en_tramite,
+  aprobado, anulado), `elaborado_por` y `flujo` jsonb
+  `{pasos (copia con rolNombre), paso, firmas {"0": quien envió, "1": …}}`.
+  Devolver quita la firma del paso al que vuelve; quien elabora y quien ya
+  firmó otro paso no aprueban (`auto-aprobacion`).
+- `obra_flujos` (pasos por proyecto y tipo) y `obra_aprobaciones` (solo
+  inserción). Tipos: acta_cliente, acta_subcontrato, inspeccion, cierre_nc
+  (paso 0 con `nc.editar`), vale_salida; `TIPOS_FLUJO` y
+  `obra_tipos_flujo()`/`obra_modulo_de_flujo()` con prueba que los compara.
+- Permisos nuevos solo se **agregan** a `obra_permisos_validos()` (los roles
+  guardados deben seguir pasando la restricción). Roles iniciales nuevos se
+  crean en las empresas existentes con un bloque `do` del SQL; a los viejos
+  se les ofrecen con `permisosSugeridos` (aviso "Marcarlos" en Roles).
+
 ## Probar
 
-- `npx tsx --test lib/control-obra/*.test.ts` (72 pruebas en la fase 3, con
-  acceso cruzado entre dos empresas en `service.test.ts`).
+- `npx tsx --test lib/control-obra/*.test.ts` (96 pruebas tras la fase 1
+  del plan de actas, con acceso cruzado entre dos empresas en
+  `service.test.ts`).
+- Para probar un cambio del SQL sobre la base como está en producción: correr
+  primero `git show HEAD~N:supabase/control-obra.sql` (el viejo), sembrar una
+  empresa con sus funciones, y luego el nuevo dos veces encima.
 - SQL con PGlite: script por fase en el scratchpad que crea
   `service_role` con **`bypassrls`** (como Supabase), corre el SQL dos veces,
   siembra con las funciones (roles y niveles iniciales con

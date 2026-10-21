@@ -47,7 +47,12 @@ export type MotivoRechazo =
   | "version-conflict"
   | "no-existe"
   | "motivo-requerido"
-  | "historial-inmutable";
+  | "historial-inmutable"
+  | "sin-flujo"
+  | "flujo-no-valido"
+  | "paso-ajeno"
+  | "auto-aprobacion"
+  | "estado-no-permite";
 
 export const MENSAJES: Record<MotivoRechazo, string> = {
   "sin-acceso": "No tienes acceso a Control de Obra en este proyecto. Pídeselo a un administrador.",
@@ -81,6 +86,11 @@ export const MENSAJES: Record<MotivoRechazo, string> = {
   "no-existe": "No existe.",
   "motivo-requerido": "Escribe el motivo.",
   "historial-inmutable": "La bitácora y el historial de licencias no se pueden cambiar ni borrar.",
+  "sin-flujo": "Este proyecto no tiene configurado el flujo de aprobación de este documento. Pídeselo a un administrador (pestaña Flujos de aprobación).",
+  "flujo-no-valido": "El flujo de aprobación no es válido.",
+  "paso-ajeno": "Este paso del flujo lo atiende otro rol.",
+  "auto-aprobacion": "Quien elabora un documento no lo aprueba, y una misma persona no firma dos pasos del mismo documento.",
+  "estado-no-permite": "El documento no está en un estado que permita esa acción.",
 };
 
 export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
@@ -115,6 +125,11 @@ export const ESTADO_HTTP: Record<MotivoRechazo, number> = {
   "no-existe": 404,
   "motivo-requerido": 400,
   "historial-inmutable": 403,
+  "sin-flujo": 409,
+  "flujo-no-valido": 400,
+  "paso-ajeno": 403,
+  "auto-aprobacion": 403,
+  "estado-no-permite": 409,
 };
 
 export function esMotivo(text: string): text is MotivoRechazo {
