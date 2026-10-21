@@ -23,10 +23,11 @@ import type { PropiedadesViewer } from "../../lib/propiedades/selection";
 import type { ViewerEventListener } from "../trimble/ExtensionShell";
 import { acceptButton, C, message, Notice } from "../presupuesto/ui";
 import { ayuda, botonSecundario, etiqueta, linkBtn, select } from "./estilos";
+import PanelAuditoria from "./PanelAuditoria";
 import ReglaEditor from "./ReglaEditor";
 
 type ViewerSelection = { modelId: string; objectRuntimeIds?: number[] }[];
-type Pestana = "modelos" | "reglas" | "clasificacion";
+type Pestana = "modelos" | "reglas" | "clasificacion" | "auditoria";
 
 function selectionFrom(data: unknown): ViewerSelection {
   if (Array.isArray(data)) return data as ViewerSelection;
@@ -42,7 +43,7 @@ const n = (x: number) => x.toLocaleString("es");
  * ("Probar regla" highlights them), manual links by IFCGUID (which win over
  * the rules) and the objects that match nothing. It only reads the models.
  */
-export default function PanelVisor({ api, viewer, subscribe }: { api: LoinApi; viewer: VisorLoin; subscribe: (l: ViewerEventListener) => () => void }) {
+export default function PanelVisor({ api, viewer, subscribe, proyecto }: { api: LoinApi; viewer: VisorLoin; subscribe: (l: ViewerEventListener) => () => void; proyecto: string }) {
   const [estado, setEstado] = useState<EstadoResponse | null>(null);
   const [elems, setElems] = useState<ElementosResponse | null>(null);
   const [visor, setVisor] = useState<VisorResponse | null>(null);
@@ -190,6 +191,7 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: LoinApi; v
             ["modelos", "Modelos"],
             ["reglas", "Reglas"],
             ["clasificacion", "Clasificación"],
+            ["auditoria", "Auditoría"],
           ] as [Pestana, string][]
         ).map(([id, nombre]) => (
           <button key={id} type="button" onClick={() => setPestana(id)} style={tab(id === pestana)} aria-current={id === pestana ? "page" : undefined}>
@@ -263,6 +265,25 @@ export default function PanelVisor({ api, viewer, subscribe }: { api: LoinApi; v
           colorear={colorear}
           quitarColores={quitarColores}
           onElemento={(e) => setElems((x) => (x ? { ...x, elementos: x.elementos.map((y) => (y.id === e.id ? e : y)) } : x))}
+          setNota={setNota}
+        />
+      )}
+      {pestana === "auditoria" && (
+        <PanelAuditoria
+          api={api}
+          viewer={viewer}
+          puede={puede}
+          proyecto={proyecto}
+          estado={estado}
+          elems={elems}
+          cargados={cargados}
+          disciplinasDeModelo={disciplinasDeModelo}
+          manuales={manuales}
+          seleccion={seleccion}
+          ocupado={!!lectura}
+          asegurarLeidos={asegurarLeidos}
+          colorear={colorear}
+          quitarColores={quitarColores}
           setNota={setNota}
         />
       )}

@@ -5,6 +5,14 @@ import { entradasDyco, planificarImportacion } from "./importar";
 import {
   aplicarPlantilla,
   cambiarPlantilla,
+  agregarResultados,
+  cerrarAuditoria,
+  crearAuditoria,
+  crearExcepciones,
+  getAuditoria,
+  getAuditorias,
+  getExcepciones,
+  revocarExcepcion,
   asociar,
   getCamposModelo,
   getVisor,
@@ -265,6 +273,43 @@ describe("servicio de Requisitos BIM", () => {
 
     await guardarCamposModelo(ctx(store, ADMIN), { modelos: ["ARQ.ifc"], campos: [{ grupo: "Pset_WallCommon", propiedad: "LoadBearing", cuenta: 12 }] });
     assert.equal((await getCamposModelo(ctx(store, MIEMBRO))).campos?.campos[0].propiedad, "LoadBearing");
+  });
+
+  it("una auditoría se guarda por partes, se cierra solo completa y después no cambia", async () => {
+    const store = memoryStore();
+    const { etapa } = await guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "PRO", nombre: "Proyecto" });
+    const resumen = { etapa: { id: etapa.id }, total: { pct: 60 }, disciplinas: [], elementos: [] };
+    const id = uuid();
+    await rechaza(crearAuditoria(ctx(store, MIEMBRO), { id, etapaId: etapa.id, resumen }), 403, "not-editor");
+    await rechaza(crearAuditoria(ctx(store, ADMIN), { id, etapaId: etapa.id, resumen: { ...resumen, etapa: { id: uuid() } } }), 400);
+    const { auditoria } = await crearAuditoria(ctx(store, ADMIN), { id, etapaId: etapa.id, resumen, nota: "Primera" });
+    assert.equal(auditoria.estado, "guardando");
+    const lote = (parte: number) => ({ parte, elementoId: null, objetos: [["g", "x", "M", "IfcFurniture", "ARQ"]] });
+    await agregarResultados(ctx(store, ADMIN), id, { lotes: [lote(1)] });
+    await agregarResultados(ctx(store, ADMIN), id, { lotes: [lote(1), lote(2)] }); // a retry doesn't duplicate part 1
+    await rechaza(cerrarAuditoria(ctx(store, ADMIN), id, { partes: 3 }), 409, "auditoria-incompleta");
+    assert.equal((await cerrarAuditoria(ctx(store, ADMIN), id, { partes: 2 })).auditoria.estado, "completa");
+    await rechaza(agregarResultados(ctx(store, ADMIN), id, { lotes: [lote(3)] }), 409, "auditoria-cerrada");
+    const { lotes } = await getAuditoria(ctx(store, MIEMBRO), id);
+    assert.deepEqual(lotes.map((l) => l.parte), [1, 2]);
+    assert.equal((await getAuditorias(ctx(store, MIEMBRO))).auditorias[0].nota, "Primera");
+    await rechaza(getAuditoria(ctx(store, ADMIN, "OBRA2"), id), 404);
+  });
+
+  it("las excepciones piden justificación, no se repiten vigentes y se revocan sin borrarse", async () => {
+    const store = memoryStore();
+    const [p] = await conDyco(store);
+    const { etapa } = await guardarEtapa(ctx(store, ADMIN), { id: uuid(), version: 0, codigo: "PRO", nombre: "Proyecto" });
+    const fila = { id: uuid(), etapaId: etapa.id, ifcGuid: "3CqVfw$t15ihB2vPgB1wri", parametroId: p.id, elementoId: null, justificacion: "Se acepta: se corrige en obra" };
+    await rechaza(crearExcepciones(ctx(store, ADMIN), { filas: [{ ...fila, justificacion: "ok" }] }), 400);
+    await rechaza(crearExcepciones(ctx(store, MIEMBRO), { filas: [fila] }), 403);
+    assert.equal((await crearExcepciones(ctx(store, ADMIN), { filas: [fila, { ...fila, id: uuid() }] })).creadas, 1);
+    await rechaza(revocarExcepcion(ctx(store, ADMIN), { id: fila.id, motivo: "" }), 400);
+    const { excepcion } = await revocarExcepcion(ctx(store, ADMIN), { id: fila.id, motivo: "Ya se corrigió en el modelo" });
+    assert.deepEqual([excepcion.activa, excepcion.revocadaPor, excepcion.motivoRevocacion], [false, "Ana", "Ya se corrigió en el modelo"]);
+    await rechaza(revocarExcepcion(ctx(store, ADMIN), { id: fila.id, motivo: "Otra vez" }), 409);
+    assert.equal((await crearExcepciones(ctx(store, ADMIN), { filas: [{ ...fila, id: uuid() }] })).creadas, 1);
+    assert.equal((await getExcepciones(ctx(store, MIEMBRO))).excepciones.length, 2);
   });
 
   it("una disciplina guardada como plantilla se copia a otro proyecto con la misma base, con sus imágenes", async () => {

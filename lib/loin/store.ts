@@ -18,6 +18,10 @@ import type {
   AsociacionManual,
   CamposModelo,
   ModeloDisciplina,
+  Auditoria,
+  Excepcion,
+  LoteAuditoria,
+  ResumenAuditoria,
 } from "./types";
 
 /**
@@ -102,15 +106,31 @@ export interface LoinStore {
   getCamposModelo(projectId: string): Promise<CamposModelo | null>;
   saveCamposModelo(projectId: string, data: Pick<CamposModelo, "modelos" | "campos">, user: string): Promise<void>;
 
+  /** Newest first, without their objects. */
+  listAuditorias(projectId: string): Promise<Auditoria[]>;
+  getAuditoria(projectId: string, id: string): Promise<{ auditoria: Auditoria; lotes: LoteAuditoria[] } | null>;
+  /** The header, in state "guardando"; the stage must be the project's. */
+  crearAuditoria(projectId: string, a: { id: string; etapaId: string; resumen: ResumenAuditoria; nota: string }, user: string): Promise<Auditoria>;
+  /** Slices already saved are left as they are (a retry doesn't duplicate them). */
+  agregarResultados(projectId: string, auditoriaId: string, lotes: LoteAuditoria[]): Promise<number>;
+  /** Closes it when it has all its slices ("auditoria-incompleta" otherwise); then it never changes. */
+  cerrarAuditoria(projectId: string, id: string, partes: number): Promise<Auditoria>;
+  listExcepciones(projectId: string): Promise<Excepcion[]>;
+  /** Those already in force for the same object, parameter and stage are left; answers how many were created. */
+  crearExcepciones(projectId: string, filas: NuevaExcepcion[], user: string): Promise<number>;
+  revocarExcepcion(projectId: string, id: string, motivo: string, user: string): Promise<Excepcion>;
+
   archivos: Archivos;
 }
+
+export type NuevaExcepcion = { id: string; etapaId: string; ifcGuid: string; parametroId: string; elementoId: string | null; justificacion: string };
 
 export const BUCKET = "loin-imagenes";
 
 const SETUP_HINT =
   "Faltan las tablas de Requisitos BIM (LOIN) en Supabase: abre Supabase → SQL Editor y ejecuta el archivo supabase/loin.sql del repositorio (se puede repetir sin perder datos).";
 
-const MOTIVOS = ["version-conflict", "duplicate-code", "disciplina-ajena"] as const;
+const MOTIVOS = ["version-conflict", "duplicate-code", "disciplina-ajena", "auditoria-cerrada", "auditoria-incompleta"] as const;
 
 // ---------------------------------------------------------------- rows
 
@@ -374,6 +394,48 @@ const filaDeCelda = (c: ConVersion<CeldaData>) => ({
   nota: c.nota,
 });
 
+interface AuditoriaRow {
+  id: string;
+  etapa_id: string;
+  estado: Auditoria["estado"];
+  creada: string;
+  creada_por: string | null;
+  nota: string;
+  resumen: ResumenAuditoria;
+}
+
+const auditoriaDeFila = (r: AuditoriaRow): Auditoria => ({ id: r.id, etapaId: r.etapa_id, estado: r.estado, creada: r.creada, creadaPor: r.creada_por, nota: r.nota, resumen: r.resumen });
+
+interface ExcepcionRow {
+  id: string;
+  etapa_id: string;
+  ifc_guid: string;
+  parametro_id: string;
+  elemento_id: string | null;
+  justificacion: string;
+  creada: string;
+  creada_por: string | null;
+  activa: boolean;
+  revocada: string | null;
+  revocada_por: string | null;
+  motivo_revocacion: string;
+}
+
+const excepcionDeFila = (r: ExcepcionRow): Excepcion => ({
+  id: r.id,
+  etapaId: r.etapa_id,
+  ifcGuid: r.ifc_guid,
+  parametroId: r.parametro_id,
+  elementoId: r.elemento_id,
+  justificacion: r.justificacion,
+  creada: r.creada,
+  creadaPor: r.creada_por,
+  activa: r.activa,
+  revocada: r.revocada,
+  revocadaPor: r.revocada_por,
+  motivoRevocacion: r.motivo_revocacion,
+});
+
 // ---------------------------------------------------------------- Supabase
 
 function claveServidor(): { url: string; headers: Record<string, string> } | null {
@@ -580,6 +642,42 @@ function supabaseStore(): LoinStore | null {
       await upsert("loin_campos_modelo", { project_id: projectId, leido: new Date().toISOString(), leido_por: user, modelos: data.modelos, campos: data.campos }, "project_id");
     },
 
+    async listAuditorias(projectId) {
+      return (await all<AuditoriaRow>(`/loin_auditorias?project_id=${eq(projectId)}&select=id,etapa_id,estado,creada,creada_por,nota,resumen&order=creada.desc`)).map(auditoriaDeFila);
+    },
+    async getAuditoria(projectId, id) {
+      const rows = await json<AuditoriaRow[]>(`/loin_auditorias?project_id=${eq(projectId)}&id=${eq(id)}&select=id,etapa_id,estado,creada,creada_por,nota,resumen`);
+      if (!rows[0]) return null;
+      const lotes = await all<{ parte: number; elemento_id: string | null; objetos: unknown[] }>(`/loin_auditoria_resultados?auditoria_id=${eq(id)}&select=parte,elemento_id,objetos&order=parte.asc`);
+      return { auditoria: auditoriaDeFila(rows[0]), lotes: lotes.map((l) => ({ parte: l.parte, elementoId: l.elemento_id, objetos: l.objetos })) };
+    },
+    async crearAuditoria(projectId, a, user) {
+      return auditoriaDeFila(
+        await rpc<AuditoriaRow>("loin_crear_auditoria", { p_project_id: projectId, p_id: a.id, p_etapa_id: a.etapaId, p_resumen: a.resumen, p_nota: a.nota, p_usuario: user })
+      );
+    },
+    agregarResultados: (projectId, auditoriaId, lotes) =>
+      rpc<number>("loin_agregar_resultados", {
+        p_project_id: projectId,
+        p_auditoria_id: auditoriaId,
+        p_lotes: lotes.map((l) => ({ parte: l.parte, elemento_id: l.elementoId, objetos: l.objetos })),
+      }),
+    async cerrarAuditoria(projectId, id, partes) {
+      return auditoriaDeFila(await rpc<AuditoriaRow>("loin_cerrar_auditoria", { p_project_id: projectId, p_id: id, p_partes: partes }));
+    },
+    async listExcepciones(projectId) {
+      return (await all<ExcepcionRow>(`/loin_excepciones?project_id=${eq(projectId)}&select=*&order=creada.desc`)).map(excepcionDeFila);
+    },
+    crearExcepciones: (projectId, filas, user) =>
+      rpc<number>("loin_crear_excepciones", {
+        p_project_id: projectId,
+        p_filas: filas.map((f) => ({ id: f.id, etapa_id: f.etapaId, ifc_guid: f.ifcGuid, parametro_id: f.parametroId, elemento_id: f.elementoId, justificacion: f.justificacion })),
+        p_usuario: user,
+      }),
+    async revocarExcepcion(projectId, id, motivo, user) {
+      return excepcionDeFila(await rpc<ExcepcionRow>("loin_revocar_excepcion", { p_project_id: projectId, p_id: id, p_motivo: motivo, p_usuario: user }));
+    },
+
     archivos,
   };
 }
@@ -638,6 +736,10 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
   const modelos = new Map<string, ModeloDisciplina & { projectId: string }>();
   const asociaciones = new Map<string, AsociacionManual & { projectId: string }>();
   const campos = new Map<string, CamposModelo>();
+  const auditorias = new Map<string, Auditoria & { projectId: string }>();
+  const resultados = new Map<string, Map<number, LoteAuditoria>>();
+  const excepciones = new Map<string, Excepcion & { projectId: string }>();
+  let ultimaCreada = 0;
   const ahora = () => new Date().toISOString();
   const rechazo = (motivo: (typeof MOTIVOS)[number]) => new StoreError(motivo, motivo === "disciplina-ajena" ? 400 : 409);
   const sin = <T extends object, K extends string>(x: T, k: K): Omit<T, K> => {
@@ -813,6 +915,63 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
     },
     async saveCamposModelo(projectId, data, user) {
       campos.set(projectId, { ...structuredClone(data), leido: ahora(), leidoPor: user });
+    },
+
+    async listAuditorias(projectId) {
+      return [...auditorias.values()].filter((a) => a.projectId === projectId).sort((a, b) => b.creada.localeCompare(a.creada)).map((a) => sin(a, "projectId"));
+    },
+    async getAuditoria(projectId, id) {
+      const a = auditorias.get(id);
+      if (!a || a.projectId !== projectId) return null;
+      const lotes = [...(resultados.get(id)?.values() ?? [])].sort((x, y) => x.parte - y.parte);
+      return { auditoria: sin(a, "projectId"), lotes: structuredClone(lotes) };
+    },
+    async crearAuditoria(projectId, a, user) {
+      if (etapas.get(a.etapaId)?.projectId !== projectId) throw rechazo("disciplina-ajena");
+      if (auditorias.has(a.id)) throw rechazo("version-conflict");
+      // Strictly increasing times, so "newest first" holds within the same millisecond.
+      const creada = new Date(Math.max(Date.now(), ultimaCreada + 1)).toISOString();
+      ultimaCreada = Date.parse(creada);
+      const nueva = { id: a.id, etapaId: a.etapaId, estado: "guardando" as const, creada, creadaPor: user, nota: a.nota, resumen: structuredClone(a.resumen), projectId };
+      auditorias.set(a.id, nueva);
+      return sin(nueva, "projectId");
+    },
+    async agregarResultados(projectId, auditoriaId, lotes) {
+      const a = auditorias.get(auditoriaId);
+      if (!a || a.projectId !== projectId || a.estado !== "guardando") throw rechazo("auditoria-cerrada");
+      const partes = resultados.get(auditoriaId) ?? new Map<number, LoteAuditoria>();
+      for (const l of lotes) if (!partes.has(l.parte)) partes.set(l.parte, structuredClone(l));
+      resultados.set(auditoriaId, partes);
+      return lotes.length;
+    },
+    async cerrarAuditoria(projectId, id, partes) {
+      const a = auditorias.get(id);
+      if (!a || a.projectId !== projectId || a.estado !== "guardando") throw rechazo("auditoria-cerrada");
+      if ((resultados.get(id)?.size ?? 0) !== partes) throw rechazo("auditoria-incompleta");
+      a.estado = "completa";
+      return sin(a, "projectId");
+    },
+    async listExcepciones(projectId) {
+      return [...excepciones.values()].filter((x) => x.projectId === projectId).sort((a, b) => b.creada.localeCompare(a.creada)).map((x) => sin(x, "projectId"));
+    },
+    async crearExcepciones(projectId, filas, user) {
+      for (const f of filas) if (etapas.get(f.etapaId)?.projectId !== projectId) throw rechazo("disciplina-ajena");
+      let n = 0;
+      for (const f of filas) {
+        const vigente = [...excepciones.values()].some(
+          (x) => x.projectId === projectId && x.activa && x.etapaId === f.etapaId && x.ifcGuid === f.ifcGuid && x.parametroId === f.parametroId
+        );
+        if (vigente || excepciones.has(f.id)) continue;
+        excepciones.set(f.id, { ...structuredClone(f), creada: ahora(), creadaPor: user, activa: true, revocada: null, revocadaPor: null, motivoRevocacion: "", projectId });
+        n++;
+      }
+      return n;
+    },
+    async revocarExcepcion(projectId, id, motivo, user) {
+      const x = excepciones.get(id);
+      if (!x || x.projectId !== projectId || !x.activa) throw rechazo("version-conflict");
+      Object.assign(x, { activa: false, revocada: ahora(), revocadaPor: user, motivoRevocacion: motivo.trim() });
+      return sin(x, "projectId");
     },
 
     archivos,

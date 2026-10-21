@@ -31,6 +31,28 @@ export interface ModeloLeido {
   objetos: ObjetoModelo[];
 }
 
+// The Workspace API's PropertyType codes that need converting (see lib/graficos/modelData.ts).
+const TIPO_LONGITUD = 0;
+const TIPO_FECHA = 8;
+
+/**
+ * A property value in the units the requirements use (SI, like IDS): the
+ * viewer gives lengths in mm (they become m) and dates as timestamps (they
+ * become "AAAA-MM-DD"). Everything else stays as it comes.
+ */
+export function valorDelVisor(tipo: number | undefined, valor: unknown): unknown {
+  if (tipo === TIPO_LONGITUD) {
+    const n = typeof valor === "number" ? valor : Number(valor);
+    return typeof valor === "string" && valor.trim() === "" ? valor : Number.isFinite(n) ? Math.round((n / 1000) * 1e6) / 1e6 : valor;
+  }
+  if (tipo === TIPO_FECHA && (typeof valor === "number" || typeof valor === "bigint" || (typeof valor === "string" && /^\d+$/.test(valor.trim())))) {
+    const n = Number(valor);
+    const d = new Date(n < 1e11 ? n * 1000 : n);
+    return n > 0 && !Number.isNaN(d.getTime()) ? d.toISOString().slice(0, 10) : valor;
+  }
+  return valor;
+}
+
 /**
  * An object as the viewer describes it (getObjectProperties), with its
  * IFCGUID: an explicit GUID property wins (Revit's IfcGUID), otherwise the
@@ -39,7 +61,7 @@ export interface ModeloLeido {
 export function objetoDesdeRaw(raw: RawObject, externalId: string | null): ObjetoModelo {
   const grupos = (raw.properties ?? []).map((set) => ({
     nombre: set.name ?? "Propiedades",
-    propiedades: (set.properties ?? []).filter((p) => p && p.name != null).map((p) => ({ nombre: String(p.name), valor: p.value })),
+    propiedades: (set.properties ?? []).filter((p) => p && p.name != null).map((p) => ({ nombre: String(p.name), valor: valorDelVisor(p.type, p.value) })),
   }));
   const nombre = raw.product?.name?.trim() ?? "";
   const tipo = raw.product?.objectType?.trim() ?? "";

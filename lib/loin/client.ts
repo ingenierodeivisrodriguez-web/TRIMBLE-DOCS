@@ -1,8 +1,14 @@
 import { ApiError, TokenSource } from "../propiedades/client";
 import { expiresSoon } from "../propiedades/token";
 import type { ProjectContacts, Responsable } from "../propiedades/types";
-import type { ConVersion } from "./store";
+import { aGuardar } from "./auditoria";
+import type { ConVersion, NuevaExcepcion } from "./store";
 import {
+  Auditoria,
+  Excepcion,
+  InformeAuditoria,
+  LoteAuditoria,
+  MAX_LOTES_POR_ENVIO,
   CamposModelo,
   MAX_ASOCIACIONES_POR_ENVIO,
   ModeloDisciplina,
@@ -58,6 +64,32 @@ export interface LoinApi {
   asociar(elementoId: string | null, objetos: { ifcGuid: string; fileId: string }[], onProgress?: (hechos: number) => void): Promise<number>;
   getCamposModelo(): Promise<CamposModelo | null>;
   guardarCamposModelo(data: Pick<CamposModelo, "modelos" | "campos">): Promise<number>;
+  getAuditorias(): Promise<Auditoria[]>;
+  getAuditoria(id: string): Promise<{ auditoria: Auditoria; lotes: LoteAuditoria[] }>;
+  /** Saves a whole audit: its header, its objects in slices (several requests) and then closes it. */
+  guardarAuditoria(informe: InformeAuditoria, nota: string, onProgress?: (hechas: number, total: number) => void): Promise<Auditoria>;
+  getExcepciones(): Promise<Excepcion[]>;
+  crearExcepciones(filas: NuevaExcepcion[]): Promise<number>;
+  revocarExcepcion(id: string, motivo: string): Promise<Excepcion>;
+}
+
+/** Slices grouped so each request stays well under the hosting's body limit. */
+export function agruparLotes(lotes: LoteAuditoria[], maxBytes = 1_500_000, maxPorEnvio = MAX_LOTES_POR_ENVIO): LoteAuditoria[][] {
+  const grupos: LoteAuditoria[][] = [];
+  let actual: LoteAuditoria[] = [];
+  let bytes = 0;
+  for (const l of lotes) {
+    const n = JSON.stringify(l).length;
+    if (actual.length && (bytes + n > maxBytes || actual.length >= maxPorEnvio)) {
+      grupos.push(actual);
+      actual = [];
+      bytes = 0;
+    }
+    actual.push(l);
+    bytes += n;
+  }
+  if (actual.length) grupos.push(actual);
+  return grupos;
 }
 
 /** Calls /api/loin with the user's Trimble token (asked again once if Trimble rejects it). */
@@ -149,5 +181,23 @@ export function loinApi(projectId: string, auth: TokenSource): LoinApi {
     },
     getCamposModelo: () => request<{ campos: CamposModelo | null }>("/campos-modelo").then((r) => r.campos),
     guardarCamposModelo: (data) => request<{ guardados: number }>("/campos-modelo", send("PUT", data)).then((r) => r.guardados),
+    getAuditorias: () => request<{ auditorias: Auditoria[] }>("/auditorias").then((r) => r.auditorias),
+    getAuditoria: (id) => request(`/auditorias/${encodeURIComponent(id)}`),
+    async guardarAuditoria(informe, nota, onProgress) {
+      const { resumen, lotes } = aGuardar(informe);
+      const id = crypto.randomUUID();
+      await request("/auditorias", send("POST", { id, etapaId: resumen.etapa.id, resumen, nota }));
+      const grupos = agruparLotes(lotes);
+      let hechas = 0;
+      for (const g of grupos) {
+        await request(`/auditorias/${id}/resultados`, send("POST", { lotes: g }));
+        hechas += g.length;
+        onProgress?.(hechas, lotes.length);
+      }
+      return request<{ auditoria: Auditoria }>(`/auditorias/${id}`, send("PUT", { partes: lotes.length })).then((r) => r.auditoria);
+    },
+    getExcepciones: () => request<{ excepciones: Excepcion[] }>("/excepciones").then((r) => r.excepciones),
+    crearExcepciones: (filas) => request<{ creadas: number }>("/excepciones", send("POST", { filas })).then((r) => r.creadas),
+    revocarExcepcion: (id, motivo) => request<{ excepcion: Excepcion }>("/excepciones", send("PUT", { id, motivo })).then((r) => r.excepcion),
   };
 }

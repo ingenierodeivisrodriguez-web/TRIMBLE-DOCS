@@ -176,6 +176,114 @@ export interface VisorResponse {
   asociaciones: AsociacionManual[];
 }
 
+// ---------------------------------------------------------------- audit (phase 4)
+
+/** Green, yellow, red (by the share of mandatory parameters met and the project's threshold). */
+export type EstadoObjeto = "cumple" | "parcial" | "no_cumple";
+
+/**
+ * Why a required parameter fails: it isn't in the object ("falta"), it is an
+ * automatic one (geometry / software) that is missing or empty ("modelado":
+ * a modeling problem, not missing data), it has no real value ("sin_llenar":
+ * empty or a garbage value) or its value breaks the rule ("valor": type,
+ * range, list or pattern).
+ */
+export type MotivoFalla = "falta" | "modelado" | "sin_llenar" | "valor";
+
+export interface Totales {
+  objetos: number;
+  cumple: number;
+  parcial: number;
+  noCumple: number;
+  /** Mandatory parameters required and met (accepted exceptions count as met). */
+  exigidos: number;
+  cumplidos: number;
+  /** cumplidos ÷ exigidos × 100, one decimal (100 when nothing is required). */
+  pct: number;
+}
+
+/** One object in a report: its element, what it met and what it lacks. */
+export interface ObjetoInforme {
+  elementoId: string;
+  ifcGuid: string;
+  nombre: string;
+  modelo: string;
+  exigidos: number;
+  cumplidos: number;
+  pct: number;
+  estado: EstadoObjeto;
+  /** Parameters that fail (and those accepted by an exception). */
+  fallas: { codigo: string; motivo: MotivoFalla | "aceptado"; obligatorio: boolean }[];
+}
+
+/** What an audit says, without its objects (saved as the audit's header). */
+export interface ResumenAuditoria {
+  proyecto: string;
+  etapa: { id: string; codigo: string; nombre: string; fecha: string | null };
+  /** The models audited, with the Trimble Connect version read. */
+  modelos: { fileId: string; nombre: string; versionId: string | null }[];
+  umbralAmarillo: number;
+  valoresBasura: string[];
+  disciplinas: { id: string; codigo: string; nombre: string; color: string; totales: Totales }[];
+  elementos: { id: string; codigo: string; nombre: string; disciplinaId: string; ndi: Ndi; lod: Lod | null; totales: Totales; exigidos: { codigo: string; obligatorio: boolean }[] }[];
+  total: Totales;
+  /** Parameter code -> name (for the objects' failures). */
+  parametros: Record<string, string>;
+  masIncumplidos: { codigo: string; nombre: string; fallas: number; porMotivo: Record<MotivoFalla, number> }[];
+  porMotivo: Record<MotivoFalla, number>;
+  aceptados: number;
+  sinClasificar: number;
+  /** Objects whose element requires no information at this stage. */
+  sinExigencia: number;
+  sinGuid: number;
+  /** Elements required at the stage with no object in the models audited. */
+  elementosSinObjetos: string[];
+}
+
+export interface InformeAuditoria extends ResumenAuditoria {
+  objetos: ObjetoInforme[];
+  objetosSinClasificar: { ifcGuid: string; nombre: string; clase: string; tipo: string; modelo: string }[];
+}
+
+/** A saved audit as listed (its objects are read apart). */
+export interface Auditoria {
+  id: string;
+  etapaId: string;
+  estado: "guardando" | "completa";
+  creada: string;
+  creadaPor: string | null;
+  nota: string;
+  resumen: ResumenAuditoria;
+}
+
+/** A slice of a saved audit's objects ("sin clasificar" when elementoId is null). */
+export interface LoteAuditoria {
+  parte: number;
+  elementoId: string | null;
+  /** Compact rows, see lib/loin/auditoria.ts (aGuardar / desdeGuardado). */
+  objetos: unknown[];
+}
+
+/** A failure accepted by the coordinator, for one object, parameter and stage. Revoked, never deleted. */
+export interface Excepcion {
+  id: string;
+  etapaId: string;
+  ifcGuid: string;
+  parametroId: string;
+  elementoId: string | null;
+  justificacion: string;
+  creada: string;
+  creadaPor: string | null;
+  activa: boolean;
+  revocada: string | null;
+  revocadaPor: string | null;
+  motivoRevocacion: string;
+}
+
+export const MAX_LOTES_POR_ENVIO = 20;
+export const MAX_OBJETOS_POR_LOTE = 2000;
+export const MAX_EXCEPCIONES_POR_ENVIO = 500;
+
 export const MAX_CONDICIONES = 12;
 export const MAX_ASOCIACIONES_POR_ENVIO = 2000;
 export const MAX_CAMPOS_MODELO = 3000;

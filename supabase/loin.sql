@@ -1,7 +1,8 @@
 -- Requisitos BIM (LOIN): catálogo de parámetros, disciplinas, elementos a
 -- modelar con sus imágenes de referencia y parámetros exigidos, y plantillas
 -- de disciplina, etapas y matriz LOIN, modelos por disciplina, reglas y
--- asociaciones manuales con los objetos de los modelos. Se puede ejecutar varias veces sin perder datos (Supabase →
+-- asociaciones manuales con los objetos de los modelos, auditorías y
+-- excepciones. Se puede ejecutar varias veces sin perder datos (Supabase →
 -- SQL Editor → pegar y ejecutar).
 --
 -- Reglas que también cumple la base de datos:
@@ -238,6 +239,195 @@ begin
 end;
 $$;
 
+-- Auditorías guardadas: la cabecera (resumen y configuración usada) y sus
+-- objetos por partes. Mientras se guardan están 'guardando'; al cerrarlas
+-- quedan 'completa' y ya no cambian. Nunca se borran.
+create table if not exists public.loin_auditorias (
+  id         uuid        primary key,
+  project_id text        not null,
+  etapa_id   uuid        not null references public.loin_etapas (id),
+  estado     text        not null default 'guardando' check (estado in ('guardando', 'completa')),
+  creada     timestamptz not null default now(),
+  creada_por text,
+  nota       text        not null default '',
+  resumen    jsonb       not null check (jsonb_typeof(resumen) = 'object')
+);
+create index if not exists loin_auditorias_proyecto on public.loin_auditorias (project_id, creada desc);
+
+create table if not exists public.loin_auditoria_resultados (
+  auditoria_id uuid    not null references public.loin_auditorias (id),
+  parte        integer not null check (parte > 0),
+  elemento_id  uuid,
+  objetos      jsonb   not null check (jsonb_typeof(objetos) = 'array'),
+  primary key (auditoria_id, parte)
+);
+
+-- Incumplimientos aceptados por el coordinador (objeto + parámetro + etapa),
+-- con justificación y autor. Se revocan, nunca se borran.
+create table if not exists public.loin_excepciones (
+  id                uuid        primary key,
+  project_id        text        not null,
+  etapa_id          uuid        not null references public.loin_etapas (id),
+  ifc_guid          text        not null check (ifc_guid ~ '^[0-3][0-9A-Za-z_$]{21}$'),
+  parametro_id      uuid        not null references public.loin_parametros (id),
+  elemento_id       uuid,
+  justificacion     text        not null check (length(btrim(justificacion)) between 5 and 1000),
+  creada            timestamptz not null default now(),
+  creada_por        text,
+  activa            boolean     not null default true,
+  revocada          timestamptz,
+  revocada_por      text,
+  motivo_revocacion text        not null default ''
+);
+create unique index if not exists loin_excepciones_vigente on public.loin_excepciones (project_id, etapa_id, ifc_guid, parametro_id) where activa;
+create index if not exists loin_excepciones_proyecto on public.loin_excepciones (project_id);
+
+-- Una auditoría completa no cambia; sus resultados no cambian nunca; una
+-- excepción solo pasa de activa a revocada.
+create or replace function public.loin_auditoria_inmutable()
+returns trigger
+language plpgsql
+as $$
+begin
+  if tg_table_name = 'loin_auditorias' then
+    if old.estado = 'completa' then
+      raise exception 'loin-inmutable: una auditoría completa no se cambia';
+    end if;
+  elsif tg_table_name = 'loin_auditoria_resultados' then
+    raise exception 'loin-inmutable: los resultados de una auditoría no se cambian';
+  elsif tg_table_name = 'loin_excepciones' then
+    if not old.activa or new.activa or new.ifc_guid <> old.ifc_guid or new.parametro_id <> old.parametro_id or new.etapa_id <> old.etapa_id
+       or new.justificacion <> old.justificacion or new.creada <> old.creada then
+      raise exception 'loin-inmutable: una excepción solo se puede revocar';
+    end if;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists loin_auditorias_inmutable on public.loin_auditorias;
+create trigger loin_auditorias_inmutable before update on public.loin_auditorias for each row execute function public.loin_auditoria_inmutable();
+drop trigger if exists loin_auditoria_resultados_inmutable on public.loin_auditoria_resultados;
+create trigger loin_auditoria_resultados_inmutable before update on public.loin_auditoria_resultados for each row execute function public.loin_auditoria_inmutable();
+drop trigger if exists loin_excepciones_inmutable on public.loin_excepciones;
+create trigger loin_excepciones_inmutable before update on public.loin_excepciones for each row execute function public.loin_auditoria_inmutable();
+
+-- Crea la cabecera de una auditoría ('guardando'); la etapa debe ser del proyecto.
+create or replace function public.loin_crear_auditoria(p_project_id text, p_id uuid, p_etapa_id uuid, p_resumen jsonb, p_nota text, p_usuario text)
+returns public.loin_auditorias
+language plpgsql
+set search_path = public
+as $$
+declare
+  r public.loin_auditorias;
+begin
+  perform 1 from public.loin_etapas where id = p_etapa_id and project_id = p_project_id;
+  if not found then
+    raise exception 'disciplina-ajena';
+  end if;
+  insert into public.loin_auditorias (id, project_id, etapa_id, resumen, nota, creada_por)
+  values (p_id, p_project_id, p_etapa_id, p_resumen, coalesce(p_nota, ''), p_usuario)
+  returning * into r;
+  return r;
+exception when unique_violation then
+  raise exception 'version-conflict';
+end;
+$$;
+
+-- Agrega partes de los objetos a una auditoría que se está guardando. Una
+-- parte ya guardada se deja como está (así un reintento no la duplica).
+create or replace function public.loin_agregar_resultados(p_project_id text, p_auditoria_id uuid, p_lotes jsonb)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  l jsonb;
+  n integer := 0;
+begin
+  perform 1 from public.loin_auditorias where id = p_auditoria_id and project_id = p_project_id and estado = 'guardando' for update;
+  if not found then
+    raise exception 'loin-auditoria-cerrada';
+  end if;
+  for l in select * from jsonb_array_elements(p_lotes) loop
+    insert into public.loin_auditoria_resultados (auditoria_id, parte, elemento_id, objetos)
+    values (p_auditoria_id, (l ->> 'parte')::integer, (l ->> 'elemento_id')::uuid, coalesce(l -> 'objetos', '[]'::jsonb))
+    on conflict (auditoria_id, parte) do nothing;
+    n := n + 1;
+  end loop;
+  return n;
+end;
+$$;
+
+-- Cierra la auditoría si tiene todas sus partes (si falta alguna: 'loin-auditoria-incompleta').
+create or replace function public.loin_cerrar_auditoria(p_project_id text, p_id uuid, p_partes integer)
+returns public.loin_auditorias
+language plpgsql
+set search_path = public
+as $$
+declare
+  r public.loin_auditorias;
+  v_partes integer;
+begin
+  perform 1 from public.loin_auditorias where id = p_id and project_id = p_project_id and estado = 'guardando' for update;
+  if not found then
+    raise exception 'loin-auditoria-cerrada';
+  end if;
+  select count(*) into v_partes from public.loin_auditoria_resultados where auditoria_id = p_id;
+  if v_partes <> p_partes then
+    raise exception 'loin-auditoria-incompleta';
+  end if;
+  update public.loin_auditorias set estado = 'completa' where id = p_id returning * into r;
+  return r;
+end;
+$$;
+
+-- Crea excepciones (las que ya están vigentes para el mismo objeto, parámetro y etapa se dejan).
+create or replace function public.loin_crear_excepciones(p_project_id text, p_filas jsonb, p_usuario text)
+returns integer
+language plpgsql
+set search_path = public
+as $$
+declare
+  f jsonb;
+  n integer := 0;
+  v integer;
+begin
+  for f in select * from jsonb_array_elements(p_filas) loop
+    perform 1 from public.loin_etapas where id = (f ->> 'etapa_id')::uuid and project_id = p_project_id;
+    if not found then
+      raise exception 'disciplina-ajena';
+    end if;
+    insert into public.loin_excepciones (id, project_id, etapa_id, ifc_guid, parametro_id, elemento_id, justificacion, creada_por)
+    values ((f ->> 'id')::uuid, p_project_id, (f ->> 'etapa_id')::uuid, f ->> 'ifc_guid', (f ->> 'parametro_id')::uuid, (f ->> 'elemento_id')::uuid,
+            btrim(f ->> 'justificacion'), p_usuario)
+    on conflict (project_id, etapa_id, ifc_guid, parametro_id) where activa do nothing;
+    get diagnostics v = row_count;
+    n := n + v;
+  end loop;
+  return n;
+end;
+$$;
+
+create or replace function public.loin_revocar_excepcion(p_project_id text, p_id uuid, p_motivo text, p_usuario text)
+returns public.loin_excepciones
+language plpgsql
+set search_path = public
+as $$
+declare
+  r public.loin_excepciones;
+begin
+  update public.loin_excepciones
+     set activa = false, revocada = now(), revocada_por = p_usuario, motivo_revocacion = coalesce(btrim(p_motivo), '')
+   where id = p_id and project_id = p_project_id and activa
+  returning * into r;
+  if not found then
+    raise exception 'version-conflict';
+  end if;
+  return r;
+end;
+$$;
+
 -- Nada del catálogo, disciplinas, elementos, plantillas, etapas ni matriz se borra: se desactiva.
 create or replace function public.loin_sin_borrar()
 returns trigger
@@ -260,6 +450,12 @@ drop trigger if exists loin_etapas_sin_borrar on public.loin_etapas;
 create trigger loin_etapas_sin_borrar before delete on public.loin_etapas for each row execute function public.loin_sin_borrar();
 drop trigger if exists loin_matriz_sin_borrar on public.loin_matriz;
 create trigger loin_matriz_sin_borrar before delete on public.loin_matriz for each row execute function public.loin_sin_borrar();
+drop trigger if exists loin_auditorias_sin_borrar on public.loin_auditorias;
+create trigger loin_auditorias_sin_borrar before delete on public.loin_auditorias for each row execute function public.loin_sin_borrar();
+drop trigger if exists loin_auditoria_resultados_sin_borrar on public.loin_auditoria_resultados;
+create trigger loin_auditoria_resultados_sin_borrar before delete on public.loin_auditoria_resultados for each row execute function public.loin_sin_borrar();
+drop trigger if exists loin_excepciones_sin_borrar on public.loin_excepciones;
+create trigger loin_excepciones_sin_borrar before delete on public.loin_excepciones for each row execute function public.loin_sin_borrar();
 
 -- Guarda varios parámetros de un catálogo: todos o ninguno. version 0 = nuevo;
 -- si no, solo si sigue en esa versión ('version-conflict'). Código repetido:
@@ -531,6 +727,14 @@ alter table public.loin_matriz enable row level security;
 alter table public.loin_modelos enable row level security;
 alter table public.loin_asociaciones enable row level security;
 alter table public.loin_campos_modelo enable row level security;
+alter table public.loin_auditorias enable row level security;
+alter table public.loin_auditoria_resultados enable row level security;
+alter table public.loin_excepciones enable row level security;
+revoke all on function public.loin_crear_auditoria(text, uuid, uuid, jsonb, text, text) from public;
+revoke all on function public.loin_agregar_resultados(text, uuid, jsonb) from public;
+revoke all on function public.loin_cerrar_auditoria(text, uuid, integer) from public;
+revoke all on function public.loin_crear_excepciones(text, jsonb, text) from public;
+revoke all on function public.loin_revocar_excepcion(text, uuid, text, text) from public;
 revoke all on function public.loin_asociar(text, uuid, jsonb, text) from public;
 revoke all on function public.loin_guardar_parametros(text, jsonb, text) from public;
 revoke all on function public.loin_guardar_etapa(text, jsonb, text) from public;
@@ -548,6 +752,11 @@ begin
     revoke all on function public.loin_guardar_etapa(text, jsonb, text) from anon, authenticated;
     revoke all on function public.loin_guardar_matriz(text, jsonb, text) from anon, authenticated;
     revoke all on function public.loin_asociar(text, uuid, jsonb, text) from anon, authenticated;
+    revoke all on function public.loin_crear_auditoria(text, uuid, uuid, jsonb, text, text) from anon, authenticated;
+    revoke all on function public.loin_agregar_resultados(text, uuid, jsonb) from anon, authenticated;
+    revoke all on function public.loin_cerrar_auditoria(text, uuid, integer) from anon, authenticated;
+    revoke all on function public.loin_crear_excepciones(text, jsonb, text) from anon, authenticated;
+    revoke all on function public.loin_revocar_excepcion(text, uuid, text, text) from anon, authenticated;
   end if;
   if exists (select 1 from pg_roles where rolname = 'service_role') then
     grant execute on function public.loin_guardar_parametros(text, jsonb, text) to service_role;
@@ -557,6 +766,11 @@ begin
     grant execute on function public.loin_guardar_etapa(text, jsonb, text) to service_role;
     grant execute on function public.loin_guardar_matriz(text, jsonb, text) to service_role;
     grant execute on function public.loin_asociar(text, uuid, jsonb, text) to service_role;
+    grant execute on function public.loin_crear_auditoria(text, uuid, uuid, jsonb, text, text) to service_role;
+    grant execute on function public.loin_agregar_resultados(text, uuid, jsonb) to service_role;
+    grant execute on function public.loin_cerrar_auditoria(text, uuid, integer) to service_role;
+    grant execute on function public.loin_crear_excepciones(text, jsonb, text) to service_role;
+    grant execute on function public.loin_revocar_excepcion(text, uuid, text, text) to service_role;
   end if;
 end;
 $$;

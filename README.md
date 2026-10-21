@@ -3017,16 +3017,21 @@ y documentación.
 Se construye por fases. Están la **fase 1** (catálogo de parámetros,
 disciplinas, elementos a modelar con sus imágenes y parámetros exigidos,
 Excel y plantillas), la **fase 2** (etapas y matriz LOIN, con exportación a
-Excel y PDF para el BEP) y la **fase 3** (panel del visor 3D: modelos por
+Excel y PDF para el BEP), la **fase 3** (panel del visor 3D: modelos por
 disciplina, reglas de asociación, "Probar regla", asociación manual y objetos
-sin clasificar). Un solo manifiesto (`manifest-loin.json`) la pone en el menú
+sin clasificar) y la **fase 4** (auditoría de cumplimiento con colores en el
+visor, detalle por objeto, excepciones, historial e informes en Excel y PDF).
+Un solo manifiesto (`manifest-loin.json`) la pone en el menú
 lateral del proyecto (`/loin`) y en el panel de extensiones del visor;
 `manifest-loin-visor.json` (`/loin/visor`) es el respaldo solo para el visor.
 
 Reglas que no cambian:
 
 - **Nunca escribe en los Property Sets ni en los UDA de Trimble Connect.** La
-  auditoría solo leerá los modelos; lo propio va a Supabase.
+  auditoría solo lee los modelos; lo propio (resultados, excepciones) va a
+  Supabase, ligado a cada objeto por su IFCGUID.
+- **Las auditorías guardadas no se borran ni se cambian**, y las excepciones
+  no se borran: se revocan con su motivo.
 - **Nada del catálogo, las disciplinas, los elementos ni las plantillas se
   borra: se desactiva.** La base de datos también rechaza el borrado. Las
   imágenes sí se pueden quitar (son una ayuda, no un requisito).
@@ -3229,13 +3234,83 @@ de 250, con barra de avance y **Cancelar**, una vez por sesión (botón
   **Quitar asociación manual** los devuelve a las reglas. Los objetos sin
   IFCGUID no se pueden asociar ni auditar (se cuentan aparte).
 
+### Auditoría
+
+Pestaña **Auditoría** del panel del visor. Revisa, objeto por objeto, que
+cada parámetro que su elemento exige en la etapa esté en el modelo, lleno y
+con un valor que cumpla su regla. **Solo lee los modelos.**
+
+- Se elige la **etapa** (abre en la primera que pide NDI), las
+  **disciplinas** y los **modelos** (con su versión). **Auditar** lee los
+  modelos que falten, clasifica los objetos con las reglas y la asociación
+  manual, revisa los parámetros exigidos hasta el NDI de la celda de la
+  matriz (acumulativo) y pinta el visor.
+- **Cálculo**: % = parámetros obligatorios cumplidos ÷ parámetros
+  obligatorios exigidos, sumados sobre los objetos. Los opcionales se
+  muestran pero no bajan el %. Cada objeto queda **✓ cumple** (100 %),
+  **◐ cumple parcial** (desde el umbral del amarillo, 50 % por defecto,
+  editable en ⚙) o **✗ no cumple** (por debajo); **? sin clasificar** en
+  gris. Los colores van siempre con su ícono y su nombre. Los objetos de
+  elementos que no tienen exigencia en esa etapa se cuentan aparte y quedan
+  con el color original del modelo.
+- **Por qué falla** cada parámetro: **no existe en el objeto**, **sin
+  llenar** (vacío o con un valor de relleno como "N/A"), **valor
+  incorrecto** (fuera del mínimo y máximo, no cumple el patrón, no está en
+  la lista) o **problema de modelado** (cuando el parámetro es de origen
+  "Automática", es decir, debería salir del modelo y no salió). En números,
+  sí/no y fechas, un valor de relleno que no se puede leer como tal también
+  cuenta como sin llenar. Las longitudes del visor vienen en milímetros y se
+  pasan a metros; las fechas, a fecha.
+- **Resumen**: el % total, cuántos objetos cumplen, parcial, no cumplen y
+  sin clasificar; por disciplina (con su color) y por elemento (los de menor
+  cumplimiento primero); los **parámetros más incumplidos** y cuántos
+  incumplimientos hay por cada motivo.
+- **Colorear / Quitar colores** vuelve a pintar o deja el visor como
+  estaba. **Seleccionar los que no cumplen** los deja seleccionados en el
+  visor para revisarlos o aislarlos.
+- **Detalle del objeto**: al seleccionar un objeto en el visor se ve su
+  elemento (con la primera imagen de referencia), su % y cada parámetro con
+  ✓, ✗ o ◎ (aceptado), el motivo, el valor leído y **dónde se leyó**
+  (grupo.propiedad).
+- **Excepciones**: en el detalle se marcan los incumplimientos que se
+  aceptan, se escribe la justificación (obligatoria) y **Aceptar N
+  incumplimiento(s)**; se puede aplicar a todos los objetos seleccionados.
+  Cada excepción vale para **un objeto (IFCGUID), un parámetro y una
+  etapa**, cuenta como cumplido (◎) y queda con quién y cuándo. Si ya hay
+  una vigente igual, no se duplica.
+- **Exportar Excel**: hojas Resumen, Detalle por objeto (estado con color,
+  % y qué obligatorios faltan y por qué), Más incumplidos y Sin clasificar.
+  **Exportar PDF**: el % grande, los recuadros por estado, barras por
+  disciplina, la tabla por elemento, los más incumplidos y "Elementos a
+  corregir" con su imagen de referencia; páginas numeradas.
+- **Guardar auditoría** (con una nota opcional): guarda la fecha, quién, la
+  etapa, la **versión de cada modelo**, el umbral y los valores de relleno
+  de ese momento, el resumen y el resultado de cada objeto. Se envía por
+  partes (para modelos grandes) y solo queda **completa** cuando llegaron
+  todas; si se corta, en el historial sale como incompleta. Una auditoría
+  completa ya no se puede cambiar.
+
+En el menú del proyecto, pestaña **Auditorías**:
+
+- **Historial**: filtro por etapa, **gráfica de evolución** del % (total y
+  una línea por disciplina, con dos auditorías o más de la etapa) y la
+  tabla de auditorías (fecha, etapa, disciplinas, modelos con su versión,
+  %, ✓ / ◐ / ✗, autor y nota). Al abrir una se ve su resumen, la
+  comparación **frente a la anterior de la etapa** (▲ / ▼ puntos por
+  disciplina y total) y se exporta a Excel o PDF tal como se guardó.
+- **Excepciones**: vigentes, revocadas o todas, por etapa, con objeto,
+  elemento, parámetro, justificación y autor. **Revocar** pide un motivo; la
+  excepción no se borra y la siguiente auditoría vuelve a contar ese
+  incumplimiento.
+
 ### Permisos
 
 | Acción | Quién |
 |---|---|
 | Ver catálogo, disciplinas, elementos, imágenes y plantillas | Cualquier miembro del proyecto |
 | Editar disciplinas, elementos e imágenes, etapas y matriz LOIN, usar plantillas, valores de relleno y umbral; en el visor: disciplinas de los modelos, reglas, asociación manual y nombres de propiedades | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
-| Probar reglas y clasificar en el visor | Cualquier miembro (solo lee) |
+| Probar reglas, clasificar y auditar en el visor, exportar, ver el historial y las excepciones | Cualquier miembro (solo lee) |
+| Guardar auditorías, aceptar y revocar excepciones | Administradores del proyecto y editores |
 | Editar el catálogo, los grupos TDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
 | Elegir editores y proyecto base | Administradores del proyecto |
 
@@ -3266,9 +3341,15 @@ políticas: solo el servidor (clave de servicio) lee y escribe.
 | `loin_asociaciones` | Por proyecto e IFCGUID (único): archivo y elemento asociado a mano |
 | `loin_campos_modelo` | Por proyecto: los nombres de grupos y propiedades leídos de los modelos, cuándo y quién |
 | `loin_asociar(proyecto, elemento, objetos, usuario)` | Asocia (o con elemento vacío, quita) varios objetos: todos o ninguno; el elemento debe ser del proyecto |
+| `loin_auditorias` | Por proyecto: etapa, nota, quién, cuándo, estado (`guardando` / `completa`), cuántas partes y el resumen (jsonb, con la versión de cada modelo y la configuración usada) |
+| `loin_auditoria_resultados` | Las partes de una auditoría (auditoría + número de parte, único): el resultado compacto de cada objeto (IFCGUID, % y los parámetros que fallan con su motivo) |
+| `loin_excepciones` | Por proyecto: etapa, IFCGUID, parámetro, elemento, justificación (5 a 1000 caracteres), quién y cuándo; revocada con quién, cuándo y motivo. Una sola vigente por etapa, objeto y parámetro |
+| `loin_crear_auditoria`, `loin_agregar_resultados`, `loin_cerrar_auditoria` | Crea la auditoría, agrega partes (una parte repetida no se duplica) y la cierra solo si llegaron todas (`auditoria-incompleta`) |
+| `loin_crear_excepciones`, `loin_revocar_excepcion` | Crea varias (la etapa debe ser del proyecto) / revoca una con su motivo |
+| `loin_auditoria_inmutable()` | Trigger: una auditoría completa no cambia, los resultados no cambian y de una excepción solo se puede revocar |
 | `loin_guardar_parametros(base, filas, usuario)` | Guarda varios: todos o ninguno (`version-conflict`, `duplicate-code`) |
 | `loin_guardar_disciplina`, `loin_guardar_elemento`, `loin_guardar_plantilla` | Crean (versión 0) o cambian si la versión coincide; el elemento debe ser de una disciplina del proyecto |
-| `loin_sin_borrar()` | Trigger que rechaza borrar parámetros, disciplinas, elementos, plantillas, etapas y celdas de la matriz |
+| `loin_sin_borrar()` | Trigger que rechaza borrar parámetros, disciplinas, elementos, plantillas, etapas, celdas de la matriz, auditorías, sus resultados y excepciones |
 | Bucket `loin-imagenes` | Privado, 2 MB por archivo, solo PNG / JPG / WebP |
 
 ### API
@@ -3298,17 +3379,20 @@ comprueban que sea miembro del proyecto (`lib/loin/routes.ts`).
 | `PUT /api/loin/modelos` | Disciplinas de un modelo |
 | `POST /api/loin/asociaciones` | Asocia objetos a un elemento (o los desasocia) |
 | `GET/PUT /api/loin/campos-modelo` | Nombres de propiedades leídos de los modelos |
+| `GET/POST /api/loin/auditorias` | Lista las auditorías (con su resumen) / crea una (estado `guardando`) |
+| `GET/PUT /api/loin/auditorias/[id]` | Una auditoría con sus partes / la cierra (`{ partes }`) |
+| `POST /api/loin/auditorias/[id]/resultados` | Agrega partes del resultado (hasta 20 por envío) |
+| `GET/POST/PUT /api/loin/excepciones` | Lista / crea (hasta 500 por envío) / revoca con motivo |
 
 Lógica pura con pruebas en `lib/loin/` (`alias.ts`, `reglas.ts`, `ndi.ts`,
 `semilla.ts`, `importar.ts`, `plantillas.ts`, `excel.ts`, `matriz.ts`,
-`exportarMatriz.ts`, `clasificacion.ts`) y servicio probado contra
+`exportarMatriz.ts`, `clasificacion.ts`, `auditoria.ts`,
+`exportarAuditoria.ts`) y servicio probado contra
 `memoryStore()` (`service.test.ts`). La lectura del visor
 (`lecturaVisor.ts`) usa los lectores de Gráficos de Modelos.
 
 ### Lo que sigue
 
-4. **Auditoría**: presencia, contenido, regla y origen de cada parámetro,
-   colores en el visor, excepciones, historial y reportes.
 5. **IDS**: exportar (luego importar) y, con confirmación, ToDos/BCF.
 
 ---

@@ -10,6 +10,13 @@ import { VALORES_BASURA_INICIALES } from "./reglas";
 import { disciplinasSugeridas, TDI_INICIALES } from "./semilla";
 import type { ConVersion, ImagenGuardada, LoinStore, StoredConfig } from "./store";
 import {
+  Auditoria,
+  Excepcion,
+  LoteAuditoria,
+  MAX_EXCEPCIONES_POR_ENVIO,
+  MAX_LOTES_POR_ENVIO,
+  MAX_OBJETOS_POR_LOTE,
+  ResumenAuditoria,
   CamposModelo,
   MAX_ASOCIACIONES_POR_ENVIO,
   MAX_CAMPOS_MODELO,
@@ -90,6 +97,10 @@ export function traducir(err: unknown): unknown {
   }
   if (err.message === "duplicate-code") return new ServiceError("Ya existe otro registro con ese código. Los códigos no se pueden repetir.", 409, "duplicate-code");
   if (err.message === "disciplina-ajena") return new ServiceError("Esa disciplina, elemento o etapa no es de este proyecto.", 400, "disciplina-ajena");
+  if (err.message === "auditoria-cerrada") return new ServiceError("Esa auditoría ya está cerrada (o no es de este proyecto): no se le pueden agregar resultados.", 409, "auditoria-cerrada");
+  if (err.message === "auditoria-incompleta") {
+    return new ServiceError("A la auditoría le faltan partes por guardar: vuelve a intentar guardarla.", 409, "auditoria-incompleta");
+  }
   return err;
 }
 
@@ -489,6 +500,101 @@ export async function guardarCamposModelo(ctx: Ctx, body: unknown): Promise<{ gu
   });
   await ctx.store.saveCamposModelo(ctx.projectId, { modelos, campos }, ctx.caller.name);
   return { guardados: campos.length };
+}
+
+// ---------------------------------------------------------------- audits and exceptions
+
+export async function getAuditorias(ctx: Ctx): Promise<{ auditorias: Auditoria[] }> {
+  return { auditorias: await ctx.store.listAuditorias(ctx.projectId) };
+}
+
+export async function getAuditoria(ctx: Ctx, id: string): Promise<{ auditoria: Auditoria; lotes: LoteAuditoria[] }> {
+  const r = await ctx.store.getAuditoria(ctx.projectId, leerId(id, "Auditoría"));
+  if (!r) throw new ServiceError("La auditoría no existe en este proyecto.", 404);
+  return r;
+}
+
+const MAX_RESUMEN = 3_000_000;
+const MAX_LOTES_BYTES = 3_500_000;
+
+/** Starts saving an audit (its header: the summary and the configuration used). */
+export async function crearAuditoria(ctx: Ctx, body: unknown): Promise<{ auditoria: Auditoria }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as { id?: unknown; etapaId?: unknown; resumen?: unknown; nota?: unknown };
+  const id = leerId(o.id, "Auditoría");
+  const etapaId = leerId(o.etapaId, "Etapa");
+  const r = o.resumen as ResumenAuditoria | null;
+  if (!r || typeof r !== "object" || Array.isArray(r) || !r.total || !Array.isArray(r.disciplinas) || !Array.isArray(r.elementos)) bad("El resumen de la auditoría no es válido.");
+  if (r.etapa?.id !== etapaId) bad("El resumen no es de esa etapa.");
+  if (JSON.stringify(r).length > MAX_RESUMEN) bad("El resumen de la auditoría es demasiado grande.");
+  const nota = typeof o.nota === "string" ? o.nota.trim().slice(0, 500) : "";
+  return { auditoria: await guardando(ctx.store.crearAuditoria(ctx.projectId, { id, etapaId, resumen: r, nota }, ctx.caller.name)) };
+}
+
+/** Adds slices of an audit's objects (a slice already saved is left as it is). */
+export async function agregarResultados(ctx: Ctx, id: string, body: unknown): Promise<{ guardados: number }> {
+  await requireEdit(ctx);
+  const auditoriaId = leerId(id, "Auditoría");
+  const list = (body as { lotes?: unknown } | null)?.lotes;
+  if (!Array.isArray(list) || list.length === 0) bad("No hay resultados que guardar.");
+  if (list.length > MAX_LOTES_POR_ENVIO) bad(`Máximo ${MAX_LOTES_POR_ENVIO} partes por envío.`);
+  if (JSON.stringify(list).length > MAX_LOTES_BYTES) bad("El envío es demasiado grande: mándalo en partes más pequeñas.");
+  const lotes: LoteAuditoria[] = list.map((x) => {
+    const l = (x ?? {}) as { parte?: unknown; elementoId?: unknown; objetos?: unknown };
+    if (!Number.isInteger(l.parte) || (l.parte as number) < 1) bad("Parte de la auditoría no válida.");
+    if (!Array.isArray(l.objetos) || l.objetos.length > MAX_OBJETOS_POR_LOTE) bad(`Cada parte lleva hasta ${MAX_OBJETOS_POR_LOTE} objetos.`);
+    return { parte: l.parte as number, elementoId: l.elementoId === null ? null : leerId(l.elementoId, "Elemento"), objetos: l.objetos };
+  });
+  return { guardados: await guardando(ctx.store.agregarResultados(ctx.projectId, auditoriaId, lotes)) };
+}
+
+/** Closes an audit once all its slices are saved; from then on it never changes. */
+export async function cerrarAuditoria(ctx: Ctx, id: string, body: unknown): Promise<{ auditoria: Auditoria }> {
+  await requireEdit(ctx);
+  const partes = (body as { partes?: unknown } | null)?.partes;
+  if (!Number.isInteger(partes) || (partes as number) < 0) bad("Falta cuántas partes tiene la auditoría.");
+  return { auditoria: await guardando(ctx.store.cerrarAuditoria(ctx.projectId, leerId(id, "Auditoría"), partes as number)) };
+}
+
+export async function getExcepciones(ctx: Ctx): Promise<{ excepciones: Excepcion[] }> {
+  return { excepciones: await ctx.store.listExcepciones(ctx.projectId) };
+}
+
+/** Accepts failures (object + parameter + stage) with a justification; those already in force are left. */
+export async function crearExcepciones(ctx: Ctx, body: unknown): Promise<{ creadas: number }> {
+  await requireEdit(ctx);
+  const list = (body as { filas?: unknown } | null)?.filas;
+  if (!Array.isArray(list) || list.length === 0) bad("No hay excepciones que guardar.");
+  if (list.length > MAX_EXCEPCIONES_POR_ENVIO) bad(`Máximo ${MAX_EXCEPCIONES_POR_ENVIO} excepciones por envío.`);
+  const filas = list.map((x, i) => {
+    const f = (x ?? {}) as Record<string, unknown>;
+    if (typeof f.ifcGuid !== "string" || !isIfcGuid(f.ifcGuid)) bad(`Excepción ${i + 1}: el objeto no tiene un IFCGUID válido.`);
+    const justificacion = typeof f.justificacion === "string" ? f.justificacion.trim() : "";
+    if (justificacion.length < 5 || justificacion.length > 1000) bad("La justificación de la excepción debe tener entre 5 y 1000 caracteres.");
+    return {
+      id: leerId(f.id, "Excepción"),
+      etapaId: leerId(f.etapaId, "Etapa"),
+      ifcGuid: f.ifcGuid,
+      parametroId: leerId(f.parametroId, "Parámetro"),
+      elementoId: f.elementoId === null || f.elementoId === undefined ? null : leerId(f.elementoId, "Elemento"),
+      justificacion,
+    };
+  });
+  return { creadas: await guardando(ctx.store.crearExcepciones(ctx.projectId, filas, ctx.caller.name)) };
+}
+
+/** Takes an exception out of force (it stays in the history with who and why). */
+export async function revocarExcepcion(ctx: Ctx, body: unknown): Promise<{ excepcion: Excepcion }> {
+  await requireEdit(ctx);
+  const o = (body ?? {}) as { id?: unknown; motivo?: unknown };
+  const motivo = typeof o.motivo === "string" ? o.motivo.trim().slice(0, 500) : "";
+  if (motivo.length < 3) bad("Escribe por qué se revoca la excepción.");
+  try {
+    return { excepcion: await ctx.store.revocarExcepcion(ctx.projectId, leerId(o.id, "Excepción"), motivo, ctx.caller.name) };
+  } catch (err) {
+    if (err instanceof StoreError && err.message === "version-conflict") throw new ServiceError("Esa excepción ya estaba revocada (o no existe en este proyecto).", 409, "version-conflict");
+    throw traducir(err);
+  }
 }
 
 // ---------------------------------------------------------------- reference images

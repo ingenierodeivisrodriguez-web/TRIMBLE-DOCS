@@ -11,7 +11,7 @@ export default function LoinPage({ forceHost }: { forceHost?: Host }) {
     <LoinShell forceHost={forceHost}>
       {({ host, projectId, projectName, api, viewer, subscribe }) =>
         host === "3dviewer" && viewer ? (
-          <PanelVisor api={api} viewer={viewer as unknown as VisorLoin} subscribe={subscribe} />
+          <PanelVisor api={api} viewer={viewer as unknown as VisorLoin} subscribe={subscribe} proyecto={projectName || projectId} />
         ) : (
           <LoinApp api={api} projectId={projectId} projectName={projectName} />
         )

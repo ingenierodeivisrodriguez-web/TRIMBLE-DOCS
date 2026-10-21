@@ -74,6 +74,10 @@ describe("regla de valor", () => {
     assert.equal(!r.ok && r.motivo, "rango");
     assert.equal(revisarValor(numero, { ...REGLA_VACIA, min: 0.08, max: 0.5 }, "0,15", basura).ok, true);
     assert.equal(!revisarValor(numero, REGLA_VACIA, "alto", basura).ok && "tipo", "tipo");
+    // "N/A" in a number or a yes/no is a garbage value (not filled in), not a wrong type.
+    const na = revisarValor({ tipoDato: "booleano", valoresPermitidos: [], unidad: "" }, REGLA_VACIA, "N/A", basura);
+    assert.equal(!na.ok && na.motivo, "basura");
+    assert.equal(revisarValor({ tipoDato: "booleano", valoresPermitidos: [], unidad: "" }, REGLA_VACIA, "0", basura).ok, true);
   });
 
   it("lee números, verdadero/falso y fechas como los escriben los modelos", () => {

@@ -4,13 +4,14 @@ import { CSSProperties, useCallback, useEffect, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import type { CamposModelo, CatalogoResponse, EstadoResponse, Parametro } from "../../lib/loin/types";
 import { C, message, Notice } from "../presupuesto/ui";
+import Auditorias from "./Auditorias";
 import Catalogo from "./Catalogo";
 import ConfigDialog from "./ConfigDialog";
 import Disciplinas from "./Disciplinas";
 import { linkBtn } from "./estilos";
 import Matriz from "./Matriz";
 
-type Pestana = "catalogo" | "elementos" | "matriz";
+type Pestana = "catalogo" | "elementos" | "matriz" | "auditorias";
 
 /** "Requisitos BIM (LOIN)" in the project menu: the parameter catalog and the elements each discipline models. */
 export default function LoinApp({ api, projectId, projectName }: { api: LoinApi; projectId: string; projectName: string }) {
@@ -52,6 +53,7 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
     { id: "catalogo", nombre: "Catálogo de parámetros" },
     { id: "elementos", nombre: "Disciplinas y elementos" },
     { id: "matriz", nombre: "Matriz LOIN" },
+    { id: "auditorias", nombre: "Auditorías" },
   ];
 
   return (
@@ -98,6 +100,7 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
             {pestana === "catalogo" && <Catalogo api={api} estado={estado} catalogo={catalogo} proyecto={projectName || projectId} camposModelo={camposModelo} onGuardados={alGuardar} />}
             {pestana === "elementos" && <Disciplinas api={api} estado={estado} parametros={catalogo.parametros} tdiGrupos={catalogo.tdiGrupos} camposModelo={camposModelo} />}
             {pestana === "matriz" && <Matriz api={api} estado={estado} parametros={catalogo.parametros} proyecto={projectName || projectId} />}
+            {pestana === "auditorias" && <Auditorias api={api} estado={estado} parametros={catalogo.parametros} />}
           </main>
         </>
       )}

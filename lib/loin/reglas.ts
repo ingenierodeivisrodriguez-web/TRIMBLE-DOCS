@@ -97,10 +97,15 @@ const texto = (v: unknown) => (typeof v === "string" ? v.trim() : String(v));
 /** Checks a value; `basura` are the project's garbage values. */
 export function revisarValor(req: Requisito, regla: ReglaValor, valor: unknown, basura: string[]): RevisionValor {
   if (estaVacio(valor)) return { ok: false, motivo: "vacio", detalle: "El parámetro está vacío." };
+  // In numbers, yes/no and dates a garbage value only counts when it can't be read as one ("N/A", "-"); a 0 can.
+  const relleno = (): RevisionValor | null => {
+    const t = texto(valor);
+    return basura.some((b) => normalizarNombre(b) === normalizarNombre(t)) ? { ok: false, motivo: "basura", detalle: `"${t}" es un valor de relleno.` } : null;
+  };
 
   if (req.tipoDato === "numero") {
     const n = leerNumero(valor);
-    if (n === null) return { ok: false, motivo: "tipo", detalle: `"${texto(valor)}" no es un número.` };
+    if (n === null) return relleno() ?? { ok: false, motivo: "tipo", detalle: `"${texto(valor)}" no es un número.` };
     const u = req.unidad ? ` ${req.unidad}` : "";
     if (regla.min !== null && n < regla.min) return { ok: false, motivo: "rango", detalle: `${n}${u} es menor que el mínimo ${regla.min}${u}.` };
     if (regla.max !== null && n > regla.max) return { ok: false, motivo: "rango", detalle: `${n}${u} es mayor que el máximo ${regla.max}${u}.` };
@@ -108,11 +113,11 @@ export function revisarValor(req: Requisito, regla: ReglaValor, valor: unknown, 
   }
   if (req.tipoDato === "booleano") {
     const b = leerBooleano(valor);
-    return b === null ? { ok: false, motivo: "tipo", detalle: `"${texto(valor)}" no es verdadero ni falso.` } : { ok: true, valor: b };
+    return b === null ? (relleno() ?? { ok: false, motivo: "tipo", detalle: `"${texto(valor)}" no es verdadero ni falso.` }) : { ok: true, valor: b };
   }
   if (req.tipoDato === "fecha") {
     const f = leerFecha(valor);
-    return f === null ? { ok: false, motivo: "tipo", detalle: `"${texto(valor)}" no es una fecha (DD-MM-AAAA).` } : { ok: true, valor: f };
+    return f === null ? (relleno() ?? { ok: false, motivo: "tipo", detalle: `"${texto(valor)}" no es una fecha (DD-MM-AAAA).` }) : { ok: true, valor: f };
   }
 
   const t = texto(valor);
