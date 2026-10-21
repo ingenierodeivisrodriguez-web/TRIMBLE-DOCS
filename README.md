@@ -14,6 +14,7 @@ ambos lugares** para Trimble Connect:
 | **Manuales** — los manuales de la empresa, leídos desde la carpeta de MANAGER PROJECT para las personas que autorice su administrador | Menú lateral del proyecto | `/manuales` | `/manifest-manuales.json` |
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
+| **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (el panel del visor llega en la fase 3) | `/loin` | `/manifest-loin.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -41,6 +42,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Manuales (proyecto)](#manuales-proyecto)
 - [Compras y Contratación (proyecto)](#compras-y-contratación-proyecto)
 - [Control de Obra (proyecto)](#control-de-obra-proyecto)
+- [Requisitos BIM (LOIN) (proyecto)](#requisitos-bim-loin-proyecto)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -3002,6 +3004,202 @@ del presupuesto.
 
 ---
 
+## Requisitos BIM (LOIN) (proyecto)
+
+Define **qué se modela, con qué nivel de detalle y con qué información** en
+cada disciplina y etapa del proyecto, para después auditar los modelos 3D
+contra eso. Se apoya en el nivel de información necesaria (LOIN, ISO
+7817-1:2024): el requisito se define por propósito, hito, actor que entrega y
+objeto, y se divide en información geométrica (detalle, dimensionalidad,
+ubicación, apariencia y comportamiento paramétrico), información alfanumérica
+y documentación.
+
+Se construye por fases. Está la **fase 1: catálogo de parámetros, disciplinas,
+elementos a modelar con sus imágenes y parámetros exigidos, Excel y
+plantillas**. Aparece en el menú lateral del proyecto (`/loin`,
+`manifest-loin.json`); el panel del visor 3D llega en la fase 3.
+
+Reglas que no cambian:
+
+- **Nunca escribe en los Property Sets ni en los UDA de Trimble Connect.** La
+  auditoría solo leerá los modelos; lo propio va a Supabase.
+- **Nada del catálogo, las disciplinas, los elementos ni las plantillas se
+  borra: se desactiva.** La base de datos también rechaza el borrado. Las
+  imágenes sí se pueden quitar (son una ayuda, no un requisito).
+- **Nada se sobrescribe en silencio**: al importar, lo que cambiaría un
+  parámetro existente se muestra y se decide fila por fila.
+- Guardados con versión: si otra persona guardó antes, sale el aviso y los
+  cambios siguen en pantalla.
+
+### Catálogo de parámetros (diccionario de datos)
+
+Pestaña **Catálogo de parámetros**: buscador (código, N°, nombre,
+descripción) y filtros por TDI, NDI, origen del dato, "equivalencias por
+confirmar" e inactivos. Un clic en una fila abre la ficha del parámetro.
+
+- **Cargar listado DYCO** compara los 89 parámetros del listado DYCO con el
+  catálogo: los que faltan entran (marcados) y los que existen con datos
+  distintos se muestran con sus diferencias (sin marcar). Volver a pulsarlo
+  no cambia nada si el catálogo ya los tiene. Los cuatro que no traían N°
+  quedaron con 86 (Espacio), 87 (Clasificación de ocupación según NSR-10),
+  88 (Bloque o etapa) y 89 (Paquete de trabajo o conjunto); el código interno
+  es `DYCO-` + N°.
+- Correcciones aprobadas del listado: Decripcion → Descripción,
+  permehabilidad, contructor, famila, deriba, grnade, compañia,
+  DEMOLISION → DEMOLICION y las tildes de los nombres. Cada parámetro guarda
+  además una equivalencia con su nombre original del listado, así que un
+  modelo con "Decripcion" o "Codigo de proyecto" se sigue encontrando.
+- Ficha: código interno, N°, nombre, descripción, **TDI** (grupo), **NDI**
+  (1 a 3, acumulativo), **origen del dato** (Automática / A ingresar / Por
+  definir), **tipo de dato** (texto, número con unidad, sí/no, fecha, lista
+  de valores), regla de valor, equivalencias de lectura, URI IDS / bSDD y
+  activo. Los tipos de dato de la semilla salen de la descripción del
+  listado (los TRUE/FALSE son sí/no, Estado del elemento y Función de la
+  edificación son listas, las medidas son números en unidades SI); son
+  editables.
+- **Regla de valor**: siempre se exige que no esté vacío. Los valores de
+  relleno ("N/A", "-", "Default"…, editables en ⚙) solo cuentan en texto y
+  listas: **un 0 en un número es válido** (el listado dice que una
+  inclinación de 0° es un plano horizontal) salvo que el mínimo lo impida.
+  Números: mínimo y máximo. Texto: patrón (expresión regular sobre el valor
+  completo; Espacio trae `[A-ZÑ0-9_ ]+`, mayúsculas sin tildes). Listas: solo
+  sus valores, sin distinguir mayúsculas ni tildes. **Probar un valor** dice
+  al momento si un valor cumple y por qué no.
+- **Equivalencias de lectura**: dónde se busca el parámetro en el modelo, en
+  orden de preferencia (se usa la primera que tenga valor):
+  `Pset_WallCommon.LoadBearing`, `Datos de identidad.Capacidad de carga`,
+  `*.Capacidad de carga` (cualquier grupo), `Qto_*BaseQuantities.NetVolume`
+  (comodín en el grupo) o `@Name` (atributo IFC). Los nombres no distinguen
+  mayúsculas ni tildes. Las equivalencias IFC que propuso la app quedan
+  **sugeridas** hasta que alguien pulse Confirmar; se revisaron contra las
+  definiciones de IFC 4.3 de buildingSMART (por ejemplo, el espesor de una
+  losa es `Qto_SlabBaseQuantities.Width`; su Depth es una medida en planta).
+  "Resistencia al Fuego" (sí/no en DYCO) no lleva `FireRating`, que en IFC es
+  un texto ("2h"): ese va con "Tiempo de resistencia al fuego (horas)".
+- **Grupos TDI**: A proyecto / administrativo, B dimensiones y cantidades,
+  C ubicación y espacios, D identificación y materiales, E producto y
+  fabricante, J sistemas (MEP), K requisitos técnicos, seguridad y ocupación,
+  L programación (4D). Los nombres se editan en ⚙ Configuración; una letra
+  que usa algún parámetro no se puede quitar.
+- **Exportar Excel**: hoja "1. Lista de parámetros DYCO" con las columnas del
+  listado (N°, TDI, NDI, Dato, Parámetro, Descripción) y después las que
+  agrega la app (código, tipo, unidad, valores, mínimo, máximo, patrón,
+  equivalencias, URI, activo), más las hojas Grupos TDI e Instrucciones.
+  Sirve de plantilla para importar.
+- **Importar Excel**: busca la hoja con la columna "Parámetro" (el listado
+  original, con su título arriba, también sirve). Reconoce cada fila por su
+  código, luego por N° y luego por nombre; **solo compara y cambia las
+  columnas que trae el archivo** (importar el listado original no borra las
+  equivalencias). Las filas con errores se listan y no se importan. Cada
+  envío de hasta 200 parámetros se guarda completo o no se guarda.
+
+### Disciplinas y elementos
+
+Pestaña **Disciplinas y elementos**: las disciplinas a la izquierda (código,
+nombre, color) y los elementos a modelar de la elegida a la derecha, cada uno
+con su miniatura, clase IFC y cuántos parámetros exige por NDI.
+
+- **Cargar disciplinas sugeridas** agrega las que el proyecto no tenga
+  (se reconocen por código): General, Arquitectura, Estructura,
+  Hidrosanitaria, Eléctrica, Mecánica, Red contra incendio, Gas,
+  Telecomunicaciones y Urbanismo, con unos 50 elementos usuales y su clase
+  IFC. Los parámetros empiezan vacíos, salvo **Información del proyecto**
+  (General, IfcProject), que exige los 14 parámetros TDI-A NDI-1: los datos
+  del proyecto se piden a ese objeto y no a cada muro.
+- Ficha del elemento, en tres pestañas:
+  - **Ficha**: código, nombre, disciplina, clase IFC (con lista de las
+    usuales), tipo predefinido, clasificación (OmniClass / Uniclass y código)
+    y notas de modelado (por capas, por nivel, uniones, qué no se modela).
+  - **Parámetros exigidos**: se agregan del catálogo con buscador, o con
+    **Agregar todos los NDI-n del grupo TDI-X**. Cada uno es obligatorio u
+    opcional y puede tener **su propio NDI o su propia regla solo para este
+    elemento** (p. ej. Grosor de losa entre 0.08 y 0.50 m). El NDI es
+    acumulativo: cuando una etapa pida NDI-2, el elemento deberá tener sus
+    parámetros NDI-1 y NDI-2.
+  - **Imágenes**: hasta 6 por elemento (PNG, JPG o WebP). Se reducen en el
+    navegador a 1600 px por lado (WebP, o JPEG si el navegador no escribe
+    WebP) antes de subirlas: una foto de celular de varios MB queda en unos
+    cientos de KB. El servidor
+    revisa que el archivo sea de verdad una imagen (por sus primeros bytes) y
+    lo guarda en el bucket **privado** `loin-imagenes` de Supabase Storage;
+    el navegador solo recibe enlaces firmados que vencen en una hora.
+- **Plantillas…**: una disciplina completa (elementos, parámetros exigidos,
+  notas e imágenes) se guarda como plantilla en el proyecto base del catálogo
+  y cualquier proyecto con la misma base la copia con **Usar en este
+  proyecto**. La copia es independiente; si el código ya existe se le agrega
+  -2, -3…; los parámetros que el catálogo del proyecto no tenga se dejan
+  fuera y se avisa. Las plantillas se desactivan, no se borran.
+
+### Permisos
+
+| Acción | Quién |
+|---|---|
+| Ver catálogo, disciplinas, elementos, imágenes y plantillas | Cualquier miembro del proyecto |
+| Editar disciplinas, elementos e imágenes, usar plantillas, valores de relleno y umbral | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
+| Editar el catálogo, los grupos TDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
+| Elegir editores y proyecto base | Administradores del proyecto |
+
+Como en Presupuesto, un proyecto puede usar el catálogo de otro (⚙ → proyecto
+base): así se mantiene un solo diccionario de datos para toda la empresa. Las
+disciplinas y elementos siguen siendo de cada proyecto.
+
+### Esquema de la base de datos
+
+[`supabase/loin.sql`](supabase/loin.sql) (se puede volver a ejecutar sin
+perder datos; probado dos veces seguidas con PGlite). RLS activado sin
+políticas: solo el servidor (clave de servicio) lee y escribe.
+
+| Tabla / función | Contenido |
+|---|---|
+| `loin_config` | Por proyecto: proyecto base, editores, valores de relleno, umbral del amarillo |
+| `loin_catalogos` | Por proyecto base: nombres de los grupos TDI |
+| `loin_parametros` | El catálogo (código único por base, sin importar mayúsculas), con versión |
+| `loin_disciplinas` | Por proyecto (código único), con versión |
+| `loin_elementos` | Por proyecto (código único dentro de su disciplina); los parámetros exigidos van en la misma fila (`parametros` jsonb), con versión |
+| `loin_imagenes` | Dónde está cada imagen en el bucket, sus medidas y quién la subió |
+| `loin_plantillas` | Por proyecto base; el contenido no cambia después de guardarla |
+| `loin_guardar_parametros(base, filas, usuario)` | Guarda varios: todos o ninguno (`version-conflict`, `duplicate-code`) |
+| `loin_guardar_disciplina`, `loin_guardar_elemento`, `loin_guardar_plantilla` | Crean (versión 0) o cambian si la versión coincide; el elemento debe ser de una disciplina del proyecto |
+| `loin_sin_borrar()` | Trigger que rechaza borrar parámetros, disciplinas, elementos y plantillas |
+| Bucket `loin-imagenes` | Privado, 2 MB por archivo, solo PNG / JPG / WebP |
+
+### API
+
+Todas las rutas piden `?projectId=` y el token de Trimble del usuario, y
+comprueban que sea miembro del proyecto (`lib/loin/routes.ts`).
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /api/loin/estado` | Configuración, grupos TDI y qué puede hacer quien llama |
+| `PUT /api/loin/config` | Editores y base (administradores); valores de relleno y umbral (editores) |
+| `GET /api/loin/contactos` | Personas y grupos del proyecto, para elegir editores |
+| `GET /api/loin/catalogo` | Parámetros y grupos TDI del proyecto base |
+| `POST /api/loin/catalogo/parametros` | Crea o cambia parámetros (todos o ninguno) |
+| `PUT /api/loin/catalogo/tdi` | Nombres de los grupos TDI |
+| `GET/PUT /api/loin/elementos` | Disciplinas, elementos e imágenes (con enlaces firmados) / guarda un elemento |
+| `POST /api/loin/elementos/sugeridas` | Agrega las disciplinas sugeridas que falten |
+| `PUT /api/loin/disciplinas` | Guarda una disciplina |
+| `POST /api/loin/imagenes` | Sube una imagen (el cuerpo es la imagen ya reducida) |
+| `DELETE /api/loin/imagenes/[id]` | Quita una imagen |
+| `GET/POST/PUT /api/loin/plantillas` | Lista, crea desde una disciplina, renombra o desactiva |
+| `POST /api/loin/plantillas/aplicar` | Copia una plantilla a este proyecto |
+
+Lógica pura con pruebas en `lib/loin/` (`alias.ts`, `reglas.ts`, `ndi.ts`,
+`semilla.ts`, `importar.ts`, `plantillas.ts`, `excel.ts`) y servicio
+probado contra `memoryStore()` (`service.test.ts`).
+
+### Lo que sigue
+
+2. Etapas y **matriz LOIN** (elemento × etapa con LOD, NDI, propósito y
+   actor), exportación a Excel y PDF para el BEP.
+3. **Panel del visor**: modelos por disciplina, reglas de asociación,
+   "Probar regla", asociación manual por IFCGUID y objetos sin clasificar.
+4. **Auditoría**: presencia, contenido, regla y origen de cada parámetro,
+   colores en el visor, excepciones, historial y reportes.
+5. **IDS**: exportar (luego importar) y, con confirmación, ToDos/BCF.
+
+---
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -3212,6 +3410,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Manuales | `https://trimble-docs.vercel.app/manifest-manuales.json` |
    | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
    | Control de Obra | `https://trimble-docs.vercel.app/manifest-control-obra.json` |
+   | Requisitos BIM (LOIN) | `https://trimble-docs.vercel.app/manifest-loin.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
