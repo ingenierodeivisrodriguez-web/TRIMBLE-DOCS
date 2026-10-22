@@ -98,7 +98,7 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
           </nav>
           <main style={{ flex: 1, minHeight: 0, padding: 16, display: "flex", flexDirection: "column" }}>
             {pestana === "catalogo" && <Catalogo api={api} estado={estado} catalogo={catalogo} proyecto={projectName || projectId} camposModelo={camposModelo} onGuardados={alGuardar} />}
-            {pestana === "elementos" && <Disciplinas api={api} estado={estado} parametros={catalogo.parametros} tdiGrupos={catalogo.tdiGrupos} camposModelo={camposModelo} />}
+            {pestana === "elementos" && <Disciplinas api={api} estado={estado} parametros={catalogo.parametros} tdiGrupos={catalogo.tdiGrupos} camposModelo={camposModelo} onParametros={alGuardar} />}
             {pestana === "matriz" && <Matriz api={api} estado={estado} parametros={catalogo.parametros} proyecto={projectName || projectId} />}
             {pestana === "auditorias" && <Auditorias api={api} estado={estado} parametros={catalogo.parametros} />}
           </main>

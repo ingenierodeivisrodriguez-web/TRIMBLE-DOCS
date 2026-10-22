@@ -3019,9 +3019,10 @@ disciplinas, elementos a modelar con sus imágenes y parámetros exigidos,
 Excel y plantillas), la **fase 2** (etapas y matriz LOIN, con exportación a
 Excel y PDF para el BEP), la **fase 3** (panel del visor 3D: modelos por
 disciplina, reglas de asociación, "Probar regla", asociación manual y objetos
-sin clasificar) y la **fase 4** (auditoría de cumplimiento con colores en el
-visor, detalle por objeto, excepciones, historial e informes en Excel y PDF).
-Un solo manifiesto (`manifest-loin.json`) la pone en el menú
+sin clasificar), la **fase 4** (auditoría de cumplimiento con colores en el
+visor, detalle por objeto, excepciones, historial e informes en Excel y PDF)
+y la **fase 5** (exportar los requisitos de una etapa a IDS e importar un
+IDS). Un solo manifiesto (`manifest-loin.json`) la pone en el menú
 lateral del proyecto (`/loin`) y en el panel de extensiones del visor;
 `manifest-loin-visor.json` (`/loin/visor`) es el respaldo solo para el visor.
 
@@ -3303,13 +3304,105 @@ En el menú del proyecto, pestaña **Auditorías**:
   excepción no se borra y la siguiente auditoría vuelve a contar ese
   incumplimiento.
 
+### IDS (exportar e importar)
+
+**IDS** (Information Delivery Specification, buildingSMART, versión 1.0) es
+el formato estándar para pedir información verificable en un IFC. Las reglas
+de escritura se tomaron del esquema y el manual oficiales
+([github.com/buildingSMART/IDS](https://github.com/buildingSMART/IDS),
+versión v1.0.0) y los tipos de dato de las propiedades estándar, de las
+definiciones de IFC 4.3. El archivo se arma y se lee en el navegador: no hay
+rutas nuevas ni tablas nuevas.
+
+**Exportar IDS…** (pestaña Matriz LOIN): se eligen la etapa, las
+disciplinas y las versiones de IFC de los modelos (IFC2X3 e IFC4 marcadas;
+los revisores solo aplican el IDS a modelos de las versiones marcadas). Antes
+de descargar se ve cuántas especificaciones y requisitos lleva y qué queda
+por fuera.
+
+- Una **especificación por elemento** que pide NDI en esa etapa. Aplica a su
+  clase IFC en mayúsculas y, si lo tiene, a su tipo predefinido. El IDS no
+  incluye subtipos solo, así que un muro se escribe
+  `IFCWALL|IFCWALLSTANDARDCASE|IFCWALLELEMENTEDCASE`. Cada especificación
+  puede faltar en un modelo (cada disciplina revisa el suyo), lleva el código
+  del elemento, "LOD 300 · NDI-2 · Propósito… · Entrega…" y sus notas de
+  modelado como instrucciones.
+- **Cada parámetro exigido** hasta el NDI de la celda (acumulativo) es un
+  requisito obligatorio u opcional. Se pide donde lo busca primero la
+  auditoría (`*.Ancho` = "Ancho" en cualquier grupo, como lo exporta Revit con
+  parámetros compartidos; `@Name` como atributo IFC). Con **"Pedir cada
+  parámetro en su equivalencia IFC estándar"** se usa la de Pset_, Qto_ o el
+  atributo cuando la tiene (`Qto_*BaseQuantities.Width`).
+- **Tipo de dato IFC**: se escribe cuando el IDS lo exige (hay un valor que
+  revisar o el parámetro es opcional) y en las propiedades estándar, cuyo
+  tipo se conoce (FireRating es texto, LoadBearing sí/no, NumberOfRiser un
+  conteo). Las fechas van como IFCDATE, o como texto si se incluye IFC2X3,
+  que no tiene ese tipo.
+- **Reglas**: el rango de un número va en unidades SI. Los metros quedan
+  igual y los grados pasan a radianes: 45° se escribe 0.785398163397. Las
+  listas van como valores permitidos y los patrones como expresión regular de
+  XML Schema, sin `^` ni `$`. La regla propia del elemento gana sobre la del
+  catálogo.
+- **Lo que un IDS no puede llevar** se lista antes de descargar:
+  - el LOD;
+  - los valores de relleno ("N/A");
+  - un patrón con construcciones que XML Schema no tiene;
+  - un rango sobre una propiedad que en IFC es texto, como FireRating.
+
+  Se avisa también qué elementos se quedan fuera (sin clase IFC, o sin
+  parámetros de ese NDI). Y se avisa cuándo dos elementos comparten clase sin
+  un tipo predefinido que los distinga, porque el IDS les exigiría los
+  parámetros de los dos.
+- Las listas de un IDS distinguen mayúsculas y tildes; la auditoría de la app
+  no.
+- Archivo `Requisitos LOIN DD-MM-AAAA - Proyecto - Etapa.ids`. Se probó contra
+  el esquema oficial con un validador XML: el catálogo DYCO completo en 52
+  elementos (2.808 requisitos) da un IDS válido.
+
+**Importar IDS…** (pestaña Disciplinas y elementos, editores): lee un IDS
+del cliente, de otra herramienta o uno exportado aquí. Antes de guardar
+muestra, especificación por especificación, a qué elemento va y qué
+agrega. **Nada existente cambia sin marcarlo.**
+
+- **Elemento**: se reconoce por su código (identificador del IDS), por su
+  nombre ("ARQ · Muro") o por ser el único de su clase y tipo predefinido.
+  Si hay varios de la misma clase, queda en "No importar" para que se elija.
+  Si ninguno tiene esa clase, se propone **crear uno nuevo** en la
+  disciplina elegida. Se crea con su clase, tipo predefinido, notas y una
+  regla de asociación por clase.
+- **Parámetro**: se busca en el catálogo por dónde se lee (gana la
+  equivalencia exacta; una con comodín, como `Qto_*BaseQuantities`, también
+  cuenta), luego por su URI y luego por su nombre. Si no está, se propone
+  uno nuevo (`IDS-001`…) con:
+  - su tipo, deducido del tipo IFC;
+  - su unidad, la SI del tipo IFC (los ángulos en grados);
+  - su regla, valores permitidos y equivalencia;
+  - grupo TDI y NDI elegidos en la ventana (las cantidades Qto_ van a
+    TDI-B).
+
+  Solo se crean los parámetros que use una fila marcada, y crearlos requiere
+  editar el catálogo del proyecto base.
+- **Filas**:
+  - **Agrega** (marcada): el elemento no lo exigía. Si el IDS trae una regla
+    distinta a la del catálogo, va como regla propia del elemento.
+  - **Cambia** (sin marcar): ya lo exige con otra obligación u otra regla;
+    se muestra el antes → después.
+  - **Igual**: no hace nada.
+  - **No se importa**: prohibidos, clasificación, material o "partOf".
+
+  Un límite excluyente (> o <) queda incluido y se avisa.
+- **Equivalencias que faltan** (sin marcar): cuando un parámetro se reconoció
+  por su nombre o URI, pero el IDS lo lee en otro lugar.
+- Volver a importar el mismo archivo no duplica nada: todo sale "Igual".
+
 ### Permisos
 
 | Acción | Quién |
 |---|---|
 | Ver catálogo, disciplinas, elementos, imágenes y plantillas | Cualquier miembro del proyecto |
 | Editar disciplinas, elementos e imágenes, etapas y matriz LOIN, usar plantillas, valores de relleno y umbral; en el visor: disciplinas de los modelos, reglas, asociación manual y nombres de propiedades | Administradores del proyecto y **editores** elegidos en ⚙ Configuración |
-| Probar reglas, clasificar y auditar en el visor, exportar, ver el historial y las excepciones | Cualquier miembro (solo lee) |
+| Probar reglas, clasificar y auditar en el visor, exportar (Excel, PDF, IDS), ver el historial y las excepciones | Cualquier miembro (solo lee) |
+| Importar un IDS (los parámetros nuevos además piden editar el catálogo base) | Administradores del proyecto y editores |
 | Guardar auditorías, aceptar y revocar excepciones | Administradores del proyecto y editores |
 | Editar el catálogo, los grupos TDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
 | Elegir editores y proyecto base | Administradores del proyecto |
@@ -3387,13 +3480,14 @@ comprueban que sea miembro del proyecto (`lib/loin/routes.ts`).
 Lógica pura con pruebas en `lib/loin/` (`alias.ts`, `reglas.ts`, `ndi.ts`,
 `semilla.ts`, `importar.ts`, `plantillas.ts`, `excel.ts`, `matriz.ts`,
 `exportarMatriz.ts`, `clasificacion.ts`, `auditoria.ts`,
-`exportarAuditoria.ts`) y servicio probado contra
-`memoryStore()` (`service.test.ts`). La lectura del visor
+`exportarAuditoria.ts`, `ids.ts`, `importarIds.ts`, `xml.ts`) y servicio
+probado contra `memoryStore()` (`service.test.ts`). La lectura del visor
 (`lecturaVisor.ts`) usa los lectores de Gráficos de Modelos.
 
 ### Lo que sigue
 
-5. **IDS**: exportar (luego importar) y, con confirmación, ToDos/BCF.
+- **ToDos / BCF** para los objetos que no cumplen: opcional y solo con
+  confirmación del dueño.
 
 ---
 

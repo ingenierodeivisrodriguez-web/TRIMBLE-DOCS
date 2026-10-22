@@ -6,7 +6,7 @@ import { reducirImagen } from "../../lib/loin/imagen";
 import { agregarGrupo, conteoPorNdi, ndiDe } from "../../lib/loin/ndi";
 import { describirRegla, errorPatron } from "../../lib/loin/reglas";
 import { textoAlias } from "../../lib/loin/alias";
-import { textoRegla } from "../../lib/loin/clasificacion";
+import { CLASES_IFC, textoRegla } from "../../lib/loin/clasificacion";
 import ReglaEditor from "./ReglaEditor";
 import { CamposModelo, Disciplina, Elemento, ElementoData, EstadoResponse, GrupoTdi, Imagen, MAX_IMAGENES_ELEMENTO, NDIS, Ndi, Parametro, ParametroExigido, REGLA_VACIA, ReglaValor } from "../../lib/loin/types";
 import { coincide, fecha } from "../../lib/presupuesto/format";
@@ -14,17 +14,6 @@ import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInpu
 import { area, ayuda, botonPeligro, botonSecundario, campo, ETIQUETA_NDI, inactivo, linkBtn, select, td, th } from "./estilos";
 
 type Seccion = "ficha" | "parametros" | "imagenes";
-
-const CLASES_IFC = [
-  "IfcProject", "IfcSite", "IfcBuilding", "IfcBuildingStorey", "IfcSpace", "IfcZone",
-  "IfcWall", "IfcSlab", "IfcBeam", "IfcColumn", "IfcFooting", "IfcPile", "IfcMember", "IfcPlate", "IfcCurtainWall", "IfcRoof", "IfcCovering",
-  "IfcDoor", "IfcWindow", "IfcStair", "IfcStairFlight", "IfcRamp", "IfcRailing", "IfcFurniture", "IfcBuildingElementProxy",
-  "IfcReinforcingBar", "IfcReinforcingMesh", "IfcFastener", "IfcMechanicalFastener",
-  "IfcPipeSegment", "IfcPipeFitting", "IfcValve", "IfcPump", "IfcTank", "IfcSanitaryTerminal", "IfcFlowMeter",
-  "IfcDuctSegment", "IfcDuctFitting", "IfcAirTerminal", "IfcFan", "IfcUnitaryEquipment",
-  "IfcLightFixture", "IfcElectricDistributionBoard", "IfcOutlet", "IfcSwitchingDevice", "IfcCableSegment", "IfcCableCarrierSegment", "IfcCableCarrierFitting",
-  "IfcFireSuppressionTerminal", "IfcAlarm", "IfcCommunicationsAppliance", "IfcPavement", "IfcGeographicElement",
-];
 
 /** One element to model: its sheet, the parameters it must carry and its reference images. */
 export default function ElementoDialog({

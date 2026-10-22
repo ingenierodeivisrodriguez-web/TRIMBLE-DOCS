@@ -7,6 +7,7 @@ import type { CamposModelo, Disciplina, Elemento, ElementosResponse, EstadoRespo
 import { CATEGORY_COLORS } from "../../lib/graficos/colors";
 import { acceptButton, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
 import ElementoDialog from "./ElementoDialog";
+import ImportarIdsDialog from "./ImportarIdsDialog";
 import { ayuda, botonPrincipal, botonSecundario, campo, ETIQUETA_NDI, inactivo, linkBtn } from "./estilos";
 import PlantillasDialog from "./PlantillasDialog";
 
@@ -17,12 +18,15 @@ export default function Disciplinas({
   parametros,
   tdiGrupos,
   camposModelo,
+  onParametros,
 }: {
   api: LoinApi;
   estado: EstadoResponse;
   parametros: Parametro[];
   tdiGrupos: GrupoTdi[];
   camposModelo: CamposModelo | null;
+  /** Catalog parameters saved here (an IDS import may create some). */
+  onParametros: (p: Parametro[]) => void;
 }) {
   const [datos, setDatos] = useState<ElementosResponse | null>(null);
   const [error, setError] = useState("");
@@ -32,6 +36,7 @@ export default function Disciplinas({
   const [editarDisciplina, setEditarDisciplina] = useState<Disciplina | "nueva" | null>(null);
   const [editarElemento, setEditarElemento] = useState<Elemento | "nuevo" | null>(null);
   const [plantillas, setPlantillas] = useState(false);
+  const [importarIds, setImportarIds] = useState(false);
   const [busy, setBusy] = useState(false);
   const puede = estado.canEdit;
   const catalogo = useMemo(() => new Map(parametros.map((p) => [p.id, p])), [parametros]);
@@ -105,6 +110,11 @@ export default function Disciplinas({
         <button type="button" style={botonSecundario} onClick={() => setPlantillas(true)}>
           Plantillas…
         </button>
+        {puede && (
+          <button type="button" style={botonSecundario} onClick={() => setImportarIds(true)} title="Lee un archivo IDS (buildingSMART) y agrega sus requisitos a los elementos, mostrando antes qué cambia">
+            Importar IDS…
+          </button>
+        )}
         <label style={{ fontSize: 13.5, display: "inline-flex", alignItems: "center", gap: 4 }}>
           <input type="checkbox" checked={inactivos} onChange={(e) => setInactivos(e.target.checked)} /> Ver inactivos
         </label>
@@ -245,6 +255,21 @@ export default function Disciplinas({
             await cargar();
           }}
           onClose={() => setPlantillas(false)}
+        />
+      )}
+      {importarIds && (
+        <ImportarIdsDialog
+          api={api}
+          estado={estado}
+          parametros={parametros}
+          tdiGrupos={tdiGrupos}
+          datos={datos}
+          onParametros={onParametros}
+          onListo={async (texto) => {
+            if (texto) setAviso(texto);
+            await cargar();
+          }}
+          onClose={() => setImportarIds(false)}
         />
       )}
     </div>

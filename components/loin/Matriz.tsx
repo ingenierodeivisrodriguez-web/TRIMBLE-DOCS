@@ -27,6 +27,7 @@ import { CeldaMatriz, Disciplina, Elemento, ElementosResponse, Etapa, EstadoResp
 import { coincide } from "../../lib/presupuesto/format";
 import { acceptButton, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
 import EtapasDialog from "./EtapasDialog";
+import ExportarIdsDialog from "./ExportarIdsDialog";
 import { ayuda, botonSecundario, campo, linkBtn, select } from "./estilos";
 
 type Masivo = { tipo: "disciplina"; disciplina: Disciplina; etapa: Etapa } | { tipo: "copiar"; desde: Etapa; hacia: Etapa };
@@ -43,6 +44,7 @@ export default function Matriz({ api, estado, parametros, proyecto }: { api: Loi
   const [masivo, setMasivo] = useState<Masivo | null>(null);
   const [etapasDlg, setEtapasDlg] = useState(false);
   const [exportando, setExportando] = useState("");
+  const [idsDlg, setIdsDlg] = useState(false);
   const puede = estado.canEdit;
   const catalogo = useMemo(() => new Map(parametros.map((p) => [p.id, p])), [parametros]);
 
@@ -138,6 +140,9 @@ export default function Matriz({ api, estado, parametros, proyecto }: { api: Loi
         <button type="button" style={botonSecundario} onClick={() => exportar("pdf")} disabled={!!exportando || etapas.length === 0} title="La matriz con sus colores y la leyenda, en hojas horizontales">
           Exportar PDF
         </button>
+        <button type="button" style={botonSecundario} onClick={() => setIdsDlg(true)} disabled={etapas.length === 0} title="Archivo IDS (buildingSMART) con la información que pide una etapa, para que el diseñador revise su IFC antes de subirlo">
+          Exportar IDS…
+        </button>
         <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>
           {totalElementos} elemento(s) × {etapas.length} etapa(s) · {conExigencia} celda(s) con exigencia{exportando && ` · ${exportando}`}
         </span>
@@ -223,6 +228,9 @@ export default function Matriz({ api, estado, parametros, proyecto }: { api: Loi
           }}
           onClose={() => setMasivo(null)}
         />
+      )}
+      {idsDlg && (
+        <ExportarIdsDialog proyecto={proyecto} etapas={etapas} disciplinas={elems.disciplinas} elementos={elems.elementos} celdas={celdas} catalogo={catalogo} onClose={() => setIdsDlg(false)} />
       )}
       {etapasDlg && <EtapasDialog api={api} etapas={matriz.etapas} puedeEditar={puede} onCambio={cargar} onClose={() => setEtapasDlg(false)} />}
     </div>

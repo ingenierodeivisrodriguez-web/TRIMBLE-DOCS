@@ -126,6 +126,54 @@ export function claseBase(clase: string): string {
   return clase.trim().toLowerCase().replace(/(standardcase|elementedcase)$/, "");
 }
 
+/** IFC classes usually modeled (offered in the element's sheet). */
+export const CLASES_IFC = [
+  "IfcProject", "IfcSite", "IfcBuilding", "IfcBuildingStorey", "IfcSpace", "IfcZone",
+  "IfcWall", "IfcSlab", "IfcBeam", "IfcColumn", "IfcFooting", "IfcPile", "IfcMember", "IfcPlate", "IfcCurtainWall", "IfcRoof", "IfcCovering",
+  "IfcDoor", "IfcWindow", "IfcStair", "IfcStairFlight", "IfcRamp", "IfcRailing", "IfcFurniture", "IfcBuildingElementProxy",
+  "IfcReinforcingBar", "IfcReinforcingMesh", "IfcFastener", "IfcMechanicalFastener",
+  "IfcPipeSegment", "IfcPipeFitting", "IfcValve", "IfcPump", "IfcTank", "IfcSanitaryTerminal", "IfcFlowMeter",
+  "IfcDuctSegment", "IfcDuctFitting", "IfcAirTerminal", "IfcFan", "IfcUnitaryEquipment",
+  "IfcLightFixture", "IfcElectricDistributionBoard", "IfcOutlet", "IfcSwitchingDevice", "IfcCableSegment", "IfcCableCarrierSegment", "IfcCableCarrierFitting",
+  "IfcFireSuppressionTerminal", "IfcAlarm", "IfcCommunicationsAppliance", "IfcPavement", "IfcGeographicElement",
+];
+
+// More IFC4 / IFC4.3 element classes, only to write names read in upper case (an IDS) with their capitals.
+const OTRAS_CLASES_IFC = [
+  "IfcTransportElement", "IfcElementAssembly", "IfcDiscreteAccessory", "IfcShadingDevice", "IfcChimney", "IfcRampFlight", "IfcBuildingElementPart",
+  "IfcCivilElement", "IfcFurnishingElement", "IfcSystemFurnitureElement", "IfcOpeningElement", "IfcVirtualElement", "IfcAnnotation", "IfcGrid",
+  "IfcFlowTerminal", "IfcFlowSegment", "IfcFlowFitting", "IfcFlowController", "IfcFlowMovingDevice", "IfcFlowStorageDevice", "IfcFlowTreatmentDevice",
+  "IfcEnergyConversionDevice", "IfcDistributionElement", "IfcDistributionControlElement", "IfcDistributionChamberElement", "IfcElectricAppliance",
+  "IfcElectricGenerator", "IfcElectricMotor", "IfcTransformer", "IfcJunctionBox", "IfcCableFitting", "IfcCableCarrierFitting", "IfcLamp",
+  "IfcProtectiveDevice", "IfcSensor", "IfcActuator", "IfcController", "IfcAudioVisualAppliance", "IfcMedicalDevice", "IfcSolarDevice",
+  "IfcBoiler", "IfcChiller", "IfcCoil", "IfcCompressor", "IfcCondenser", "IfcCoolingTower", "IfcDamper", "IfcDuctSilencer", "IfcEvaporator",
+  "IfcFilter", "IfcHeatExchanger", "IfcHumidifier", "IfcInterceptor", "IfcSpaceHeater", "IfcStackTerminal", "IfcWasteTerminal", "IfcBurner",
+  "IfcTendon", "IfcTendonAnchor", "IfcReinforcingElement", "IfcBearing", "IfcCourse", "IfcEarthworksFill", "IfcEarthworksCut", "IfcKerb", "IfcSign",
+  "IfcSignal", "IfcRail", "IfcTrackElement", "IfcMooringDevice", "IfcPavement", "IfcStructuralItem", "IfcSpatialZone", "IfcFacility", "IfcBridge",
+  "IfcRoad", "IfcRailway", "IfcMarineFacility", "IfcAlignment", "IfcWallStandardCase", "IfcSlabStandardCase", "IfcColumnStandardCase",
+  "IfcBeamStandardCase", "IfcMemberStandardCase", "IfcPlateStandardCase", "IfcDoorStandardCase", "IfcWindowStandardCase",
+];
+
+/** "IFCWALL" -> "IfcWall" when the class is known; any other keeps its letters after "Ifc". */
+export function nombreClaseIfc(clase: string): string {
+  const t = clase.trim();
+  const conocida = [...CLASES_IFC, ...OTRAS_CLASES_IFC].find((c) => c.toLowerCase() === t.toLowerCase());
+  return conocida ?? t;
+}
+
+// Classes whose standard (and elemented) case is a separate IFC entity; an IDS doesn't include subtypes by itself.
+const CON_CASO_ESTANDAR = ["ifcwall", "ifcslab", "ifcbeam", "ifccolumn", "ifcmember", "ifcplate", "ifcdoor", "ifcwindow"];
+const CON_CASO_ELEMENTADO = ["ifcwall", "ifcslab"];
+
+/** The IFC entity names (upper case) that count as this class: "IfcWall" -> IFCWALL, IFCWALLSTANDARDCASE, IFCWALLELEMENTEDCASE. */
+export function variantesClase(clase: string): string[] {
+  const base = claseBase(clase);
+  const out = [base.toUpperCase()];
+  if (CON_CASO_ESTANDAR.includes(base)) out.push(`${base.toUpperCase()}STANDARDCASE`);
+  if (CON_CASO_ELEMENTADO.includes(base)) out.push(`${base.toUpperCase()}ELEMENTEDCASE`);
+  return out;
+}
+
 export function nombreCampo(campo: string): string {
   return CAMPOS_FIJOS.find((c) => c.campo === campo)?.nombre ?? campo;
 }
