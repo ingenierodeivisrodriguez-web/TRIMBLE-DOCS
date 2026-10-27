@@ -29,6 +29,7 @@ import {
   GrupoTdi,
   Imagen,
   MAX_PARAMETROS_POR_ENVIO,
+  NivelNdi,
   Parametro,
   ParametroData,
   Plantilla,
@@ -41,6 +42,7 @@ export interface LoinApi {
   getContacts(): Promise<ProjectContacts>;
   getCatalogo(): Promise<CatalogoResponse>;
   guardarGruposTdi(grupos: GrupoTdi[]): Promise<GrupoTdi[]>;
+  guardarNivelesNdi(niveles: NivelNdi[]): Promise<NivelNdi[]>;
   /** Several requests when there are many (`onProgress` after each); each request is all or none. */
   guardarParametros(filas: ConVersion<ParametroData>[], onProgress?: (hechos: number) => void): Promise<Parametro[]>;
   getElementos(): Promise<ElementosResponse>;
@@ -132,6 +134,7 @@ export function loinApi(projectId: string, auth: TokenSource): LoinApi {
     getContacts: () => request("/contactos"),
     getCatalogo: () => request("/catalogo"),
     guardarGruposTdi: (grupos) => request<{ tdiGrupos: GrupoTdi[] }>("/catalogo/tdi", send("PUT", { grupos })).then((r) => r.tdiGrupos),
+    guardarNivelesNdi: (niveles) => request<{ ndiNiveles: NivelNdi[] }>("/catalogo/ndi", send("PUT", { niveles })).then((r) => r.ndiNiveles),
     async guardarParametros(filas, onProgress) {
       const out: Parametro[] = [];
       for (let i = 0; i < filas.length; i += MAX_PARAMETROS_POR_ENVIO) {

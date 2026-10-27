@@ -3,13 +3,14 @@
 import { useCallback, useEffect, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import { VALORES_BASURA_INICIALES } from "../../lib/loin/reglas";
-import { TDI_INICIALES } from "../../lib/loin/semilla";
-import type { EstadoResponse, GrupoTdi } from "../../lib/loin/types";
+import { nivelesLibres } from "../../lib/loin/ndi";
+import { NDI_INICIALES, TDI_INICIALES } from "../../lib/loin/semilla";
+import type { EstadoResponse, GrupoTdi, NivelNdi } from "../../lib/loin/types";
 import { describeResponsables, withCurrentNames } from "../../lib/propiedades/responsables";
 import type { ProjectContacts, Responsable } from "../../lib/propiedades/types";
 import ResponsablesPicker from "../propiedades/ResponsablesPicker";
 import { acceptButton, baseInput, message, Modal, Notice, NumInput } from "../presupuesto/ui";
-import { area, ayuda, botonSecundario, campo, h3, linkBtn, parrafo } from "./estilos";
+import { area, ayuda, botonSecundario, campo, etiquetaNdi, h3, linkBtn, parrafo } from "./estilos";
 
 /** "https://web.connect.trimble.com/projects/AbC123/data" or "AbC123" -> "AbC123". */
 function projectIdFrom(text: string): string {
@@ -20,7 +21,8 @@ function projectIdFrom(text: string): string {
 
 /**
  * Who edits besides the administrators, which project holds the parameter
- * catalog, the TDI group names, the garbage values and the yellow threshold.
+ * catalog, the TDI groups, the NDI levels, the garbage values and the yellow
+ * threshold.
  */
 export default function ConfigDialog({
   api,
@@ -38,6 +40,8 @@ export default function ConfigDialog({
   const [contactsError, setContactsError] = useState("");
   const [base, setBase] = useState("");
   const [grupos, setGrupos] = useState<GrupoTdi[]>(estado.tdiGrupos);
+  const [niveles, setNiveles] = useState<NivelNdi[]>(estado.ndiNiveles);
+  const [numeroNuevo, setNumeroNuevo] = useState(0);
   const [basura, setBasura] = useState(estado.config.valoresBasura.join("\n"));
   const [umbral, setUmbral] = useState<number>(estado.config.umbralAmarillo);
   const [busy, setBusy] = useState(false);
@@ -78,6 +82,8 @@ export default function ConfigDialog({
     correr(async () => ({ estado: await api.updateConfig(patch), baseCambiada: patch.baseProjectId !== undefined }), texto);
 
   const libre = "ABCDEFGHIJKLMNOPQRSTUVWXYZ".split("").find((l) => !grupos.some((g) => g.codigo === l));
+  const libres = nivelesLibres(niveles);
+  const nivelNuevo = libres.includes(numeroNuevo) ? numeroNuevo : libres[0];
 
   return (
     <Modal title="Configuración de Requisitos BIM" onClose={onClose} width={860}>
@@ -181,6 +187,70 @@ export default function ConfigDialog({
                 }, "Grupos TDI guardados.")}
               >
                 Guardar grupos
+              </button>
+            </div>
+          )}
+        </section>
+
+        <section>
+          <h3 style={h3}>Niveles NDI (nivel de información)</h3>
+          <p style={ayuda}>
+            Los niveles son del catálogo, numerados del 1 al 9; el nombre es opcional. El NDI es acumulativo por número: una etapa que pide NDI-3 exige los parámetros del elemento de nivel 3 o
+            menor. Un nivel que usa algún parámetro, elemento, plantilla o celda de la matriz no se puede quitar.
+          </p>
+          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+            {niveles.map((n, i) => (
+              <div key={n.numero} style={{ display: "flex", gap: 8, alignItems: "center" }}>
+                <span style={{ width: 52 }}>
+                  <span style={etiquetaNdi(n.numero)}>NDI-{n.numero}</span>
+                </span>
+                <input
+                  value={n.nombre}
+                  onChange={(e) => setNiveles(niveles.map((x, j) => (j === i ? { ...x, nombre: e.target.value } : x)))}
+                  readOnly={!estado.canEditBase}
+                  maxLength={120}
+                  placeholder={estado.canEditBase ? "Nombre (opcional)" : "Sin nombre"}
+                  style={{ ...campo, flex: 1, width: "auto" }}
+                  aria-label={`Nombre del nivel NDI-${n.numero}`}
+                />
+                {estado.canEditBase && (
+                  <button type="button" style={linkBtn} onClick={() => setNiveles(niveles.filter((_, j) => j !== i))}>
+                    Quitar
+                  </button>
+                )}
+              </div>
+            ))}
+          </div>
+          {estado.canEditBase && (
+            <div style={{ display: "flex", gap: 8, marginTop: 10, flexWrap: "wrap" }}>
+              {nivelNuevo !== undefined && (
+                <span style={{ display: "inline-flex", gap: 4, alignItems: "center" }}>
+                  <select value={nivelNuevo} onChange={(e) => setNumeroNuevo(Number(e.target.value))} style={{ ...baseInput, padding: "6px" }} aria-label="Número del nivel nuevo">
+                    {libres.map((n) => (
+                      <option key={n} value={n}>
+                        NDI-{n}
+                      </option>
+                    ))}
+                  </select>
+                  <button type="button" style={botonSecundario} onClick={() => setNiveles([...niveles, { numero: nivelNuevo, nombre: "" }].sort((a, b) => a.numero - b.numero))}>
+                    + Agregar nivel
+                  </button>
+                </span>
+              )}
+              <button type="button" style={botonSecundario} onClick={() => setNiveles(NDI_INICIALES)}>
+                Restablecer los de fábrica (NDI-1 a NDI-3)
+              </button>
+              <button
+                type="button"
+                style={acceptButton}
+                disabled={busy || niveles.length === 0}
+                onClick={() => correr(async () => {
+                  const ndiNiveles = await api.guardarNivelesNdi(niveles.map((n) => ({ ...n, nombre: n.nombre.trim() })));
+                  setNiveles(ndiNiveles);
+                  return { estado: { ...estado, ndiNiveles } };
+                }, "Niveles NDI guardados.")}
+              >
+                Guardar niveles
               </button>
             </div>
           )}

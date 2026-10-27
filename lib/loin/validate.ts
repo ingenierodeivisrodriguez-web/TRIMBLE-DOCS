@@ -27,6 +27,9 @@ import {
   MAX_VALORES_BASURA,
   MAX_VALORES_PERMITIDOS,
   Ndi,
+  NDI_MAX,
+  NDI_MIN,
+  NivelNdi,
   ORIGENES,
   ParametroData,
   ParametroExigido,
@@ -85,9 +88,10 @@ export function leerVersion(v: unknown): number {
   return v as number;
 }
 
+// Whether the level exists in the catalog is the service's check (the levels are configured).
 function leerNdi(v: unknown, donde: string): Ndi {
-  if (v !== 1 && v !== 2 && v !== 3) bad(`${donde}: el NDI debe ser 1, 2 o 3.`);
-  return v;
+  if (!Number.isInteger(v) || (v as number) < NDI_MIN || (v as number) > NDI_MAX) bad(`${donde}: el NDI debe ser un número entero del ${NDI_MIN} al ${NDI_MAX}.`);
+  return v as Ndi;
 }
 
 export function leerRegla(v: unknown, donde: string): ReglaValor {
@@ -306,6 +310,23 @@ export function leerGruposTdi(v: unknown): GrupoTdi[] {
     vistos.add(codigo);
     return { codigo, nombre: texto(o.nombre, `Grupo TDI-${codigo} (nombre)`, 120, true) };
   });
+}
+
+/** The NDI levels, from the lowest; the name is optional. */
+export function leerNivelesNdi(v: unknown): NivelNdi[] {
+  if (!Array.isArray(v) || v.length === 0) bad("Debe haber al menos un nivel NDI.");
+  const cupo = NDI_MAX - NDI_MIN + 1;
+  if (v.length > cupo) bad(`Máximo ${cupo} niveles NDI (del ${NDI_MIN} al ${NDI_MAX}).`);
+  const vistos = new Set<number>();
+  return v
+    .map((x, i) => {
+      const o = objeto(x, `Nivel NDI ${i + 1}`);
+      const numero = leerNdi(o.numero, `Nivel NDI ${i + 1}`);
+      if (vistos.has(numero)) bad(`El NDI-${numero} está repetido.`);
+      vistos.add(numero);
+      return { numero, nombre: texto(o.nombre, `NDI-${numero} (nombre)`, 120) };
+    })
+    .sort((a, b) => a.numero - b.numero);
 }
 
 export function leerValoresBasura(v: unknown): string[] {

@@ -5,9 +5,10 @@ import type { Responsable } from "../propiedades/types";
 import { plegar } from "../presupuesto/format";
 import { reglaDesdeClase } from "./clasificacion";
 import { ETAPAS_SUGERIDAS } from "./matriz";
+import { textoUsos, usosDeNiveles } from "./ndi";
 import { codigoLibre, contenidoPlantilla, elementosDePlantilla } from "./plantillas";
 import { VALORES_BASURA_INICIALES } from "./reglas";
-import { disciplinasSugeridas, TDI_INICIALES } from "./semilla";
+import { disciplinasSugeridas, NDI_INICIALES, TDI_INICIALES } from "./semilla";
 import type { ConVersion, ImagenGuardada, LoinStore, StoredConfig } from "./store";
 import {
   Auditoria,
@@ -35,6 +36,8 @@ import {
   EstadoResponse,
   GrupoTdi,
   Imagen,
+  Ndi,
+  NivelNdi,
   MAX_BYTES_IMAGEN,
   MAX_ELEMENTOS_PLANTILLA,
   MAX_IMAGENES_ELEMENTO,
@@ -54,6 +57,7 @@ import {
   leerElemento,
   leerGruposTdi,
   leerId,
+  leerNivelesNdi,
   leerParametro,
   leerUmbral,
   leerValoresBasura,
@@ -173,15 +177,34 @@ async function gruposDe(store: LoinStore, baseId: string): Promise<GrupoTdi[]> {
   return (await store.getGruposTdi(baseId)) ?? TDI_INICIALES;
 }
 
+async function nivelesDe(store: LoinStore, baseId: string): Promise<NivelNdi[]> {
+  return (await store.getNivelesNdi(baseId)) ?? NDI_INICIALES;
+}
+
+/** Only the catalog's levels are used ("donde" names the record for the message). */
+async function revisarNiveles(store: LoinStore, baseId: string, usos: { ndi: Ndi | null; donde: string }[]) {
+  const usados = usos.filter((u) => u.ndi !== null);
+  if (!usados.length) return;
+  const numeros = new Set((await nivelesDe(store, baseId)).map((n) => n.numero));
+  const ajeno = usados.find((u) => !numeros.has(u.ndi!));
+  if (ajeno) bad(`El NDI-${ajeno.ndi} de ${ajeno.donde} no existe en el catálogo: agrégalo en ⚙ Configuración o elige otro nivel.`);
+}
+
 // ---------------------------------------------------------------- state and configuration
 
 export async function getEstado(ctx: Ctx): Promise<EstadoResponse> {
   const config = await configDe(ctx.store, ctx.projectId);
-  const [canEdit, base, tdiGrupos] = await Promise.all([esEditor(ctx.caller, config.editores), permisoBase(ctx, config), gruposDe(ctx.store, config.baseProjectId)]);
+  const [canEdit, base, tdiGrupos, ndiNiveles] = await Promise.all([
+    esEditor(ctx.caller, config.editores),
+    permisoBase(ctx, config),
+    gruposDe(ctx.store, config.baseProjectId),
+    nivelesDe(ctx.store, config.baseProjectId),
+  ]);
   return {
     projectId: ctx.projectId,
     config: configPublica(config),
     tdiGrupos,
+    ndiNiveles,
     esBasePropia: config.baseProjectId === ctx.projectId,
     isAdmin: ctx.caller.isAdmin,
     canEdit,
@@ -247,6 +270,41 @@ export async function guardarGruposTdi(ctx: Ctx, body: unknown): Promise<{ tdiGr
   return { tdiGrupos: grupos };
 }
 
+/**
+ * The NDI levels belong to the catalog too. A level still used by a parameter,
+ * an element's own level, a template or a matrix cell (of any project using
+ * this catalog) can't be removed.
+ */
+export async function guardarNivelesNdi(ctx: Ctx, body: unknown): Promise<{ ndiNiveles: NivelNdi[] }> {
+  const baseId = await requireEditBase(ctx);
+  const niveles = leerNivelesNdi((body as { niveles?: unknown } | null)?.niveles);
+  const quedan = new Set(niveles.map((n) => n.numero));
+  const quitados = new Set((await nivelesDe(ctx.store, baseId)).map((n) => n.numero).filter((n) => !quedan.has(n)));
+  if (quitados.size) {
+    const proyectos = new Set(await ctx.store.proyectosDeBase(baseId));
+    if ((await configDe(ctx.store, baseId)).baseProjectId === baseId) proyectos.add(baseId);
+    const [parametros, plantillas, porProyecto] = await Promise.all([
+      ctx.store.listParametros(baseId),
+      ctx.store.listPlantillas(baseId),
+      Promise.all([...proyectos].map(async (p) => ({ elementos: await ctx.store.listElementos(p), celdas: await ctx.store.listMatriz(p) }))),
+    ]);
+    const usos = usosDeNiveles(quitados, {
+      parametros,
+      plantillas,
+      elementos: porProyecto.flatMap((p) => p.elementos),
+      celdas: porProyecto.flatMap((p) => p.celdas),
+    });
+    const [primero] = usos;
+    if (primero) {
+      const [n, u] = primero;
+      const otros = proyectos.size > 1 ? " (en este proyecto o en otros que usan este catálogo)" : "";
+      bad(`No se puede quitar el NDI-${n}: lo usan ${textoUsos(u)}${otros}. Cámbialos a otro nivel primero.`);
+    }
+  }
+  await ctx.store.saveNivelesNdi(baseId, niveles, ctx.caller.name);
+  return { ndiNiveles: niveles };
+}
+
 // ---------------------------------------------------------------- the parameter catalog
 
 export async function getCatalogo(ctx: Ctx): Promise<CatalogoResponse> {
@@ -278,6 +336,7 @@ export async function guardarParametros(ctx: Ctx, body: unknown): Promise<{ para
   const letras = new Set(grupos.map((g) => g.codigo));
   const sinGrupo = filas.find((f) => !letras.has(f.tdi));
   if (sinGrupo) bad(`El grupo TDI-${sinGrupo.tdi} de "${sinGrupo.nombre}" no existe: agrégalo en ⚙ Configuración.`);
+  await revisarNiveles(ctx.store, baseId, filas.map((f) => ({ ndi: f.ndi, donde: `"${f.nombre}"` })));
   const nuevos = filas.filter((f) => f.version === 0).length;
   if (actuales.length + nuevos > MAX_PARAMETROS_CATALOGO) bad(`El catálogo admite hasta ${MAX_PARAMETROS_CATALOGO} parámetros.`);
   return { parametros: await guardando(ctx.store.saveParametros(baseId, filas, ctx.caller.name)) };
@@ -326,6 +385,7 @@ export async function guardarElemento(ctx: Ctx, body: unknown): Promise<{ elemen
     const catalogo = new Set((await ctx.store.listParametros(config.baseProjectId)).map((p) => p.id));
     const ajeno = fila.parametros.find((p) => !catalogo.has(p.parametroId));
     if (ajeno) bad("Uno de los parámetros exigidos no está en el catálogo de este proyecto. Recarga la página.");
+    await revisarNiveles(ctx.store, config.baseProjectId, fila.parametros.map((p) => ({ ndi: p.ndi, donde: `un parámetro de "${fila.nombre}"` })));
   }
   return { elemento: await guardando(ctx.store.saveElemento(ctx.projectId, fila, ctx.caller.name)) };
 }
@@ -418,7 +478,7 @@ export async function cargarEtapasSugeridas(ctx: Ctx): Promise<{ etapas: number;
 
 /** Saves cells of the matrix (all or none). Cells are never deleted: without LOD and NDI they require nothing. */
 export async function guardarMatriz(ctx: Ctx, body: unknown): Promise<{ celdas: CeldaMatriz[] }> {
-  await requireEdit(ctx);
+  const config = await requireEdit(ctx);
   const list = (body as { celdas?: unknown } | null)?.celdas;
   if (!Array.isArray(list) || list.length === 0) bad("No hay celdas que guardar.");
   if (list.length > MAX_CELDAS_POR_ENVIO) bad(`Máximo ${MAX_CELDAS_POR_ENVIO} celdas por envío.`);
@@ -430,6 +490,7 @@ export async function guardarMatriz(ctx: Ctx, body: unknown): Promise<{ celdas: 
       vistas.add(k);
     }
   }
+  await revisarNiveles(ctx.store, config.baseProjectId, filas.map((f) => ({ ndi: f.ndi, donde: "una celda de la matriz" })));
   return { celdas: await guardando(ctx.store.saveMatriz(ctx.projectId, filas, ctx.caller.name)) };
 }
 

@@ -142,8 +142,9 @@ export function leerHojaParametros(hoja: Celda[][]): { entradas: Entrada[]; erro
       else datos.tdi = m[1].toUpperCase();
     }
     if (indice.has("ndi")) {
-      const m = /^(?:NDI\s*-?\s*)?([123])$/i.exec(celdaTexto(celda("ndi")));
-      if (!m) error("el NDI debe ser NDI-1, NDI-2 o NDI-3.");
+      // Any level from 1 to 9 is read; saving checks it is one of the catalog's.
+      const m = /^(?:NDI\s*-?\s*)?([1-9])$/i.exec(celdaTexto(celda("ndi")));
+      if (!m) error("el NDI debe ser un número del 1 al 9 (NDI-1, NDI-2…).");
       else datos.ndi = Number(m[1]) as Ndi;
     }
     if (indice.has("origen")) {

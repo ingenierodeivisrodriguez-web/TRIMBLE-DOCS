@@ -4,13 +4,14 @@ import { CSSProperties, useState } from "react";
 import { leerAlias, normalizarNombre, textoAlias } from "../../lib/loin/alias";
 import type { LoinApi } from "../../lib/loin/client";
 import { errorPatron, MOTIVOS, revisarValor } from "../../lib/loin/reglas";
+import { nivelesCon, nombreNdi } from "../../lib/loin/ndi";
 import { codigoDyco } from "../../lib/loin/semilla";
-import { Alias, CamposModelo, EstadoResponse, GrupoTdi, NDIS, Ndi, ORIGENES, OrigenDato, Parametro, ParametroData, REGLA_VACIA, TIPOS_DATO, TipoDato } from "../../lib/loin/types";
+import { Alias, CamposModelo, EstadoResponse, GrupoTdi, Ndi, ORIGENES, OrigenDato, Parametro, ParametroData, REGLA_VACIA, TIPOS_DATO, TipoDato } from "../../lib/loin/types";
 import { coincide, fecha } from "../../lib/presupuesto/format";
 import { acceptButton, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
 import { area, ayuda, botonSecundario, campo, h3, linkBtn, select, sugerida } from "./estilos";
 
-function nuevoParametro(parametros: Parametro[], tdi: string): ParametroData {
+function nuevoParametro(parametros: Parametro[], tdi: string, ndi: Ndi): ParametroData {
   const numero = Math.max(0, ...parametros.map((p) => p.numero ?? 0)) + 1;
   return {
     codigo: codigoDyco(numero),
@@ -18,7 +19,7 @@ function nuevoParametro(parametros: Parametro[], tdi: string): ParametroData {
     nombre: "",
     descripcion: "",
     tdi,
-    ndi: 1,
+    ndi,
     origen: "a_ingresar",
     tipoDato: "texto",
     unidad: "",
@@ -53,7 +54,7 @@ export default function ParametroDialog({
   onGuardado: (p: Parametro) => void;
   onClose: () => void;
 }) {
-  const [d, setD] = useState<ParametroData>(() => (parametro ? structuredClone(parametro) : nuevoParametro(parametros, tdiGrupos[0]?.codigo ?? "A")));
+  const [d, setD] = useState<ParametroData>(() => (parametro ? structuredClone(parametro) : nuevoParametro(parametros, tdiGrupos[0]?.codigo ?? "A", estado.ndiNiveles[0]?.numero ?? 1)));
   const [valoresTexto, setValoresTexto] = useState(() => d.valoresPermitidos.join("\n"));
   const [nuevoAlias, setNuevoAlias] = useState("");
   const [prueba, setPrueba] = useState("");
@@ -153,11 +154,11 @@ export default function ParametroDialog({
               ))}
             </select>
           </Campo>
-          <Campo etiqueta="NDI (nivel de información)" ancho={2} ayudaTexto="Acumulativo: un elemento exigido en NDI-2 debe tener sus parámetros NDI-1 y NDI-2.">
-            <select value={d.ndi} onChange={(e) => set({ ndi: Number(e.target.value) as Ndi })} disabled={ro} style={{ ...select, width: "100%" }} aria-label="NDI">
-              {NDIS.map((n) => (
+          <Campo etiqueta="NDI (nivel de información)" ancho={2} ayudaTexto="Acumulativo: un elemento exigido en NDI-2 debe tener sus parámetros de nivel 2 o menor. Los niveles se configuran en ⚙ Configuración.">
+            <select value={d.ndi} onChange={(e) => set({ ndi: Number(e.target.value) })} disabled={ro} style={{ ...select, width: "100%" }} aria-label="NDI">
+              {nivelesCon(estado.ndiNiveles, d.ndi).map((n) => (
                 <option key={n} value={n}>
-                  NDI-{n}
+                  {nombreNdi(n, estado.ndiNiveles)}
                 </option>
               ))}
             </select>

@@ -32,11 +32,12 @@ import {
   guardarDisciplina,
   guardarElemento,
   guardarGruposTdi,
+  guardarNivelesNdi,
   guardarParametros,
   subirImagen,
   updateConfig,
 } from "./service";
-import { TDI_INICIALES } from "./semilla";
+import { NDI_INICIALES, TDI_INICIALES } from "./semilla";
 import { LoinStore, memoryStore } from "./store";
 
 const ADMIN: Caller = { id: "ana", name: "Ana", isAdmin: true };
@@ -123,6 +124,43 @@ describe("servicio de Requisitos BIM", () => {
     await rechaza(guardarGruposTdi(ctx(store, ADMIN), { grupos: grupos.filter((g) => g.codigo !== "L") }), 400);
     const nuevo = { codigo: "X-1", nombre: "Sin grupo", descripcion: "", tdi: "F", ndi: 1, origen: "a_ingresar", tipoDato: "texto", id: uuid(), version: 0 };
     await rechaza(guardarParametros(ctx(store, ADMIN), { parametros: [nuevo] }), 400);
+  });
+
+  it("los niveles NDI se configuran como los TDI: número y nombre opcional, y no se quita uno en uso", async () => {
+    const store = memoryStore();
+    assert.deepEqual((await getEstado(ctx(store, MIEMBRO))).ndiNiveles, NDI_INICIALES);
+    await rechaza(guardarNivelesNdi(ctx(store, MIEMBRO), { niveles: NDI_INICIALES }), 403);
+    await rechaza(guardarNivelesNdi(ctx(store, ADMIN), { niveles: [] }), 400);
+    await rechaza(guardarNivelesNdi(ctx(store, ADMIN), { niveles: [{ numero: 2, nombre: "" }, { numero: 2, nombre: "Otro" }] }), 400);
+    await rechaza(guardarNivelesNdi(ctx(store, ADMIN), { niveles: [{ numero: 10, nombre: "" }] }), 400);
+
+    // Five levels, saved from the lowest; a parameter can then use NDI-5.
+    const cinco = [5, 1, 2, 3, 4].map((numero) => ({ numero, nombre: numero === 5 ? "Operación" : "" }));
+    const { ndiNiveles } = await guardarNivelesNdi(ctx(store, ADMIN), { niveles: cinco });
+    assert.deepEqual(ndiNiveles.map((n) => n.numero), [1, 2, 3, 4, 5]);
+    assert.equal((await getEstado(ctx(store, MIEMBRO))).ndiNiveles[4].nombre, "Operación");
+    const param = { codigo: "N5-1", nombre: "Garantía", descripcion: "", tdi: "E", ndi: 5, origen: "a_ingresar", tipoDato: "texto", id: uuid(), version: 0 };
+    const [p5] = (await guardarParametros(ctx(store, ADMIN), { parametros: [param] })).parametros;
+    await rechaza(guardarParametros(ctx(store, ADMIN), { parametros: [{ ...param, codigo: "N7-1", ndi: 7, id: uuid() }] }), 400);
+
+    // The parameter holds NDI-5; once moved to NDI-1, the level 5 is still used by a cell of another project with this base.
+    await rechaza(guardarNivelesNdi(ctx(store, ADMIN), { niveles: NDI_INICIALES }), 400);
+    await guardarParametros(ctx(store, ADMIN), { parametros: [{ ...p5, ndi: 1 }] });
+    const miembros = { OBRA1: ADMIN };
+    await updateConfig(ctx(store, ADMIN, "OBRA2", miembros), { baseProjectId: "OBRA1" });
+    const otra = ctx(store, ADMIN, "OBRA2", miembros);
+    const disc = (await guardarDisciplina(otra, { id: uuid(), version: 0, codigo: "ARQ", nombre: "Arquitectura", color: "#2a78d6" })).disciplina;
+    const muro = (await guardarElemento(otra, { id: uuid(), version: 0, disciplinaId: disc.id, codigo: "MUR", nombre: "Muro", parametros: [{ parametroId: p5.id, obligatorio: true, ndi: 4 }] })).elemento;
+    const etapa = (await guardarEtapa(otra, { id: uuid(), version: 0, codigo: "DD", nombre: "Diseño de detalle" })).etapa;
+    const [celda] = (await guardarMatriz(otra, { celdas: [{ id: uuid(), version: 0, elementoId: muro.id, etapaId: etapa.id, lod: 300, ndi: 5 }] })).celdas;
+    await assert.rejects(guardarNivelesNdi(ctx(store, ADMIN), { niveles: NDI_INICIALES }), /NDI-4: lo usan 1 elemento.*otros que usan este catálogo/);
+    await guardarElemento(otra, { ...muro, parametros: [{ parametroId: p5.id, obligatorio: true, ndi: null }] });
+    await assert.rejects(guardarNivelesNdi(ctx(store, ADMIN), { niveles: NDI_INICIALES }), /NDI-5: lo usan 1 celda\(s\) de la matriz/);
+    await guardarMatriz(otra, { celdas: [{ ...celda, ndi: 3 }] });
+    assert.deepEqual((await guardarNivelesNdi(ctx(store, ADMIN), { niveles: NDI_INICIALES })).ndiNiveles, NDI_INICIALES);
+    // Only the catalog's levels are saved.
+    await rechaza(guardarMatriz(otra, { celdas: [{ ...celda, version: celda.version + 1, ndi: 4 }] }), 400);
+    await rechaza(guardarElemento(otra, { ...muro, version: muro.version + 1, parametros: [{ parametroId: p5.id, obligatorio: true, ndi: 5 }] }), 400);
   });
 
   it("un proyecto que usa otra base lee su catálogo; lo modifican solo quienes la mantienen", async () => {

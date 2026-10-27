@@ -1,11 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { buscarValor, coincideGrupo, leerAlias, leerListaAlias, PropiedadesObjeto, textoListaAlias } from "./alias";
-import { agregarGrupo, conteoPorNdi, exigidosHasta } from "./ndi";
+import { agregarGrupo, conteoPorNdi, exigidosHasta, nivelesCon, nivelesLibres, nombreNdi, textoUsos, usosDeNiveles } from "./ndi";
 import { codigoLibre, contenidoPlantilla, elementosDePlantilla } from "./plantillas";
 import { errorPatron, leerBooleano, leerFecha, leerNumero, revisarValor, VALORES_BASURA_INICIALES } from "./reglas";
 import { codigoDyco, disciplinasSugeridas, parametrosDyco, TDI_INICIALES } from "./semilla";
-import { Disciplina, Elemento, Parametro, REGLA_VACIA } from "./types";
+import { Disciplina, Elemento, Parametro, Plantilla, REGLA_VACIA } from "./types";
 
 const parametro = (p: Partial<Parametro>): Parametro => ({
   id: "p1", codigo: "P-1", numero: 1, nombre: "Altura", descripcion: "", tdi: "B", ndi: 1, origen: "automatica", tipoDato: "texto",
@@ -128,7 +128,43 @@ describe("NDI acumulado", () => {
     const [e] = exigidosHasta(propios, catalogo, 1);
     assert.equal(e.ndi, 1);
     assert.equal(e.regla.min, 1);
-    assert.deepEqual(conteoPorNdi([...asignados, ...propios], catalogo)[1], { obligatorios: 2, opcionales: 0 });
+    assert.deepEqual(conteoPorNdi([...asignados, ...propios], catalogo, [1, 2, 3]).get(1), { obligatorios: 2, opcionales: 0 });
+  });
+
+  it("los niveles se configuran: el conteo trae cada nivel del catálogo y los que el elemento usa aunque no estén", () => {
+    const cuatro = new Map([...catalogo, ["g", parametro({ id: "g", ndi: 4 })]]);
+    const conteo = conteoPorNdi([...asignados, { parametroId: "g", obligatorio: false, ndi: null, regla: null }], cuatro, [1, 2, 5]);
+    assert.deepEqual([...conteo.keys()], [1, 2, 3, 4, 5]);
+    assert.deepEqual(conteo.get(4), { obligatorios: 0, opcionales: 1 });
+    assert.deepEqual(conteo.get(5), { obligatorios: 0, opcionales: 0 });
+    // Cumulative by number, whatever the levels are.
+    assert.deepEqual(exigidosHasta([{ parametroId: "g", obligatorio: true, ndi: null, regla: null }], cuatro, 5).map((e) => e.ndi), [4]);
+  });
+
+  it("nombres, menú y siguiente número libre de los niveles NDI", () => {
+    const niveles = [{ numero: 1, nombre: "" }, { numero: 2, nombre: "Diseño" }, { numero: 4, nombre: "" }];
+    assert.equal(nombreNdi(2, niveles), "NDI-2 · Diseño");
+    assert.equal(nombreNdi(1, niveles), "NDI-1");
+    assert.equal(nombreNdi(3, niveles), "NDI-3 (no configurado)");
+    assert.deepEqual(nivelesCon(niveles, 7, null, 2), [1, 2, 4, 7]);
+    assert.deepEqual(nivelesLibres(niveles), [3, 5, 6, 7, 8, 9]);
+    assert.deepEqual(nivelesLibres([1, 2, 3, 4, 5, 6, 7, 8, 9].map((numero) => ({ numero, nombre: "" }))), []);
+  });
+
+  it("dice dónde se usa un nivel antes de quitarlo", () => {
+    const plantilla = {
+      contenido: { disciplina: { codigo: "ARQ", nombre: "Arquitectura", color: "#000000" }, elementos: [{ parametros: [{ parametroId: "a", obligatorio: true, ndi: 4, regla: null }] }] },
+    } as unknown as Plantilla;
+    const usos = usosDeNiveles(new Set([3, 4]), {
+      parametros: [...catalogo.values()],
+      elementos: [{ parametros: [{ parametroId: "a", obligatorio: true, ndi: 4, regla: null }, { parametroId: "b", obligatorio: true, ndi: 4, regla: null }] }, { parametros: asignados }],
+      plantillas: [plantilla],
+      celdas: [{ ndi: 4 }, { ndi: 4 }, { ndi: 1 }, { ndi: null }],
+    });
+    assert.deepEqual([...usos.keys()], [3, 4]);
+    assert.deepEqual(usos.get(4), { parametros: 0, elementos: 1, plantillas: 1, celdas: 2 });
+    assert.equal(textoUsos(usos.get(4)!), "1 elemento(s) (con un NDI propio en algún parámetro), 1 plantilla(s) y 2 celda(s) de la matriz");
+    assert.equal(textoUsos(usos.get(3)!), "1 parámetro(s) del catálogo");
   });
 
   it("\"Agregar todos los NDI-1 del grupo\" agrega solo los que faltan", () => {

@@ -3,6 +3,7 @@
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import { exportarMatrizExcel, exportarMatrizPdf } from "../../lib/loin/exportarMatriz";
+import { nivelesCon, nombreNdi } from "../../lib/loin/ndi";
 import {
   avisosElemento,
   clave,
@@ -23,7 +24,7 @@ import {
   SIN_REQUERIMIENTO,
   textoCelda,
 } from "../../lib/loin/matriz";
-import { CeldaMatriz, Disciplina, Elemento, ElementosResponse, Etapa, EstadoResponse, Lod, LODS, MatrizResponse, NDIS, Ndi, Parametro, Requerimiento } from "../../lib/loin/types";
+import { CeldaMatriz, Disciplina, Elemento, ElementosResponse, Etapa, EstadoResponse, Lod, LODS, MatrizResponse, Ndi, NivelNdi, Parametro, Requerimiento } from "../../lib/loin/types";
 import { coincide } from "../../lib/presupuesto/format";
 import { acceptButton, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
 import EtapasDialog from "./EtapasDialog";
@@ -200,6 +201,7 @@ export default function Matriz({ api, estado, parametros, proyecto }: { api: Loi
       {editar && (
         <CeldaDialog
           api={api}
+          niveles={estado.ndiNiveles}
           elemento={editar.elemento}
           etapa={editar.etapa}
           disciplina={elems.disciplinas.find((d) => d.id === editar.elemento.disciplinaId) ?? null}
@@ -216,6 +218,7 @@ export default function Matriz({ api, estado, parametros, proyecto }: { api: Loi
       {masivo && (
         <MasivoDialog
           api={api}
+          niveles={estado.ndiNiveles}
           masivo={masivo}
           elementos={elems.elementos}
           disciplinas={elems.disciplinas}
@@ -347,12 +350,14 @@ function RequerimientoForm({
   onChange,
   ro,
   disciplina,
+  niveles,
   conteo,
 }: {
   valores: Requerimiento;
   onChange: (r: Requerimiento) => void;
   ro: boolean;
   disciplina: Disciplina | null;
+  niveles: NivelNdi[];
   /** Parameters an element would require at each NDI (one cell only). */
   conteo?: (ndi: Ndi) => { obligatorios: number; opcionales: number };
 }) {
@@ -384,10 +389,10 @@ function RequerimientoForm({
           <button type="button" disabled={ro} onClick={() => set({ ndi: null })} style={opcion(valores.ndi === null, VACIA, "var(--tc-gray-700)")}>
             Sin NDI
           </button>
-          {NDIS.map((n) => {
+          {nivelesCon(niveles, valores.ndi).map((n) => {
             const c = conteo?.(n);
             return (
-              <button key={n} type="button" disabled={ro} onClick={() => set({ ndi: n })} style={opcion(valores.ndi === n, "#e3edfb", "#1f4f9c")}>
+              <button key={n} type="button" disabled={ro} onClick={() => set({ ndi: n })} style={opcion(valores.ndi === n, "#e3edfb", "#1f4f9c")} title={nombreNdi(n, niveles)}>
                 NDI-{n}
                 {c && <span style={{ fontWeight: 400 }}> · {c.obligatorios + c.opcionales} parám.</span>}
               </button>
@@ -447,6 +452,7 @@ function RequerimientoForm({
 
 function CeldaDialog({
   api,
+  niveles,
   elemento,
   etapa,
   disciplina,
@@ -457,6 +463,7 @@ function CeldaDialog({
   onClose,
 }: {
   api: LoinApi;
+  niveles: NivelNdi[];
   elemento: Elemento;
   etapa: Etapa;
   disciplina: Disciplina | null;
@@ -513,7 +520,7 @@ function CeldaDialog({
           {elemento.codigo} · {elemento.claseIfc || "sin clase IFC"} · {fechaCorta(etapa.fecha) || "etapa sin fecha"}
         </p>
         {error && <Notice kind="error">{error}</Notice>}
-        <RequerimientoForm valores={valores} onChange={setValores} ro={!puedeEditar} disciplina={disciplina} conteo={(n) => parametrosExigidos(elemento, n, catalogo)} />
+        <RequerimientoForm valores={valores} onChange={setValores} ro={!puedeEditar} disciplina={disciplina} niveles={niveles} conteo={(n) => parametrosExigidos(elemento, n, catalogo)} />
       </div>
     </Modal>
   );
@@ -522,6 +529,7 @@ function CeldaDialog({
 /** The same values for a whole discipline at one stage, or a stage copied from the one before. */
 function MasivoDialog({
   api,
+  niveles,
   masivo,
   elementos,
   disciplinas,
@@ -531,6 +539,7 @@ function MasivoDialog({
   onClose,
 }: {
   api: LoinApi;
+  niveles: NivelNdi[];
   masivo: Masivo;
   elementos: Elemento[];
   disciplinas: Disciplina[];
@@ -539,7 +548,7 @@ function MasivoDialog({
   onGuardadas: (c: CeldaMatriz[]) => void;
   onClose: () => void;
 }) {
-  const [valores, setValores] = useState<Requerimiento>({ ...SIN_REQUERIMIENTO, lod: 200, ndi: 1 });
+  const [valores, setValores] = useState<Requerimiento>({ ...SIN_REQUERIMIENTO, lod: 200, ndi: niveles[0]?.numero ?? null });
   const [sobrescribir, setSobrescribir] = useState(false);
   const [busy, setBusy] = useState("");
   const [error, setError] = useState("");
@@ -581,7 +590,7 @@ function MasivoDialog({
       <div style={{ padding: "12px 16px", display: "flex", flexDirection: "column", gap: 12 }}>
         {error && <Notice kind="error">{error}</Notice>}
         {masivo.tipo === "disciplina" ? (
-          <RequerimientoForm valores={valores} onChange={setValores} ro={false} disciplina={masivo.disciplina} />
+          <RequerimientoForm valores={valores} onChange={setValores} ro={false} disciplina={masivo.disciplina} niveles={niveles} />
         ) : (
           <p style={{ margin: 0, fontSize: 14 }}>Cada elemento activo toma en {masivo.hacia.nombre} el LOD, el NDI, el propósito, el actor y la nota que tiene en {masivo.desde.nombre}. Los elementos sin exigencia en {masivo.desde.nombre} no se tocan.</p>
         )}

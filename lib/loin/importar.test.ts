@@ -15,11 +15,14 @@ describe("importar parámetros", () => {
       [1, "TDI-A", "NDI-1", "A ingresar", "Codigo de proyecto", "Se refiere al código del proyecto"],
       ["—", "TDI-C", "NDI-2", "A ingresar", "Espacio", "Nombre descriptivo"],
       [2, "TDI-A", "NDI-1", "(sin definir)", "Constructor responsable", ""],
-      [3, "TDI-X", "NDI-7", "Quizás", "Malo", ""],
+      [3, "TDI-X", "NDI-0", "Quizás", "Malo", ""],
       [null, null, null, null, null, null],
+      // Any level 1 to 9 is read: whether the catalog has it is checked when saving.
+      [4, "TDI-A", "NDI-5", "A ingresar", "Nivel cinco", ""],
     ];
     const { entradas, errores } = leerHojaParametros(hoja);
-    assert.equal(entradas.length, 3);
+    assert.equal(entradas.length, 4);
+    assert.equal(entradas[3].datos.ndi, 5);
     assert.deepEqual(entradas[0].datos, { nombre: "Codigo de proyecto", numero: 1, tdi: "A", ndi: 1, origen: "a_ingresar", descripcion: "Se refiere al código del proyecto" });
     assert.equal(entradas[1].datos.numero, null);
     assert.equal(entradas[2].datos.origen, "por_definir");

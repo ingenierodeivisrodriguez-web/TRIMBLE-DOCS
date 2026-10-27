@@ -5,11 +5,12 @@ import { textoAlias } from "../../lib/loin/alias";
 import type { LoinApi } from "../../lib/loin/client";
 import { exportarCatalogo, leerLibroParametros } from "../../lib/loin/excel";
 import { entradasDyco, leerHojaParametros, planificarImportacion, PlanImportacion } from "../../lib/loin/importar";
-import { CamposModelo, CatalogoResponse, EstadoResponse, NDIS, ORIGENES, OrigenDato, Parametro, TIPOS_DATO } from "../../lib/loin/types";
+import { nivelesCon, nombreNdi } from "../../lib/loin/ndi";
+import { CamposModelo, CatalogoResponse, EstadoResponse, ORIGENES, OrigenDato, Parametro, TIPOS_DATO } from "../../lib/loin/types";
 import { nombreSeguro } from "../../lib/presupuesto/excel";
 import { coincide } from "../../lib/presupuesto/format";
 import { baseInput, C, message, Notice } from "../presupuesto/ui";
-import { botonPrincipal, botonSecundario, ETIQUETA_NDI, inactivo, select, sugerida, td, th } from "./estilos";
+import { botonPrincipal, botonSecundario, etiquetaNdi, inactivo, select, sugerida, td, th } from "./estilos";
 import ImportarDialog from "./ImportarDialog";
 import ParametroDialog from "./ParametroDialog";
 
@@ -88,7 +89,7 @@ export default function Catalogo({
   async function exportar() {
     setOcupado("Preparando el Excel…");
     try {
-      await exportarCatalogo(parametros, tdiGrupos, `${nombreSeguro(`Parámetros LOIN - ${proyecto}`)}.xlsx`);
+      await exportarCatalogo(parametros, tdiGrupos, estado.ndiNiveles, `${nombreSeguro(`Parámetros LOIN - ${proyecto}`)}.xlsx`);
     } catch (err) {
       setError(message(err));
     } finally {
@@ -110,9 +111,9 @@ export default function Catalogo({
         </select>
         <select value={ndi} onChange={(e) => setNdi(Number(e.target.value))} style={select} aria-label="NDI">
           <option value={0}>Todos los NDI</option>
-          {NDIS.map((n) => (
+          {nivelesCon(estado.ndiNiveles, ...parametros.map((p) => p.ndi)).map((n) => (
             <option key={n} value={n}>
-              NDI-{n}
+              {nombreNdi(n, estado.ndiNiveles)}
             </option>
           ))}
         </select>
@@ -199,7 +200,9 @@ export default function Catalogo({
                   TDI-{p.tdi}
                 </td>
                 <td style={td}>
-                  <span style={ETIQUETA_NDI[p.ndi]}>NDI-{p.ndi}</span>
+                  <span style={etiquetaNdi(p.ndi)} title={nombreNdi(p.ndi, estado.ndiNiveles)}>
+                    NDI-{p.ndi}
+                  </span>
                 </td>
                 <td style={{ ...td, whiteSpace: "nowrap", color: p.origen === "por_definir" ? "var(--tc-gray-500)" : undefined }}>{ORIGENES[p.origen]}</td>
                 <td style={td}>

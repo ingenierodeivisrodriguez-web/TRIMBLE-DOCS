@@ -5,7 +5,7 @@ import type { Workbook } from "exceljs";
 import { descargar, nombreSeguro } from "../presupuesto/excel";
 import { plegar } from "../presupuesto/format";
 import { Celda, COLUMNAS_EXCEL, NOMBRE_CAMPO, textoCampo } from "./importar";
-import type { GrupoTdi, Parametro } from "./types";
+import type { GrupoTdi, NivelNdi, Parametro } from "./types";
 
 async function excelJs() {
   const mod = (await import("exceljs")) as unknown as { default?: typeof import("exceljs") };
@@ -20,7 +20,7 @@ const INSTRUCCIONES = [
   "Catálogo de parámetros · Requisitos BIM (LOIN)",
   "",
   "Hoja \"1. Lista de parámetros DYCO\": un parámetro por fila. Las seis primeras columnas son las del listado DYCO (N°, TDI, NDI, Dato, Parámetro, Descripción).",
-  "  TDI: TDI-A, TDI-B… (los nombres de los grupos están en la hoja Grupos TDI). NDI: NDI-1, NDI-2 o NDI-3 (acumulativo).",
+  "  TDI: TDI-A, TDI-B… (los nombres de los grupos están en la hoja Grupos TDI). NDI: NDI-1, NDI-2… (los niveles del catálogo están en la hoja Niveles NDI; acumulativo).",
   "  Dato: \"A ingresar\" (lo escribe el modelador), \"Automática\" (sale de la geometría o del software) o vacío (por definir).",
   "Columnas que agrega la app (opcionales al importar; si una columna no está, ese dato no se toca):",
   "  Código interno (único). Tipo de dato: Texto, Número, Sí / No, Fecha o Lista de valores.",
@@ -37,13 +37,13 @@ const INSTRUCCIONES = [
 const HEADER_FILL = { type: "pattern" as const, pattern: "solid" as const, fgColor: { argb: "FF2F55B0" } };
 
 /** The catalog (or an empty template) as an Excel file. */
-export async function exportarCatalogo(parametros: Parametro[], grupos: GrupoTdi[], nombre: string) {
-  const buffer = await libroCatalogo(parametros, grupos);
+export async function exportarCatalogo(parametros: Parametro[], grupos: GrupoTdi[], niveles: NivelNdi[], nombre: string) {
+  const buffer = await libroCatalogo(parametros, grupos, niveles);
   descargar(new Blob([buffer], { type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" }), nombre);
 }
 
 /** The workbook's bytes (kept apart from the download so it can be tested). */
-export async function libroCatalogo(parametros: Parametro[], grupos: GrupoTdi[]): Promise<ArrayBuffer> {
+export async function libroCatalogo(parametros: Parametro[], grupos: GrupoTdi[], niveles: NivelNdi[]): Promise<ArrayBuffer> {
   const ExcelJS = await excelJs();
   const wb: Workbook = new ExcelJS.Workbook();
   const ws = wb.addWorksheet(nombreSeguro(HOJA_PARAMETROS, 31));
@@ -71,6 +71,13 @@ export async function libroCatalogo(parametros: Parametro[], grupos: GrupoTdi[])
   for (const x of grupos) g.addRow([`TDI-${x.codigo}`, x.nombre]);
   g.getColumn(1).width = 10;
   g.getColumn(2).width = 50;
+
+  const n = wb.addWorksheet("Niveles NDI");
+  n.addRow(["NDI", "Nombre"]);
+  n.getRow(1).font = { bold: true };
+  for (const x of niveles) n.addRow([`NDI-${x.numero}`, x.nombre]);
+  n.getColumn(1).width = 10;
+  n.getColumn(2).width = 50;
 
   const info = wb.addWorksheet("Instrucciones");
   INSTRUCCIONES.forEach((line) => info.addRow([line]));

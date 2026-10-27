@@ -3060,7 +3060,7 @@ confirmar" e inactivos. Un clic en una fila abre la ficha del parámetro.
   además una equivalencia con su nombre original del listado, así que un
   modelo con "Decripcion" o "Codigo de proyecto" se sigue encontrando.
 - Ficha: código interno, N°, nombre, descripción, **TDI** (grupo), **NDI**
-  (1 a 3, acumulativo), **origen del dato** (Automática / A ingresar / Por
+  (uno de los niveles del catálogo, acumulativo), **origen del dato** (Automática / A ingresar / Por
   definir), **tipo de dato** (texto, número con unidad, sí/no, fecha, lista
   de valores), regla de valor, equivalencias de lectura, URI IDS / bSDD y
   activo. Los tipos de dato de la semilla salen de la descripción del
@@ -3091,10 +3091,26 @@ confirmar" e inactivos. Un clic en una fila abre la ficha del parámetro.
   fabricante, J sistemas (MEP), K requisitos técnicos, seguridad y ocupación,
   L programación (4D). Los nombres se editan en ⚙ Configuración; una letra
   que usa algún parámetro no se puede quitar.
+- **Niveles NDI**: de fábrica NDI-1, NDI-2 y NDI-3 (los del listado DYCO, sin
+  nombre). En ⚙ Configuración se configuran como los grupos TDI: cuántos hay
+  y con qué número (del 1 al 9; se elige el número del nivel nuevo en la
+  lista), con un nombre opcional ("NDI-4 · Operación y mantenimiento") que se
+  ve en las listas y al pasar el mouse. Son del catálogo, así que valen para
+  todos los proyectos que usan la misma base. El NDI sigue siendo acumulativo
+  por número: una etapa que pide NDI-4 exige los parámetros de nivel 4 o
+  menor. **Un nivel en uso no se puede quitar**: el aviso dice cuántos
+  parámetros del catálogo, elementos (con un NDI propio en algún parámetro),
+  plantillas y celdas de la matriz lo usan, contando los otros proyectos que
+  usan el mismo catálogo. Al guardar un parámetro, un elemento o una celda
+  solo se aceptan niveles del catálogo. Si un proyecto cambia de base y
+  trae un nivel que la nueva no tiene, se ve como "NDI-n (no configurado)":
+  no se cambia solo y no se puede volver a guardar hasta elegir otro nivel o
+  agregarlo a la base.
 - **Exportar Excel**: hoja "1. Lista de parámetros DYCO" con las columnas del
   listado (N°, TDI, NDI, Dato, Parámetro, Descripción) y después las que
   agrega la app (código, tipo, unidad, valores, mínimo, máximo, patrón,
-  equivalencias, URI, activo), más las hojas Grupos TDI e Instrucciones.
+  equivalencias, URI, activo), más las hojas Grupos TDI, Niveles NDI e
+  Instrucciones.
   Sirve de plantilla para importar.
 - **Importar Excel**: busca la hoja con la columna "Parámetro" (el listado
   original, con su título arriba, también sirve). Reconoce cada fila por su
@@ -3125,7 +3141,8 @@ con su miniatura, clase IFC y cuántos parámetros exige por NDI.
     opcional y puede tener **su propio NDI o su propia regla solo para este
     elemento** (p. ej. Grosor de losa entre 0.08 y 0.50 m). El NDI es
     acumulativo: cuando una etapa pida NDI-2, el elemento deberá tener sus
-    parámetros NDI-1 y NDI-2.
+    parámetros de nivel 2 o menor. Arriba se ve cuántos parámetros tiene en
+    cada nivel del catálogo.
   - **Imágenes**: hasta 6 por elemento (PNG, JPG o WebP). Se reducen en el
     navegador a 1600 px por lado (WebP, o JPEG si el navegador no escribe
     WebP) antes de subirlas: una foto de celular de varios MB queda en unos
@@ -3154,7 +3171,8 @@ y **actor responsable** (quién entrega), más una nota opcional.
   de detalle, Licencia, Construcción y As-built / entrega a operación. Las
   etapas se desactivan, no se borran.
 - **Clic en una celda**: se eligen el LOD (con su descripción corta) y el
-  NDI; cada botón de NDI dice cuántos parámetros exigiría ese elemento
+  NDI (un botón por cada nivel del catálogo, con su nombre al pasar el
+  mouse); cada botón de NDI dice cuántos parámetros exigiría ese elemento
   ("NDI-2 · 20 parám.") y abajo cuántos son obligatorios y opcionales. **No
   se exige en esta etapa** deja la celda sin LOD ni NDI (no se borra).
 - **Asignar a todos** (fila de cada disciplina, en cada etapa): el mismo LOD,
@@ -3404,7 +3422,7 @@ agrega. **Nada existente cambia sin marcarlo.**
 | Probar reglas, clasificar y auditar en el visor, exportar (Excel, PDF, IDS), ver el historial y las excepciones | Cualquier miembro (solo lee) |
 | Importar un IDS (los parámetros nuevos además piden editar el catálogo base) | Administradores del proyecto y editores |
 | Guardar auditorías, aceptar y revocar excepciones | Administradores del proyecto y editores |
-| Editar el catálogo, los grupos TDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
+| Editar el catálogo, los grupos TDI, los niveles NDI y las plantillas | Administradores y editores del proyecto **base** del catálogo |
 | Elegir editores y proyecto base | Administradores del proyecto |
 
 Como en Presupuesto, un proyecto puede usar el catálogo de otro (⚙ → proyecto
@@ -3420,14 +3438,14 @@ políticas: solo el servidor (clave de servicio) lee y escribe.
 | Tabla / función | Contenido |
 |---|---|
 | `loin_config` | Por proyecto: proyecto base, editores, valores de relleno, umbral del amarillo |
-| `loin_catalogos` | Por proyecto base: nombres de los grupos TDI |
-| `loin_parametros` | El catálogo (código único por base, sin importar mayúsculas), con versión |
+| `loin_catalogos` | Por proyecto base: los grupos TDI y los niveles NDI (`ndi_niveles`; vacío = NDI-1 a NDI-3) |
+| `loin_parametros` | El catálogo (código único por base, sin importar mayúsculas; NDI del 1 al 9), con versión |
 | `loin_disciplinas` | Por proyecto (código único), con versión |
 | `loin_elementos` | Por proyecto (código único dentro de su disciplina); los parámetros exigidos van en la misma fila (`parametros` jsonb), con versión |
 | `loin_imagenes` | Dónde está cada imagen en el bucket, sus medidas y quién la subió |
 | `loin_plantillas` | Por proyecto base; el contenido no cambia después de guardarla |
 | `loin_etapas` | Por proyecto (código único): nombre, fecha del hito, orden, activa; con versión |
-| `loin_matriz` | Una celda por elemento × etapa (única): LOD, NDI, propósitos, actor, nota; con versión. Sin LOD ni NDI = no se exige |
+| `loin_matriz` | Una celda por elemento × etapa (única): LOD, NDI (del 1 al 9), propósitos, actor, nota; con versión. Sin LOD ni NDI = no se exige |
 | `loin_guardar_etapa(...)`, `loin_guardar_matriz(proyecto, celdas, usuario)` | Como las demás; la matriz guarda todas las celdas o ninguna y exige que el elemento y la etapa sean del proyecto |
 | `loin_elementos.regla` | La regla de asociación del elemento (jsonb: modo y condiciones; vacía = sin regla) |
 | `loin_modelos` | Por proyecto y archivo: nombre y disciplinas del modelo |
@@ -3452,12 +3470,13 @@ comprueban que sea miembro del proyecto (`lib/loin/routes.ts`).
 
 | Ruta | Qué hace |
 |---|---|
-| `GET /api/loin/estado` | Configuración, grupos TDI y qué puede hacer quien llama |
+| `GET /api/loin/estado` | Configuración, grupos TDI, niveles NDI y qué puede hacer quien llama |
 | `PUT /api/loin/config` | Editores y base (administradores); valores de relleno y umbral (editores) |
 | `GET /api/loin/contactos` | Personas y grupos del proyecto, para elegir editores |
 | `GET /api/loin/catalogo` | Parámetros y grupos TDI del proyecto base |
 | `POST /api/loin/catalogo/parametros` | Crea o cambia parámetros (todos o ninguno) |
 | `PUT /api/loin/catalogo/tdi` | Nombres de los grupos TDI |
+| `PUT /api/loin/catalogo/ndi` | Niveles NDI del catálogo (no quita uno en uso) |
 | `GET/PUT /api/loin/elementos` | Disciplinas, elementos e imágenes (con enlaces firmados) / guarda un elemento |
 | `POST /api/loin/elementos/sugeridas` | Agrega las disciplinas sugeridas que falten |
 | `PUT /api/loin/disciplinas` | Guarda una disciplina |

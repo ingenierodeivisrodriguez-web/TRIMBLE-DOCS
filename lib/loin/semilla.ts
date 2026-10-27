@@ -7,7 +7,7 @@
 // models whose parameters carry the old spelling still match.
 import { CATEGORY_COLORS, OTHER_COLOR } from "../graficos/colors";
 import { normalizarNombre } from "./alias";
-import { Alias, GrupoTdi, Ndi, OrigenDato, ParametroData, REGLA_VACIA, TipoDato } from "./types";
+import { Alias, GrupoTdi, Ndi, NivelNdi, OrigenDato, ParametroData, REGLA_VACIA, TipoDato } from "./types";
 
 export const TDI_INICIALES: GrupoTdi[] = [
   { codigo: "A", nombre: "Proyecto / administrativo" },
@@ -18,6 +18,13 @@ export const TDI_INICIALES: GrupoTdi[] = [
   { codigo: "J", nombre: "Sistemas (MEP)" },
   { codigo: "K", nombre: "Requisitos técnicos, seguridad y ocupación" },
   { codigo: "L", nombre: "Programación (4D)" },
+];
+
+/** The three levels the DYCO list uses; it gives them no names. */
+export const NDI_INICIALES: NivelNdi[] = [
+  { numero: 1, nombre: "" },
+  { numero: 2, nombre: "" },
+  { numero: 3, nombre: "" },
 ];
 
 /** "A ingresar" / "Automática" / "" as the DYCO list writes them. */

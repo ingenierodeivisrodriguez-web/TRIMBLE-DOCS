@@ -26,13 +26,15 @@ create table if not exists public.loin_config (
   updated_by        text
 );
 
--- Lo que pertenece al catálogo (en su proyecto base): los nombres de los grupos TDI.
+-- Lo que pertenece al catálogo (en su proyecto base): los grupos TDI y los
+-- niveles NDI (null = los de fábrica, NDI-1 a NDI-3).
 create table if not exists public.loin_catalogos (
   base_id     text        primary key,
   tdi_grupos  jsonb       not null default '[]'::jsonb check (jsonb_typeof(tdi_grupos) = 'array'),
   updated_at  timestamptz not null default now(),
   updated_by  text
 );
+alter table public.loin_catalogos add column if not exists ndi_niveles jsonb check (ndi_niveles is null or jsonb_typeof(ndi_niveles) = 'array');
 
 create table if not exists public.loin_parametros (
   id                 uuid        primary key,
@@ -42,7 +44,7 @@ create table if not exists public.loin_parametros (
   nombre             text        not null check (length(btrim(nombre)) between 1 and 200),
   descripcion        text        not null default '',
   tdi                text        not null check (tdi ~ '^[A-Z]$'),
-  ndi                smallint    not null check (ndi between 1 and 3),
+  ndi                smallint    not null check (ndi between 1 and 9),
   origen             text        not null check (origen in ('automatica', 'a_ingresar', 'por_definir')),
   tipo_dato          text        not null check (tipo_dato in ('texto', 'numero', 'booleano', 'fecha', 'lista')),
   unidad             text        not null default '',
@@ -58,6 +60,9 @@ create table if not exists public.loin_parametros (
   actualizado_por    text
 );
 create unique index if not exists loin_parametros_codigo_unico on public.loin_parametros (base_id, lower(btrim(codigo)));
+-- Los niveles NDI se configuran (del 1 al 9; antes iban fijos del 1 al 3).
+alter table public.loin_parametros drop constraint if exists loin_parametros_ndi_check;
+alter table public.loin_parametros add constraint loin_parametros_ndi_check check (ndi between 1 and 9);
 
 create table if not exists public.loin_disciplinas (
   id              uuid        primary key,
@@ -160,7 +165,7 @@ create table if not exists public.loin_matriz (
   elemento_id     uuid        not null references public.loin_elementos (id),
   etapa_id        uuid        not null references public.loin_etapas (id),
   lod             smallint    check (lod is null or lod in (100, 200, 300, 350, 400, 500)),
-  ndi             smallint    check (ndi is null or ndi between 1 and 3),
+  ndi             smallint    check (ndi is null or ndi between 1 and 9),
   propositos      jsonb       not null default '[]'::jsonb check (jsonb_typeof(propositos) = 'array'),
   actor           text        not null default '',
   nota            text        not null default '',
@@ -171,6 +176,8 @@ create table if not exists public.loin_matriz (
   actualizado_por text
 );
 create unique index if not exists loin_matriz_celda_unica on public.loin_matriz (elemento_id, etapa_id);
+alter table public.loin_matriz drop constraint if exists loin_matriz_ndi_check;
+alter table public.loin_matriz add constraint loin_matriz_ndi_check check (ndi is null or ndi between 1 and 9);
 create index if not exists loin_matriz_proyecto on public.loin_matriz (project_id);
 
 -- Modelos del proyecto (por id de archivo, que no cambia con las versiones) y

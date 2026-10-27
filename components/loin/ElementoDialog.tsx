@@ -3,15 +3,15 @@
 import { CSSProperties, useMemo, useRef, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import { reducirImagen } from "../../lib/loin/imagen";
-import { agregarGrupo, conteoPorNdi, ndiDe } from "../../lib/loin/ndi";
+import { agregarGrupo, conteoPorNdi, ndiDe, nivelesCon, nombreNdi } from "../../lib/loin/ndi";
 import { describirRegla, errorPatron } from "../../lib/loin/reglas";
 import { textoAlias } from "../../lib/loin/alias";
 import { CLASES_IFC, textoRegla } from "../../lib/loin/clasificacion";
 import ReglaEditor from "./ReglaEditor";
-import { CamposModelo, Disciplina, Elemento, ElementoData, EstadoResponse, GrupoTdi, Imagen, MAX_IMAGENES_ELEMENTO, NDIS, Ndi, Parametro, ParametroExigido, REGLA_VACIA, ReglaValor } from "../../lib/loin/types";
+import { CamposModelo, Disciplina, Elemento, ElementoData, EstadoResponse, GrupoTdi, Imagen, MAX_IMAGENES_ELEMENTO, Ndi, NivelNdi, Parametro, ParametroExigido, REGLA_VACIA, ReglaValor } from "../../lib/loin/types";
 import { coincide, fecha } from "../../lib/presupuesto/format";
 import { acceptButton, baseInput, C, labelStyle, message, Modal, Notice, NumInput } from "../presupuesto/ui";
-import { area, ayuda, botonPeligro, botonSecundario, campo, ETIQUETA_NDI, inactivo, linkBtn, select, td, th } from "./estilos";
+import { area, ayuda, botonPeligro, botonSecundario, campo, etiquetaNdi, inactivo, linkBtn, select, td, th } from "./estilos";
 
 type Seccion = "ficha" | "parametros" | "imagenes";
 
@@ -87,7 +87,7 @@ export default function ElementoDialog({
     }
   }
 
-  const conteo = conteoPorNdi(d.parametros, catalogo);
+  const conteo = conteoPorNdi(d.parametros, catalogo, estado.ndiNiveles.map((n) => n.numero));
   const titulo = actual ? `${actual.codigo} · ${actual.nombre}` : "Nuevo elemento";
 
   return (
@@ -128,7 +128,7 @@ export default function ElementoDialog({
         {error && <Notice kind="error">{error}</Notice>}
         {ok && <Notice kind="info">{ok}</Notice>}
         {seccion === "ficha" && <Ficha d={d} set={set} ro={ro} disciplinas={disciplinas} camposModelo={camposModelo} />}
-        {seccion === "parametros" && <Exigidos d={d} set={set} ro={ro} parametros={parametros} catalogo={catalogo} tdiGrupos={tdiGrupos} conteo={conteo} />}
+        {seccion === "parametros" && <Exigidos d={d} set={set} ro={ro} parametros={parametros} catalogo={catalogo} tdiGrupos={tdiGrupos} niveles={estado.ndiNiveles} conteo={conteo} />}
         {seccion === "imagenes" && (
           <Imagenes
             api={api}
@@ -244,6 +244,7 @@ function Exigidos({
   parametros,
   catalogo,
   tdiGrupos,
+  niveles,
   conteo,
 }: {
   d: ElementoData;
@@ -252,11 +253,12 @@ function Exigidos({
   parametros: Parametro[];
   catalogo: Map<string, Parametro>;
   tdiGrupos: GrupoTdi[];
+  niveles: NivelNdi[];
   conteo: ReturnType<typeof conteoPorNdi>;
 }) {
   const [busqueda, setBusqueda] = useState("");
   const [tdi, setTdi] = useState(tdiGrupos[0]?.codigo ?? "A");
-  const [ndi, setNdi] = useState<Ndi>(1);
+  const [ndi, setNdi] = useState<Ndi>(niveles[0]?.numero ?? 1);
   const [reglaAbierta, setReglaAbierta] = useState<string | null>(null);
   const asignados = new Set(d.parametros.map((p) => p.parametroId));
   const disponibles = parametros.filter((p) => p.activo && !asignados.has(p.id) && coincide(`${p.codigo} ${p.nombre} TDI-${p.tdi} NDI-${p.ndi}`, busqueda));
@@ -271,23 +273,23 @@ function Exigidos({
   return (
     <>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center" }}>
-        {NDIS.map((n) => (
-          <span key={n} style={ETIQUETA_NDI[n]}>
-            NDI-{n}: {conteo[n].obligatorios} obligatorio(s) · {conteo[n].opcionales} opcional(es)
+        {[...conteo].map(([n, c]) => (
+          <span key={n} style={etiquetaNdi(n)} title={nombreNdi(n, niveles)}>
+            NDI-{n}: {c.obligatorios} obligatorio(s) · {c.opcionales} opcional(es)
           </span>
         ))}
       </div>
       <p style={ayuda}>
-        El NDI es acumulativo: cuando la matriz de una etapa pida NDI-2, este elemento deberá tener todos sus parámetros NDI-1 y NDI-2. Cada parámetro toma el NDI y la regla del catálogo, salvo que aquí le
-        pongas los suyos (solo para este elemento).
+        El NDI es acumulativo: cuando la matriz de una etapa pida NDI-2, este elemento deberá tener todos sus parámetros de nivel 2 o menor. Cada parámetro toma el NDI y la regla del catálogo, salvo que
+        aquí le pongas los suyos (solo para este elemento).
       </p>
       {!ro && (
         <div style={{ display: "flex", gap: 6, alignItems: "center", flexWrap: "wrap", background: "#fff", border: `1px solid ${C.border}`, borderRadius: 4, padding: 8 }}>
           <span style={{ fontSize: 13.5 }}>Agregar todos los</span>
-          <select value={ndi} onChange={(e) => setNdi(Number(e.target.value) as Ndi)} style={select} aria-label="NDI a agregar">
-            {NDIS.map((n) => (
+          <select value={ndi} onChange={(e) => setNdi(Number(e.target.value))} style={select} aria-label="NDI a agregar">
+            {nivelesCon(niveles, ndi).map((n) => (
               <option key={n} value={n}>
-                NDI-{n}
+                {nombreNdi(n, niveles)}
               </option>
             ))}
           </select>
@@ -355,17 +357,19 @@ function Exigidos({
                   <td style={td}>
                     <select
                       value={a.ndi ?? 0}
-                      onChange={(e) => cambiar(a.parametroId, { ndi: Number(e.target.value) ? (Number(e.target.value) as Ndi) : null })}
+                      onChange={(e) => cambiar(a.parametroId, { ndi: Number(e.target.value) || null })}
                       disabled={ro}
                       style={select}
                       aria-label={`NDI de ${p.nombre}`}
                     >
                       <option value={0}>NDI-{p.ndi} (catálogo)</option>
-                      {NDIS.filter((n) => n !== p.ndi).map((n) => (
-                        <option key={n} value={n}>
-                          NDI-{n} (propio)
-                        </option>
-                      ))}
+                      {nivelesCon(niveles, a.ndi)
+                        .filter((n) => n !== p.ndi)
+                        .map((n) => (
+                          <option key={n} value={n}>
+                            {nombreNdi(n, niveles)} (propio)
+                          </option>
+                        ))}
                     </select>
                   </td>
                   <td style={{ ...td, textAlign: "center" }}>
@@ -409,7 +413,7 @@ function Exigidos({
                   {p.nombre}
                 </span>
                 <span>TDI-{p.tdi}</span>
-                <span style={ETIQUETA_NDI[p.ndi]}>NDI-{p.ndi}</span>
+                <span style={etiquetaNdi(p.ndi)}>NDI-{p.ndi}</span>
                 <button type="button" style={linkBtn} onClick={() => set({ parametros: [...d.parametros, { parametroId: p.id, obligatorio: true, ndi: null, regla: null }] })}>
                   + Agregar
                 </button>

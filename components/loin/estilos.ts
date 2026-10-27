@@ -31,11 +31,23 @@ export function etiqueta(color: string, fondo: string): CSSProperties {
   return { display: "inline-block", color, background: fondo, borderRadius: 10, padding: "1px 8px", fontSize: 12, fontWeight: 600, whiteSpace: "nowrap" };
 }
 
-export const ETIQUETA_NDI: Record<number, CSSProperties> = {
-  1: etiqueta("#1f4f9c", "#e3edfb"),
-  2: etiqueta("#7a4d00", "#fcefd6"),
-  3: etiqueta("#5b2b8a", "#efe4fa"),
-};
+// One color per level number (1 to 9), so a level keeps it whatever levels the catalog has; the label always says "NDI-n".
+const COLORES_NDI: [string, string][] = [
+  ["#1f4f9c", "#e3edfb"],
+  ["#7a4d00", "#fcefd6"],
+  ["#5b2b8a", "#efe4fa"],
+  ["#1e6b3a", "#e2f4e8"],
+  ["#0f5f66", "#dff3f4"],
+  ["#8a2346", "#fbe4ec"],
+  ["#6b4226", "#f3e9e1"],
+  ["#33408f", "#e6e8fa"],
+  ["#5a6312", "#f0f2d9"],
+];
+
+export function etiquetaNdi(n: number): CSSProperties {
+  const [color, fondo] = COLORES_NDI[n - 1] ?? ["#6b7280", "#eceef1"];
+  return etiqueta(color, fondo);
+}
 
 export const sugerida = etiqueta("#7a4d00", "#fcefd6");
 export const inactivo = etiqueta("#6b7280", "#eceef1");

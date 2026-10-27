@@ -2,13 +2,13 @@
 
 import { CSSProperties, useCallback, useEffect, useMemo, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
-import { conteoPorNdi } from "../../lib/loin/ndi";
+import { conteoPorNdi, nombreNdi } from "../../lib/loin/ndi";
 import type { CamposModelo, Disciplina, Elemento, ElementosResponse, EstadoResponse, GrupoTdi, Imagen, Parametro } from "../../lib/loin/types";
 import { CATEGORY_COLORS } from "../../lib/graficos/colors";
 import { acceptButton, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
 import ElementoDialog from "./ElementoDialog";
 import ImportarIdsDialog from "./ImportarIdsDialog";
-import { ayuda, botonPrincipal, botonSecundario, campo, ETIQUETA_NDI, inactivo, linkBtn } from "./estilos";
+import { ayuda, botonPrincipal, botonSecundario, campo, etiquetaNdi, inactivo, linkBtn } from "./estilos";
 import PlantillasDialog from "./PlantillasDialog";
 
 /** Disciplines on the left, the elements to model of the chosen one on the right. */
@@ -181,7 +181,7 @@ export default function Disciplinas({
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))", gap: 10, overflow: "auto", alignContent: "start" }}>
             {elementos.map((e) => {
               const img = imagenesDe(e.id)[0];
-              const conteo = conteoPorNdi(e.parametros, catalogo);
+              const conteo = conteoPorNdi(e.parametros, catalogo, []);
               return (
                 <button key={e.id} type="button" onClick={() => setEditarElemento(e)} style={{ ...tarjeta, opacity: e.activo ? 1 : 0.55 }}>
                   <span style={miniatura}>
@@ -196,13 +196,12 @@ export default function Disciplinas({
                       {e.tipoPredefinido ? ` (${e.tipoPredefinido})` : ""}
                     </span>
                     <span style={{ display: "flex", gap: 4, marginTop: 5, flexWrap: "wrap" }}>
-                      {([1, 2, 3] as const).map((n) =>
-                        conteo[n].obligatorios + conteo[n].opcionales > 0 ? (
-                          <span key={n} style={ETIQUETA_NDI[n]} title={`${conteo[n].obligatorios} obligatorio(s), ${conteo[n].opcionales} opcional(es)`}>
-                            NDI-{n}: {conteo[n].obligatorios + conteo[n].opcionales}
-                          </span>
-                        ) : null
-                      )}
+                      {/* No levels given: the count has only those the element uses. */}
+                      {[...conteo].map(([n, c]) => (
+                        <span key={n} style={etiquetaNdi(n)} title={`${nombreNdi(n, estado.ndiNiveles)}: ${c.obligatorios} obligatorio(s), ${c.opcionales} opcional(es)`}>
+                          NDI-{n}: {c.obligatorios + c.opcionales}
+                        </span>
+                      ))}
                       {e.parametros.length === 0 && <span style={{ fontSize: 12, color: "#b3261e" }}>Sin parámetros exigidos</span>}
                     </span>
                   </span>

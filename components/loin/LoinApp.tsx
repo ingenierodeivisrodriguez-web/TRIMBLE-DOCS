@@ -69,7 +69,7 @@ export default function LoinApp({ api, projectId, projectName }: { api: LoinApi;
           </span>
         )}
         {estado && (
-          <button type="button" onClick={() => setConfig(true)} style={botonHeader} title="Editores, proyecto base del catálogo, grupos TDI, valores de relleno y umbral">
+          <button type="button" onClick={() => setConfig(true)} style={botonHeader} title="Editores, proyecto base del catálogo, grupos TDI, niveles NDI, valores de relleno y umbral">
             ⚙ Configuración
           </button>
         )}

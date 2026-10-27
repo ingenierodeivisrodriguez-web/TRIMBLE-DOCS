@@ -7,6 +7,7 @@ import type {
   Elemento,
   ElementoData,
   GrupoTdi,
+  NivelNdi,
   Parametro,
   ParametroData,
   Plantilla,
@@ -73,6 +74,10 @@ export interface LoinStore {
   saveConfig(projectId: string, config: StoredConfig, user: string): Promise<void>;
   getGruposTdi(baseId: string): Promise<GrupoTdi[] | null>;
   saveGruposTdi(baseId: string, grupos: GrupoTdi[], user: string): Promise<void>;
+  getNivelesNdi(baseId: string): Promise<NivelNdi[] | null>;
+  saveNivelesNdi(baseId: string, niveles: NivelNdi[], user: string): Promise<void>;
+  /** The projects whose saved settings name this base (a project without settings uses its own catalog). */
+  proyectosDeBase(baseId: string): Promise<string[]>;
 
   listParametros(baseId: string): Promise<Parametro[]>;
   /** All or none: version 0 creates, otherwise only if the row is still at that version. */
@@ -502,7 +507,8 @@ function supabaseStore(): LoinStore | null {
     const texto = detail.message ?? body;
     const motivo = MOTIVOS.find((m) => texto.includes(m));
     if (motivo) return new StoreError(motivo, motivo === "disciplina-ajena" ? 400 : 409);
-    if (faltaTabla(body)) return new StoreError(SETUP_HINT);
+    // A missing column (PGRST204 / 42703) means an older loin.sql too.
+    if (faltaTabla(body) || /PGRST204|42703/.test(body)) return new StoreError(SETUP_HINT);
     return null;
   });
   const archivos = almacenSupabase();
@@ -545,10 +551,22 @@ function supabaseStore(): LoinStore | null {
     },
     async getGruposTdi(baseId) {
       const rows = await json<{ tdi_grupos: GrupoTdi[] }[]>(`/loin_catalogos?base_id=${eq(baseId)}&select=tdi_grupos`);
-      return rows[0]?.tdi_grupos ?? null;
+      // The row may exist only for the NDI levels (its groups default to []).
+      return rows[0]?.tdi_grupos?.length ? rows[0].tdi_grupos : null;
     },
     async saveGruposTdi(baseId, grupos, user) {
       await upsert("loin_catalogos", { base_id: baseId, tdi_grupos: grupos, updated_at: new Date().toISOString(), updated_by: user }, "base_id");
+    },
+    async getNivelesNdi(baseId) {
+      // select=* so a database still without the column answers the initial levels.
+      const rows = await json<{ ndi_niveles?: NivelNdi[] | null }[]>(`/loin_catalogos?base_id=${eq(baseId)}&select=*`);
+      return rows[0]?.ndi_niveles?.length ? rows[0].ndi_niveles : null;
+    },
+    async saveNivelesNdi(baseId, niveles, user) {
+      await upsert("loin_catalogos", { base_id: baseId, ndi_niveles: niveles, updated_at: new Date().toISOString(), updated_by: user }, "base_id");
+    },
+    async proyectosDeBase(baseId) {
+      return (await all<{ project_id: string }>(`/loin_config?base_project_id=${eq(baseId)}&select=project_id`)).map((r) => r.project_id);
     },
 
     async listParametros(baseId) {
@@ -726,6 +744,7 @@ const codigoClave = (c: string) => c.trim().toLowerCase();
 export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore {
   const configs = new Map<string, StoredConfig>();
   const tdi = new Map<string, GrupoTdi[]>();
+  const ndi = new Map<string, NivelNdi[]>();
   const parametros = new Map<string, Parametro & { baseId: string }>();
   const disciplinas = new Map<string, Disciplina & { projectId: string }>();
   const elementos = new Map<string, Elemento & { projectId: string }>();
@@ -773,6 +792,16 @@ export function memoryStore(archivos: Archivos = archivosEnMemoria()): LoinStore
     },
     async saveGruposTdi(baseId, grupos) {
       tdi.set(baseId, structuredClone(grupos));
+    },
+    async getNivelesNdi(baseId) {
+      const n = ndi.get(baseId);
+      return n ? structuredClone(n) : null;
+    },
+    async saveNivelesNdi(baseId, niveles) {
+      ndi.set(baseId, structuredClone(niveles));
+    },
+    async proyectosDeBase(baseId) {
+      return [...configs].filter(([, c]) => c.baseProjectId === baseId).map(([id]) => id);
     },
 
     async listParametros(baseId) {

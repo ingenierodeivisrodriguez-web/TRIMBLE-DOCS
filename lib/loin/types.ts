@@ -5,9 +5,14 @@
 // their reference images and required parameters, and discipline templates.
 import type { Responsable } from "../propiedades/types";
 
-/** Nivel de información (NDI): cumulative, an element required at NDI-2 needs its NDI-1 and NDI-2 parameters. */
-export type Ndi = 1 | 2 | 3;
-export const NDIS: Ndi[] = [1, 2, 3];
+/**
+ * Nivel de información (NDI): a whole number from the levels the catalog
+ * configures. Cumulative: an element required at NDI-2 needs its parameters
+ * of every level up to 2.
+ */
+export type Ndi = number;
+export const NDI_MIN = 1;
+export const NDI_MAX = 9;
 
 /** Where the value comes from: the geometry/software, the modeler, or not decided yet. */
 export type OrigenDato = "automatica" | "a_ingresar" | "por_definir";
@@ -48,6 +53,12 @@ export interface Alias {
 /** A TDI group (tipo de información): its letter and its editable name. */
 export interface GrupoTdi {
   codigo: string;
+  nombre: string;
+}
+
+/** An NDI level of the catalog: its number and an optional name. */
+export interface NivelNdi {
+  numero: Ndi;
   nombre: string;
 }
 
@@ -341,7 +352,7 @@ export interface Plantilla extends PlantillaData {
   actualizado: string;
 }
 
-/** A project's settings; the TDI names belong to the catalog (its base project). */
+/** A project's settings; the TDI groups and NDI levels belong to the catalog (its base project). */
 export interface ConfigLoin {
   baseProjectId: string;
   baseProjectName: string;
@@ -356,12 +367,14 @@ export interface EstadoResponse {
   projectId: string;
   config: ConfigLoin;
   tdiGrupos: GrupoTdi[];
+  /** The catalog's NDI levels, from the lowest. */
+  ndiNiveles: NivelNdi[];
   /** True when the project uses its own catalog. */
   esBasePropia: boolean;
   isAdmin: boolean;
   /** Edits disciplines, elements and (later) the matrix, rules and audits. */
   canEdit: boolean;
-  /** Edits the parameter catalog, the TDI names and the templates (in the base project). */
+  /** Edits the parameter catalog, the TDI groups, the NDI levels and the templates (in the base project). */
   canEditBase: boolean;
   baseNote: string;
   /** Whether images can be stored (Supabase Storage configured). */

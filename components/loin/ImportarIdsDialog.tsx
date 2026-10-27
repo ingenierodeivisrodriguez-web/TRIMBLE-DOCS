@@ -4,7 +4,8 @@ import { CSSProperties, useMemo, useState } from "react";
 import type { LoinApi } from "../../lib/loin/client";
 import { claseBase, nombreClaseIfc } from "../../lib/loin/clasificacion";
 import { aplicarFilas, elementoDesdeEspecificacion, FilaPlan, filasEspecificacion, IdsLeido, leerIds, planIds } from "../../lib/loin/importarIds";
-import { Elemento, ElementosResponse, EstadoResponse, GrupoTdi, NDIS, Ndi, Parametro, TIPOS_DATO } from "../../lib/loin/types";
+import { nivelesCon, nombreNdi } from "../../lib/loin/ndi";
+import { Elemento, ElementosResponse, EstadoResponse, GrupoTdi, Ndi, Parametro, TIPOS_DATO } from "../../lib/loin/types";
 import { acceptButton, C, labelStyle, message, Modal, Notice } from "../presupuesto/ui";
 import { ayuda, botonSecundario, etiqueta, select, td, th } from "./estilos";
 
@@ -41,7 +42,7 @@ export default function ImportarIdsDialog({
   const [ids, setIds] = useState<IdsLeido | null>(null);
   const [archivo, setArchivo] = useState("");
   const [tdi, setTdi] = useState(() => (tdiGrupos.find((g) => g.codigo === "D") ?? tdiGrupos[0])?.codigo ?? "A");
-  const [ndi, setNdi] = useState<Ndi>(1);
+  const [ndi, setNdi] = useState<Ndi>(estado.ndiNiveles[0]?.numero ?? 1);
   const disciplinas = useMemo(() => datos.disciplinas.filter((d) => d.activo).sort((a, b) => a.orden - b.orden || a.codigo.localeCompare(b.codigo)), [datos.disciplinas]);
   const [disciplinaNueva, setDisciplinaNueva] = useState(() => disciplinas[0]?.id ?? "");
   const [eleccion, setEleccion] = useState<string[]>([]);
@@ -264,10 +265,10 @@ export default function ImportarIdsDialog({
               </label>
               <label style={labelStyle}>
                 NDI de los parámetros nuevos
-                <select value={ndi} onChange={(e) => setNdi(Number(e.target.value) as Ndi)} style={{ ...select, display: "block", marginTop: 4 }} disabled={!puedeCatalogo}>
-                  {NDIS.map((n) => (
+                <select value={ndi} onChange={(e) => setNdi(Number(e.target.value))} style={{ ...select, display: "block", marginTop: 4 }} disabled={!puedeCatalogo}>
+                  {nivelesCon(estado.ndiNiveles, ndi).map((n) => (
                     <option key={n} value={n}>
-                      NDI-{n}
+                      {nombreNdi(n, estado.ndiNiveles)}
                     </option>
                   ))}
                 </select>
