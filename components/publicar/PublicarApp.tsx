@@ -17,7 +17,7 @@ const PESTANAS: { id: Pestana; texto: string }[] = [
   { id: "publicar", texto: "Publicar" },
   { id: "recibido", texto: "Recibido en este proyecto" },
   { id: "actividad", texto: "Actividad" },
-  { id: "cuenta", texto: "Cuenta técnica" },
+  { id: "cuenta", texto: "Usuario en ambos proyectos" },
   { id: "copia", texto: "Copia a mano" },
 ];
 

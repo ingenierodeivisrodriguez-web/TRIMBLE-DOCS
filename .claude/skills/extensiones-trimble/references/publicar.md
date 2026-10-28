@@ -86,12 +86,20 @@ origen (`downloadurl?format=TRB`); si Trimble no acepta el TRB, se repite sin
 archivo. **Pendiente**: que el dueño diga, con un modelo real, cuál camino
 salió y si el visor del destino quedó listo sin "Conversión en curso".
 
-## Cuenta técnica (fases A y B, 28-10-2026)
+## Usuario en ambos proyectos y cuenta conectada (fases A y B, 28-10-2026)
 
-La decisión 3 ("alguien pertenece a los dos proyectos") **cambió**: al probar
-SELVIA ↔ otro proyecto de otra empresa, nadie estaba en ambos (la lista de
-destinos sale de `/projects/me` del usuario y la copia necesita leer y escribir
-con el mismo token). Ahora:
+La decisión 3 se probó, cambió y **volvió**: al probar SELVIA ↔ otro proyecto
+de otra empresa nadie estaba en ambos y se hizo la "cuenta técnica" (usuario
+de la herramienta invitado a cada proyecto). La prueba SELVIA → MANAGER
+PROJECT no copió nada porque la cuenta conectada (managerbim@dyco.co) no era
+miembro de MANAGER PROJECT. Se propuso un buzón (guardar el archivo en
+Supabase y entregarlo con la sesión del destino), y el dueño **eligió en su
+lugar que un solo usuario pertenezca a los dos proyectos** (dibujo: miembro 1
+administra el que recibe; miembro 2 administra el que publica y es usuario del
+que recibe). La pestaña se llama **"Usuario en ambos proyectos"** y la cuenta
+conectada es la de esa persona (puede ser quien la conecta). El código interno
+sigue llamándola `tecnico`/`cuenta`. Prueba del caso: "como en el dibujo del
+dueño…" en `service.test.ts`. No construir el buzón si no lo pide.
 
 - `lib/publicar/cuenta.ts`: conectar (PKCE con `lib/manuales/oauth.ts`, misma app
   "apibasedatos" y `TRIMBLE_CLIENT_SECRET`; `redirect_uri` http://localhost y

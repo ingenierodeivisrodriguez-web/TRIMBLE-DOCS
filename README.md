@@ -3819,25 +3819,30 @@ Trimble Connect no permite compartir carpetas entre proyectos ni avisa cuando
 aparece una versión nueva. Por eso la extensión **copia** cada versión: la lee
 del origen y la sube con el mismo nombre a la carpeta del destino, donde
 Trimble la registra como versión nueva (el número de versión del destino no
-tiene que coincidir con el del origen). La copia la hace el servidor con la
-**cuenta técnica** (un usuario de Trimble de la herramienta que cada proyecto
-invita) o, si no está invitada, con la sesión de quien abre la extensión y es
-miembro de los dos proyectos.
+tiene que coincidir con el del origen). Para copiar hace falta **un usuario
+que pertenezca a los dos proyectos** (por ejemplo, quien publica, invitado
+también como usuario en el proyecto que recibe); los demás siguen entrando solo
+a su proyecto. La copia la hace el servidor con la sesión de esa persona cuando
+abre la extensión, o con su **cuenta conectada** (abajo) cuando cualquiera la
+abre.
 
 Decisiones del dueño (28-10-2026): solo **origen → destino** (un cambio hecho
 en el destino se muestra y se pregunta, nunca se pisa); la actualización es
-**al abrir la extensión**, con un botón "Revisar ahora" (sin cuenta técnica ni
-revisión programada por ahora); el administrador del destino define una
+**al abrir la extensión**, con un botón "Revisar ahora" (sin revisión
+programada por ahora); el administrador del destino define una
 **carpeta de recepción fija** por proyecto origen y lo publicado llega ahí sin
-aceptarlo. La decisión "alguien pertenece a los dos proyectos" cambió el mismo
-día, al probarlo entre empresas distintas: nadie está en ambos, así que las
-copias las hace la **cuenta técnica** (abajo).
+aceptarlo. Sobre quién copia: el mismo día se probó entre empresas donde nadie
+está en ambos y se hizo la cuenta técnica, pero el dueño decidió al final que
+**un solo usuario pertenezca a los dos proyectos** (su dibujo: miembro 1
+administra el proyecto que recibe; miembro 2 administra el que publica y es
+usuario del que recibe). La cuenta conectada es la de ese usuario.
 
 Fases (todas el 28-10-2026): 0 prueba de copia en Trimble real · copia a mano ·
 1 configuración del proyecto destino · 2 Publicar y actividad · 3
-actualización al abrir · 4 actividad con filtros y cierre · A cuenta técnica ·
-B publicar y copiar con ella. Pendiente, si el dueño lo pide: C, la copia
-automática una vez al día sin que nadie abra la extensión.
+actualización al abrir · 4 actividad con filtros y cierre · A cuenta conectada ·
+B publicar y copiar con ella · textos con "usuario en ambos proyectos".
+Pendiente, si el dueño lo pide: C, la copia automática una vez al día sin que
+nadie abra la extensión.
 
 ### Cómo se usa
 
@@ -3872,7 +3877,8 @@ SELVIA"). Nunca se borra: se desactiva. Cada cambio queda en la actividad.
 ### Publicar (fase 2)
 
 - Para publicar hay que ser miembro del proyecto destino (con la sesión se
-  comprueba que se puede abrir). El servidor relee en el origen cada archivo o
+  comprueba que se puede abrir) o que el destino espere a este proyecto con su
+  carpeta de recepción. El servidor relee en el origen cada archivo o
   carpeta (nombre y ruta nunca vienen del navegador).
 - Un **archivo** llega directo a la carpeta de recepción; una **carpeta**
   llega como carpeta con su nombre dentro de la recepción, con sus
@@ -3889,9 +3895,9 @@ navegador corre paso a paso
 alguien abre la extensión, en el origen o en el destino, y con "Revisar
 ahora" (también después de publicar o de definir una carpeta):
 
-1. `plan`: para cada publicación activa de o hacia el proyecto, si quien abre
-   es miembro de los dos proyectos (si no, un aviso: la actualiza otra
-   persona), fija su carpeta en el destino (la de recepción, si ya existe),
+1. `plan`: para cada publicación activa de o hacia el proyecto, si la cuenta
+   conectada o quien abre es miembro de los dos proyectos (si no, el aviso
+   "hace falta un usuario que pertenezca a los dos proyectos"), fija su carpeta en el destino (la de recepción, si ya existe),
    lista lo que hay ahora en el origen (una carpeta, con sus subcarpetas, hasta
    2000 archivos) y deja como tareas los archivos nunca copiados o con una
    versión nueva. Los archivos nuevos de una carpeta publicada se siguen solos.
@@ -3915,19 +3921,21 @@ ahora" (también después de publicar o de definir una carpeta):
 Un archivo o una carpeta que ya no está en el origen queda **"Retirado en el
 origen"**: en el destino no se borra nada y deja de actualizarse.
 
-### Cuenta técnica (fases A y B)
+### Usuario en ambos proyectos y cuenta conectada (fases A y B)
 
-Para publicar entre proyectos donde nadie es miembro de los dos (empresas
-distintas). [`lib/publicar/cuenta.ts`](lib/publicar/cuenta.ts):
+[`lib/publicar/cuenta.ts`](lib/publicar/cuenta.ts). Sin cuenta conectada, las
+versiones nuevas llegan solo cuando la persona que pertenece a los dos
+proyectos abre la extensión. Con su cuenta conectada llegan cuando cualquiera
+la abre, en cualquiera de los dos proyectos.
 
-- **Qué es**: un usuario de Trimble Connect de la herramienta (por ejemplo
-  publicaciones@dyco.co). Cada proyecto lo invita: el origen con **lectura** en
-  lo que publica, el destino con **acceso completo** en la carpeta de recepción.
-- **Conectarla** (pestaña **Cuenta técnica**): solo las personas cuyo id de
+- **Qué necesita esa persona**: ser miembro de los dos proyectos (en el que
+  recibe basta como usuario), con **lectura** en lo que se publica y **acceso
+  completo** en la carpeta de recepción.
+- **Conectarla** (pestaña **Usuario en ambos proyectos**): solo las personas cuyo id de
   Trimble está en la variable `PUBLICAR_ADMINS` de Vercel (la pantalla muestra
   el id de cada quien). "Conectar" da el enlace de inicio de sesión de Trimble
   (la misma app y el mismo `TRIMBLE_CLIENT_SECRET` de Manuales); se entra con
-  el usuario de la cuenta técnica y la dirección `http://localhost/?code=…` a
+  el usuario que pertenece a los dos proyectos (puede ser el propio) y la dirección `http://localhost/?code=…` a
   la que llega el navegador se pega en la pantalla. La sesión queda cifrada en
   `publicar_cuenta` (nunca en claro) y la renueva sola: al usarla y cada día con
   `/api/publicar/mantener` (Vercel Cron, 11:30 UTC), porque Trimble pide
@@ -3940,11 +3948,11 @@ distintas). [`lib/publicar/cuenta.ts`](lib/publicar/cuenta.ts):
   los proyectos cuya carpeta de recepción espera a este proyecto ("te espera
   con su carpeta de recepción"); esa carpeta es el permiso del destino. Sin
   ella, solo se puede publicar en proyectos donde uno es miembro.
-- **Quién copia**: la cuenta técnica si es miembro de los dos proyectos; si no,
-  la sesión de quien abre la extensión si es miembro de ambos; si no, un aviso
-  que dice a quién invitar. La actividad anota "Copiado con la cuenta técnica" y
-  la persona que tenía la extensión abierta.
-- El nombre del proyecto origen se lee con la cuenta técnica (o lo pone quien
+- **Quién copia**: la cuenta conectada si es miembro de los dos proyectos; si
+  no, la sesión de quien abre la extensión si es miembro de ambos; si no, un
+  aviso que dice a quién invitar. La actividad anota "Copiado con la cuenta
+  conectada (correo)" y la persona que tenía la extensión abierta.
+- El nombre del proyecto origen se lee con la cuenta conectada (o lo pone quien
   publica), así la tabla de recepciones ya no muestra el id.
 
 ### Actividad (fase 4)

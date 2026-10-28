@@ -8,10 +8,11 @@ import { acceptButton, baseInput, C, labelStyle, message, Notice } from "../pres
 import { botonPeligro, botonSecundario, card, td, texto, titulo } from "../compras/estilos";
 
 /**
- * "Cuenta técnica": the Trimble user of the tool that copies between
- * projects where nobody belongs to both. Everyone sees whether it's
- * connected, how to invite it and what it can do in this project; the
- * people in PUBLICAR_ADMINS connect or disconnect it.
+ * "Usuario en ambos proyectos": the Trimble user who belongs to both
+ * projects, connected so copies don't wait for them to open the extension.
+ * Everyone sees whether it's connected, what permissions it needs and what
+ * it can do in this project; the people in PUBLICAR_ADMINS connect or
+ * disconnect it.
  */
 export default function CuentaTab({ api }: { api: PublicarApi }) {
   const [cuenta, setCuenta] = useState<CuentaInfo | null>(null);
@@ -45,15 +46,16 @@ export default function CuentaTab({ api }: { api: PublicarApi }) {
     }
   }
 
-  const correo = cuenta?.email || "la cuenta técnica";
+  const correo = cuenta?.email || "el usuario que pertenece a los dos proyectos";
 
   return (
     <div style={{ display: "grid", gap: 14, maxWidth: 900 }}>
       <section style={card}>
-        <h2 style={titulo}>Cuenta técnica</h2>
+        <h2 style={titulo}>Usuario en ambos proyectos</h2>
         <p style={texto}>
-          Cuando nadie es miembro de los dos proyectos (por ejemplo, empresas distintas), las copias las hace la cuenta técnica: un usuario de Trimble Connect de esta
-          herramienta que cada proyecto invita. Así cada persona sigue entrando solo a su proyecto.
+          Las copias las hace un usuario que pertenece a los dos proyectos (por ejemplo, quien publica, invitado también como usuario en el proyecto que recibe). Los
+          demás siguen entrando solo a su proyecto. Si esa persona abre la extensión, copia con su sesión. Si conecta aquí su cuenta, las versiones nuevas llegan
+          cuando cualquiera abre la extensión en cualquiera de los dos proyectos, aunque ella no la abra.
         </p>
         {!cuenta ? (
           <p style={{ ...texto, color: "var(--tc-gray-500)" }}>Cargando…</p>
@@ -65,7 +67,7 @@ export default function CuentaTab({ api }: { api: PublicarApi }) {
             {cuenta.renovadaEn ? ` · sesión renovada el ${fechaHora(cuenta.renovadaEn)}` : ""}.
           </Notice>
         ) : (
-          <Notice kind="warning">Todavía no está conectada: entre proyectos donde nadie es miembro de ambos no se puede copiar.</Notice>
+          <Notice kind="warning">No hay una cuenta conectada: las versiones nuevas llegan solo cuando la persona que pertenece a los dos proyectos abre la extensión.</Notice>
         )}
         {cuenta && cuenta.faltan.length > 0 && (
           <Notice kind="warning" style={{ marginTop: 8 }}>
@@ -75,10 +77,10 @@ export default function CuentaTab({ api }: { api: PublicarApi }) {
       </section>
 
       <section style={card}>
-        <h2 style={titulo}>Cómo invitarla a este proyecto</h2>
+        <h2 style={titulo}>Qué necesita en este proyecto</h2>
         <ol style={{ ...texto, paddingLeft: 20 }}>
           <li>
-            En Trimble Connect, invita a <strong>{correo}</strong> como miembro de este proyecto (Equipo → Invitar).
+            Que <strong>{correo}</strong> sea miembro de este proyecto (si no lo es: Equipo → Invitar; basta como usuario).
           </li>
           <li>
             Si este proyecto <strong>publica</strong>: dale permiso de <strong>lectura</strong> en las carpetas que se publican.
@@ -108,7 +110,7 @@ export default function CuentaTab({ api }: { api: PublicarApi }) {
 
       {cuenta && (
         <section style={card}>
-          <h2 style={titulo}>Conectar la cuenta técnica</h2>
+          <h2 style={titulo}>Conectar la cuenta</h2>
           {!cuenta.administra ? (
             <p style={{ ...texto, marginBottom: 0 }}>
               La conecta una persona autorizada en la variable <code>PUBLICAR_ADMINS</code> de Vercel. Tu id de Trimble es <code>{cuenta.miId}</code>.
@@ -118,7 +120,7 @@ export default function CuentaTab({ api }: { api: PublicarApi }) {
               <ol style={{ ...texto, paddingLeft: 20, marginBottom: 0 }}>
                 <li>Pulsa &quot;Conectar&quot; y abre el inicio de sesión de Trimble.</li>
                 <li>
-                  Entra con el usuario de la <strong>cuenta técnica</strong> (no con el tuyo).
+                  Entra con el usuario que <strong>pertenece a los dos proyectos</strong> (puede ser el tuyo).
                 </li>
                 <li>
                   Al terminar, el navegador va a una página que no carga (<code>http://localhost/?code=…</code>): copia esa dirección completa y pégala aquí.
@@ -171,7 +173,7 @@ export default function CuentaTab({ api }: { api: PublicarApi }) {
                     type="button"
                     disabled={busy}
                     onClick={() => {
-                      if (window.confirm("¿Desconectar la cuenta técnica? Las copias entre proyectos donde nadie es miembro de ambos se detienen hasta conectarla otra vez.")) {
+                      if (window.confirm("¿Desconectar la cuenta? Las versiones nuevas llegarán solo cuando la persona que pertenece a los dos proyectos abra la extensión.")) {
                         hacer(async () => setCuenta(await api.desconectarCuenta()));
                       }
                     }}

@@ -136,7 +136,8 @@ export default function PublicarTab({
                 )}
                 {!elegido.miembro && (
                   <Notice kind="info">
-                    No eres miembro de {elegido.nombre}: la copia la hace la cuenta técnica, que debe estar invitada en los dos proyectos (pestaña &quot;Cuenta técnica&quot;).
+                    No eres miembro de {elegido.nombre}: la copia la hace un usuario que pertenezca a los dos proyectos, cuando abra esta extensión o con su cuenta
+                    conectada (pestaña &quot;Usuario en ambos proyectos&quot;).
                   </Notice>
                 )}
               </div>

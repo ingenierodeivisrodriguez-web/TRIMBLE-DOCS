@@ -1,8 +1,8 @@
 /**
- * The technical account of "Publicar entre proyectos": a Trimble Connect user
- * of the tool itself that each project invites (origin: reading what it
- * publishes; destination: writing in the reception folder), so copies can be
- * made when nobody belongs to both projects. A person allowed in
+ * The connected account of "Publicar entre proyectos": the Trimble Connect
+ * user who belongs to both projects (origin: reading what it publishes;
+ * destination: writing in the reception folder), so copies don't wait for
+ * that person to open the extension. A person allowed in
  * PUBLICAR_ADMINS signs in with it once (Trimble Identity, authorization code
  * with PKCE, the same app as Manuales); the server keeps its rotating
  * refresh token encrypted and renews it (daily keep-alive, see /api/publicar/mantener).
@@ -49,21 +49,21 @@ export function olvidarToken() {
 }
 
 function exigirOauth(deps: DepsCuenta): OauthConfig {
-  if (!deps.oauth) throw new PublicarError("Falta la variable TRIMBLE_CLIENT_SECRET en Vercel: sin ella no se puede usar la cuenta técnica.", 503, "sin-oauth");
+  if (!deps.oauth) throw new PublicarError("Falta la variable TRIMBLE_CLIENT_SECRET en Vercel: sin ella no se puede conectar la cuenta.", 503, "sin-oauth");
   return deps.oauth;
 }
 
 function exigirAdministrador(deps: DepsCuenta, quien: { id: string }) {
   if (!deps.administradores.includes(quien.id)) {
     throw new PublicarError(
-      `Solo las personas indicadas en la variable PUBLICAR_ADMINS de Vercel conectan la cuenta técnica. Tu id de Trimble es ${quien.id}: agrégalo ahí y vuelve a desplegar.`,
+      `Solo las personas indicadas en la variable PUBLICAR_ADMINS de Vercel conectan la cuenta. Tu id de Trimble es ${quien.id}: agrégalo ahí y vuelve a desplegar.`,
       403,
       "no-administra"
     );
   }
 }
 
-const VENCIDA = () => new PublicarError("La sesión de la cuenta técnica venció: hay que volver a conectarla (pestaña Cuenta técnica).", 503, "cuenta-vencida");
+const VENCIDA = () => new PublicarError("La sesión de la cuenta conectada venció: hay que volver a conectarla (pestaña Usuario en ambos proyectos).", 503, "cuenta-vencida");
 
 /** What everyone sees about the account, and whether this person may manage it. */
 export async function estadoCuenta(store: PublicarStore, deps: DepsCuenta, quien: { id: string }): Promise<CuentaInfo> {
@@ -103,7 +103,7 @@ export async function completarConexion(store: PublicarStore, deps: DepsCuenta, 
   if (retorno.error) return { ok: false, titulo: "No se conectó la cuenta", texto: retorno.error };
   if (!retorno.code || !retorno.state) return { ok: false, titulo: "Dirección incompleta", texto: "La dirección no trae el código de Trimble: copia la dirección completa de la barra (empieza por http://localhost/?code=...)." };
   const estado = await store.consumirEstado(retorno.state);
-  if (!estado) return { ok: false, titulo: "El enlace venció", texto: 'Pasaron más de 10 minutos o ese enlace ya se usó. Pulsa otra vez "Conectar la cuenta técnica".' };
+  if (!estado) return { ok: false, titulo: "El enlace venció", texto: 'Pasaron más de 10 minutos o ese enlace ya se usó. Pulsa otra vez "Conectar".' };
   const tokens = await deps.canjear(oauth, retorno.code, estado.redirectUri, estado.verifier);
   const me = await deps.usuario(tokens.accessToken);
   await store.guardarCuenta({
@@ -116,7 +116,7 @@ export async function completarConexion(store: PublicarStore, deps: DepsCuenta, 
     conectadaPor: quien.name,
   });
   olvidarToken();
-  return { ok: true, titulo: "Cuenta técnica conectada", texto: `Las copias entre proyectos se harán con la cuenta ${me.email ?? me.id} donde la inviten.` };
+  return { ok: true, titulo: "Cuenta conectada", texto: `Las copias entre proyectos donde ${me.email ?? me.id} sea miembro de los dos se harán con su cuenta, aunque no abra la extensión.` };
 }
 
 /** Disconnects it: the session stops working at Trimble and its row is deleted. */
@@ -181,7 +181,7 @@ export async function tokenTecnico(store: PublicarStore, deps: DepsCuenta, forza
     }
     await deps.esperar(500); // someone else is renewing it
   }
-  throw new PublicarError("La sesión de la cuenta técnica se está renovando; inténtalo de nuevo en unos segundos.", 503, "cuenta-ocupada");
+  throw new PublicarError("La sesión de la cuenta conectada se está renovando; inténtalo de nuevo en unos segundos.", 503, "cuenta-ocupada");
 }
 
 /** The daily keep-alive: renews the session if the last renewal is old, so it never lapses. */

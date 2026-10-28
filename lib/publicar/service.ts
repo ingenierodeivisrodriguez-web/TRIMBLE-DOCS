@@ -2,9 +2,10 @@
  * "Publicar entre proyectos": the destination's reception folders, the
  * publications and their files, keeping them up to date, and the activity.
  *
- * Copies are made with the technical account when it is connected and
- * invited to both projects; otherwise with the token of whoever opens the
- * extension (in the origin or the destination), if they belong to both.
+ * Copies need one user who belongs to both projects: with their connected
+ * account when it is (so copies don't wait for them to open the extension),
+ * otherwise with the token of whoever opens the extension (in the origin or
+ * the destination), if they belong to both.
  * Publishing to a project one isn't a member of needs its consent: an
  * active reception folder for this project. A copy never
  * replaces silently what someone changed in the destination: it stays as a
@@ -58,7 +59,7 @@ function ladoDe(ctx: Ctx, projectId: string): Promise<Lado> {
   return projectId === ctx.projectId ? Promise.resolve(ctx.deps.aqui) : ctx.deps.abrir(projectId);
 }
 
-/** A project's name, read with the caller's token or else the technical account's. */
+/** A project's name, read with the caller's token or else the connected account's. */
 async function nombreDe(ctx: Ctx, projectId: string, porDefecto = ""): Promise<string> {
   for (const leer of [ctx.deps.nombreProyecto, ctx.deps.tecnico?.nombreProyecto]) {
     if (!leer) continue;
@@ -73,10 +74,11 @@ async function nombreDe(ctx: Ctx, projectId: string, porDefecto = ""): Promise<s
 }
 
 /**
- * Which session copies between two projects: the technical account when it
- * belongs to both, else the caller when they do; otherwise why not.
+ * Which session copies between two projects: the connected account (its
+ * e-mail in `conectada`) when it belongs to both, else the caller when they
+ * do; otherwise why not.
  */
-async function ladosPara(ctx: Ctx, origen: string, destino: string): Promise<{ o: Lado; d: Lado; tecnica: boolean } | { aviso: string }> {
+async function ladosPara(ctx: Ctx, origen: string, destino: string): Promise<{ o: Lado; d: Lado; conectada: string | null } | { aviso: string }> {
   const ambos = async (abrir: (id: string) => Promise<Lado>) => {
     try {
       const [o, d] = await Promise.all([abrir(origen), abrir(destino)]);
@@ -96,16 +98,16 @@ async function ladosPara(ctx: Ctx, origen: string, destino: string): Promise<{ o
     }
     if (cuenta) {
       const r = await ambos((id) => t.abrir(id));
-      if (r) return { ...r, tecnica: true };
+      if (r) return { ...r, conectada: cuenta.email };
     }
   }
   const r = await ambos((id) => ladoDe(ctx, id));
-  if (r) return { ...r, tecnica: false };
+  if (r) return { ...r, conectada: null };
   if (fallo) return { aviso: fallo.replace(/\.$/, "") };
   return {
     aviso: cuenta
-      ? `la cuenta técnica (${cuenta.email}) aún no es miembro de los dos proyectos: hay que invitarla en el que falte`
-      : "la copia la hace alguien que sea miembro de los dos proyectos, o la cuenta técnica cuando esté conectada e invitada a ambos",
+      ? `hace falta un usuario que pertenezca a los dos proyectos, y la cuenta conectada (${cuenta.email}) aún no es miembro de uno de ellos: invítala en el que le falte`
+      : "hace falta un usuario que pertenezca a los dos proyectos: se copia cuando esa persona abre la extensión, o siempre si conecta su cuenta en la pestaña «Usuario en ambos proyectos»",
   };
 }
 
@@ -534,7 +536,7 @@ async function terminar(
   p: Publicacion,
   origen: { versionId: string | null; revision: number | null },
   destino: { fileId: string | null; versionId: string | null; revision: number | null },
-  tecnica: boolean
+  conectada: string | null
 ) {
   const accion: AccionActividad = s.estado === "diferencia" ? "reemplazar" : s.origenVersionId ? "actualizar" : "copiar";
   await ctx.store.actualizarArchivo(s.id, {
@@ -557,7 +559,7 @@ async function terminar(
     actualizar: `Actualización automática – versión ${origen.revision ?? "?"} del origen.`,
     reemplazar: "Reemplazó lo que había en el destino, con la confirmación de quien lo revisó.",
   }[accion as "copiar" | "actualizar" | "reemplazar"];
-  await registrar(ctx, { ...p, publicacionId: p.id }, accion, { nombre: nombreCompleto(s), versionOrigen: origen.revision, versionDestino: destino.revision, nota: tecnica ? `${nota} Copiado con la cuenta técnica.` : nota });
+  await registrar(ctx, { ...p, publicacionId: p.id }, accion, { nombre: nombreCompleto(s), versionOrigen: origen.revision, versionDestino: destino.revision, nota: conectada ? `${nota} Copiado con la cuenta conectada (${conectada}).` : nota });
 }
 
 /**
@@ -567,7 +569,7 @@ async function terminar(
  * it, only if it's still the version the person saw.
  */
 async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | null): Promise<PasoArchivo> {
-  const { s, p, o, d, tecnica } = await contexto(ctx, archivoId);
+  const { s, p, o, d, conectada } = await contexto(ctx, archivoId);
   if (p.estado !== "activa") return { ok: false, mensaje: "Esa publicación no está activa." };
   if (!p.destinoCarpetaId) return { ok: false, mensaje: "La publicación aún no tiene carpeta en el destino." };
   if (siVersion && s.estado !== "diferencia") return { ok: false, mensaje: "Ese archivo no tiene una diferencia por decidir." };
@@ -601,7 +603,7 @@ async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | nu
       const esLaNuestra = !!s.destinoVersionId && b.versionId === s.destinoVersionId;
       if (situacionDe(a, b) === "al-dia") {
         // Same content already there (ours or not): just remember it.
-        await terminar(ctx, s, p, a, { fileId: b.id, versionId: b.versionId, revision: b.revision }, tecnica);
+        await terminar(ctx, s, p, a, { fileId: b.id, versionId: b.versionId, revision: b.revision }, conectada);
         return { ok: true, listo: true, mensaje: `“${s.nombre}” ya estaba igual en el destino.` };
       }
       if (!esLaNuestra) {
@@ -626,7 +628,7 @@ async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | nu
       return { ok: false, mensaje: r.mensaje };
     }
     if (r.metodo === "trimble") {
-      await terminar(ctx, s, p, a, { fileId: r.fileId ?? null, versionId: r.versionId ?? null, revision: r.revision ?? null }, tecnica);
+      await terminar(ctx, s, p, a, { fileId: r.fileId ?? null, versionId: r.versionId ?? null, revision: r.revision ?? null }, conectada);
       return { ok: true, listo: true, mensaje: r.mensaje };
     }
     await ctx.store.actualizarArchivo(s.id, { copiandoUploadId: r.uploadId ?? null, copiandoVersionId: a.versionId, copiandoRevision: a.revision, enCursoHasta: iso(ctx, MINUTOS_SUBIDA), actualizado: iso(ctx) });
@@ -639,11 +641,11 @@ async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | nu
 
 /** Checks with Trimble an upload started by "copiar" and records it when it's done. */
 async function confirmar(ctx: Ctx, archivoId: string): Promise<PasoArchivo> {
-  const { s, p, d, tecnica } = await contexto(ctx, archivoId);
+  const { s, p, d, conectada } = await contexto(ctx, archivoId);
   if (!s.copiandoUploadId) return { ok: s.estado === "al-dia", listo: true, mensaje: s.estado === "al-dia" ? "Ya está al día." : "No hay una copia en curso." };
   const e = await estadoSubida(d.cliente, s.copiandoUploadId);
   if (e.status === "DONE") {
-    await terminar(ctx, s, p, { versionId: s.copiandoVersionId, revision: s.copiandoRevision }, { fileId: e.fileId, versionId: e.versionId, revision: e.revision }, tecnica);
+    await terminar(ctx, s, p, { versionId: s.copiandoVersionId, revision: s.copiandoRevision }, { fileId: e.fileId, versionId: e.versionId, revision: e.revision }, conectada);
     return { ok: true, listo: true, mensaje: `Trimble confirmó la carga: versión ${e.revision ?? "?"} en el destino.` };
   }
   if (e.status === "ERROR" || e.status === "EXPIRED" || e.respuesta.estado === 404) {
@@ -655,10 +657,10 @@ async function confirmar(ctx: Ctx, archivoId: string): Promise<PasoArchivo> {
   return { ok: true, listo: false, uploadId: s.copiandoUploadId, mensaje: "Trimble aún no confirma la carga." };
 }
 
-// ---------------------------------------------------------------- the technical account in this project
+// ---------------------------------------------------------------- the connected account in this project
 
 /**
- * What the technical account can do in this project: be a member, write in
+ * What the connected account can do in this project: be a member, write in
  * each reception folder (as destination) and read what is published (as
  * origin). So each administrator sees what permission is missing.
  */
@@ -669,10 +671,10 @@ export async function revisarAcceso(ctx: Ctx): Promise<{ comprobaciones: Comprob
   try {
     cuenta = t ? await t.cuenta() : null;
   } catch (err) {
-    return { comprobaciones: [{ que: "Cuenta técnica", ok: false, mensaje: err instanceof Error ? err.message : String(err) }] };
+    return { comprobaciones: [{ que: "Cuenta conectada", ok: false, mensaje: err instanceof Error ? err.message : String(err) }] };
   }
-  if (!t || !cuenta) return { comprobaciones: [{ que: "Cuenta técnica", ok: false, mensaje: "Todavía no está conectada." }] };
-  lista.push({ que: "Cuenta técnica", ok: true, mensaje: `Conectada como ${cuenta.email}.` });
+  if (!t || !cuenta) return { comprobaciones: [{ que: "Cuenta conectada", ok: false, mensaje: "Todavía no hay una cuenta conectada." }] };
+  lista.push({ que: "Cuenta conectada", ok: true, mensaje: `${cuenta.email}.` });
   let aqui: Lado;
   try {
     aqui = await t.abrir(ctx.projectId);
@@ -680,7 +682,7 @@ export async function revisarAcceso(ctx: Ctx): Promise<{ comprobaciones: Comprob
     lista.push({ que: "Miembro de este proyecto", ok: false, mensaje: `Invita a ${cuenta.email} a este proyecto en Trimble Connect (Equipo).` });
     return { comprobaciones: lista };
   }
-  lista.push({ que: "Miembro de este proyecto", ok: true, mensaje: "La cuenta técnica es miembro de este proyecto." });
+  lista.push({ que: "Miembro de este proyecto", ok: true, mensaje: `${cuenta.email} es miembro de este proyecto.` });
   for (const r of (await ctx.store.recepciones(ctx.projectId)).filter((x) => x.activa)) {
     const { carpeta } = await leerCarpeta(aqui.cliente, r.carpetaId);
     const escribe = carpeta?.permiso === "FULL_ACCESS";
@@ -692,7 +694,7 @@ export async function revisarAcceso(ctx: Ctx): Promise<{ comprobaciones: Comprob
   }
   for (const p of (await ctx.store.publicaciones(ctx.projectId)).filter((x) => x.origenProyecto === ctx.projectId && x.estado === "activa")) {
     const ve = p.tipo === "archivo" ? !!(await leerArchivo(aqui.cliente, p.itemId)).archivo : !!(await leerCarpeta(aqui.cliente, p.itemId)).carpeta;
-    lista.push({ que: `Publicado: ${p.nombre}`, ok: ve, mensaje: ve ? "La cuenta técnica lo puede leer." : `No lo ve: dale acceso de lectura a «${p.ruta}».` });
+    lista.push({ que: `Publicado: ${p.nombre}`, ok: ve, mensaje: ve ? "La cuenta conectada lo puede leer." : `No lo ve: dale acceso de lectura a «${p.ruta}».` });
   }
   return { comprobaciones: lista };
 }

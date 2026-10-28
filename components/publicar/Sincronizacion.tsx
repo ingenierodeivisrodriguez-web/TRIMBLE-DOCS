@@ -116,8 +116,8 @@ export default function Sincronizacion({ api, pedido, onCambio }: { api: Publica
         </details>
       )}
       <div style={{ marginTop: 4, fontSize: 12, color: "var(--tc-gray-500)" }}>
-        Las versiones nuevas se copian cuando alguien abre esta extensión en cualquiera de los dos proyectos: con la cuenta técnica si está invitada en ambos, o con la
-        sesión de quien sea miembro de los dos.
+        Las versiones nuevas se copian cuando abre esta extensión alguien que pertenece a los dos proyectos, o cuando la abre cualquiera si esa persona conectó su
+        cuenta (pestaña &quot;Usuario en ambos proyectos&quot;).
       </div>
     </div>
   );

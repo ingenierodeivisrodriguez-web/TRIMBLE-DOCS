@@ -72,11 +72,11 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       return { projectId: id, servidor: s, cliente: clienteTrimble(s, token) };
     };
     const store = publicarStore();
-    // The technical account's token, read once per request (null: not connected).
+    // The connected account's token, read once per request (null: not connected).
     let tecnica: Promise<string | null> | null = null;
     const tokenTecnica = async () => {
       const t = await (tecnica ??= tokenTecnico(store, cuentaDeps()));
-      if (!t) throw new PublicarError("La cuenta técnica no está conectada.", 503, "sin-cuenta");
+      if (!t) throw new PublicarError("No hay una cuenta conectada.", 503, "sin-cuenta");
       return t;
     };
     return await run({
@@ -90,7 +90,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
         tecnico: {
           cuenta: async () => {
             if (!(await (tecnica ??= tokenTecnico(store, cuentaDeps())))) return null;
-            return { email: (await store.getCuenta())?.cuentaEmail || "la cuenta técnica" };
+            return { email: (await store.getCuenta())?.cuentaEmail || "la cuenta conectada" };
           },
           abrir: async (id) => {
             const t = await tokenTecnica();

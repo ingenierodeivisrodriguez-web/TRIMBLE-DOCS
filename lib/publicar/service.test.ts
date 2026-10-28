@@ -227,7 +227,7 @@ test("dos personas no copian el mismo archivo a la vez", async () => {
   assert.equal(e.enCarpeta(e.recibidos).length, 0);
 });
 
-test("sin ser miembro del destino solo se publica si definió la carpeta de recepción; sin nadie en los dos ni cuenta técnica, el plan avisa", async () => {
+test("sin ser miembro del destino solo se publica si definió la carpeta de recepción; sin nadie en los dos ni cuenta conectada, el plan avisa", async () => {
   const e = escenario();
   const luis = () => e.ctx("SELVIA", LUIS, ["SELVIA"]);
   await assert.rejects(() => publicar(luis(), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" }), /no ha definido una carpeta de recepción/);
@@ -237,11 +237,42 @@ test("sin ser miembro del destino solo se publica si definió la carpeta de rece
   assert.equal(r.publicadas.length, 1);
   const { plan } = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"]));
   assert.equal(plan.tareas.length, 0);
-  assert.match(plan.avisos[0], /miembro de los dos proyectos, o la cuenta técnica/);
+  assert.match(plan.avisos[0], /hace falta un usuario que pertenezca a los dos proyectos/);
   assert.equal((await getActividad(e.ctx("OTRO", LUIS, ["OTRO"]), {})).entradas.length, 0, "otro proyecto no ve esta actividad");
 });
 
-test("con la cuenta técnica invitada a los dos proyectos se copia aunque nadie sea miembro de ambos", async () => {
+test("como en el dibujo del dueño: una sola persona en los dos proyectos publica, y las versiones nuevas llegan cuando la abre", async () => {
+  const e = escenario();
+  const ambos = ["SELVIA", "LAB"];
+  // Member 2: administrator of the origin, plain user of the destination.
+  const enOrigen = () => e.ctx("SELVIA", { id: "u-m2", name: "Miembro 2", isAdmin: true }, ambos);
+  const enDestino = () => e.ctx("LAB", { id: "u-m2", name: "Miembro 2", isAdmin: false }, ambos);
+  // Member 1, administrator of the destination only, says where it arrives.
+  await guardarRecepcion(e.ctx("LAB", ADMIN_LAB, ["LAB"]), { origen: "SELVIA", carpetaId: e.recibidos });
+  await publicar(enOrigen(), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "Emisión" });
+  const primera = await e.alDia(enOrigen());
+  assert.equal(primera.pasos[0]?.ok, true, primera.pasos[0]?.mensaje);
+  assert.equal(e.enCarpeta(e.recibidos).length, 1);
+  // A new version: member 1 alone doesn't see the origin, so it waits and says why.
+  e.nube.sembrarArchivo(e.planos, "EST-001.pdf", "plano versión 2");
+  const solo = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"]));
+  assert.equal(solo.plan.tareas.length, 0);
+  assert.match(solo.plan.avisos[0], /hace falta un usuario que pertenezca a los dos proyectos/);
+  // Member 2 opens it in the destination: it arrives as a new version.
+  const despues = await e.alDia(enDestino());
+  assert.equal(despues.pasos[0]?.ok, true, despues.pasos[0]?.mensaje);
+  assert.equal(e.enCarpeta(e.recibidos)[0].versiones.length, 2);
+  const { entradas } = await getActividad(e.ctx("LAB", ADMIN_LAB, ["LAB"]), {});
+  assert.equal(entradas[0].accion, "actualizar");
+  assert.equal(entradas[0].usuario, "Miembro 2");
+  // With member 2's account connected, the next one arrives when member 1 opens it.
+  e.nube.sembrarArchivo(e.planos, "EST-001.pdf", "plano versión 3");
+  const conectada = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"], ambos));
+  assert.equal(conectada.pasos[0]?.ok, true, conectada.pasos[0]?.mensaje);
+  assert.equal(e.enCarpeta(e.recibidos)[0].versiones.length, 3);
+});
+
+test("con la cuenta conectada de quien pertenece a los dos proyectos se copia aunque la abra alguien de uno solo", async () => {
   const e = escenario();
   const ambos = ["SELVIA", "LAB"];
   // The destination's administrator isn't a member of SELVIA: its name comes through the technical account.
@@ -254,7 +285,7 @@ test("con la cuenta técnica invitada a los dos proyectos se copia aunque nadie 
   assert.equal(e.enCarpeta(e.recibidos).length, 1);
   const { entradas } = await getActividad(e.ctx("LAB", ADMIN_LAB, ["LAB"]), {});
   assert.equal(entradas[0].accion, "copiar");
-  assert.match(entradas[0].nota, /Copiado con la cuenta técnica/);
+  assert.match(entradas[0].nota, /Copiado con la cuenta conectada \(publicaciones@dyco\.co\)/);
   assert.equal(entradas[0].usuario, "Luis Pérez", "queda quien tenía la extensión abierta");
   // A new version, reviewed from the destination by someone who only belongs there.
   e.nube.sembrarArchivo(e.planos, "EST-001.pdf", "plano versión 2");
@@ -263,13 +294,13 @@ test("con la cuenta técnica invitada a los dos proyectos se copia aunque nadie 
   assert.equal(e.enCarpeta(e.recibidos)[0].versiones.length, 2);
 });
 
-test("si la cuenta técnica no está invitada a uno de los proyectos, el aviso lo dice", async () => {
+test("si la cuenta conectada no es miembro de uno de los proyectos, el aviso lo dice", async () => {
   const e = escenario();
   await recibir(e);
   await publicar(e.ctx("SELVIA", ANA), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" });
   const { plan } = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"], ["LAB"]));
   assert.equal(plan.tareas.length, 0);
-  assert.match(plan.avisos[0], /publicaciones@dyco\.co\) aún no es miembro de los dos proyectos/);
+  assert.match(plan.avisos[0], /cuenta conectada \(publicaciones@dyco\.co\) aún no es miembro de uno de ellos/);
 });
 
 test("quien publica sin ver el destino le da su nombre real al proyecto origen en la recepción", async () => {
@@ -281,9 +312,9 @@ test("quien publica sin ver el destino le da su nombre real al proyecto origen e
   assert.equal(rec.origenNombre, "Selvia");
 });
 
-test("la revisión de acceso dice qué le falta a la cuenta técnica en cada carpeta", async () => {
+test("la revisión de acceso dice qué le falta a la cuenta conectada en cada carpeta", async () => {
   const e = escenario();
-  assert.match((await revisarAcceso(e.ctx("LAB", ADMIN_LAB))).comprobaciones[0].mensaje, /no está conectada/);
+  assert.match((await revisarAcceso(e.ctx("LAB", ADMIN_LAB))).comprobaciones[0].mensaje, /no hay una cuenta conectada/);
   assert.match((await revisarAcceso(e.ctx("LAB", ADMIN_LAB, ["LAB"], ["SELVIA"]))).comprobaciones[1].mensaje, /Invita a publicaciones@dyco\.co a este proyecto/);
   await recibir(e);
   e.nube.carpetas.get(e.recibidos)!.permiso = "READ";
