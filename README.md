@@ -15,6 +15,7 @@ ambos lugares** para Trimble Connect:
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
+| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fase 1, preparar el modelo) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3530,7 +3531,7 @@ según una configuración de uso; el QR abre **sin sesión y con vencimiento**; 
 punto de anclaje se **elige en el visor 3D**; colorear es **a mano**, elemento
 por elemento (ligado por IFCGUID, nunca en los Property Sets).
 
-Fases: 0 prueba en el celular · 1 preparar el modelo · 2 punto de anclaje y QR
+Fases: 0 prueba en el celular (hecha) · 1 preparar el modelo (hecha) · 2 punto de anclaje y QR
 · 3 visor en el celular con calibración · 4 cortes, transparencia y colorear
 · 5 cierre (manifiesto, guía, prueba en obra). Cada fase espera el OK del dueño.
 
@@ -3560,6 +3561,80 @@ volumen a escala real fijo en el piso y que no se corre al caminar.
 Qué debe reportar quien prueba: marca y modelo del celular, si el volumen
 quedó fijo al caminar, cuánto midió con flexómetro un lado de la base (debe dar
 2 m) y cuántos centímetros se corrió la cruz al volver a la marca.
+
+### Fase 1: preparar el modelo (visor 3D) y modelos preparados (menú del proyecto)
+
+Cambio frente al plan: la preparación se hace desde el **panel del visor 3D**
+y no desde el menú del proyecto. Así se toman los IFC que ya están abiertos
+(sin recorrer todas las carpetas) y es el mismo panel donde la fase 2 elegirá
+el punto del QR. El menú del proyecto queda para ver y administrar los
+modelos preparados.
+
+**Panel del visor «Realidad aumentada»** ([`components/ra/PanelPreparar.tsx`](components/ra/PanelPreparar.tsx)):
+
+1. **Modelos**: lista los IFC abiertos en el visor (todos marcados) y un
+   nombre para el celular. **Leer modelos** descarga cada IFC a través del
+   servidor (`/api/ra/ifc`, con el token de la persona: Trimble decide si lo
+   puede leer) y lo convierte **en el navegador** con web-ifc. Si son varios
+   (arquitectura + estructura), quedan en un solo modelo.
+2. **Qué se lleva al celular**: niveles y clases IFC con cuántos elementos
+   tiene cada uno, para quitar lo que no hace falta en obra. Empiezan sin
+   marcar IfcSpace, IfcOpeningElement, IfcVirtualElement e IfcAnnotation.
+   Muestra los triángulos que quedan: más de 1 millón avisa que puede ir
+   lento; más de 3 millones o un archivo de más de 50 MB no se deja enviar
+   ([`lib/ra/limites.ts`](lib/ra/limites.ts)).
+3. **Vista previa** (se gira arrastrando) con elementos, triángulos y peso.
+   **Guardar para el celular** sube el archivo y confirma que llegó completo.
+
+**Menú del proyecto «Realidad aumentada»** ([`components/ra/RaApp.tsx`](components/ra/RaApp.tsx)):
+la tabla de modelos preparados (archivos IFC, elementos, triángulos, tamaño,
+quién y cuándo, último uso, **se elimina el**), **Eliminar** (quien lo
+preparó o un administrador; pide confirmación) y el historial de eliminados
+con el motivo (vencido, a mano, subida sin terminar).
+
+**Eliminación automática** (decisión del dueño): un administrador fija los
+días sin uso (30 al inicio, de 1 a 365). Cada modelo tiene su fecha «se
+elimina el» = último uso + días; al cambiar los días se recalcula para los ya
+preparados. Las subidas que no terminaron se limpian a las 24 horas. La
+limpieza corre cada vez que alguien abre la pantalla del proyecto (y en la
+fase 3, cuando un celular abre un modelo). Se borra el **archivo**; la fila
+queda como «eliminado» para el historial (regla 3: no se borran registros).
+
+**Cómo se guarda el modelo** ([`lib/ra/modelo.ts`](lib/ra/modelo.ts),
+[`lib/ra/formato.ts`](lib/ra/formato.ts)):
+
+- Cada elemento conserva **IFCGUID**, clase, nombre, nivel (el del contenedor
+  o, si es parte de un ensamble, el del ensamble) y archivo de origen. Cada
+  triángulo sabe de qué elemento es (para colorear a mano en la fase 4).
+- La geometría se junta en un lote por color (pocas llamadas de dibujo en el
+  celular). Medidas en metros aunque el IFC esté en milímetros; eje y hacia
+  arriba. Las posiciones van **relativas a un origen en metros enteros**
+  cerca del modelo, para no perder milímetros en proyectos georreferenciados.
+- Archivo propio «RAQ1» comprimido con gzip, en el bucket privado
+  `ra-modelos` de Supabase. El navegador lo sube directo con un **enlace
+  firmado de un solo objeto** que entrega el servidor (Vercel no deja pasar
+  archivos de más de 4.5 MB por sus funciones); la clave de Supabase nunca
+  sale del servidor.
+- El motor web-ifc se sirve desde `public/web-ifc/web-ifc.wasm`; una prueba
+  verifica que sea el mismo del paquete instalado (si se actualiza web-ifc,
+  hay que copiarlo de nuevo).
+
+**Base de datos**: [`supabase/ra.sql`](supabase/ra.sql) (tablas `ra_config`
+y `ra_modelos`, bucket `ra-modelos`; RLS sin políticas). API:
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /api/ra/estado` | Configuración y modelos del proyecto (antes limpia los vencidos) |
+| `PUT /api/ra/config` | `{ diasSinUso }` (administradores) |
+| `GET /api/ra/ifc?fileId=&versionId=` | El IFC de Trimble Connect, transmitido por el servidor |
+| `POST /api/ra/modelos` | Registra el modelo y entrega el enlace firmado de subida |
+| `POST /api/ra/modelos/{id}/confirmar` | Revisa que el archivo llegó completo y lo marca listo |
+| `DELETE /api/ra/modelos/{id}` | Borra el archivo ahora (la fila queda) |
+
+**Límites conocidos**: la conversión ocupa el navegador; con IFC grandes la
+pantalla se queda quieta mientras convierte (si molesta, se pasa a un
+proceso aparte). IFC de más de 150 MB pueden no caber en la memoria del
+navegador.
 
 ---
 
@@ -3774,6 +3849,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
    | Control de Obra | `https://trimble-docs.vercel.app/manifest-control-obra.json` |
    | Requisitos BIM (LOIN) | `https://trimble-docs.vercel.app/manifest-loin.json` |
+   | Realidad aumentada | `https://trimble-docs.vercel.app/manifest-ra.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;
@@ -3793,6 +3869,9 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    **Requisitos BIM (LOIN)** también: los requisitos en el menú lateral y la
    asociación con los modelos en el visor (respaldo:
    `https://trimble-docs.vercel.app/manifest-loin-visor.json`).
+   **Realidad aumentada** igual: los modelos preparados en el menú lateral y
+   la preparación en el visor (respaldo:
+   `https://trimble-docs.vercel.app/manifest-ra-visor.json`).
 6. Al abrir Resumen Archivos o Validación por primera vez, Trimble Connect
    pedira tu consentimiento para que la extension pueda leer el access token
    del usuario actual (esto es lo que permite leer los documentos del

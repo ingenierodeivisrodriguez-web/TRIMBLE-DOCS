@@ -23,7 +23,8 @@
     "react-window": "^2.3.2",
     "recharts": "^3.10.1",
     "three": "^0.186.1",
-    "trimble-connect-workspace-api": "^0.3.34"
+    "trimble-connect-workspace-api": "^0.3.34",
+    "web-ifc": "0.0.78"
   },
   "devDependencies": {
     "@types/node": "^26.6.1",
