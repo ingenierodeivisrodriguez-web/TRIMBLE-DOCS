@@ -9,6 +9,7 @@ import {
   HORAS_SUBIDA_INCOMPLETA,
   ModeloGuardado,
   ModeloVista,
+  AperturaResponse,
   PublicoResponse,
   PuntoGuardado,
   PuntoVista,
@@ -243,5 +244,33 @@ export async function publico(store: RaStore, codigo: string, ahora: Date = new 
   const estado = estadoQr(p, m, ahora);
   if (estado !== "activo" || !m) return { estado, nombre: p.nombre };
   await store.actualizarPunto(p.projectId, p.id, { usos: p.usos + 1, ultimoUso: ahora.toISOString() });
-  return { estado, nombre: p.nombre, referencia: p.referencia, vence: p.vence, modelo: { nombre: m.nombre, elementos: m.elementos, triangulos: m.triangulos, bytes: m.bytes } };
+  return {
+    estado,
+    nombre: p.nombre,
+    referencia: p.referencia,
+    vence: p.vence,
+    montaje: p.montaje,
+    modelo: { nombre: m.nombre, elementos: m.elementos, triangulos: m.triangulos, bytes: m.bytes },
+  };
+}
+
+/** How long the phone's link to the model file lasts (enough for a slow download). */
+export const SEGUNDOS_DESCARGA = 15 * 60;
+
+/**
+ * The phone opens the model of an active wall QR: a short-lived link to its
+ * file, the point and the wall's direction. Opening it counts as use, so the
+ * model's unused-days term starts again (owner's decision 2).
+ */
+export async function abrirModelo(store: RaStore, codigo: string, ahora: Date = new Date()): Promise<AperturaResponse> {
+  if (!esCodigo(codigo)) return { estado: "no-existe" };
+  const p = await store.puntoPorCodigo(codigo);
+  if (!p) return { estado: "no-existe" };
+  const m = await store.obtener(p.projectId, p.modeloId);
+  const estado = estadoQr(p, m, ahora);
+  if (estado !== "activo" || !m) return { estado };
+  if (p.montaje !== "muro") return { estado: "en-piso" };
+  const dias = (await store.getConfig(p.projectId))?.diasSinUso ?? DIAS_SIN_USO_INICIAL;
+  await store.actualizar(p.projectId, m.id, { ultimoUso: ahora.toISOString(), eliminaEn: masDias(ahora, dias) });
+  return { estado, url: await store.archivos.firmar(m.ruta, SEGUNDOS_DESCARGA), punto: p.punto, rumbo: p.rumbo, bytes: m.bytes };
 }

@@ -4,6 +4,7 @@ import { CSSProperties, useEffect, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import { tamanoLegible } from "../../lib/ra/limites";
 import type { PublicoResponse } from "../../lib/ra/types";
+import VisorCelular from "./VisorCelular";
 
 const AZUL = "#2f55b0";
 
@@ -15,8 +16,8 @@ const NO_ABRE: Record<string, { titulo: string; detalle: string }> = {
 };
 
 /**
- * Phone page of a scanned QR (phase 2): says whether it opens and what it is.
- * Phase 3 adds the AR view here.
+ * Phone page of a scanned QR: says whether it opens and what it is, and for an
+ * active wall QR shows the model in AR (phase 3).
  */
 export default function QrCelular({ codigo }: { codigo: string }) {
   const [r, setR] = useState<PublicoResponse | null>(null);
@@ -58,16 +59,19 @@ export default function QrCelular({ codigo }: { codigo: string }) {
             </div>
             {r.vence && <div style={{ color: "#4b5563", fontSize: 14 }}>Este QR abre hasta el {fechaHora(r.vence).slice(0, 10)}.</div>}
           </div>
-          <div style={{ ...caja, background: "#fff8db", borderColor: "#d4b106" }}>
-            <b>El QR es válido.</b> La vista del modelo a escala real en este celular llega en la siguiente fase. Mientras tanto puede comprobar si su celular sirve en{" "}
-            <a href="/ra-prueba" style={{ color: AZUL }}>
-              la prueba de realidad aumentada
-            </a>
-            .
-          </div>
-          {r.referencia && <p style={{ fontSize: 14, color: "#4b5563" }}>La hoja va pegada en: {r.referencia}.</p>}
+          {r.referencia && <p style={{ fontSize: 14, color: "#4b5563", margin: "0 0 4px" }}>La hoja va pegada en: {r.referencia}.</p>}
+          {r.montaje === "muro" ? (
+            <VisorCelular codigo={codigo} bytes={r.modelo.bytes} />
+          ) : (
+            <div style={{ ...caja, background: "#fff8db", borderColor: "#d4b106" }}>Este es un QR de prueba con la hoja en el piso: pida uno nuevo pegado en un muro.</div>
+          )}
         </>
       )}
+      <p style={{ marginTop: 18 }}>
+        <a href="/ra/escanear" style={{ color: AZUL, fontWeight: 600 }}>
+          Escanear otro QR
+        </a>
+      </p>
     </main>
   );
 }

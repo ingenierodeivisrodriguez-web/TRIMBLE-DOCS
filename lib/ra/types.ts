@@ -122,5 +122,17 @@ export interface PublicoResponse {
   nombre?: string;
   referencia?: string;
   vence?: string;
+  montaje?: Montaje;
   modelo?: { nombre: string; elementos: number; triangulos: number; bytes: number };
+}
+
+/** What the phone needs to show the model in AR (only for an active QR on a wall). */
+export interface AperturaResponse {
+  estado: EstadoQr | "no-existe" | "en-piso";
+  /** Short-lived link to the model's file. */
+  url?: string;
+  /** The QR's point and which way its wall looks, in the model's frame. */
+  punto?: Vec3;
+  rumbo?: number;
+  bytes?: number;
 }

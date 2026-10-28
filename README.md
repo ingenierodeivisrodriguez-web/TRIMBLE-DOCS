@@ -15,7 +15,7 @@ ambos lugares** para Trimble Connect:
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
-| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fases 1 y 2, preparar el modelo y crear los QR) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
+| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fases 1 a 3, preparar el modelo, crear los QR y verlo en el celular) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3532,7 +3532,7 @@ punto de anclaje se **elige en el visor 3D**; colorear es **a mano**, elemento
 por elemento (ligado por IFCGUID, nunca en los Property Sets).
 
 Fases: 0 prueba en el celular (hecha) · 1 preparar el modelo (hecha) · 2 punto de anclaje y QR (hecha)
-· 3 visor en el celular con calibración · 4 cortes, transparencia y colorear
+· 3 visor en el celular con calibración (hecha) · 4 cortes, transparencia y colorear
 · 5 cierre (manifiesto, guía, prueba en obra). Cada fase espera el OK del dueño.
 
 ### Fase 0: prueba en el celular (`/ra-prueba`)
@@ -3710,6 +3710,44 @@ Base de datos: tabla `ra_puntos` en [`supabase/ra.sql`](supabase/ra.sql)
 
 Supuestos de esta fase: cualquier miembro del proyecto crea QR; el código se
 guarda tal cual en la base de datos para poder volver a imprimir la hoja.
+
+### Fase 3: el modelo en el celular
+
+**Escanear QR** (`/ra/escanear`, [`components/ra/EscanearQR.tsx`](components/ra/EscanearQR.tsx);
+también un botón en `/ra-prueba` y el enlace «Escanear otro QR» en cada página
+de QR): abre la cámara trasera con el lector de QR propio de Chrome en Android
+y, al leer uno, abre su página. Solo sigue QR de esta aplicación
+(`…/ra/q/<código>`); cualquier otro QR muestra un aviso y no lleva a ninguna
+parte. Si el navegador no tiene lector propio, dice que use la cámara del
+celular (que abre el enlace igual).
+
+**Página del QR** (`/ra/q/<código>`, [`components/ra/VisorCelular.tsx`](components/ra/VisorCelular.tsx)):
+
+1. **Descargar el modelo**: pide a `/api/ra/publico/<código>/modelo` el
+   enlace temporal del archivo (15 minutos), el punto y el rumbo del muro, y lo
+   descarga con barra de avance. **Abrir el modelo cuenta como uso**: su plazo
+   de días sin uso vuelve a empezar (decisión del dueño). Los QR de prueba con
+   la hoja en el piso no se abren: piden uno nuevo en un muro.
+2. **Revisión del celular** (la misma de la fase 0): si no sirve, dice por qué
+   y no deja iniciar.
+3. **Ver en realidad aumentada**: abre la cámara. Un círculo amarillo aparece
+   solo sobre **muros** (superficies a menos de 15° de la vertical); en el piso
+   dice «Eso no es un muro». Se pone el círculo sobre la **cruz de la hoja** y
+   se toca la pantalla: el punto tocado y el plano del muro ubican el modelo
+   ([`lib/ra/calibracion.ts`](lib/ra/calibracion.ts)): un giro alrededor de la
+   vertical, para que la cara del muro del modelo mire hacia donde mira el muro
+   real, y un corrimiento, para que el punto del QR caiga sobre la cruz. La
+   cámara y el modelo tienen el eje vertical por la gravedad, así que no hace
+   falta nivelar nada.
+4. Ya ubicado, se camina dentro del modelo; arriba se ve a cuántos metros
+   está uno de la hoja. **Recalibrar** oculta el modelo y pide tocar la cruz de
+   nuevo (cuando se corre por caminar mucho); **Salir** cierra la cámara.
+
+Límites conocidos: el modelo se dibuja siempre delante de lo real (no lo tapan
+muros ni personas); en muros lisos y sin textura el celular tarda más en
+reconocer el plano (la hoja impresa ayuda); en recorridos largos el modelo se
+puede correr unos centímetros, para eso está Recalibrar. Los cortes, la
+transparencia y el colorear llegan en la fase 4.
 
 ---
 

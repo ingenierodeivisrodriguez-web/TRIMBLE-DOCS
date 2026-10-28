@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Caller } from "../propiedades/service";
-import { anularPunto, archivoModelo, confirmarSubida, crearPunto, Ctx, eliminar, estado, guardarConfig, iniciarSubida, limpiar, publico } from "./service";
+import { abrirModelo, anularPunto, archivoModelo, confirmarSubida, crearPunto, Ctx, eliminar, estado, guardarConfig, iniciarSubida, limpiar, publico } from "./service";
 import { archivosEnMemoria, memoryStore, RaStore } from "./store";
 
 const ANA: Caller = { id: "u-ana", name: "Ana Pérez", isAdmin: false };
@@ -202,6 +202,7 @@ describe("puntos QR", () => {
       nombre: "Acceso principal",
       referencia: "Muro del eje 3 entre B y C, cara hacia el patio",
       vence: "2026-11-27T04:59:59.000Z",
+      montaje: "muro",
       modelo: { nombre: "Torre A - estructura", elementos: 40, triangulos: 1200, bytes: 5 },
     });
     const [vista] = (await estado(m.ctx(ANA))).puntos;
@@ -236,5 +237,49 @@ describe("puntos QR", () => {
     const m = montar();
     const listo = await prepararListo(m);
     assert.match((await archivoModelo(m.ctx(LUIS), listo.id)).url, /\.raq$/);
+  });
+});
+
+describe("abrir el modelo en el celular", () => {
+  const punto = (modeloId: string) => ({
+    modeloId,
+    nombre: "Acceso",
+    referencia: "Muro eje 3",
+    montaje: "muro",
+    punto: [4.4, 1.415, 4.42],
+    rumbo: -0.95,
+    elemento: "Muro 1",
+    vence: "2026-11-26",
+  });
+
+  it("entrega el enlace del archivo, el punto y el rumbo del muro, y el plazo de uso vuelve a empezar", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const p = await crearPunto(m.ctx(ANA), punto(listo.id));
+    m.avanzarDias(10);
+    const r = await abrirModelo(m.store, p.codigo, m.reloj());
+    assert.equal(r.estado, "activo");
+    assert.match(r.url!, /.raq$/);
+    assert.deepEqual(r.punto, [4.4, 1.415, 4.42]);
+    assert.equal(r.rumbo, -0.95);
+    assert.equal(r.bytes, 5);
+    const [modelo] = (await estado(m.ctx(ANA))).modelos;
+    assert.equal(modelo.ultimoUso, "2026-11-06T12:00:00.000Z");
+    assert.equal(modelo.eliminaEn, "2026-12-06T12:00:00.000Z");
+  });
+  it("un QR vencido, anulado o inventado no entrega el modelo", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const p = await crearPunto(m.ctx(ANA), punto(listo.id));
+    assert.deepEqual(await abrirModelo(m.store, "AbCdEfGhIjKlMnOpQrStUv", m.reloj()), { estado: "no-existe" });
+    await anularPunto(m.ctx(ANA), p.id);
+    assert.deepEqual(await abrirModelo(m.store, p.codigo, m.reloj()), { estado: "anulado" });
+  });
+  it("un QR de prueba con la hoja en el piso no se abre en realidad aumentada", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const p = await crearPunto(m.ctx(ANA), punto(listo.id));
+    await m.store.actualizarPunto("proy-1", p.id, { montaje: "piso" });
+    assert.deepEqual(await abrirModelo(m.store, p.codigo, m.reloj()), { estado: "en-piso" });
   });
 });

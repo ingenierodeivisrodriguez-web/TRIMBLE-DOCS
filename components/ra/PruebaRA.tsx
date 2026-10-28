@@ -219,6 +219,9 @@ export default function PruebaRA() {
       <p style={{ margin: "0 0 14px", color: "#4b5563" }}>
         Fase 0: comprobar si este celular puede mostrar un modelo a escala real (1:1) fijo en el piso, antes de cargar modelos BIM.
       </p>
+      <a href="/ra/escanear" style={{ ...botonPrincipal, display: "block", textAlign: "center", textDecoration: "none", boxSizing: "border-box", margin: "0 0 14px" }}>
+        Escanear QR
+      </a>
 
       <section style={tarjeta}>
         <h2 style={subtitulo}>1 · Revisión del celular</h2>
