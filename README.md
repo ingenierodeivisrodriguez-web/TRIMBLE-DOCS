@@ -16,7 +16,7 @@ ambos lugares** para Trimble Connect:
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
-| **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto, con cada versión nueva copiada al destino (por ahora: copia a mano de la última versión) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
+| **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -46,7 +46,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Control de Obra (proyecto)](#control-de-obra-proyecto)
 - [Requisitos BIM (LOIN) (proyecto)](#requisitos-bim-loin-proyecto)
 - [Realidad aumentada con QR (en construcción)](#realidad-aumentada-con-qr-en-construcción)
-- [Publicar entre proyectos (en construcción)](#publicar-entre-proyectos-en-construcción)
+- [Publicar entre proyectos (proyecto)](#publicar-entre-proyectos-proyecto)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -3806,7 +3806,7 @@ precisión medida, decidir para qué tareas sirve.
 
 ---
 
-## Publicar entre proyectos (en construcción)
+## Publicar entre proyectos (proyecto)
 
 Objetivo: publicar un documento o una carpeta de un proyecto en otro proyecto
 de Trimble Connect, y que cada versión nueva del proyecto origen llegue sola
@@ -3829,10 +3829,122 @@ revisión programada por ahora); en el uso real **alguien pertenece a los dos
 proyectos**; el administrador del destino define una **carpeta de recepción
 fija** por proyecto origen y lo publicado llega ahí sin aceptarlo.
 
-Fases: 0 prueba de copia en Trimble real (hecha el 28-10-2026, ver abajo) ·
-copia a mano a otro proyecto (hecha) · 1 configuración del proyecto destino ·
-2 Publicar · 3 actualización al abrir · 4 actividad y cierre. Cada fase espera
-el OK del dueño.
+Fases (todas el 28-10-2026): 0 prueba de copia en Trimble real · copia a mano ·
+1 configuración del proyecto destino · 2 Publicar y actividad · 3
+actualización al abrir · 4 actividad con filtros y cierre. Falta la prueba con
+proyectos reales de las fases 1 a 4.
+
+### Cómo se usa
+
+La extensión tiene cuatro pestañas y, arriba, la **revisión de las
+publicaciones**, que corre sola al abrir.
+
+1. **Recibido en este proyecto** (en el proyecto destino): un administrador
+   de Trimble del proyecto define, con "Agregar proyecto origen", **la carpeta
+   de recepción** de cada proyecto que publica ahí (el proyecto se elige de la
+   lista o se pega su enlace, porque el administrador no tiene que ser miembro
+   del origen). "Cambiar carpeta" solo afecta lo que se publique después;
+   "Desactivar" no borra nada: lo nuevo espera otra carpeta y lo ya copiado
+   sigue actualizándose donde está. Debajo, **Publicado hacia este proyecto**.
+2. **Publicar** (en el proyecto origen): se marcan archivos o **carpetas
+   completas** (la casilla de la carpeta), se elige el proyecto destino (por
+   su nombre), se ve adónde llega ("Llega a: …" o el aviso de que el
+   administrador aún no definió la carpeta: se puede publicar igual y queda
+   esperando), se escribe una nota y **Publicar**. Debajo, **Publicado desde
+   este proyecto**, con "Dejar de actualizar" / "Reanudar" para quien publicó
+   o un administrador.
+3. **Actividad**: todo lo publicado desde o hacia el proyecto.
+4. **Copia a mano**: la copia de una vez (abajo), sin seguimiento.
+
+### Carpetas de recepción (fase 1)
+
+Una por par (proyecto destino, proyecto origen), en `publicar_recepciones`.
+Solo un administrador de Trimble del proyecto destino la define (403 a los
+demás, en pantalla y en la API); la carpeta se lee con su sesión (no se acepta
+una de solo lectura) y se guarda con su ruta ("Laboratorio / Recibidos de
+SELVIA"). Nunca se borra: se desactiva. Cada cambio queda en la actividad.
+
+### Publicar (fase 2)
+
+- Para publicar hay que ser miembro del proyecto destino (con la sesión se
+  comprueba que se puede abrir). El servidor relee en el origen cada archivo o
+  carpeta (nombre y ruta nunca vienen del navegador).
+- Un **archivo** llega directo a la carpeta de recepción; una **carpeta**
+  llega como carpeta con su nombre dentro de la recepción, con sus
+  subcarpetas (se crean al copiar, sin repetir las que ya existen).
+- Lo ya publicado y activo no se duplica ("ya está publicado en …"); lo
+  detenido o retirado se puede publicar otra vez.
+- La publicación queda en la actividad con la nota.
+
+### Actualización al abrir (fase 3)
+
+[`lib/publicar/service.ts`](lib/publicar/service.ts) `sincronizar`, que el
+navegador corre paso a paso
+([`Sincronizacion.tsx`](components/publicar/Sincronizacion.tsx)) cada vez que
+alguien abre la extensión, en el origen o en el destino, y con "Revisar
+ahora" (también después de publicar o de definir una carpeta):
+
+1. `plan`: para cada publicación activa de o hacia el proyecto, si quien abre
+   es miembro de los dos proyectos (si no, un aviso: la actualiza otra
+   persona), fija su carpeta en el destino (la de recepción, si ya existe),
+   lista lo que hay ahora en el origen (una carpeta, con sus subcarpetas, hasta
+   2000 archivos) y deja como tareas los archivos nunca copiados o con una
+   versión nueva. Los archivos nuevos de una carpeta publicada se siguen solos.
+2. `copiar`, archivo por archivo: toma el archivo (`en_curso_hasta`, para que
+   dos personas no lo copien a la vez) y compara con lo que hay en el destino
+   con ese nombre:
+   - es la última copia hecha o no hay nada: copia la **última versión** (los
+     mismos tres caminos de la copia a mano: copia dentro de Trimble, archivo
+     con el modelo convertido, solo el archivo). Si el envío del modelo falla,
+     repite sin él;
+   - es el mismo contenido (huella MD5): solo lo anota;
+   - **es otro contenido** (alguien lo cambió en el destino): no lo toca. Queda
+     como **"Distinto en el destino"** con la versión vista, quién y cuándo, y
+     la pestaña "Recibido" dice cuántos hay por decidir. "Reemplazar con la
+     versión del origen" (con confirmación) sube encima la del origen, solo si
+     el destino sigue en la versión que se vio. La versión del destino queda
+     en su historial de Trimble.
+3. `confirmar`: una subida por el servidor se registra cuando Trimble la
+   confirma (lo pregunta el servidor, no lo cree al navegador).
+
+Un archivo o una carpeta que ya no está en el origen queda **"Retirado en el
+origen"**: en el destino no se borra nada y deja de actualizarse.
+
+### Actividad (fase 4)
+
+`publicar_actividad` solo recibe filas (el SQL quita `update` y `delete`).
+Cada fila: fecha y hora, usuario (quien publicó, o quien tenía la extensión
+abierta cuando se copió), qué pasó (carpeta de recepción, publicado, primera
+copia, versión nueva copiada, distinto en el destino, reemplazado, retirado,
+detenida, reanudada, error), documento (con su subcarpeta), versión en el
+origen → versión en el destino, proyectos y **notas** (la de quien publicó;
+en las actualizaciones, "Actualización automática – versión N del origen").
+La pestaña filtra por días (en el servidor, días de Colombia), por qué pasó y
+por texto (usuario, documento, proyecto o nota; sin importar tildes), con las
+1000 más recientes.
+
+### Base de datos
+
+[`supabase/publicar.sql`](supabase/publicar.sql) (re-ejecutable, RLS sin
+políticas, solo el servidor): `publicar_recepciones`, `publicar_publicaciones`,
+`publicar_archivos` (cada archivo seguido, la última versión copiada en el
+origen y en el destino, el estado y la versión vista cuando es distinto) y
+`publicar_actividad`. Ningún archivo se guarda en Supabase: viven en Trimble.
+Sin `delete` en ninguna tabla.
+
+### Supuestos (la opción más simple)
+
+- Una carpeta publicada sigue sus archivos y subcarpetas nuevos, y llega como
+  carpeta con su nombre dentro de la recepción.
+- Lo borrado o movido en el origen no se borra en el destino: queda
+  "Retirado en el origen". Si alguien borra la copia en el destino, la próxima
+  revisión la vuelve a copiar.
+- Si un archivo se renombra en el origen, en el destino llega con el nombre
+  nuevo como otro archivo (el anterior queda).
+- Publica cualquier miembro del origen que también lo sea del destino; si no
+  puede subir en la carpeta de recepción, Trimble lo rechaza y queda el error.
+- Se copia desde la última versión al publicar, no el historial anterior.
+- Sin exportar la actividad a Excel (no se pidió).
 
 ### Resultado de la prueba de copia (fase 0, 28-10-2026)
 
@@ -3893,7 +4005,11 @@ envío usa hasta 270 s; Trimble acepta subidas de una sola parte hasta 5 GB.
 Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
 ([`lib/publicar/routes.ts`](lib/publicar/routes.ts) confirma que es miembro):
 `GET /api/publicar/proyectos`, `GET /api/publicar/carpeta?proyecto=&folderId=`
-y `POST /api/publicar/copia` (`{ paso, destino, carpetaId, fileId, ... }`).
+`POST /api/publicar/copia` (copia a mano), `GET|PUT /api/publicar/recepciones`,
+`POST /api/publicar/recepciones/desactivar`, `GET /api/publicar/recepcion?destino=`,
+`GET|POST /api/publicar/publicaciones`, `POST /api/publicar/publicaciones/estado`,
+`POST /api/publicar/sincronizar` (`{ paso: plan | copiar | confirmar | reemplazar }`) y
+`GET /api/publicar/actividad?desde=&hasta=`.
 
 ## Cómo funciona (común a ambas extensiones)
 

@@ -47,9 +47,11 @@ export interface ArchivoTrimble {
   huella: string | null;
   modificadoPor: string;
   modificado: string | null;
+  /** The folder it is in. */
+  padreId: string | null;
 }
 
-function archivoDe(cuerpo: unknown): ArchivoTrimble | null {
+export function archivoDe(cuerpo: unknown): ArchivoTrimble | null {
   const o = (cuerpo ?? {}) as Record<string, unknown>;
   if (typeof o.id !== "string") return null;
   const texto = (v: unknown) => (typeof v === "string" && v ? v : null);
@@ -64,12 +66,13 @@ function archivoDe(cuerpo: unknown): ArchivoTrimble | null {
     huella: texto(o.md5) ?? texto(o.hash),
     modificadoPor: [texto(quien.firstName), texto(quien.lastName)].filter(Boolean).join(" ") || (texto(quien.email) ?? ""),
     modificado: texto(o.modifiedOn),
+    padreId: texto(o.parentId),
   };
 }
 
 const ok = (r: Respuesta) => r.estado >= 200 && r.estado < 300;
 
-async function leerArchivo(c: ClienteTrimble, fileId: string): Promise<{ archivo: ArchivoTrimble | null; respuesta: Respuesta }> {
+export async function leerArchivo(c: ClienteTrimble, fileId: string): Promise<{ archivo: ArchivoTrimble | null; respuesta: Respuesta }> {
   const respuesta = await c.pedir("GET", `/files/${encodeURIComponent(fileId)}`);
   return { archivo: ok(respuesta) ? archivoDe(respuesta.cuerpo) : null, respuesta };
 }
@@ -213,6 +216,51 @@ export async function pasoCopia(deps: DepsCopia, body: unknown): Promise<CopiaRe
   if (enDestino && !siVersion) return responder(false, "Ya hay un archivo con ese nombre en la carpeta del destino: revísalo antes de reemplazarlo.");
   if (enDestino && siVersion !== enDestino.versionId) return responder(false, "El archivo cambió en el destino después de revisarlo: revísalo otra vez.", { cambio: true });
   if (!a.versionId) return responder(false, "Trimble no dio la versión del archivo en este proyecto.");
+  const r = await copiarUltimaVersion({ origen, destino: d, archivo: a, carpetaId, enDestino, sinModelo: o.sinModelo === "1", fetch: fetchFn, reloj: deps.reloj });
+  const { ok: bien, mensaje, ...datos } = r;
+  return responder(bien, mensaje, datos);
+}
+
+export interface ResultadoCopia {
+  ok: boolean;
+  mensaje: string;
+  /** "trimble": Trimble's own copy (done); "servidor": an upload to follow with `uploadId`. */
+  metodo?: "trimble" | "servidor";
+  listo?: boolean;
+  fileId?: string | null;
+  versionId?: string | null;
+  revision?: number | null;
+  uploadId?: string;
+  envio?: "flujo" | "memoria" | null;
+  modelo?: "copiado" | "sin-modelo" | "rechazado" | "omitido";
+  bytes?: number | null;
+  ms?: number;
+  velocidad?: string | null;
+  servidorDestino?: string;
+  http?: number;
+  /** The file went but not its converted model: copy again without it. */
+  reintentarSinModelo?: boolean;
+}
+
+/**
+ * Copies the latest version of `archivo` into a destination folder, under the
+ * same name: a new file, or a new version of `enDestino` (refused by Trimble
+ * if that is no longer the latest one, on an upload). Tries Trimble's own
+ * copy, then an upload with the converted model, then the file alone.
+ */
+export async function copiarUltimaVersion(o: {
+  origen: Lado;
+  destino: Lado;
+  archivo: ArchivoTrimble;
+  carpetaId: string;
+  enDestino: { versionId: string | null } | null;
+  sinModelo?: boolean;
+  fetch?: Fetch;
+  reloj?: () => number;
+}): Promise<ResultadoCopia> {
+  const { origen, destino: d, archivo: a, carpetaId, enDestino } = o;
+  const fetchFn = o.fetch ?? fetch;
+  if (!a.versionId) return { ok: false, mensaje: "Trimble no dio la versión del archivo en el origen." };
 
   const copia = await d.cliente.pedir("POST", "/files", { cuerpo: { parentId: carpetaId, parentType: "FOLDER", fromFileVersionId: a.versionId, mergeExisting: !!enDestino } });
   if (ok(copia)) {
@@ -222,22 +270,24 @@ export async function pasoCopia(deps: DepsCopia, body: unknown): Promise<CopiaRe
       b = hallado ? (await leerArchivo(d.cliente, hallado.id)).archivo : null;
     }
     const otroNombre = b && b.nombre && b.nombre !== a.nombre ? ` Trimble lo guardó como “${b.nombre}”.` : "";
-    return responder(true, `Copiado dentro de Trimble, sin pasar por el servidor: versión ${b?.revision ?? "?"} en el destino.${otroNombre}`, {
+    return {
+      ok: true,
+      mensaje: `Copiado dentro de Trimble, sin pasar por el servidor: versión ${b?.revision ?? "?"} en el destino.${otroNombre}`,
       metodo: "trimble",
       listo: true,
       fileId: b?.id ?? null,
       versionId: b?.versionId ?? null,
       revision: b?.revision ?? null,
-    });
+    };
   }
   const sinCopiaTrimble = `La copia dentro de Trimble no se pudo (${explicarEstado(copia.estado)}).`;
 
   // The origin's converted model, unless a previous try with it failed.
   let modelo: "copiado" | "sin-modelo" | "rechazado" | "omitido" = "omitido";
   let urlModeloOrigen: string | null = null;
-  if (o.sinModelo !== "1") {
+  if (!o.sinModelo) {
     const r = await origen.cliente.pedir("GET", `/files/fs/${encodeURIComponent(a.id)}/downloadurl?format=TRB`);
-    urlModeloOrigen = ok(r) && typeof (r.cuerpo as { url?: unknown } | null)?.url === "string" ? ((r.cuerpo as { url: string }).url) : null;
+    urlModeloOrigen = ok(r) && typeof (r.cuerpo as { url?: unknown } | null)?.url === "string" ? (r.cuerpo as { url: string }).url : null;
     if (!urlModeloOrigen) modelo = "sin-modelo";
   }
   const condicion = enDestino ? { siVersion: enDestino.versionId ?? undefined } : { soloNuevo: true };
@@ -247,16 +297,16 @@ export async function pasoCopia(deps: DepsCopia, body: unknown): Promise<CopiaRe
     urlModeloOrigen = null;
     s = await abrirSubida(d.cliente, carpetaId, a.nombre, { conModelo: false, ...condicion });
   }
-  if (!s.uploadId || !s.url) return responder(false, `Trimble no abrió la subida en el destino: ${explicarEstado(s.respuesta.estado)}`, { http: s.respuesta.estado });
+  if (!s.uploadId || !s.url) return { ok: false, mensaje: `Trimble no abrió la subida en el destino: ${explicarEstado(s.respuesta.estado)}`, http: s.respuesta.estado };
   const bajada = await urlDescarga(origen.cliente, a.id);
-  if (!bajada.url) return responder(false, `Trimble no dio el enlace del archivo en este proyecto: ${explicarEstado(bajada.respuesta.estado)}`, { http: bajada.respuesta.estado });
+  if (!bajada.url) return { ok: false, mensaje: `Trimble no dio el enlace del archivo en el origen: ${explicarEstado(bajada.respuesta.estado)}`, http: bajada.respuesta.estado };
 
-  const envio = await copiarContenido(bajada.url, s.url, fetchFn, deps.reloj);
-  if (!envio.ok) return responder(false, envio.mensaje, { http: envio.http });
+  const envio = await copiarContenido(bajada.url, s.url, fetchFn, o.reloj);
+  if (!envio.ok) return { ok: false, mensaje: envio.mensaje, http: envio.http };
   if (urlModeloOrigen && s.urlModelo) {
-    const m = await copiarContenido(urlModeloOrigen, s.urlModelo, fetchFn, deps.reloj);
+    const m = await copiarContenido(urlModeloOrigen, s.urlModelo, fetchFn, o.reloj);
     // Without its model the open upload would never finish: start over without it.
-    if (!m.ok) return responder(false, `El archivo llegó, pero no el modelo convertido (${m.mensaje}); se copia otra vez sin él.`, { reintentarSinModelo: true });
+    if (!m.ok) return { ok: false, mensaje: `El archivo llegó, pero no el modelo convertido (${m.mensaje}); se copia otra vez sin él.`, reintentarSinModelo: true };
     modelo = "copiado";
   } else if (urlModeloOrigen) {
     modelo = "rechazado";
@@ -265,11 +315,13 @@ export async function pasoCopia(deps: DepsCopia, body: unknown): Promise<CopiaRe
   const v = velocidad(envio.bytes, envio.ms);
   const sobreModelo = {
     copiado: " Con el modelo ya convertido del origen.",
-    "sin-modelo": " Este proyecto no tiene modelo convertido de ese archivo: Trimble lo convertirá en el destino.",
+    "sin-modelo": " El origen no tiene modelo convertido de ese archivo: Trimble lo convertirá en el destino.",
     rechazado: " Trimble no aceptó el modelo convertido junto con el archivo: lo convertirá en el destino.",
     omitido: " Sin el modelo convertido (el intento con él falló): Trimble lo convertirá en el destino.",
   }[modelo];
-  return responder(true, `Copiado por el servidor: ${formatBytes(envio.bytes ?? 0)} en ${duracion(envio.ms)}${v ? ` (${v})` : ""}.${sobreModelo} ${sinCopiaTrimble}`, {
+  return {
+    ok: true,
+    mensaje: `Copiado por el servidor: ${formatBytes(envio.bytes ?? 0)} en ${duracion(envio.ms)}${v ? ` (${v})` : ""}.${sobreModelo} ${sinCopiaTrimble}`,
     metodo: "servidor",
     listo: false,
     uploadId: s.uploadId,
@@ -279,5 +331,5 @@ export async function pasoCopia(deps: DepsCopia, body: unknown): Promise<CopiaRe
     ms: envio.ms,
     velocidad: v,
     servidorDestino: host(d.servidor),
-  });
+  };
 }

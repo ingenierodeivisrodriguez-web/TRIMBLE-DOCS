@@ -13,8 +13,8 @@ Contratación** (construida en 8 fases en octubre de 2026) y **Control de Obra**
 (multiempresa con licencias; en construcción por fases), además de Requisitos
 BIM (LOIN), **Realidad aumentada con QR** (modelo 1:1 en el celular, fijo en un
 QR pegado en un muro; 6 fases el 27-10-2026) y **Publicar entre proyectos**
-(copiar documentos y sus versiones nuevas a otro proyecto; fase 0 y copia a
-mano el 28-10-2026). El dueño es ingeniero civil en Colombia y escribe en español:
+(documentos y carpetas a otro proyecto, versiones nuevas copiadas al abrir;
+fases 0 a 4 el 28-10-2026). El dueño es ingeniero civil en Colombia y escribe en español:
 responde en español, con palabras de obra (partida, insumo, APU, cuadrilla,
 rendimiento, metrado, jornal), sin jerga de programación.
 
@@ -131,9 +131,9 @@ Herramientas incluidas:
 
 - Realidad aumentada: falta la prueba en obra con un Android real (protocolo en
   `/ra/guia#prueba`); ver `references/realidad-aumentada.md`.
-- Publicar entre proyectos: la prueba de copia (fase 0) salió bien en Trimble
-  real; falta que el dueño pruebe la **copia a mano** y diga cuál camino evita
-  la conversión del modelo en el destino. Las fases 1–4 esperan su OK. Ver
+- Publicar entre proyectos: fases 0 a 4 en `main` (28-10-2026). Falta que el
+  dueño ejecute `supabase/publicar.sql`, la pruebe con dos proyectos reales y
+  diga cuál camino de copia evita la conversión del modelo en el destino. Ver
   `references/publicar.md`.
 
 - Ofrecido y **sin aprobar**: un párrafo en la política de privacidad

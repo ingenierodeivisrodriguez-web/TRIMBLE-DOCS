@@ -86,6 +86,32 @@ origen (`downloadurl?format=TRB`); si Trimble no acepta el TRB, se repite sin
 archivo. **Pendiente**: que el dueño diga, con un modelo real, cuál camino
 salió y si el visor del destino quedó listo sin "Conversión en curso".
 
+## Publicación (fases 1 a 4, hechas el 28-10-2026)
+
+- `lib/publicar/service.ts` (recepciones, publicar, estado, `sincronizar`,
+  actividad), `store.ts` (Supabase + `memoryStore`), `supabase/publicar.sql`
+  (4 tablas, sin `delete`; actividad sin `update`), pruebas en
+  `service.test.ts` con `memoryStore` y la nube falsa.
+- Recepción: una por (destino, origen); solo administradores de Trimble del
+  destino; se desactiva, no se borra. El admin puede pegar el enlace del
+  origen (no tiene que ser miembro de él).
+- `sincronizar` lo corre el navegador al abrir la extensión (`plan` →
+  `copiar` → `confirmar`), en origen o destino, con la sesión de quien abre
+  (debe estar en los dos proyectos; si no, aviso). Bloqueo por archivo
+  (`en_curso_hasta`, 10 min; 15 min esperando una subida).
+- Regla 2: si en el destino hay otro contenido que no es la última copia
+  hecha (`destino_version_id`), queda `diferencia` con `diferencia_version_id`
+  (la versión vista) y solo `reemplazar` con esa versión lo pisa. Nunca se
+  guarda la versión ajena en `destino_version_id` (si no, la próxima copia la
+  creería nuestra).
+- Carpeta publicada: carpeta con su nombre dentro de la recepción y
+  subcarpetas por `subcarpeta` ("A/B"), creadas al copiar; hasta 2000
+  archivos. Retirado en el origen: no se borra nada en el destino.
+- La página temporal de navegador monta `PublicarApp` con una `PublicarApi`
+  que llama al servicio real sobre `memoryStore` y la nube falsa (su huella es
+  una función pura para que corra en el navegador); `window.mundo` crea
+  versiones nuevas y cambios en el destino.
+
 ## Fases
 
 0. **Prueba de copia en Trimble real** (hecha el 28-10-2026). Sin Supabase.

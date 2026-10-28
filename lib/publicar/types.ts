@@ -58,3 +58,141 @@ export interface CopiaResponse {
   mensaje: string;
   datos: Record<string, unknown>;
 }
+
+// ---------------------------------------------------------------- publishing
+
+/** The folder of this project (destination) where an origin project's publications arrive. */
+export interface Recepcion {
+  id: string;
+  destinoProyecto: string;
+  origenProyecto: string;
+  origenNombre: string;
+  carpetaId: string;
+  carpetaRuta: string;
+  activa: boolean;
+  actualizado: string;
+  actualizadoPor: string | null;
+  actualizadoPorId: string | null;
+}
+
+export type EstadoPublicacion = "activa" | "detenida" | "retirada";
+
+export interface Publicacion {
+  id: string;
+  origenProyecto: string;
+  origenNombre: string;
+  destinoProyecto: string;
+  destinoNombre: string;
+  tipo: "archivo" | "carpeta";
+  /** The file or folder id in the origin. */
+  itemId: string;
+  nombre: string;
+  ruta: string;
+  estado: EstadoPublicacion;
+  /** Where it lives in the destination (set with the first copy). */
+  destinoCarpetaId: string | null;
+  destinoCarpetaRuta: string;
+  nota: string;
+  publicado: string;
+  publicadoPor: string | null;
+  publicadoPorId: string | null;
+  revisado: string | null;
+}
+
+export type EstadoArchivo = "pendiente" | "al-dia" | "diferencia" | "retirado" | "error";
+
+/** A file a publication follows, and the last version copied. */
+export interface ArchivoSeguido {
+  id: string;
+  publicacionId: string;
+  origenFileId: string;
+  nombre: string;
+  /** Subfolder inside the published folder ("Estructura/Detalles"); "" at its top. */
+  subcarpeta: string;
+  origenVersionId: string | null;
+  origenRevision: number | null;
+  destinoFileId: string | null;
+  destinoVersionId: string | null;
+  destinoRevision: number | null;
+  estado: EstadoArchivo;
+  mensaje: string;
+  enCursoHasta: string | null;
+  copiandoUploadId: string | null;
+  copiandoVersionId: string | null;
+  copiandoRevision: number | null;
+  /** The destination version seen when it turned out different (only that one is replaced). */
+  diferenciaVersionId: string | null;
+  actualizado: string;
+}
+
+export type AccionActividad =
+  | "recepcion"
+  | "recepcion-desactivada"
+  | "publicar"
+  | "copiar"
+  | "actualizar"
+  | "diferencia"
+  | "reemplazar"
+  | "retirado"
+  | "detener"
+  | "reanudar"
+  | "error";
+
+export interface EntradaActividad {
+  id: number;
+  creado: string;
+  origenProyecto: string;
+  destinoProyecto: string;
+  origenNombre: string;
+  destinoNombre: string;
+  publicacionId: string | null;
+  accion: AccionActividad;
+  usuario: string | null;
+  usuarioId: string | null;
+  nombre: string;
+  versionOrigen: number | null;
+  versionDestino: number | null;
+  nota: string;
+  resultado: "ok" | "aviso" | "error";
+}
+
+/** A publication with its files, as the screens show it. */
+export interface PublicacionInfo extends Publicacion {
+  archivos: ArchivoSeguido[];
+}
+
+/** One file to copy now, as the review of the publications leaves it. */
+export interface Tarea {
+  archivoId: string;
+  publicacionId: string;
+  nombre: string;
+  subcarpeta: string;
+  /** "nuevo": never copied; "version": the origin has a newer version. */
+  motivo: "nuevo" | "version";
+}
+
+export interface PlanSincronizacion {
+  tareas: Tarea[];
+  /** What couldn't be reviewed and why (no reception folder, no access to the other project...). */
+  avisos: string[];
+  /** Files that differ in the destination and wait for someone to decide. */
+  diferencias: number;
+  revisadas: number;
+}
+
+/** The answer to copying (or confirming) one followed file. */
+export interface PasoArchivo {
+  ok: boolean;
+  mensaje: string;
+  /** Done (nothing to wait for). */
+  listo?: boolean;
+  /** An upload Trimble still has to confirm ("confirmar"). */
+  uploadId?: string;
+  /** Someone else is copying it right now. */
+  ocupado?: boolean;
+  /** The destination has another content: a person decides. */
+  diferencia?: boolean;
+}
+
+/** The step of reviewing and copying the publications (the browser runs them in order). */
+export type PasoSincronizar = "plan" | "copiar" | "confirmar" | "reemplazar";

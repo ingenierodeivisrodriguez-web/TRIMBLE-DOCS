@@ -1,13 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, isValidProjectId } from "../access";
 import { clienteTrimble } from "../compras/cde";
+import { resolveCaller } from "../propiedades/caller";
+import { StoreError } from "../propiedades/store";
 import { getFolderDetails, getProjectDetails, listFolderItems, listMyProjects, listRegionProjects, listRegions, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
+import type { DepsCopia, Lado } from "./copiar";
 import { PublicarError } from "./errores";
 import type { TcExplorar } from "./explorar";
-import type { DepsCopia } from "./copiar";
+import type { Ctx } from "./service";
+import { publicarStore } from "./store";
 
-export interface RouteContext {
-  projectId: string;
+export interface RouteContext extends Ctx {
   tc: TcExplorar;
   copia: DepsCopia;
 }
@@ -27,9 +30,9 @@ function tcCon(token: string): TcExplorar {
 
 /**
  * Runs a request of "Publicar entre proyectos": checks `?projectId=` and the
- * Bearer token, confirms the caller belongs to that project (the region
- * lookup fails otherwise) and turns errors into `{ error, code }` JSON.
- * Everything else happens with the caller's own Trimble permissions.
+ * Bearer token, confirms the caller belongs to that project (and whether
+ * they administer it) and turns errors into `{ error, code }` JSON.
+ * Everything in Trimble happens with the caller's own permissions.
  */
 export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promise<NextResponse>): Promise<NextResponse> {
   const projectId = req.nextUrl.searchParams.get("projectId");
@@ -41,17 +44,23 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
     return NextResponse.json({ error: "Falta el access token (header Authorization: Bearer <token>)." }, { status: 401 });
   }
   try {
-    const servidor = await resolveProjectBaseUrl(token, projectId);
+    const [caller, servidor] = await Promise.all([resolveCaller(token, projectId), resolveProjectBaseUrl(token, projectId)]);
+    const aqui: Lado = { projectId, servidor, cliente: clienteTrimble(servidor, token) };
+    const abrir = async (id: string): Promise<Lado> => {
+      const s = await resolveProjectBaseUrl(token, id);
+      return { projectId: id, servidor: s, cliente: clienteTrimble(s, token) };
+    };
     return await run({
       projectId,
-      tc: tcCon(token),
-      copia: {
-        origen: { projectId, servidor, cliente: clienteTrimble(servidor, token) },
-        destino: async (id) => {
-          const s = await resolveProjectBaseUrl(token, id);
-          return { projectId: id, servidor: s, cliente: clienteTrimble(s, token) };
-        },
+      caller,
+      store: publicarStore(),
+      deps: {
+        aqui,
+        abrir,
+        nombreProyecto: async (id) => (await getProjectDetails(await resolveProjectBaseUrl(token, id), token, id)).name ?? "",
       },
+      tc: tcCon(token),
+      copia: { origen: aqui, destino: abrir },
     });
   } catch (err) {
     if (err instanceof PublicarError) {
@@ -65,6 +74,9 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
     }
     if (err instanceof TrimbleApiError && (err.status === 403 || err.status === 404)) {
       return NextResponse.json({ error: err.status === 404 ? "No existe o no tienes acceso en Trimble Connect." : "Trimble Connect negó el acceso con tu usuario.", code: "trimble-acceso" }, { status: err.status });
+    }
+    if (err instanceof StoreError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
     console.error("[publicar]", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "Error inesperado." }, { status: 500 });

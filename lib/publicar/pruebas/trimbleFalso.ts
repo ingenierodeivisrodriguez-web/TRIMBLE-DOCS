@@ -1,5 +1,4 @@
 // Test helper: a fake Trimble Connect with several projects (not used by the app).
-import { createHash } from "node:crypto";
 import type { ClienteTrimble, Respuesta } from "../../compras/cde";
 
 interface Version {
@@ -34,7 +33,16 @@ interface SubidaFalsa {
   hecho: boolean;
 }
 
-const md5 = (b: Uint8Array) => createHash("md5").update(b).digest("hex");
+/** A fingerprint of the content standing in for its MD5 (pure, so the fake also runs in the browser). */
+const md5 = (b: Uint8Array) => {
+  let h1 = 0x811c9dc5;
+  let h2 = 0x01000193;
+  for (const x of b) {
+    h1 = Math.imul(h1 ^ x, 16777619) >>> 0;
+    h2 = Math.imul(h2 ^ x, 2246822519) >>> 0;
+  }
+  return `${h1.toString(16).padStart(8, "0")}${h2.toString(16).padStart(8, "0")}${b.byteLength.toString(16)}`;
+};
 const texto = (s: string) => new TextEncoder().encode(s);
 
 /**
@@ -91,7 +99,19 @@ export function nubeFalsa(opciones: { rechazarFlujo?: boolean; sinCopiaTrimble?:
         const partes = url.pathname.split("/").filter(Boolean);
         if (metodo === "GET" && partes[0] === "folders" && partes.length === 2) {
           const c = carpetas.get(partes[1]);
-          return c ? responder(200, { id: c.id, versionId: c.versionId, name: c.name, permission: c.permiso }) : responder(404);
+          if (!c) return responder(404);
+          const path: { id: string; name: string }[] = [];
+          for (let x = c.parent ? carpetas.get(c.parent) : undefined; x; x = x.parent ? carpetas.get(x.parent) : undefined) path.unshift({ id: x.id, name: x.name });
+          return responder(200, { id: c.id, versionId: c.versionId, name: c.name, parentId: c.parent, permission: c.permiso, path });
+        }
+        if (metodo === "GET" && partes[0] === "folders" && partes[2] === "items") {
+          if (!carpetas.has(partes[1])) return responder(404);
+          const hijos = [
+            ...[...carpetas.values()].filter((x) => x.parent === partes[1]).map((x) => ({ id: x.id, name: x.name, type: "FOLDER", versionId: x.versionId })),
+            ...[...archivos.values()].filter((x) => x.parent === partes[1]).map((x) => ({ id: x.id, name: x.name, type: "FILE", versionId: ultima(x).versionId, revision: ultima(x).revision, size: ultima(x).contenido.byteLength })),
+          ];
+          const rango = /items=(\d+)-(\d+)/.exec(o.encabezados?.Range ?? "");
+          return responder(200, rango ? hijos.slice(Number(rango[1]), Number(rango[2]) + 1) : hijos);
         }
         if (metodo === "GET" && partes[0] === "folders" && partes[2] === "item") {
           const nombre = url.searchParams.get("name");
@@ -101,6 +121,15 @@ export function nubeFalsa(opciones: { rechazarFlujo?: boolean; sinCopiaTrimble?:
           if (c) return responder(200, { id: c.id, versionId: c.versionId });
           if (a) return responder(200, { id: a.id, versionId: ultima(a).versionId });
           return responder(404);
+        }
+        if (metodo === "POST" && ruta === "/folders") {
+          const { name, parentId } = o.cuerpo as { name: string; parentId: string };
+          const padre = [...carpetas.values()].find((x) => x.versionId === parentId);
+          if (!padre) return responder(400, { message: "parent not found" });
+          if (padre.permiso === "READ") return responder(403);
+          const id = `carpeta${++n}`;
+          carpetas.set(id, { id, versionId: `${id}-v1`, name, parent: padre.id, permiso: "FULL_ACCESS" });
+          return responder(201, { id, versionId: `${id}-v1`, name, permission: "FULL_ACCESS" });
         }
         if (metodo === "POST" && ruta === "/files") {
           if (opciones.sinCopiaTrimble) return responder(400, { message: "copy between projects not supported" });
@@ -197,5 +226,8 @@ export function nubeFalsa(opciones: { rechazarFlujo?: boolean; sinCopiaTrimble?:
     return id;
   }
 
-  return { proyecto, fetchFalso, llamadas, carpetas, archivos, sembrarArchivo, sembrarCarpeta };
+  /** Removes a file (as if a person had deleted it in Trimble). */
+  const quitarArchivo = (id: string) => archivos.delete(id);
+
+  return { proyecto, fetchFalso, llamadas, carpetas, archivos, sembrarArchivo, sembrarCarpeta, quitarArchivo };
 }

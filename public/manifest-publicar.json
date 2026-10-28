@@ -1,7 +1,7 @@
 {
   "url": "https://trimble-docs.vercel.app/publicar",
   "title": "Publicar entre proyectos",
-  "description": "Publicar documentos y carpetas de este proyecto en otro proyecto de Trimble Connect, con cada versión nueva copiada al destino. Por ahora: copiar a mano la última versión de varios archivos a una carpeta de otro proyecto.",
+  "description": "Publicar documentos y carpetas de este proyecto en otro proyecto de Trimble Connect: llegan a la carpeta de recepción que define el administrador del destino, cada versión nueva se copia al abrir la extensión, un cambio hecho en el destino nunca se pisa sin confirmación y todo queda en la actividad (fecha, usuario, versión, notas).",
   "icon": "https://trimble-docs.vercel.app/icon-publicar.svg",
   "infoUrl": "https://trimble-docs.vercel.app",
   "extensionType": ["project"],
