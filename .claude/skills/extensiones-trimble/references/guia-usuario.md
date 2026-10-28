@@ -24,6 +24,11 @@ aparece).
 | Gráficos de Modelos (visor) | `https://trimble-docs.vercel.app/manifest-graficos.json` |
 | Manuales | `https://trimble-docs.vercel.app/manifest-manuales.json` |
 | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
+| Realidad aumentada (menú + visor; respaldo `manifest-ra-visor.json`) | `https://trimble-docs.vercel.app/manifest-ra.json` |
+
+Realidad aumentada tiene su propia guía pública para los usuarios (oficina y
+obra, problemas frecuentes y prueba en obra): `https://trimble-docs.vercel.app/ra/guia`.
+Necesita `supabase/ra.sql` ejecutado y un celular Android con Chrome y ARCore.
 
 Antes de dar una URL, comprueba que responde: `curl -s -o /dev/null -w "%{http_code}" <url>`.
 

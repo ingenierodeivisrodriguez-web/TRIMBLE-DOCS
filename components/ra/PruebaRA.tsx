@@ -222,6 +222,11 @@ export default function PruebaRA() {
       <a href="/ra/escanear" style={{ ...botonPrincipal, display: "block", textAlign: "center", textDecoration: "none", boxSizing: "border-box", margin: "0 0 14px" }}>
         Escanear QR
       </a>
+      <p style={{ margin: "-6px 0 14px", textAlign: "center" }}>
+        <a href="/ra/guia" style={{ color: AZUL, fontWeight: 600 }}>
+          Guía de uso
+        </a>
+      </p>
 
       <section style={tarjeta}>
         <h2 style={subtitulo}>1 · Revisión del celular</h2>

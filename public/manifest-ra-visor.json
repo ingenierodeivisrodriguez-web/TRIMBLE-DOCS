@@ -1,7 +1,7 @@
 {
   "url": "https://trimble-docs.vercel.app/ra/visor",
   "title": "Realidad aumentada",
-  "description": "Prepara los modelos IFC abiertos en el visor para verlos desde el celular a escala real: niveles, clases, vista previa y guardado.",
+  "description": "Prepara los modelos IFC abiertos en el visor para verlos desde el celular a escala real (niveles, clases, vista previa) y crea los QR con un clic en un muro, con su hoja para imprimir.",
   "icon": "https://trimble-docs.vercel.app/icon-ra.svg",
   "infoUrl": "https://trimble-docs.vercel.app",
   "extensionType": ["3dviewer"],

@@ -15,7 +15,7 @@ ambos lugares** para Trimble Connect:
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
-| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fases 1 a 4, preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
+| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3533,7 +3533,7 @@ por elemento (ligado por IFCGUID, nunca en los Property Sets).
 
 Fases: 0 prueba en el celular (hecha) · 1 preparar el modelo (hecha) · 2 punto de anclaje y QR (hecha)
 · 3 visor en el celular con calibración (hecha) · 4 cortes, transparencia y colorear (hecha)
-· 5 cierre (manifiesto, guía, prueba en obra). Cada fase espera el OK del dueño.
+· 5 cierre (manifiesto, guía, prueba en obra) (hecha; falta la prueba en obra). Cada fase espera el OK del dueño.
 
 ### Fase 0: prueba en el celular (`/ra-prueba`)
 
@@ -3779,6 +3779,28 @@ transparencia baja la opacidad de cada lote; el color va por vértice y cada
 elemento ocupa sus propios vértices en el lote, así se pinta exactamente ese
 elemento; el toque es un rayo desde el dedo que salta lo que está cortado y
 devuelve el elemento por sus triángulos.
+
+### Fase 5: cierre
+
+- **Guía de uso pública** en `https://trimble-docs.vercel.app/ra/guia`
+  ([`app/ra/guia/page.tsx`](app/ra/guia/page.tsx)), para leer en el celular o
+  imprimir: antes de empezar (instalar, celular compatible), en la oficina
+  (preparar el modelo, crear el QR, imprimir la hoja al 100 %), en la obra
+  (pegar la hoja sobre la marca de topografía, escanear, ubicar, recalibrar),
+  las herramientas, problemas frecuentes y el **protocolo de la prueba en
+  obra** con una tabla para anotar: celular, luz, tiempo hasta ubicar, 3
+  puntos de control con su distancia a la hoja y la diferencia medida con
+  flexómetro, corrimiento tras caminar 10 m y observaciones.
+- Enlaces a la guía desde el menú del proyecto, el panel del visor, la página
+  del QR en el celular y `/ra-prueba`.
+- Manifiestos con la descripción final (QR en muro, cortes, transparencia,
+  colores, hoja para imprimir).
+- La skill del proyecto tiene la referencia completa de esta extensión
+  (`.claude/skills/extensiones-trimble/references/realidad-aumentada.md`):
+  decisiones del dueño, marcos de coordenadas y cómo probarla sin celular.
+
+**Pendiente**: hacer la prueba en obra con un Android real y, según la
+precisión medida, decidir para qué tareas sirve.
 
 ---
 

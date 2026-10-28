@@ -120,7 +120,10 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
       <h1 style={{ fontSize: 20, margin: "0 0 4px", color: AZUL }}>Realidad aumentada</h1>
       <p style={{ margin: "0 0 12px", color: "#4b5563" }}>
         Modelos de {projectName || "este proyecto"} preparados para verlos desde el celular a escala real. Para preparar uno, abra el modelo IFC en el visor 3D y use el
-        panel <b>«Realidad aumentada»</b> de las extensiones.
+        panel <b>«Realidad aumentada»</b> de las extensiones.{" "}
+        <a href="/ra/guia" target="_blank" rel="noreferrer" style={{ color: AZUL, fontWeight: 600 }}>
+          Guía de uso y prueba en obra
+        </a>
       </p>
 
       {error && <div style={{ ...caja, borderColor: "#b3261e", background: "#fdecea", color: "#7f1d1d" }}>{error}</div>}

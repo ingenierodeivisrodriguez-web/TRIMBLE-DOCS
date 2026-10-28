@@ -1,7 +1,7 @@
 {
   "url": "https://trimble-docs.vercel.app/ra",
   "title": "Realidad aumentada",
-  "description": "Ver los modelos BIM desde el celular a escala real, fijos en el punto de un QR: en el visor 3D se prepara el modelo (niveles y clases) y en el menú del proyecto se ven los modelos preparados y cuándo se eliminan solos.",
+  "description": "Ver los modelos BIM desde el celular a escala real, fijos en el punto de un QR pegado en un muro, con cortes, transparencia y colores: en el visor 3D se prepara el modelo y se crea el QR; en el menú del proyecto se ven los modelos, los QR (hoja para imprimir, anular) y cuándo se eliminan solos.",
   "icon": "https://trimble-docs.vercel.app/icon-ra.svg",
   "infoUrl": "https://trimble-docs.vercel.app",
   "extensionType": ["project", "3dviewer"],

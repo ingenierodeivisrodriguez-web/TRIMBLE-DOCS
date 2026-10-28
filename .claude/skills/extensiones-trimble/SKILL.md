@@ -1,16 +1,18 @@
 ---
 name: extensiones-trimble
-description: Conocimiento completo del repositorio TRIMBLE-DOCS (extensiones para Trimble Connect en Next.js 16 + React 19, desplegadas en Vercel con Supabase), sobre todo de las extensiones Presupuesto y Compras y Contratación. Cubre las reglas fijas del dueño, la arquitectura (rutas → servicio → store → SQL), el cálculo de APU (cuadrillas por hora y por día, %MO y %, metrado, catálogos y "Al catálogo"), la programación (Gantt, ruta crítica, EDT del PMI, línea de balance), la línea base y el valor ganado, el asistente IA (Claude o Gemini, cupos, borradores), Compras (requisiciones, cotizaciones, órdenes y contratos, recepción en obra, documentos en el CDE de Trimble Connect, roles y auditoría, panel) y el flujo de pruebas, verificación en el navegador y despliegue. Úsala siempre que se trabaje en este repositorio o se pregunte por Presupuesto, partidas, insumos, análisis de precios unitarios, cuadrillas, rendimiento, jornada, metrado, Gantt, EDT, WBS, avance de obra, valor ganado, asistente IA, compras, requisiciones, cotizaciones, proveedores, órdenes de compra, contratos, recepción, CDE, Propiedades, Validación, Gráficos, Manuales, manifiestos de Trimble Connect, Supabase o Vercel, aunque no se nombre la skill.
+description: Conocimiento completo del repositorio TRIMBLE-DOCS (extensiones para Trimble Connect en Next.js 16 + React 19, desplegadas en Vercel con Supabase), sobre todo de las extensiones Presupuesto y Compras y Contratación. Cubre las reglas fijas del dueño, la arquitectura (rutas → servicio → store → SQL), el cálculo de APU (cuadrillas por hora y por día, %MO y %, metrado, catálogos y "Al catálogo"), la programación (Gantt, ruta crítica, EDT del PMI, línea de balance), la línea base y el valor ganado, el asistente IA (Claude o Gemini, cupos, borradores), Compras (requisiciones, cotizaciones, órdenes y contratos, recepción en obra, documentos en el CDE de Trimble Connect, roles y auditoría, panel) y el flujo de pruebas, verificación en el navegador y despliegue. Úsala siempre que se trabaje en este repositorio o se pregunte por Presupuesto, partidas, insumos, análisis de precios unitarios, cuadrillas, rendimiento, jornada, metrado, Gantt, EDT, WBS, avance de obra, valor ganado, asistente IA, realidad aumentada, QR, WebXR, celular en obra, compras, requisiciones, cotizaciones, proveedores, órdenes de compra, contratos, recepción, CDE, Propiedades, Validación, Gráficos, Manuales, manifiestos de Trimble Connect, Supabase o Vercel, aunque no se nombre la skill.
 ---
 
 # Extensiones para Trimble Connect (TRIMBLE-DOCS)
 
 Una sola app Next.js (App Router) en `https://trimble-docs.vercel.app`, repositorio
 `ingenierodeivisrodriguez-web/TRIMBLE-DOCS`, rama `main` (Vercel despliega solo cada
-push). Ocho extensiones: Resumen Archivos, Validación, Gráficos de Modelos,
+push). Diez extensiones: Resumen Archivos, Validación, Gráficos de Modelos,
 Propiedades, **Presupuesto** (la más grande), Manuales, **Compras y
 Contratación** (construida en 8 fases en octubre de 2026) y **Control de Obra**
-(la más reciente, multiempresa con licencias; en construcción por fases). El dueño es ingeniero civil en Colombia y escribe en español:
+(multiempresa con licencias; en construcción por fases), además de Requisitos
+BIM (LOIN) y **Realidad aumentada con QR** (modelo 1:1 en el celular, fijo en un
+QR pegado en un muro; 6 fases el 27-10-2026). El dueño es ingeniero civil en Colombia y escribe en español:
 responde en español, con palabras de obra (partida, insumo, APU, cuadrilla,
 rendimiento, metrado, jornal), sin jerga de programación.
 
@@ -106,6 +108,7 @@ Lee el archivo de referencia que corresponda antes de cambiar esa área:
 | Asistente IA: fases, proveedores, cupos, borradores, validaciones, versiones de instrucciones | `references/asistente-ia.md` |
 | Compras y Contratación: restricciones del dueño, decisiones aprobadas, roles y permisos, estados, reglas críticas (servicio + SQL + triggers), documentos en el CDE (API Core de Trimble), PDF, panel | `references/compras.md` |
 | Control de Obra: fases, decisiones D1–D13 y plan de actas, empresas, licencias, administradores, aislamiento por empresa, bitácora encadenada, flujos de aprobación, cómo probarlo | `references/control-obra.md` (y `docs/control-obra/plan-actas.md`) |
+| Realidad aumentada con QR: decisiones del dueño, por qué web-ifc y páginas públicas, marcos de coordenadas, alineación del visor, calibración en el muro, herramientas, cómo probar sin celular | `references/realidad-aumentada.md` |
 | Pruebas, página de prueba con API falsa, navegador, despliegue, SQL, trucos de Windows | `references/flujo-desarrollo.md` |
 | Responder preguntas de uso: URLs de instalación, orden de trabajo, textos para el asistente, explicar cuadrillas | `references/guia-usuario.md` |
 
@@ -122,6 +125,9 @@ Herramientas incluidas:
   puede ejecutar dos veces seguidas.
 
 ## Pendientes conocidos
+
+- Realidad aumentada: falta la prueba en obra con un Android real (protocolo en
+  `/ra/guia#prueba`); ver `references/realidad-aumentada.md`.
 
 - Ofrecido y **sin aprobar**: un párrafo en la política de privacidad
   (`app/bim-apps/privacidad/page.tsx`) sobre el proveedor de IA. No toques la

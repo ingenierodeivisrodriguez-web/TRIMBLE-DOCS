@@ -44,6 +44,11 @@ export default function PanelVisorRA({
         {boton("preparar", "Preparar")}
         {boton("punto", "Punto QR")}
       </div>
+      <div style={{ padding: "6px 12px 0", fontSize: 12.5 }}>
+        <a href="/ra/guia" target="_blank" rel="noreferrer" style={{ color: "#2f55b0" }}>
+          Guía de uso
+        </a>
+      </div>
       {/* "Preparar" stays mounted so a conversion survives a tab switch; "Punto QR" reloads the prepared models each time it opens. */}
       <div style={{ display: pestana === "preparar" ? "block" : "none" }}>
         <PanelPreparar api={api} viewer={viewer} subscribe={subscribe} />

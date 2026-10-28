@@ -71,6 +71,10 @@ export default function QrCelular({ codigo }: { codigo: string }) {
         <a href="/ra/escanear" style={{ color: AZUL, fontWeight: 600 }}>
           Escanear otro QR
         </a>
+        {" · "}
+        <a href="/ra/guia" style={{ color: AZUL, fontWeight: 600 }}>
+          Guía de uso
+        </a>
       </p>
     </main>
   );
