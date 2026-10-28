@@ -4,12 +4,14 @@ import { CSSProperties, useEffect, useRef, useState } from "react";
 import { aModelo, calibrar, Colocacion, deMatriz, esMuroAR } from "../../lib/ra/calibracion";
 import { Capacidades, detectarPlataforma, veredicto } from "../../lib/ra/diagnostico";
 import { descomprimir, desempaquetar } from "../../lib/ra/formato";
+import { EstadoHerramientas, estadoInicial } from "../../lib/ra/herramientas";
 import { tamanoLegible } from "../../lib/ra/limites";
 import type { ModeloRA, Vec3 } from "../../lib/ra/modelo";
 import type { AperturaResponse } from "../../lib/ra/types";
 import { metros } from "../../lib/ra/volumen";
+import { ControlModelo, controlModelo } from "./controlModelo";
 import { construirMira, liberar } from "./escena";
-import { construirMallas } from "./mallas";
+import HerramientasRA, { Tocado } from "./HerramientasRA";
 
 const AZUL = "#2f55b0";
 const mensaje = (e: unknown) => (e instanceof Error ? e.message : String(e));
@@ -29,6 +31,8 @@ const NO_ABRE: Record<string, string> = {
  * The model of a QR at 1:1 on site (phase 3): downloads it, checks the phone,
  * and in AR the person taps the sheet's cross on the wall; the point and the
  * wall's direction place the model, which then stays put while they walk.
+ * Once placed, the tool bar cuts, fades and colours it (phase 4); a tap on an
+ * element names it (and colours it when "Colorear" is on).
  */
 export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes: number }) {
   const [carga, setCarga] = useState<Carga>({ fase: "nada" });
@@ -40,6 +44,16 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
   const lienzoRef = useRef<HTMLDivElement>(null);
   const sesionRef = useRef<XRSession | null>(null);
   const recalibrarRef = useRef<() => void>(() => {});
+  const controlRef = useRef<ControlModelo | null>(null);
+  const [herr, setHerr] = useState<EstadoHerramientas | null>(null);
+  const herrRef = useRef<EstadoHerramientas | null>(null);
+  herrRef.current = herr;
+  const [tocado, setTocado] = useState<Tocado | null>(null);
+
+  // The scene follows the tool bar.
+  useEffect(() => {
+    if (herr) controlRef.current?.aplicar(herr);
+  }, [herr]);
 
   useEffect(() => {
     const base = detectarPlataforma(navigator.userAgent, navigator.maxTouchPoints);
@@ -108,6 +122,10 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
     }
     sesionRef.current = session;
     setEnRA({ apuntando: "nada", calibrado: false, distancia: null });
+    const inicial = estadoInicial(modelo, punto);
+    herrRef.current = inicial;
+    setHerr(inicial);
+    setTocado(null);
 
     const THREE = await import("three");
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
@@ -115,6 +133,7 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.xr.enabled = true;
     renderer.xr.setReferenceSpaceType("local");
+    renderer.localClippingEnabled = true;
     lienzoRef.current.appendChild(renderer.domElement);
 
     const escena = new THREE.Scene();
@@ -125,8 +144,9 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
     const camara = new THREE.PerspectiveCamera(70, window.innerWidth / window.innerHeight, 0.01, 500);
     const mira = construirMira(THREE);
     escena.add(mira);
-    const raiz = new THREE.Group();
-    raiz.add(construirMallas(THREE, modelo));
+    const control = controlModelo(THREE, modelo);
+    controlRef.current = control;
+    const raiz = control.raiz;
     raiz.visible = false;
     escena.add(raiz);
 
@@ -146,13 +166,32 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
       setEnRA({ apuntando, calibrado: false, distancia: null });
     };
 
-    session.addEventListener("select", () => {
-      if (colocacion || apuntando !== "muro" || !ultimo) return;
+    const rayo = { origen: new THREE.Vector3(), direccion: new THREE.Vector3(), matriz: new THREE.Matrix4() };
+    session.addEventListener("select", (ev: XRInputSourceEvent) => {
+      if (colocacion) {
+        // A tap on the placed model: which element, and colour it if asked.
+        const ref = renderer.xr.getReferenceSpace();
+        const pose = ref ? ev.frame.getPose(ev.inputSource.targetRaySpace, ref) : null;
+        if (!pose) return;
+        rayo.matriz.fromArray(pose.transform.matrix);
+        rayo.origen.setFromMatrixPosition(rayo.matriz);
+        rayo.direccion.set(0, 0, -1).transformDirection(rayo.matriz);
+        const el = control.tocar(rayo.origen, rayo.direccion);
+        if (el < 0) return;
+        const e = modelo.elementos[el];
+        setTocado({ nombre: e.nombre, clase: e.clase, nivel: e.nivel });
+        const h = herrRef.current;
+        if (h?.colorear.activo) control.colorear(el, h.colorear.color);
+        return;
+      }
+      if (apuntando !== "muro" || !ultimo) return;
       colocacion = calibrar(punto, rumbo, ultimo.punto, ultimo.normal);
       raiz.rotation.set(0, colocacion.giro, 0);
       raiz.position.set(...colocacion.traslado);
       raiz.visible = true;
       mira.visible = false;
+      // The cuts are planes in the world: they follow the model once it is placed.
+      if (herrRef.current) control.aplicar(herrRef.current);
       setEnRA((s) => (s ? { ...s, calibrado: true } : s));
     });
 
@@ -189,8 +228,10 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
       renderer.dispose();
       renderer.domElement.remove();
       sesionRef.current = null;
+      controlRef.current = null;
       recalibrarRef.current = () => {};
       setEnRA(null);
+      setTocado(null);
     });
   }
 
@@ -220,15 +261,20 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
             </>
           )}
         </div>
-        <div ref={botonesRef} style={{ position: "absolute", left: 0, right: 0, bottom: 24, display: "flex", gap: 12, justifyContent: "center", pointerEvents: "auto" }}>
-          {enRA?.calibrado && (
-            <button style={botonRA} onClick={() => recalibrarRef.current()}>
-              Recalibrar
-            </button>
+        <div ref={botonesRef} style={{ position: "absolute", left: 0, right: 0, bottom: 18, pointerEvents: "auto" }}>
+          {enRA?.calibrado && herr && carga.fase === "listo" && (
+            <HerramientasRA modelo={carga.modelo} estado={herr} cambiar={setHerr} tocado={tocado} quitarColores={() => controlRef.current?.quitarColores()} />
           )}
-          <button style={{ ...botonRA, background: "#b3261e" }} onClick={() => sesionRef.current?.end()}>
-            Salir
-          </button>
+          <div style={{ display: "flex", gap: 12, justifyContent: "center", marginTop: 10 }}>
+            {enRA?.calibrado && (
+              <button style={botonRA} onClick={() => recalibrarRef.current()}>
+                Recalibrar
+              </button>
+            )}
+            <button style={{ ...botonRA, background: "#b3261e" }} onClick={() => sesionRef.current?.end()}>
+              Salir
+            </button>
+          </div>
         </div>
       </div>
 
@@ -267,6 +313,7 @@ export default function VisorCelular({ codigo, bytes }: { codigo: string; bytes:
             <li>Pulse «Ver en realidad aumentada» y acepte el permiso de la cámara.</li>
             <li>Mueva el celular despacio frente al muro hasta ver el círculo amarillo; póngalo sobre la cruz y toque la pantalla.</li>
             <li>Camine dentro del modelo. Si se corre, vuelva a la hoja y toque «Recalibrar».</li>
+            <li>Abajo están los cortes horizontal y vertical, la transparencia y colorear. Toque un elemento para ver qué es.</li>
           </ol>
         </>
       )}

@@ -15,7 +15,7 @@ ambos lugares** para Trimble Connect:
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
-| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fases 1 a 3, preparar el modelo, crear los QR y verlo en el celular) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
+| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fases 1 a 4, preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3532,7 +3532,7 @@ punto de anclaje se **elige en el visor 3D**; colorear es **a mano**, elemento
 por elemento (ligado por IFCGUID, nunca en los Property Sets).
 
 Fases: 0 prueba en el celular (hecha) · 1 preparar el modelo (hecha) · 2 punto de anclaje y QR (hecha)
-· 3 visor en el celular con calibración (hecha) · 4 cortes, transparencia y colorear
+· 3 visor en el celular con calibración (hecha) · 4 cortes, transparencia y colorear (hecha)
 · 5 cierre (manifiesto, guía, prueba en obra). Cada fase espera el OK del dueño.
 
 ### Fase 0: prueba en el celular (`/ra-prueba`)
@@ -3746,8 +3746,39 @@ celular (que abre el enlace igual).
 Límites conocidos: el modelo se dibuja siempre delante de lo real (no lo tapan
 muros ni personas); en muros lisos y sin textura el celular tarda más en
 reconocer el plano (la hoja impresa ayuda); en recorridos largos el modelo se
-puede correr unos centímetros, para eso está Recalibrar. Los cortes, la
-transparencia y el colorear llegan en la fase 4.
+puede correr unos centímetros, para eso está Recalibrar.
+
+### Fase 4: cortes, transparencia y colorear
+
+Con el modelo ubicado, abajo de la cámara aparece la barra de herramientas
+([`components/ra/HerramientasRA.tsx`](components/ra/HerramientasRA.tsx)); cada
+botón abre su panel y queda en amarillo mientras su herramienta está
+encendida:
+
+- **Corte horizontal**: corta el modelo a una cota Z (en metros del IFC) con
+  un deslizador; empieza a la altura de la cruz del QR (como una planta).
+  «Ver lo de arriba» invierte el lado que queda.
+- **Corte vertical**: por los **ejes X o Y del modelo** (decisión del dueño):
+  se elige el eje y un deslizador mueve el plano entre los extremos del
+  modelo, mostrando la cota (X = 1,001.00 m). «Ver el otro lado» invierte.
+  Los dos cortes pueden estar a la vez.
+- **Transparencia**: de 0 a 90 % para todo el modelo (nunca desaparece del
+  todo).
+- **Colorear**: se enciende «Colorear el elemento que toque», se elige uno de
+  8 colores (o el borrador) y se toca un elemento en la cámara: se pinta todo
+  ese elemento. «Quitar todos» devuelve los colores originales. **Los colores
+  solo quedan en ese celular mientras está en la pantalla** (decisión del
+  dueño): no se guardan y nadie más los ve.
+- **Tocar un elemento** (con o sin colorear) muestra su nombre, clase IFC y
+  nivel. Lo que un corte oculta no se puede tocar.
+
+Cómo funciona ([`lib/ra/herramientas.ts`](lib/ra/herramientas.ts),
+[`components/ra/controlModelo.ts`](components/ra/controlModelo.ts)): los
+cortes son planos de recorte que siguen al modelo después de calibrar; la
+transparencia baja la opacidad de cada lote; el color va por vértice y cada
+elemento ocupa sus propios vértices en el lote, así se pinta exactamente ese
+elemento; el toque es un rayo desde el dedo que salta lo que está cortado y
+devuelve el elemento por sus triángulos.
 
 ---
 
