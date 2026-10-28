@@ -34,16 +34,25 @@ export interface CarpetaInfo {
   items: ItemCarpeta[];
 }
 
-/** Created inside the destination folder chosen for the copy test. */
-export const CARPETA_PRUEBA = "Publicar entre proyectos - prueba (se puede borrar)";
+/**
+ * The steps of copying one file to another project, one request each:
+ * compare it with what the destination folder has, copy its latest
+ * version, follow the upload, and ask how the destination's viewer
+ * conversion is going.
+ */
+export type PasoCopia = "revisar" | "copiar" | "estado-subida" | "estado-visor";
 
-/** The steps of the copy test, run one request at a time. */
-export type PasoPrueba = "leer-origen" | "preparar-destino" | "copiar" | "estado-subida" | "proteccion" | "abrir-copia-navegador" | "comprobar";
+export const PASOS_COPIA: PasoCopia[] = ["revisar", "copiar", "estado-subida", "estado-visor"];
 
-export const PASOS_PRUEBA: PasoPrueba[] = ["leer-origen", "preparar-destino", "copiar", "estado-subida", "proteccion", "abrir-copia-navegador", "comprobar"];
+/**
+ * What the destination folder has under the file's name: nothing ("nuevo"),
+ * the same content ("al-dia") or something else ("distinto", which is only
+ * replaced when the person says so).
+ */
+export type Situacion = "nuevo" | "al-dia" | "distinto";
 
-export interface PruebaResponse {
-  paso: PasoPrueba;
+export interface CopiaResponse {
+  paso: PasoCopia;
   ok: boolean;
   /** What happened, in plain words. */
   mensaje: string;

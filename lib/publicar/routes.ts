@@ -1,21 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, isValidProjectId } from "../access";
 import { clienteTrimble } from "../compras/cde";
-import { getFolderDetails, getProjectDetails, listFolderItems, listMyProjects, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
+import { getFolderDetails, getProjectDetails, listFolderItems, listMyProjects, listRegionProjects, listRegions, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
 import { PublicarError } from "./errores";
 import type { TcExplorar } from "./explorar";
-import type { DepsPrueba } from "./prueba";
+import type { DepsCopia } from "./copiar";
 
 export interface RouteContext {
   projectId: string;
   tc: TcExplorar;
-  prueba: DepsPrueba;
+  copia: DepsCopia;
 }
 
 /** Trimble Connect through the user's token. */
 function tcCon(token: string): TcExplorar {
   return {
     proyectos: () => listMyProjects(token),
+    regiones: () => listRegions(token),
+    proyectosDeRegion: (baseUrl) => listRegionProjects(baseUrl, token),
     baseUrl: (projectId) => resolveProjectBaseUrl(token, projectId),
     proyecto: (baseUrl, projectId) => getProjectDetails(baseUrl, token, projectId),
     carpeta: (baseUrl, folderId) => getFolderDetails(baseUrl, token, folderId),
@@ -43,7 +45,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
     return await run({
       projectId,
       tc: tcCon(token),
-      prueba: {
+      copia: {
         origen: { projectId, servidor, cliente: clienteTrimble(servidor, token) },
         destino: async (id) => {
           const s = await resolveProjectBaseUrl(token, id);

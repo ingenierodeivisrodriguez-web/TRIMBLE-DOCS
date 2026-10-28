@@ -53,10 +53,43 @@ Supuestos declarados: solo menú del proyecto (sin visor); se copia desde la
 cambiar la carpeta de recepción solo afecta lo nuevo; "Dejar de actualizar"
 propuesto (no pedido).
 
+## Resultado de la prueba real (28-10-2026)
+
+SELVIA → Laboratorio (misma región), `.rvt` de 90.1 MB: lee y escribe; el
+servidor copió en flujo a ~60 MB/s (1.5 s); mismo nombre = versión nueva;
+**`If-Match` viejo → Trimble rechaza** (412/409); copia desde el navegador
+también funciona (CORS permitido); tamaño y MD5 iguales. El visor del destino
+quedó en "Conversión en curso": Trimble reconvierte el modelo subido.
+`GET /projects/me` **no trae nombres** (el select mostraba ids): los nombres
+salen de `GET /projects?fullyLoaded=false` de cada región (`listRegionProjects`).
+
+Mejoras pedidas por el dueño tras la prueba (hechas): nombre del proyecto
+destino; varios archivos a la vez; **no crear carpeta en el destino** (el
+archivo directo en la carpeta elegida); **solo la última versión** (una copia,
+no versiones de prueba); evaluar cómo acelerar la conversión.
+
+## Copia a mano (`lib/publicar/copiar.ts`, `components/publicar/CopiaProyectos.tsx`)
+
+Pasos (`POST /api/publicar/copia`): `revisar` (nuevo / al-dia por MD5 /
+distinto, con versión, quién y cuándo), `copiar` (un archivo ya en el destino
+solo con `siVersion` = la versión vista; si cambió, se rechaza con
+`cambio: true`), `estado-subida`, `estado-visor` (`GET /files/{id}/status`,
+leído con `leerEstadoVisor` porque el formato real no se conoce aún).
+
+Orden para no reconvertir: (a) `POST /files { parentId, parentType: "FOLDER",
+fromFileVersionId, mergeExisting }` en el servidor del destino (copia dentro de
+Trimble; FME dice que no copia "entre ubicaciones": sin confirmar entre
+proyectos); (b) subida con `contents: [{}, { format: "TRB" }]` y el TRB del
+origen (`downloadurl?format=TRB`); si Trimble no acepta el TRB, se repite sin
+él; si el TRB no llega, la subida nunca termina, así que se responde
+`reintentarSinModelo` y el navegador repite con `sinModelo: "1"`; (c) solo el
+archivo. **Pendiente**: que el dueño diga, con un modelo real, cuál camino
+salió y si el visor del destino quedó listo sin "Conversión en curso".
+
 ## Fases
 
-0. **Prueba de copia en Trimble real** (hecha el 28-10-2026; falta el resumen
-   del dueño). Sin Supabase.
+0. **Prueba de copia en Trimble real** (hecha el 28-10-2026). Sin Supabase.
+   Reemplazada por la copia a mano.
 1. Configuración del proyecto destino (SQL `supabase/publicar.sql`, admin de
    Trimble del destino, carpeta de recepción por proyecto origen).
 2. Publicar (explorador del origen, proyecto destino, nota, primera copia,
@@ -65,22 +98,22 @@ propuesto (no pedido).
    publicadas, cambios hechos en el destino, retirados en el origen).
 4. Actividad completa y cierre (filtros, README, guía, protocolo de prueba).
 
-## La prueba de copia (fase 0)
+## Piezas técnicas
 
-- `lib/publicar/prueba.ts` (`pasoPrueba`): un paso por solicitud
-  (`leer-origen`, `preparar-destino`, `copiar`, `estado-subida`, `proteccion`,
-  `abrir-copia-navegador`, `comprobar`). Relee el archivo del origen en cada
-  paso: el nombre nunca viene del navegador. Usa las funciones genéricas de
-  `lib/compras/cde.ts` (cliente de la API Core, carpetas, subidas).
+- Relee el archivo del origen en cada paso: el nombre nunca viene del
+  navegador. Usa las funciones genéricas de `lib/compras/cde.ts` (cliente de la
+  API Core, carpetas, `estadoSubida`, `urlDescarga`); la subida con TRB está en
+  `abrirSubida` de `copiar.ts`.
 - `lib/publicar/copia.ts` (`copiarContenido`): el servidor pasa el contenido de
   la URL de descarga a la URL firmada de subida **en flujo con
   `Content-Length`** (`duplex: "half"`; comprobado con Node 24 que no usa
   `chunked` ni pone `Content-Type`). Si el flujo falla y pesa hasta 512 MB, lo
-  baja otra vez entero. La ruta tiene `maxDuration = 300`; la copia usa hasta
-  270 s (`TIEMPO_COPIA_MS`), de ahí el "archivo más pesado estimado".
-- La copia desde el navegador prueba si los enlaces firmados de Trimble
-  permiten CORS desde nuestro dominio (dato que tampoco tiene Compras).
-- Pruebas: `copia.test.ts`, `prueba.test.ts` (con `lib/publicar/pruebas/trimbleFalso.ts`,
-  una nube falsa con varios proyectos, versiones, `If-Match` y descargas) y
-  `explorar.test.ts`. La página temporal de navegador usó una API falsa con
+  baja otra vez entero. La ruta tiene `maxDuration = 300` (Vercel lo aceptó);
+  cada envío usa hasta 270 s (`TIEMPO_COPIA_MS`).
+- Los enlaces firmados de Trimble aceptan CORS desde nuestro dominio (lo probó
+  la fase 0): sirve también para Compras y para archivos muy pesados.
+- Pruebas: `copia.test.ts`, `copiar.test.ts` (con
+  `lib/publicar/pruebas/trimbleFalso.ts`: varios proyectos, versiones con su
+  TRB, `If-Match`, `POST /files`, `format=TRB` y `/status`) y
+  `explorar.test.ts`. La página temporal de navegador usa una API falsa con
   respuestas fijas (la nube falsa usa `node:crypto` y no corre en el navegador).

@@ -9,6 +9,8 @@ import type { CarpetaInfo, ItemCarpeta, ProyectoInfo } from "./types";
 /** Trimble Connect through the user's token. */
 export interface TcExplorar {
   proyectos(): Promise<MyProject[]>;
+  regiones(): Promise<{ name: string; baseUrl: string }[]>;
+  proyectosDeRegion(baseUrl: string): Promise<{ id: string; name: string }[]>;
   baseUrl(projectId: string): Promise<string>;
   proyecto(baseUrl: string, projectId: string): Promise<ProjectDetails>;
   carpeta(baseUrl: string, folderId: string): Promise<FolderDetails>;
@@ -17,11 +19,24 @@ export interface TcExplorar {
 
 const porNombre = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
 
-/** Every project of the user, the current one first, then by name. */
+/**
+ * Every project of the user, the current one first, then by name. The list
+ * of memberships (/projects/me) has no names, so they come from each
+ * region's project list; a region that fails just leaves its ids unnamed.
+ */
 export async function listarProyectos(tc: TcExplorar, actual: string): Promise<ProyectoInfo[]> {
-  const lista = await tc.proyectos();
+  const [lista, regiones] = await Promise.all([tc.proyectos(), tc.regiones().catch(() => [])]);
+  const nombres = new Map<string, { nombre: string; region: string }>();
+  const listados = await Promise.allSettled(regiones.map(async (r) => ({ region: r.name, proyectos: await tc.proyectosDeRegion(r.baseUrl) })));
+  for (const l of listados) {
+    if (l.status !== "fulfilled") continue;
+    for (const p of l.value.proyectos) if (p.name && !nombres.has(p.id)) nombres.set(p.id, { nombre: p.name, region: l.value.region });
+  }
   return lista
-    .map((p) => ({ id: p.id, nombre: p.name || p.id, actual: p.id === actual, region: p.location }))
+    .map((p) => {
+      const n = nombres.get(p.id);
+      return { id: p.id, nombre: n?.nombre || p.name || p.id, actual: p.id === actual, region: n?.region || p.location };
+    })
     .sort((a, b) => Number(b.actual) - Number(a.actual) || porNombre.compare(a.nombre, b.nombre));
 }
 

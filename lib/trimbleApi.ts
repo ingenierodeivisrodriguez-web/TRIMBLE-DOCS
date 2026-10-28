@@ -116,12 +116,38 @@ export interface MyProject {
   location: string;
 }
 
-/** GET /projects/me on the master region: every project the user belongs to, in any region. */
+/**
+ * GET /projects/me on the master region: every project the user belongs to,
+ * in any region. It carries no names (see listRegionProjects for them).
+ */
 export async function listMyProjects(accessToken: string): Promise<MyProject[]> {
   const data = (await trimbleFetch(`${MASTER_BASE_URL}/projects/me?fullyLoaded=false`, accessToken)) as Partial<ProjectMinimal>[];
   return data
     .filter((p) => typeof p?.id === "string")
     .map((p) => ({ id: p.id as string, name: typeof p.name === "string" ? p.name : "", location: typeof p.location === "string" ? p.location : "" }));
+}
+
+/** Every region: its name and the base URL of its Core API. */
+export async function listRegions(accessToken: string): Promise<{ name: string; baseUrl: string }[]> {
+  const regions = await getRegions(accessToken);
+  return regions
+    .filter((r) => typeof r["tc-api"] === "string")
+    .map((r) => ({ name: r.location ?? r.region ?? "", baseUrl: r["tc-api"].replace(/\/$/, "") }));
+}
+
+/** GET /projects?fullyLoaded=false in one region: the user's projects there, with their names. */
+export async function listRegionProjects(baseUrl: string, accessToken: string): Promise<{ id: string; name: string }[]> {
+  const all: { id: string; name: string }[] = [];
+  let start = 0;
+  for (;;) {
+    const batch = (await trimbleFetch(`${baseUrl}/projects?fullyLoaded=false`, accessToken, { Range: `items=${start}-${start + FOLDER_PAGE_SIZE - 1}` })) as { id?: unknown; name?: unknown }[];
+    // A page that starts with a project already seen means the Range header was ignored.
+    if (!Array.isArray(batch) || (batch.length && all.some((p) => p.id === batch[0]?.id))) break;
+    for (const p of batch) if (typeof p?.id === "string") all.push({ id: p.id, name: typeof p.name === "string" ? p.name : "" });
+    if (batch.length < FOLDER_PAGE_SIZE) break;
+    start += FOLDER_PAGE_SIZE;
+  }
+  return all;
 }
 
 export async function resolveProjectBaseUrl(

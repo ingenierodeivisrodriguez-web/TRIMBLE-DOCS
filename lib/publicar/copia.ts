@@ -104,9 +104,3 @@ export function velocidad(bytes: number | null, ms: number): string | null {
   if (!bytes || bytes < MINIMO_MEDIBLE || ms <= 0) return null;
   return `${formatBytes((bytes * 1000) / ms)}/s`;
 }
-
-/** The largest file a copy could take at the measured speed (null when it couldn't be measured). */
-export function maximoEstimado(bytes: number | null, ms: number): number | null {
-  if (!bytes || bytes < MINIMO_MEDIBLE || ms <= 0) return null;
-  return Math.floor((bytes / ms) * TIEMPO_COPIA_MS);
-}

@@ -16,7 +16,7 @@ ambos lugares** para Trimble Connect:
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
-| **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto, con cada versión nueva copiada al destino (fase 0: prueba de copia) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
+| **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto, con cada versión nueva copiada al destino (por ahora: copia a mano de la última versión) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3829,59 +3829,71 @@ revisión programada por ahora); en el uso real **alguien pertenece a los dos
 proyectos**; el administrador del destino define una **carpeta de recepción
 fija** por proyecto origen y lo publicado llega ahí sin aceptarlo.
 
-Fases: 0 prueba de copia en Trimble real (hecha; falta el resultado en un
-proyecto real) · 1 configuración del proyecto destino · 2 Publicar · 3
-actualización al abrir · 4 actividad y cierre. Cada fase espera el OK del dueño.
+Fases: 0 prueba de copia en Trimble real (hecha el 28-10-2026, ver abajo) ·
+copia a mano a otro proyecto (hecha) · 1 configuración del proyecto destino ·
+2 Publicar · 3 actualización al abrir · 4 actividad y cierre. Cada fase espera
+el OK del dueño.
 
-### Fase 0: prueba de copia entre proyectos
+### Resultado de la prueba de copia (fase 0, 28-10-2026)
 
-Es lo único que tiene la extensión por ahora. No guarda nada en Supabase, no
-cambia el proyecto abierto y no borra nada.
+Entre los proyectos SELVIA y Laboratorio (misma región), con un modelo
+`.rvt` de 90.1 MB: la extensión lee el archivo y escribe en el destino; el
+servidor lo pasó por partes en 1.5 s (unos 60 MB/s, así que una copia aguanta
+archivos de varios GB); el mismo nombre crea una versión nueva del mismo
+archivo; **Trimble rechaza subir encima de una versión que ya no es la última**
+(`If-Match`), y eso es lo que evita pisar cambios hechos en el destino; la copia
+desde el navegador también funciona (los enlaces de Trimble aceptan CORS); y
+llegó el mismo archivo (tamaño y huella MD5 iguales). En el destino el visor
+quedó en "Conversión en curso": Trimble convierte otra vez el modelo.
 
-1. **El archivo de este proyecto**: se abren las carpetas (con los permisos
-   del usuario en Trimble) y se hace clic en un archivo.
-2. **El proyecto destino**: la lista de los proyectos donde el usuario es
-   miembro, de todas las regiones (`GET /projects/me`).
+La pantalla de la prueba se reemplazó por la copia a mano (abajo), con las
+mejoras que pidió el dueño: nombres de los proyectos, varios archivos a la vez,
+sin carpeta nueva en el destino, solo la última versión y menos espera de la
+conversión.
+
+### Copiar a otro proyecto (a mano)
+
+Copia la **última versión** de los archivos elegidos a una carpeta de otro
+proyecto, con el mismo nombre y sin crear carpetas. Por ahora no queda en la
+Actividad ni usa Supabase, no cambia el proyecto abierto y no borra nada.
+
+1. **Los archivos de este proyecto**: se abren las carpetas y se marcan uno o
+   varios archivos (pueden ser de carpetas distintas); la lista de elegidos
+   queda debajo, con "quitar".
+2. **El proyecto destino**: los proyectos donde el usuario es miembro, **por su
+   nombre**. `GET /projects/me` no trae los nombres, así que salen de la lista
+   de proyectos de cada región (`GET /projects?fullyLoaded=false`); si una
+   región falla, ese proyecto se ve con su id.
 3. **La carpeta del destino**: se abre una carpeta y se pulsa "Usar esta
    carpeta" (apagado donde solo hay lectura).
-4. **Hacer la prueba**, un paso por solicitud al servidor
-   ([`lib/publicar/prueba.ts`](lib/publicar/prueba.ts)):
-   - lee el archivo en el origen: nombre, versión, tamaño y huella MD5 si
-     Trimble la da;
-   - busca o crea, dentro de la carpeta elegida, `Publicar entre proyectos -
-     prueba (se puede borrar)`, y dice si los dos proyectos están en la misma
-     región de Trimble;
-   - **primera copia por el servidor**
-     ([`lib/publicar/copia.ts`](lib/publicar/copia.ts)): pide el enlace de
-     descarga del origen, abre la subida en el destino (`If-None-Match: *` si
-     el archivo no está) y pasa el contenido de un enlace al otro **por partes,
-     con su tamaño declarado**, sin cargar el archivo entero. Si eso falla y el
-     archivo pesa hasta 512 MB, lo baja otra vez entero y lo envía. Mide el
-     tiempo y la velocidad;
-   - espera la confirmación de Trimble (hasta 2 minutos por carga);
-   - **segunda copia** con el mismo nombre (`If-Match` con la última versión):
-     debe salir la versión 2 del mismo archivo;
-   - **protección**: abre una subida con `If-Match` de la primera versión, que
-     ya no es la última, y Trimble debe rechazarla. Es lo que en la fase 3
-     evita pisar un cambio hecho en el destino. Si Trimble la abriera, no se
-     envía contenido y la subida vence sola a los 90 minutos;
-   - **copia desde el navegador**: el navegador baja el archivo del origen y lo
-     sube al destino, para saber si sirve con archivos que el servidor no
-     alcanza a copiar a tiempo (hasta 512 MB);
-   - **compara** lo que llegó: versiones en el destino, tamaño y huella MD5.
-5. El resultado queda en una tabla con las conclusiones (lee, escribe, copia
-   por el servidor, versión nueva, protección, navegador, mismo archivo, misma
-   región y **el archivo más pesado que aguanta una copia** a la velocidad
-   medida) y un texto para copiar y compartir.
+4. **Copiar**: archivo por archivo
+   ([`lib/publicar/copiar.ts`](lib/publicar/copiar.ts)), primero compara con lo
+   que tiene la carpeta del destino con ese nombre:
+   - **no está**: se copia como archivo nuevo;
+   - **está igual** (misma huella MD5): "Ya está al día", no se copia;
+   - **está distinto**: muestra su versión, quién lo modificó y cuándo, y no lo
+     toca. Con "Subir la versión de este proyecto como versión nueva" se
+     reemplaza, solo si el archivo del destino sigue siendo el que se vio (si
+     cambió entretanto, lo dice y hay que revisarlo otra vez).
+5. **Menos espera de la conversión de los modelos 3D**: la copia intenta, en
+   este orden, (a) que Trimble copie la versión por dentro (`POST /files` con
+   `fromFileVersionId`; no pasa por nuestro servidor y debería llevar el modelo
+   ya convertido), (b) subir el archivo junto con el modelo ya convertido del
+   origen (`downloadurl?format=TRB` y una subida con `contents: [{}, { format:
+   "TRB" }]`; si falla el envío del modelo, se repite sin él), (c) subir solo el
+   archivo, y Trimble lo convierte. Al final pregunta a Trimble cómo va la
+   conversión en el destino (`GET /files/{id}/status`) y lo muestra, con un
+   botón para preguntar otra vez. Falta confirmar en Trimble real cuál de las
+   tres funciona entre proyectos y si de verdad evita la conversión.
+6. Un texto con el resultado de cada archivo para copiar y compartir.
 
-Límites: la ruta de la prueba puede trabajar hasta 300 s (`maxDuration`) y la
-copia usa hasta 270 s de ellos; con archivos de menos de 5 MB no se mide la
-velocidad. Trimble acepta subidas de una sola parte hasta 5 GB.
+Límites: la ruta de la copia puede trabajar hasta 300 s (`maxDuration`) y cada
+envío usa hasta 270 s; Trimble acepta subidas de una sola parte hasta 5 GB.
 
 Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
 ([`lib/publicar/routes.ts`](lib/publicar/routes.ts) confirma que es miembro):
 `GET /api/publicar/proyectos`, `GET /api/publicar/carpeta?proyecto=&folderId=`
-y `POST /api/publicar/prueba` (`{ paso, ... }`).
+y `POST /api/publicar/copia` (`{ paso, destino, carpetaId, fileId, ... }`).
 
 ## Cómo funciona (común a ambas extensiones)
 

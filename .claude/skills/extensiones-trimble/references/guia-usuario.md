@@ -25,7 +25,7 @@ aparece).
 | Manuales | `https://trimble-docs.vercel.app/manifest-manuales.json` |
 | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
 | Realidad aumentada (menú + visor; respaldo `manifest-ra-visor.json`) | `https://trimble-docs.vercel.app/manifest-ra.json` |
-| Publicar entre proyectos (fase 0: prueba de copia) | `https://trimble-docs.vercel.app/manifest-publicar.json` |
+| Publicar entre proyectos (por ahora: copia a mano) | `https://trimble-docs.vercel.app/manifest-publicar.json` |
 
 Realidad aumentada tiene su propia guía pública para los usuarios (oficina y
 obra, problemas frecuentes y prueba en obra): `https://trimble-docs.vercel.app/ra/guia`.

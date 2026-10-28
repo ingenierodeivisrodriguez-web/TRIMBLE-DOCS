@@ -7,11 +7,27 @@ const item = (id: string, name: string, type: "FOLDER" | "FILE", extra: Partial<
 
 function tcFalso(carpetas: Record<string, FolderDetails>, items: Record<string, RawFolderItem[]>): TcExplorar {
   return {
+    // Like /projects/me: memberships without names.
     proyectos: async () => [
-      { id: "P2", name: "Torre Norte", location: "northAmerica" },
-      { id: "P1", name: "Edificio Centro", location: "europe" },
-      { id: "P3", name: "Bodega 10", location: "northAmerica" },
+      { id: "P2", name: "", location: "" },
+      { id: "P1", name: "", location: "" },
+      { id: "P3", name: "", location: "" },
+      { id: "P4", name: "", location: "" },
     ],
+    regiones: async () => [
+      { name: "northAmerica", baseUrl: "https://app.falso" },
+      { name: "europe", baseUrl: "https://app21.falso" },
+      { name: "asia", baseUrl: "https://caida.falso" },
+    ],
+    proyectosDeRegion: async (baseUrl) => {
+      if (baseUrl === "https://caida.falso") throw new Error("503");
+      return baseUrl === "https://app.falso"
+        ? [
+            { id: "P2", name: "Torre Norte" },
+            { id: "P3", name: "Bodega 10" },
+          ]
+        : [{ id: "P1", name: "Edificio Centro" }];
+    },
     baseUrl: async () => "https://app.falso",
     proyecto: async (_b, id) => ({ id, name: "Edificio Centro", rootId: "raiz", createdOn: "" }),
     carpeta: async (_b, id) => carpetas[id],
@@ -31,11 +47,12 @@ test("muestra primero las carpetas y luego los archivos, cada grupo por nombre",
   assert.equal(r[0].tamano, null);
 });
 
-test("la lista de proyectos pone primero el actual y luego los demás por nombre", async () => {
+test("la lista de proyectos trae los nombres de cada región, con el actual primero", async () => {
   const r = await listarProyectos(tcFalso({}, {}), "P2");
-  assert.deepEqual(r.map((p) => p.nombre), ["Torre Norte", "Bodega 10", "Edificio Centro"]);
+  assert.deepEqual(r.map((p) => p.nombre), ["Torre Norte", "Bodega 10", "Edificio Centro", "P4"]);
   assert.equal(r[0].actual, true);
   assert.equal(r[2].region, "europe");
+  assert.equal(r[3].nombre, "P4", "sin nombre en ninguna región (o la región falló): queda su id");
 });
 
 test("la raíz se ve con el nombre del proyecto y la ruta baja hasta la carpeta abierta", async () => {

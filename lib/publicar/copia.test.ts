@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { copiarContenido, duracion, maximoEstimado, TIEMPO_COPIA_MS, velocidad } from "./copia";
+import { copiarContenido, duracion, velocidad } from "./copia";
 
 const MB = 1024 * 1024;
 
@@ -81,11 +81,9 @@ test("mide el tiempo con el reloj que recibe", async () => {
   assert.equal(c.ms, 4200);
 });
 
-test("velocidad, máximo estimado y duración se escriben para leerlos en obra", () => {
+test("velocidad y duración se escriben para leerlas en obra", () => {
   assert.equal(velocidad(10 * MB, 1000), "10.0 MB/s");
   assert.equal(velocidad(1 * MB, 1000), null, "muy pequeño para medir");
-  assert.equal(maximoEstimado(10 * MB, 1000), Math.floor(10 * MB * (TIEMPO_COPIA_MS / 1000)));
-  assert.equal(maximoEstimado(1000, 1000), null);
   assert.equal(duracion(4200), "4.2 s");
   assert.equal(duracion(65_000), "1 min 05 s");
 });

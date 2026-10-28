@@ -32,21 +32,25 @@ function Icono({ tipo }: { tipo: ItemCarpeta["tipo"] }) {
 
 /**
  * The folders of a project, as the user's Trimble permissions show them.
- * `elegir: "archivo"` picks a file (folders open on click); `"carpeta"` picks
- * the open folder with "Usar esta carpeta" (files are listed, not pickable).
+ * `elegir: "archivo"` checks and unchecks files, from any folder (folders
+ * open on click); `"carpeta"` picks the open folder with "Usar esta
+ * carpeta" (files are listed, not pickable). `recarga` reloads the open
+ * folder when it changes.
  */
 export default function Explorador({
   api,
   proyecto,
   elegir,
-  seleccionado,
+  seleccionados,
   onElegir,
+  recarga = 0,
 }: {
   api: PublicarApi;
   proyecto: string;
   elegir: "archivo" | "carpeta";
-  seleccionado: string | null;
+  seleccionados: string[];
   onElegir: (e: Elegido) => void;
+  recarga?: number;
 }) {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [info, setInfo] = useState<CarpetaInfo | null>(null);
@@ -65,7 +69,7 @@ export default function Explorador({
     return () => {
       vigente = false;
     };
-  }, [api, proyecto, folderId]);
+  }, [api, proyecto, folderId, recarga]);
 
   const ruta = info ? info.carpeta.ruta.map((r) => r.nombre).join(" / ") : "";
   const soloLectura = info?.carpeta.permiso === "READ";
@@ -103,7 +107,7 @@ export default function Explorador({
               {info?.items.map((it) => {
                 const esArchivo = it.tipo === "archivo";
                 const activo = esArchivo && elegir === "archivo";
-                const marcado = activo && seleccionado === it.id;
+                const marcado = activo && seleccionados.includes(it.id);
                 const abrir = () => {
                   if (!esArchivo) setFolderId(it.id);
                   else if (activo) onElegir({ id: it.id, nombre: it.nombre, ruta: `${ruta} / ${it.nombre}`, tamano: it.tamano, revision: it.revision });
@@ -113,8 +117,13 @@ export default function Explorador({
                     key={it.id}
                     onClick={abrir}
                     style={{ cursor: esArchivo && !activo ? "default" : "pointer", background: marcado ? C.rowSelected : undefined, color: esArchivo && !activo ? "var(--tc-gray-500)" : undefined }}
-                    title={esArchivo ? (activo ? "Elegir este archivo" : "En este paso se elige una carpeta") : "Abrir la carpeta"}
+                    title={esArchivo ? (activo ? (marcado ? "Quitar este archivo" : "Elegir este archivo") : "En este paso se elige una carpeta") : "Abrir la carpeta"}
                   >
+                    {elegir === "archivo" && (
+                      <td style={{ ...td, width: 24, paddingRight: 0 }}>
+                        {esArchivo && <input type="checkbox" checked={marcado} readOnly tabIndex={-1} aria-label={`Elegir ${it.nombre}`} style={{ margin: 0, pointerEvents: "none" }} />}
+                      </td>
+                    )}
                     <td style={{ ...td, width: "100%" }}>
                       <span style={{ display: "inline-flex", gap: 8, alignItems: "center" }}>
                         <Icono tipo={it.tipo} />
@@ -139,7 +148,7 @@ export default function Explorador({
             onClick={() => onElegir({ id: info.carpeta.id, nombre: info.carpeta.nombre, ruta, tamano: null, revision: null })}
             style={{ ...acceptButton, padding: "6px 14px", fontSize: 14, opacity: soloLectura ? 0.5 : 1, cursor: soloLectura ? "not-allowed" : "pointer" }}
           >
-            {seleccionado === info.carpeta.id ? "Carpeta elegida" : "Usar esta carpeta"}
+            {seleccionados.includes(info.carpeta.id) ? "Carpeta elegida" : "Usar esta carpeta"}
           </button>
           <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>
             {soloLectura ? "Solo tienes lectura en esta carpeta: abre otra donde puedas subir archivos." : `Abierta: ${info.carpeta.nombre}`}
