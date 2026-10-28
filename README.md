@@ -43,6 +43,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Compras y Contratación (proyecto)](#compras-y-contratación-proyecto)
 - [Control de Obra (proyecto)](#control-de-obra-proyecto)
 - [Requisitos BIM (LOIN) (proyecto)](#requisitos-bim-loin-proyecto)
+- [Realidad aumentada con QR (en construcción)](#realidad-aumentada-con-qr-en-construcción)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -3507,6 +3508,58 @@ probado contra `memoryStore()` (`service.test.ts`). La lectura del visor
 
 - **ToDos / BCF** para los objetos que no cumplen: opcional y solo con
   confirmación del dueño.
+
+---
+
+## Realidad aumentada con QR (en construcción)
+
+Objetivo: ver desde el celular un modelo BIM a **escala 1:1**, fijo en el
+punto de la obra donde está pegado un QR, y caminar dentro de él con
+**corte vertical y horizontal**, **transparencia** y **colorear a mano**.
+
+Como la app de Trimble Connect para celular no carga extensiones propias y la
+API del visor no entrega la geometría, la solución tiene dos partes: una
+extensión en Trimble Connect (computador) donde se prepara el modelo y se
+elige el punto del QR en el visor, y una **página pública** que el celular abre
+con el QR (sin iniciar sesión, con vencimiento).
+
+Decisiones del dueño (27-10-2026): solo **Android con Google Chrome** al
+inicio (Safari del iPhone no permite este tipo de realidad aumentada desde una
+página web); el modelo convertido se guarda en **Supabase** y se elimina solo
+según una configuración de uso; el QR abre **sin sesión y con vencimiento**; el
+punto de anclaje se **elige en el visor 3D**; colorear es **a mano**, elemento
+por elemento (ligado por IFCGUID, nunca en los Property Sets).
+
+Fases: 0 prueba en el celular · 1 preparar el modelo · 2 punto de anclaje y QR
+· 3 visor en el celular con calibración · 4 cortes, transparencia y colorear
+· 5 cierre (manifiesto, guía, prueba en obra). Cada fase espera el OK del dueño.
+
+### Fase 0: prueba en el celular (`/ra-prueba`)
+
+Página pública `https://trimble-docs.vercel.app/ra-prueba`: no lee ni guarda
+nada. Sirve para confirmar, antes de cargar modelos, que el celular pone un
+volumen a escala real fijo en el piso y que no se corre al caminar.
+
+- **Revisión del celular**: Android, navegador, https, WebXR, ARCore
+  ("Servicios de Google Play para RA") y si el navegador lee QR por sí mismo.
+  Dice en palabras qué hacer si algo falta (abrir en Chrome, instalar ARCore,
+  usar un Android en vez del iPhone o del computador). Reglas en
+  [`lib/ra/diagnostico.ts`](lib/ra/diagnostico.ts).
+- **Lo que va a ver**: vista previa del volumen de **2 × 2 m en planta y 3 m
+  de alto** (aristas amarillas, caras azules transparentes, una línea en el
+  piso cada metro, cruz naranja en el punto de colocación y flecha naranja en
+  el frente).
+- **Iniciar realidad aumentada**: abre la cámara; un círculo amarillo sigue el
+  piso (solo superficies horizontales, hasta 15° de inclinación: los muros no
+  sirven). Al tocar la pantalla el volumen queda con su cruz en ese punto y el
+  frente mirando a la persona. Arriba se ve a cuántos metros está uno del
+  centro y si está dentro o fuera del volumen; abajo, **Reubicar** y **Salir**.
+  Geometría y cuentas en [`lib/ra/volumen.ts`](lib/ra/volumen.ts); la escena
+  (three.js) en [`components/ra/escena.ts`](components/ra/escena.ts).
+
+Qué debe reportar quien prueba: marca y modelo del celular, si el volumen
+quedó fijo al caminar, cuánto midió con flexómetro un lado de la base (debe dar
+2 m) y cuántos centímetros se corrió la cruz al volver a la marca.
 
 ---
 
