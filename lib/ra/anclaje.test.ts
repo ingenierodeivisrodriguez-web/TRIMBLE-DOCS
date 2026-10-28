@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { before, describe, it } from "node:test";
 import * as WebIFC from "web-ifc";
-import { aYArriba, alinear, aZArriba, cajaElemento, Caja, concuerdan, DISTANCIA_MIN_FLECHA, puntoEnModelo, rumbo } from "./anclaje";
+import { aYArriba, alinear, aZArriba, cajaElemento, Caja, leerToque, puntoEnModelo, rumboMuro, superficie } from "./anclaje";
 import { esCodigo, estadoQr, fechaMasDias, finDelDia, generarCodigo, urlQr } from "./codigo";
 import { armarModelo, leerArchivo, ModeloRA, Vec3 } from "./modelo";
 import { IFC_PRUEBA } from "./pruebas/ifcPrueba";
@@ -65,34 +65,31 @@ describe("alinear el visor con el modelo preparado", () => {
     assert.equal(r.ok, false);
     assert.match(!r.ok ? r.motivo : "", /misma forma/);
   });
-  it("dos toques sobre elementos distintos dan el mismo corrimiento", () => {
-    const losaIfc: Caja = { min: [1000, 2000, 3], max: [1004, 2003, 3.2] };
-    const a = alinear(mover(MURO_IFC, [-1000, -2000, 0]), muro());
-    const b = alinear(mover(losaIfc, [-1000, -2000, 0]), cajaElemento(modelo, "AYvctVUKr0kugbFTf53O9L")!);
-    assert.ok(a.ok && b.ok && concuerdan(a.alineacion, b.alineacion));
-  });
-  it("si dos toques no concuerdan (el visor movió un modelo y no el otro), se detecta", () => {
-    const losaIfc: Caja = { min: [1000, 2000, 3], max: [1004, 2003, 3.2] };
-    const a = alinear(MURO_IFC, muro());
-    const b = alinear(mover(losaIfc, [0.5, 0, 0]), cajaElemento(modelo, "AYvctVUKr0kugbFTf53O9L")!);
-    assert.ok(a.ok && b.ok && !concuerdan(a.alineacion, b.alineacion));
-  });
 });
 
-describe("dirección de la flecha", () => {
-  it("hacia +z es 0°, hacia +x es 90°, hacia -z es 180°", () => {
-    assert.equal(rumbo([0, 0, 0], [0, 0, 5]), 0);
-    assert.equal(rumbo([0, 0, 0], [3, 0, 0]), Math.PI / 2);
-    assert.equal(Math.abs(rumbo([1, 0, 1], [1, 0, -4])), Math.PI);
+describe("muro donde va la hoja", () => {
+  it("una cara vertical es muro; el piso, el techo y una rampa no", () => {
+    assert.equal(superficie([1, 0, 0]), "muro");
+    assert.equal(superficie([0.6, -0.8, 0.1]), "muro");
+    assert.equal(superficie([0, 0, 1]), "piso");
+    assert.equal(superficie([0, 0, -1]), "techo");
+    assert.equal(superficie([0.7, 0, 0.7]), "inclinada");
   });
-  it("la altura no cuenta", () => {
-    assert.equal(rumbo([0, 0, 0], [3, 10, 0]), Math.PI / 2);
+  it("la cara sur del muro de prueba (normal -y del IFC) mira hacia +z del modelo: 0°", () => {
+    assert.equal(rumboMuro([0, -1, 0]), 0);
   });
-  it("hacia el norte del IFC (+y) es -z en el modelo: 180°", () => {
-    const desde = ifcAModelo([1000, 2000, 0]);
-    const hacia = ifcAModelo([1000, 2005, 0]);
-    assert.equal(Math.abs(rumbo(desde, hacia)), Math.PI);
-    assert.ok(DISTANCIA_MIN_FLECHA <= 1);
+  it("una cara que mira al este (+x) da 90°; al norte del IFC (+y), 180°", () => {
+    assert.equal(rumboMuro([1, 0, 0]), Math.PI / 2);
+    assert.equal(Math.abs(rumboMuro([0, 1, 0])), Math.PI);
+  });
+  it("la pequeña inclinación de la normal no cambia el rumbo", () => {
+    assert.equal(rumboMuro([1, 0, 0.2]), Math.PI / 2);
+  });
+  it("un punto sobre la cara sur del muro queda en el modelo a su altura (1.4 m)", () => {
+    const r = alinear(MURO_IFC, cajaElemento(modelo, "8YvctVUKr0kugbFTf53O9L")!);
+    assert.ok(r.ok);
+    const p = puntoEnModelo([1002, 2000, 1.4], r.alineacion);
+    assert.ok(cerca(p, ifcAModelo([1002, 2000, 1.4])));
   });
 });
 
@@ -138,16 +135,17 @@ describe("estado del QR", () => {
 });
 
 describe("toque en el visor", () => {
-  it("lee el evento tal cual o envuelto en { data }", async () => {
-    const { leerToque } = await import("./anclaje");
+  it("lee el evento tal cual o envuelto en { data }", () => {
     const detalle = { position: { x: 1, y: 2, z: 3 }, normal: { x: 0, y: 0, z: 1 }, modelId: "M1", objectRuntimeId: 42 };
-    const esperado = { posicion: [1, 2, 3], modelId: "M1", runtimeId: 42 };
+    const esperado = { posicion: [1, 2, 3], normal: [0, 0, 1], modelId: "M1", runtimeId: 42 };
     assert.deepEqual(leerToque(detalle), esperado);
     assert.deepEqual(leerToque({ data: detalle }), esperado);
   });
-  it("un clic en el vacío (sin objeto) no cuenta", async () => {
-    const { leerToque } = await import("./anclaje");
+  it("un clic en el vacío (sin objeto) no cuenta", () => {
     assert.equal(leerToque({ position: { x: 1, y: 2, z: 3 } }), null);
     assert.equal(leerToque(null), null);
+  });
+  it("sin normal, el toque se lee igual pero sin ella", () => {
+    assert.equal(leerToque({ position: { x: 1, y: 2, z: 3 }, modelId: "M1", objectRuntimeId: 1 })?.normal, null);
   });
 });

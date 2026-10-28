@@ -3644,13 +3644,17 @@ El panel del visor tiene dos pestañas: **Preparar** (fase 1) y **Punto QR**
 1. **Modelo preparado**: se elige uno que esté listo. Sus IFC deben estar
    abiertos en el visor (si falta alguno, lo dice).
 2. **Elegir el punto en el visor**: activa la herramienta de punto de
-   Trimble Connect. Primer clic: el punto del piso donde irá la **cruz** de la
-   hoja. Segundo clic: hacia dónde apunta la **flecha** (a más de 0.5 m; si
-   está más cerca, lo pide de nuevo).
-3. **Datos del QR**: nombre del punto, **hacia dónde debe apuntar la flecha**
-   (texto que va impreso para quien pega la hoja: «hacia el eje B, paralela
-   a la fachada») y **hasta qué día abre** (30 días al inicio, máximo 365;
-   vale todo ese día, hora de Colombia).
+   Trimble Connect. **Un solo clic sobre la cara de un muro o columna**, a la
+   altura de los ojos (unos 1.40 m), donde irá la **cruz** de la hoja. La hoja
+   va **pegada en el muro** (decisión del dueño, 27-10-2026: no se pisa, no se
+   ensucia y queda a la vista). Un clic en un piso, techo o cara inclinada se
+   rechaza con el motivo (la normal de la cara debe estar a menos de 15° de
+   la horizontal). La orientación la da la propia cara del muro: no hace falta
+   flecha.
+3. **Datos del QR**: nombre del punto, **dónde se pega la hoja** (texto que va
+   impreso para quien la pega: «muro del eje 3 entre B y C, cara hacia el
+   patio»; se propone el nombre del muro y su nivel) y **hasta qué día abre**
+   (30 días al inicio, máximo 365; vale todo ese día, hora de Colombia).
 4. **Crear QR**: muestra el QR y **Descargar hoja para imprimir (PDF)**.
 
 **Cómo se pasa el clic del visor al modelo preparado**
@@ -3659,16 +3663,21 @@ propias coordenadas (puede correr el origen de modelos georreferenciados y
 trabajar en metros o milímetros). En vez de suponerlas, se usa el elemento
 tocado: su caja en el visor y la del mismo IFCGUID en el modelo preparado dan
 la escala y el corrimiento. Si las dos cajas no tienen la misma forma (modelo
-girado o cambiado), el punto se rechaza con el motivo; los dos clics además
-deben dar el mismo corrimiento (5 cm). El elemento tocado debe estar en el
-modelo preparado (no quitado con los filtros).
+girado o cambiado), el punto se rechaza con el motivo. El elemento tocado
+debe estar en el modelo preparado (no quitado con los filtros). Se guarda el
+**rumbo** de la cara del muro (hacia dónde mira, en el marco del modelo), que
+el celular usará para girar el modelo.
 
-**La hoja** ([`lib/ra/hoja.ts`](lib/ra/hoja.ts)), tamaño carta: título y
-nombre, el QR (7.8 cm), la **flecha** naranja que sale de la **cruz** del
-punto, y los pasos para pegarla: las **coordenadas IFC del punto** (X, Y, Z en
-metros, para que topografía lo marque), poner la cruz sobre la marca, girar la
-hoja hasta que la flecha apunte a la referencia escrita y fijarla con cinta.
-Al pie: hasta cuándo abre y el código.
+**La hoja** ([`lib/ra/hoja.ts`](lib/ra/hoja.ts)), tamaño carta, para pegar
+derecha en el muro: título y nombre, el QR (9 cm), la **cruz** naranja del
+punto con «ESTE LADO ARRIBA», y los pasos: dónde se pega, las **coordenadas
+IFC del punto** (X, Y en planta y la altura Z, en metros, para que topografía
+lo marque en el muro), pegarla plana y derecha con la cruz sobre la marca y
+fijarla por las cuatro esquinas. Al pie: hasta cuándo abre y el código.
+
+Los dos primeros QR de prueba se crearon con la hoja en el piso (columna
+`montaje = 'piso'`): la lista los marca para anularlos y crearlos de nuevo en
+un muro, y no ofrece su hoja.
 
 **El QR** lleva `https://trimble-docs.vercel.app/ra/q/<código>`: un código
 aleatorio de 128 bits ([`lib/ra/codigo.ts`](lib/ra/codigo.ts)), que no se
@@ -3684,8 +3693,8 @@ y hasta cuándo abre; si no, el motivo (no existe, vencido, anulado, sin
 modelo). Sin un código válido no devuelve nada del proyecto. Cada escaneo de
 un QR activo se cuenta. La vista en realidad aumentada llega en la fase 3.
 
-**Menú del proyecto**: tabla **Puntos QR** (punto y elemento, modelo, hacia
-dónde apunta la flecha, abre hasta, estado, escaneos, quién lo creó),
+**Menú del proyecto**: tabla **Puntos QR** (punto y elemento, modelo, dónde
+se pega, abre hasta, estado, escaneos, quién lo creó),
 **Hoja PDF** para volver a imprimirla y **Anular** (quien lo creó o un
 administrador; pide confirmación).
 
@@ -3695,13 +3704,12 @@ Base de datos: tabla `ra_puntos` en [`supabase/ra.sql`](supabase/ra.sql)
 | Ruta | Qué hace |
 |---|---|
 | `GET /api/ra/modelos/{id}/archivo` | Enlace de 10 minutos al archivo del modelo (el panel lo lee para ubicar el punto) |
-| `POST /api/ra/puntos` | Crea un QR (punto, dirección de la flecha, referencia, vencimiento) |
+| `POST /api/ra/puntos` | Crea un QR (punto en el muro, rumbo de la cara, dónde se pega, vencimiento) |
 | `DELETE /api/ra/puntos/{id}` | Anula el QR (el registro queda) |
 | `GET /api/ra/publico/{código}` | **Sin sesión**: estado del QR para el celular; cuenta el escaneo si está activo |
 
-Supuestos de esta fase: la hoja va **en el piso** (la cruz sobre el punto
-marcado); cualquier miembro del proyecto crea QR; el código se guarda tal cual
-en la base de datos para poder volver a imprimir la hoja.
+Supuestos de esta fase: cualquier miembro del proyecto crea QR; el código se
+guarda tal cual en la base de datos para poder volver a imprimir la hoja.
 
 ---
 

@@ -65,7 +65,7 @@ export default function QrCelular({ codigo }: { codigo: string }) {
             </a>
             .
           </div>
-          {r.referencia && <p style={{ fontSize: 14, color: "#4b5563" }}>La flecha de la hoja debe apuntar {r.referencia}.</p>}
+          {r.referencia && <p style={{ fontSize: 14, color: "#4b5563" }}>La hoja va pegada en: {r.referencia}.</p>}
         </>
       )}
     </main>

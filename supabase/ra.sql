@@ -71,6 +71,18 @@ create table if not exists public.ra_puntos (
 
 create index if not exists ra_puntos_proyecto on public.ra_puntos (project_id, creado desc);
 
+-- Dónde va pegada la hoja: en el muro (decisión del dueño, el rumbo es hacia
+-- dónde mira la cara del muro) o en el piso (los primeros QR de prueba, cuyo
+-- rumbo es el de la flecha). En "muro", `referencia` dice dónde pegarla.
+alter table public.ra_puntos add column if not exists montaje text not null default 'piso';
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'ra_puntos_montaje_check') then
+    alter table public.ra_puntos add constraint ra_puntos_montaje_check check (montaje in ('piso', 'muro'));
+  end if;
+end;
+$$;
+
 alter table public.ra_config enable row level security;
 alter table public.ra_modelos enable row level security;
 alter table public.ra_puntos enable row level security;

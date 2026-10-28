@@ -6,7 +6,7 @@ import { hojaPdf, nombreHoja } from "./hoja";
 describe("hoja para imprimir", () => {
   const datos = {
     nombre: "Acceso principal",
-    referencia: "hacia el eje B, paralela a la fachada",
+    referencia: "muro del eje 3 entre B y C, cara hacia el patio",
     url: "https://trimble-docs.vercel.app/ra/q/AbCdEfGhIjKlMnOpQrStUv",
     codigo: "AbCdEfGhIjKlMnOpQrStUv",
     vence: "26-11-2026",

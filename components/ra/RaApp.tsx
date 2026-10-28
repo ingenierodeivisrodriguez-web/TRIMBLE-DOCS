@@ -226,7 +226,7 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
               <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13.5 }}>
                 <thead>
                   <tr>
-                    {["Punto", "Modelo", "La flecha apunta", "Abre hasta", "Estado", "Escaneos", "Creado", ""].map((t) => (
+                    {["Punto", "Modelo", "Dónde se pega", "Abre hasta", "Estado", "Escaneos", "Creado", ""].map((t) => (
                       <th key={t} style={th}>
                         {t}
                       </th>
@@ -241,7 +241,10 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
                         {p.elemento && <div style={{ color: "#6b7280" }}>sobre {p.elemento}</div>}
                       </td>
                       <td style={td}>{p.modeloNombre || "—"}</td>
-                      <td style={td}>{p.referencia}</td>
+                      <td style={td}>
+                        {p.referencia}
+                        {p.montaje === "piso" && <div style={{ color: "#8a5a00" }}>QR de prueba con la hoja en el piso: anúlelo y créelo de nuevo en un muro.</div>}
+                      </td>
                       <td style={td}>{dia(p.vence)}</td>
                       <td style={td}>
                         <span style={{ fontWeight: 600, color: p.estado === "activo" ? "#2e6b22" : "#b3261e" }}>{TEXTO_ESTADO_QR[p.estado]}</span>
@@ -256,7 +259,7 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
                         <div style={{ color: "#6b7280" }}>{p.creadoPor}</div>
                       </td>
                       <td style={{ ...td, whiteSpace: "nowrap" }}>
-                        {p.estado === "activo" && (
+                        {p.estado === "activo" && p.montaje === "muro" && (
                           <button style={botonChico} onClick={() => hoja(p)} title="La hoja para imprimir y pegar en obra">
                             Hoja PDF
                           </button>

@@ -10,6 +10,10 @@ import type { ModeloRA, Vec3 } from "./modelo";
  * its box in the viewer and its box in the prepared model (same IFCGUID) give
  * the scale and the shift. If the two boxes do not have the same shape, the
  * model is turned or different in the viewer and the point is refused.
+ *
+ * The QR sheet is stuck on a wall or column (owner's decision): the click
+ * must be on a vertical face, and that face's normal says which way the
+ * sheet looks, so no second click is needed.
  */
 
 export interface Caja {
@@ -27,10 +31,8 @@ export interface Alineacion {
 /** Tolerance when comparing the two boxes: 3 cm or 2 % of the size, whichever is larger. */
 const TOL_M = 0.03;
 const TOL_REL = 0.02;
-/** Two clicks must agree on the shift within this. */
-export const TOL_ENTRE_PUNTOS = 0.05;
-/** Arrow points closer than this do not give a reliable direction. */
-export const DISTANCIA_MIN_FLECHA = 0.5;
+/** A face counts as a wall when its normal is within this of horizontal. */
+export const TOL_MURO_GRADOS = 15;
 
 /** Model frame (y up) → z-up frame, both relative to the origin. */
 export const aZArriba = (p: Vec3): Vec3 => [p[0], -p[2], p[1]];
@@ -105,18 +107,29 @@ export function puntoEnModelo(p: Vec3, a: Alineacion): Vec3 {
   return aYArriba([p[0] * a.escala + a.traslado[0], p[1] * a.escala + a.traslado[1], p[2] * a.escala + a.traslado[2]]);
 }
 
-/** Whether two alignments (from two clicks) agree. */
-export function concuerdan(a: Alineacion, b: Alineacion): boolean {
-  return a.escala === b.escala && Math.hypot(a.traslado[0] - b.traslado[0], a.traslado[1] - b.traslado[1], a.traslado[2] - b.traslado[2]) <= TOL_ENTRE_PUNTOS;
+export type Superficie = "muro" | "piso" | "techo" | "inclinada";
+
+/** What kind of face was clicked, from its normal in the viewer (z up). */
+export function superficie(normal: Vec3, tolGrados = TOL_MURO_GRADOS): Superficie {
+  const largo = Math.hypot(...normal);
+  if (largo < 1e-9) return "inclinada";
+  const nz = normal[2] / largo;
+  const tol = Math.sin((tolGrados * Math.PI) / 180);
+  if (Math.abs(nz) <= tol) return "muro";
+  if (nz >= Math.cos((tolGrados * Math.PI) / 180)) return "piso";
+  if (nz <= -Math.cos((tolGrados * Math.PI) / 180)) return "techo";
+  return "inclinada";
 }
 
 /**
- * Direction of the arrow on the floor, in radians, measured in the model's
- * frame from +z towards +x (the same convention the phone uses to turn the
- * model). Height is ignored.
+ * Which way a wall faces (out of the wall, towards whoever stands in front of
+ * it), in radians in the model's frame from +z towards +x — the same
+ * convention the phone uses to turn the model. From the viewer normal (z up);
+ * scale and shift do not change a direction.
  */
-export function rumbo(desde: Vec3, hacia: Vec3): number {
-  return Math.atan2(hacia[0] - desde[0], hacia[2] - desde[2]);
+export function rumboMuro(normalVisor: Vec3): number {
+  const n = aYArriba(normalVisor);
+  return Math.atan2(n[0], n[2]);
 }
 
 /** A readable name for an element of the model (its name, or its class). */
@@ -124,7 +137,6 @@ export function nombreElemento(m: ModeloRA, guid: string): string {
   const e = m.elementos.find((x) => x.guid === guid);
   return e ? e.nombre || e.clase : "";
 }
-
 
 /**
  * A model point as IFC coordinates in metres (x, y, z with z up), so a
@@ -136,15 +148,20 @@ export function coordenadasIfc(punto: Vec3, origen: Vec3): Vec3 {
 
 export interface Toque {
   posicion: Vec3;
+  /** Normal of the clicked face (viewer frame), when the viewer gives it. */
+  normal: Vec3 | null;
   modelId: string;
   runtimeId: number;
 }
 
 /** The "viewer.onPicked" payload (bare or wrapped in { data }), or null when it is not a click on an object. */
 export function leerToque(data: unknown): Toque | null {
-  const d = ((data as { data?: unknown } | null)?.data ?? data) as { position?: { x?: unknown; y?: unknown; z?: unknown }; modelId?: unknown; objectRuntimeId?: unknown } | null;
+  type V = { x?: unknown; y?: unknown; z?: unknown };
+  const d = ((data as { data?: unknown } | null)?.data ?? data) as { position?: V; normal?: V; modelId?: unknown; objectRuntimeId?: unknown } | null;
   const p = d?.position;
   if (!p || typeof p.x !== "number" || typeof p.y !== "number" || typeof p.z !== "number") return null;
   if (typeof d.modelId !== "string" || typeof d.objectRuntimeId !== "number") return null;
-  return { posicion: [p.x, p.y, p.z], modelId: d.modelId, runtimeId: d.objectRuntimeId };
+  const n = d.normal;
+  const normal: Vec3 | null = n && typeof n.x === "number" && typeof n.y === "number" && typeof n.z === "number" ? [n.x, n.y, n.z] : null;
+  return { posicion: [p.x, p.y, p.z], normal, modelId: d.modelId, runtimeId: d.objectRuntimeId };
 }

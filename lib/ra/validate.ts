@@ -76,20 +76,21 @@ export function validarNuevoPunto(body: unknown, hoy: string, maxDias: number): 
   const b = body as Record<string, unknown>;
   const modeloId = validarId(typeof b.modeloId === "string" ? b.modeloId : "");
   const nombre = textoCorto(b.nombre, "el nombre del punto", 120);
-  const referencia = textoCorto(b.referencia ?? "", "la referencia de la flecha", 200, true);
-  if (!referencia) throw mal("Escriba hacia dónde apunta la flecha (por ejemplo, «hacia el eje B, paralela al muro de fachada»).");
+  if (b.montaje !== "muro") throw mal("La hoja del QR va pegada en un muro o columna.");
+  const referencia = textoCorto(b.referencia ?? "", "dónde se pega la hoja", 200, true);
+  if (!referencia) throw mal("Escriba dónde se pega la hoja (por ejemplo, «muro del eje 3 entre B y C, cara hacia el patio»).");
   const elemento = textoCorto(b.elemento ?? "", "el elemento", 200, true);
   const punto = b.punto;
   if (!Array.isArray(punto) || punto.length !== 3 || !punto.every((x) => typeof x === "number" && Number.isFinite(x) && Math.abs(x) < 1e6)) {
     throw mal("El punto elegido no es válido.");
   }
   const rumbo = b.rumbo;
-  if (typeof rumbo !== "number" || !Number.isFinite(rumbo) || Math.abs(rumbo) > Math.PI + 1e-9) throw mal("La dirección de la flecha no es válida.");
+  if (typeof rumbo !== "number" || !Number.isFinite(rumbo) || Math.abs(rumbo) > Math.PI + 1e-9) throw mal("La orientación del muro no es válida.");
   const vence = typeof b.vence === "string" ? b.vence : "";
   const dia = new Date(`${vence}T12:00:00Z`);
   if (!FECHA.test(vence) || Number.isNaN(dia.getTime()) || dia.toISOString().slice(0, 10) !== vence) throw mal("La fecha de vencimiento no es válida.");
   const dias = Math.round((dia.getTime() - new Date(`${hoy}T12:00:00Z`).getTime()) / 86_400_000);
   if (dias < 0) throw mal("La fecha de vencimiento ya pasó.");
   if (dias > maxDias) throw mal(`El QR puede abrir como máximo ${maxDias} días; elija una fecha más cercana.`);
-  return { modeloId, nombre, referencia, punto: [punto[0], punto[1], punto[2]], rumbo, elemento, vence };
+  return { modeloId, nombre, referencia, montaje: "muro", punto: [punto[0], punto[1], punto[2]], rumbo, elemento, vence };
 }

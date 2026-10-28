@@ -72,7 +72,10 @@ export interface SubidaResponse {
   urlSubida: string;
 }
 
-/** A QR: where it goes in the model, where its arrow points, until when it opens. */
+/** Where the sheet is stuck: on a wall (owner's decision) or, for the first test QRs, on the floor. */
+export type Montaje = "muro" | "piso";
+
+/** A QR: where it goes in the model, which way it faces, until when it opens. */
 export interface PuntoGuardado {
   id: string;
   projectId: string;
@@ -80,11 +83,12 @@ export interface PuntoGuardado {
   /** What the QR holds (never guessable). */
   codigo: string;
   nombre: string;
-  /** For whoever sticks the sheet on site: where the arrow must point. */
+  /** For whoever sticks the sheet on site: which wall and face (on the floor: where the arrow points). */
   referencia: string;
+  montaje: Montaje;
   /** In the prepared model's frame (metres, y up, relative to its origin). */
   punto: Vec3;
-  /** Arrow direction, radians from +z towards +x of the model. */
+  /** Radians from +z towards +x of the model: where the wall face looks (on the floor: the arrow). */
   rumbo: number;
   /** The element the point was taken on. */
   elemento: string;
@@ -104,6 +108,7 @@ export interface NuevoPunto {
   modeloId: string;
   nombre: string;
   referencia: string;
+  montaje: "muro";
   punto: Vec3;
   rumbo: number;
   elemento: string;

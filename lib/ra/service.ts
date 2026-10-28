@@ -205,6 +205,7 @@ export async function crearPunto(ctx: Ctx, body: unknown): Promise<PuntoVista> {
     codigo: generarCodigo(),
     nombre: datos.nombre,
     referencia: datos.referencia,
+    montaje: datos.montaje,
     punto: datos.punto,
     rumbo: datos.rumbo,
     elemento: datos.elemento,

@@ -153,8 +153,9 @@ describe("puntos QR", () => {
   const punto = (modeloId: string, extra: Record<string, unknown> = {}) => ({
     modeloId,
     nombre: "Acceso principal",
-    referencia: "Hacia el eje B, paralela a la fachada",
-    punto: [1.5, 0, -0.25],
+    referencia: "Muro del eje 3 entre B y C, cara hacia el patio",
+    montaje: "muro",
+    punto: [1.5, 1.4, -0.25],
     rumbo: Math.PI / 2,
     elemento: "Losa 1",
     vence: "2026-11-26",
@@ -166,6 +167,7 @@ describe("puntos QR", () => {
     const listo = await prepararListo(m);
     const p = await crearPunto(m.ctx(LUIS), punto(listo.id));
     assert.equal(p.estado, "activo");
+    assert.equal(p.montaje, "muro");
     assert.match(p.codigo, /^[A-Za-z0-9_-]{22}$/);
     assert.equal(p.url, `https://trimble-docs.vercel.app/ra/q/${p.codigo}`);
     assert.equal(p.vence, "2026-11-27T04:59:59.000Z");
@@ -173,10 +175,11 @@ describe("puntos QR", () => {
     assert.equal("creadoPorId" in p, false);
     assert.equal((await estado(m.ctx(ANA))).puntos.length, 1);
   });
-  it("pide la referencia de la flecha y una fecha entre hoy y un año", async () => {
+  it("pide dónde se pega la hoja (en un muro) y una fecha entre hoy y un año", async () => {
     const m = montar();
     const listo = await prepararListo(m);
-    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { referencia: "  " })), /hacia dónde apunta la flecha/);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { referencia: "  " })), /dónde se pega la hoja/);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { montaje: "piso" })), /muro o columna/);
     await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { vence: "2026-10-26" })), /ya pasó/);
     await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { vence: "2027-12-01" })), /máximo 365 días/);
     await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { vence: "2026-02-30" })), /no es válida/);
@@ -197,7 +200,7 @@ describe("puntos QR", () => {
     assert.deepEqual(r, {
       estado: "activo",
       nombre: "Acceso principal",
-      referencia: "Hacia el eje B, paralela a la fachada",
+      referencia: "Muro del eje 3 entre B y C, cara hacia el patio",
       vence: "2026-11-27T04:59:59.000Z",
       modelo: { nombre: "Torre A - estructura", elementos: 40, triangulos: 1200, bytes: 5 },
     });
