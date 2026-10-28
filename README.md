@@ -16,6 +16,7 @@ ambos lugares** para Trimble Connect:
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
+| **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto, con cada versión nueva copiada al destino (fase 0: prueba de copia) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -45,6 +46,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Control de Obra (proyecto)](#control-de-obra-proyecto)
 - [Requisitos BIM (LOIN) (proyecto)](#requisitos-bim-loin-proyecto)
 - [Realidad aumentada con QR (en construcción)](#realidad-aumentada-con-qr-en-construcción)
+- [Publicar entre proyectos (en construcción)](#publicar-entre-proyectos-en-construcción)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -3804,6 +3806,83 @@ precisión medida, decidir para qué tareas sirve.
 
 ---
 
+## Publicar entre proyectos (en construcción)
+
+Objetivo: publicar un documento o una carpeta de un proyecto en otro proyecto
+de Trimble Connect, y que cada versión nueva del proyecto origen llegue sola
+al destino, sin subir dos veces el mismo documento al CDE. Piezas: el botón
+**Publicar**, la **configuración del proyecto destino** (la carpeta de
+recepción, que define su administrador) y la **actividad** (fecha, usuario,
+versión y notas de cada publicación).
+
+Trimble Connect no permite compartir carpetas entre proyectos ni avisa cuando
+aparece una versión nueva. Por eso la extensión **copia** cada versión: la lee
+del origen y la sube con el mismo nombre a la carpeta del destino, donde
+Trimble la registra como versión nueva (el número de versión del destino no
+tiene que coincidir con el del origen). La copia la hace el servidor con la
+sesión de quien abre la extensión, que debe ser miembro de los dos proyectos.
+
+Decisiones del dueño (28-10-2026): solo **origen → destino** (un cambio hecho
+en el destino se muestra y se pregunta, nunca se pisa); la actualización es
+**al abrir la extensión**, con un botón "Revisar ahora" (sin cuenta técnica ni
+revisión programada por ahora); en el uso real **alguien pertenece a los dos
+proyectos**; el administrador del destino define una **carpeta de recepción
+fija** por proyecto origen y lo publicado llega ahí sin aceptarlo.
+
+Fases: 0 prueba de copia en Trimble real (hecha; falta el resultado en un
+proyecto real) · 1 configuración del proyecto destino · 2 Publicar · 3
+actualización al abrir · 4 actividad y cierre. Cada fase espera el OK del dueño.
+
+### Fase 0: prueba de copia entre proyectos
+
+Es lo único que tiene la extensión por ahora. No guarda nada en Supabase, no
+cambia el proyecto abierto y no borra nada.
+
+1. **El archivo de este proyecto**: se abren las carpetas (con los permisos
+   del usuario en Trimble) y se hace clic en un archivo.
+2. **El proyecto destino**: la lista de los proyectos donde el usuario es
+   miembro, de todas las regiones (`GET /projects/me`).
+3. **La carpeta del destino**: se abre una carpeta y se pulsa "Usar esta
+   carpeta" (apagado donde solo hay lectura).
+4. **Hacer la prueba**, un paso por solicitud al servidor
+   ([`lib/publicar/prueba.ts`](lib/publicar/prueba.ts)):
+   - lee el archivo en el origen: nombre, versión, tamaño y huella MD5 si
+     Trimble la da;
+   - busca o crea, dentro de la carpeta elegida, `Publicar entre proyectos -
+     prueba (se puede borrar)`, y dice si los dos proyectos están en la misma
+     región de Trimble;
+   - **primera copia por el servidor**
+     ([`lib/publicar/copia.ts`](lib/publicar/copia.ts)): pide el enlace de
+     descarga del origen, abre la subida en el destino (`If-None-Match: *` si
+     el archivo no está) y pasa el contenido de un enlace al otro **por partes,
+     con su tamaño declarado**, sin cargar el archivo entero. Si eso falla y el
+     archivo pesa hasta 512 MB, lo baja otra vez entero y lo envía. Mide el
+     tiempo y la velocidad;
+   - espera la confirmación de Trimble (hasta 2 minutos por carga);
+   - **segunda copia** con el mismo nombre (`If-Match` con la última versión):
+     debe salir la versión 2 del mismo archivo;
+   - **protección**: abre una subida con `If-Match` de la primera versión, que
+     ya no es la última, y Trimble debe rechazarla. Es lo que en la fase 3
+     evita pisar un cambio hecho en el destino. Si Trimble la abriera, no se
+     envía contenido y la subida vence sola a los 90 minutos;
+   - **copia desde el navegador**: el navegador baja el archivo del origen y lo
+     sube al destino, para saber si sirve con archivos que el servidor no
+     alcanza a copiar a tiempo (hasta 512 MB);
+   - **compara** lo que llegó: versiones en el destino, tamaño y huella MD5.
+5. El resultado queda en una tabla con las conclusiones (lee, escribe, copia
+   por el servidor, versión nueva, protección, navegador, mismo archivo, misma
+   región y **el archivo más pesado que aguanta una copia** a la velocidad
+   medida) y un texto para copiar y compartir.
+
+Límites: la ruta de la prueba puede trabajar hasta 300 s (`maxDuration`) y la
+copia usa hasta 270 s de ellos; con archivos de menos de 5 MB no se mide la
+velocidad. Trimble acepta subidas de una sola parte hasta 5 GB.
+
+Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
+([`lib/publicar/routes.ts`](lib/publicar/routes.ts) confirma que es miembro):
+`GET /api/publicar/proyectos`, `GET /api/publicar/carpeta?proyecto=&folderId=`
+y `POST /api/publicar/prueba` (`{ paso, ... }`).
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -4016,6 +4095,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Control de Obra | `https://trimble-docs.vercel.app/manifest-control-obra.json` |
    | Requisitos BIM (LOIN) | `https://trimble-docs.vercel.app/manifest-loin.json` |
    | Realidad aumentada | `https://trimble-docs.vercel.app/manifest-ra.json` |
+   | Publicar entre proyectos | `https://trimble-docs.vercel.app/manifest-publicar.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;

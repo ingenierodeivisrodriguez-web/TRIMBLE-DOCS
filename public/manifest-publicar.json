@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/publicar",
+  "title": "Publicar entre proyectos",
+  "description": "Publicar documentos y carpetas de este proyecto en otro proyecto de Trimble Connect, con cada versión nueva copiada al destino. Por ahora: la prueba de copia entre proyectos (fase 0).",
+  "icon": "https://trimble-docs.vercel.app/icon-publicar.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project"],
+  "enabled": true
+}

@@ -109,6 +109,21 @@ async function resolveProjectRegion(accessToken: string, projectId: string): Pro
   return pickRegion(regions, project.location);
 }
 
+export interface MyProject {
+  id: string;
+  name: string;
+  /** The region it lives in, as /projects/me names it. */
+  location: string;
+}
+
+/** GET /projects/me on the master region: every project the user belongs to, in any region. */
+export async function listMyProjects(accessToken: string): Promise<MyProject[]> {
+  const data = (await trimbleFetch(`${MASTER_BASE_URL}/projects/me?fullyLoaded=false`, accessToken)) as Partial<ProjectMinimal>[];
+  return data
+    .filter((p) => typeof p?.id === "string")
+    .map((p) => ({ id: p.id as string, name: typeof p.name === "string" ? p.name : "", location: typeof p.location === "string" ? p.location : "" }));
+}
+
 export async function resolveProjectBaseUrl(
   accessToken: string,
   projectId: string
