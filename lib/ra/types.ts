@@ -1,3 +1,4 @@
+import type { EstadoQr } from "./codigo";
 import type { Filtros, Vec3 } from "./modelo";
 
 export type EstadoModelo = "subiendo" | "listo" | "eliminado";
@@ -49,6 +50,7 @@ export type ModeloVista = Omit<ModeloGuardado, "ruta" | "creadoPorId"> & { puede
 export interface EstadoResponse {
   config: ConfigRA;
   modelos: ModeloVista[];
+  puntos: PuntoVista[];
   esAdmin: boolean;
   /** False when the server has no Supabase Storage (models cannot be uploaded). */
   almacenamiento: boolean;
@@ -68,4 +70,52 @@ export interface SubidaResponse {
   modelo: ModeloVista;
   /** Signed URL the browser PUTs the file to (valid for a couple of hours, this object only). */
   urlSubida: string;
+}
+
+/** A QR: where it goes in the model, where its arrow points, until when it opens. */
+export interface PuntoGuardado {
+  id: string;
+  projectId: string;
+  modeloId: string;
+  /** What the QR holds (never guessable). */
+  codigo: string;
+  nombre: string;
+  /** For whoever sticks the sheet on site: where the arrow must point. */
+  referencia: string;
+  /** In the prepared model's frame (metres, y up, relative to its origin). */
+  punto: Vec3;
+  /** Arrow direction, radians from +z towards +x of the model. */
+  rumbo: number;
+  /** The element the point was taken on. */
+  elemento: string;
+  vence: string;
+  creado: string;
+  creadoPor: string | null;
+  creadoPorId: string | null;
+  anulado: string | null;
+  anuladoPor: string | null;
+  usos: number;
+  ultimoUso: string | null;
+}
+
+export type PuntoVista = Omit<PuntoGuardado, "creadoPorId"> & { estado: EstadoQr; url: string; modeloNombre: string; puedeAnular: boolean };
+
+export interface NuevoPunto {
+  modeloId: string;
+  nombre: string;
+  referencia: string;
+  punto: Vec3;
+  rumbo: number;
+  elemento: string;
+  /** Last day it opens, "AAAA-MM-DD" (Colombian time). */
+  vence: string;
+}
+
+/** What the phone page learns from a QR code (nothing more without a valid one). */
+export interface PublicoResponse {
+  estado: EstadoQr | "no-existe";
+  nombre?: string;
+  referencia?: string;
+  vence?: string;
+  modelo?: { nombre: string; elementos: number; triangulos: number; bytes: number };
 }

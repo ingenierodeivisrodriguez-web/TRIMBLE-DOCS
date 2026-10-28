@@ -15,7 +15,7 @@ ambos lugares** para Trimble Connect:
 | **Compras y Contratación** — abastecimiento a partir de los insumos del presupuesto, con accesos por rol y auditoría (primera fase: accesos) | Menú lateral del proyecto | `/compras` | `/manifest-compras.json` |
 | **Control de Obra** — control de cantidades, costos, avance y calidad ligado a los modelos 3D, multiempresa con licencias, roles y bitácora (fase 3: base comercial) | Menú lateral del proyecto | `/control-obra` | `/manifest-control-obra.json` |
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
-| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fase 1, preparar el modelo) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
+| **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (en construcción: fases 1 y 2, preparar el modelo y crear los QR) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -3531,7 +3531,7 @@ según una configuración de uso; el QR abre **sin sesión y con vencimiento**; 
 punto de anclaje se **elige en el visor 3D**; colorear es **a mano**, elemento
 por elemento (ligado por IFCGUID, nunca en los Property Sets).
 
-Fases: 0 prueba en el celular (hecha) · 1 preparar el modelo (hecha) · 2 punto de anclaje y QR
+Fases: 0 prueba en el celular (hecha) · 1 preparar el modelo (hecha) · 2 punto de anclaje y QR (hecha)
 · 3 visor en el celular con calibración · 4 cortes, transparencia y colorear
 · 5 cierre (manifiesto, guía, prueba en obra). Cada fase espera el OK del dueño.
 
@@ -3635,6 +3635,73 @@ y `ra_modelos`, bucket `ra-modelos`; RLS sin políticas). API:
 pantalla se queda quieta mientras convierte (si molesta, se pasa a un
 proceso aparte). IFC de más de 150 MB pueden no caber en la memoria del
 navegador.
+
+### Fase 2: punto de anclaje y QR
+
+El panel del visor tiene dos pestañas: **Preparar** (fase 1) y **Punto QR**
+([`components/ra/PanelPunto.tsx`](components/ra/PanelPunto.tsx)):
+
+1. **Modelo preparado**: se elige uno que esté listo. Sus IFC deben estar
+   abiertos en el visor (si falta alguno, lo dice).
+2. **Elegir el punto en el visor**: activa la herramienta de punto de
+   Trimble Connect. Primer clic: el punto del piso donde irá la **cruz** de la
+   hoja. Segundo clic: hacia dónde apunta la **flecha** (a más de 0.5 m; si
+   está más cerca, lo pide de nuevo).
+3. **Datos del QR**: nombre del punto, **hacia dónde debe apuntar la flecha**
+   (texto que va impreso para quien pega la hoja: «hacia el eje B, paralela
+   a la fachada») y **hasta qué día abre** (30 días al inicio, máximo 365;
+   vale todo ese día, hora de Colombia).
+4. **Crear QR**: muestra el QR y **Descargar hoja para imprimir (PDF)**.
+
+**Cómo se pasa el clic del visor al modelo preparado**
+([`lib/ra/anclaje.ts`](lib/ra/anclaje.ts)): el visor de Trimble tiene sus
+propias coordenadas (puede correr el origen de modelos georreferenciados y
+trabajar en metros o milímetros). En vez de suponerlas, se usa el elemento
+tocado: su caja en el visor y la del mismo IFCGUID en el modelo preparado dan
+la escala y el corrimiento. Si las dos cajas no tienen la misma forma (modelo
+girado o cambiado), el punto se rechaza con el motivo; los dos clics además
+deben dar el mismo corrimiento (5 cm). El elemento tocado debe estar en el
+modelo preparado (no quitado con los filtros).
+
+**La hoja** ([`lib/ra/hoja.ts`](lib/ra/hoja.ts)), tamaño carta: título y
+nombre, el QR (7.8 cm), la **flecha** naranja que sale de la **cruz** del
+punto, y los pasos para pegarla: las **coordenadas IFC del punto** (X, Y, Z en
+metros, para que topografía lo marque), poner la cruz sobre la marca, girar la
+hoja hasta que la flecha apunte a la referencia escrita y fijarla con cinta.
+Al pie: hasta cuándo abre y el código.
+
+**El QR** lleva `https://trimble-docs.vercel.app/ra/q/<código>`: un código
+aleatorio de 128 bits ([`lib/ra/codigo.ts`](lib/ra/codigo.ts)), que no se
+puede adivinar. Quien tenga el QR abre el modelo **sin iniciar sesión**
+(decisión del dueño) mientras esté activo. Deja de abrir si **vence**, si
+**se anula** o si **su modelo se eliminó** (por días sin uso o a mano). Los QR
+nunca se borran: se anulan.
+
+**En el celular**, `/ra/q/<código>`
+([`components/ra/QrCelular.tsx`](components/ra/QrCelular.tsx)) dice si el QR
+abre. Si abre, muestra el nombre del punto, el modelo, cuánto pesa la descarga
+y hasta cuándo abre; si no, el motivo (no existe, vencido, anulado, sin
+modelo). Sin un código válido no devuelve nada del proyecto. Cada escaneo de
+un QR activo se cuenta. La vista en realidad aumentada llega en la fase 3.
+
+**Menú del proyecto**: tabla **Puntos QR** (punto y elemento, modelo, hacia
+dónde apunta la flecha, abre hasta, estado, escaneos, quién lo creó),
+**Hoja PDF** para volver a imprimirla y **Anular** (quien lo creó o un
+administrador; pide confirmación).
+
+Base de datos: tabla `ra_puntos` en [`supabase/ra.sql`](supabase/ra.sql)
+(re-ejecutable). API nueva:
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /api/ra/modelos/{id}/archivo` | Enlace de 10 minutos al archivo del modelo (el panel lo lee para ubicar el punto) |
+| `POST /api/ra/puntos` | Crea un QR (punto, dirección de la flecha, referencia, vencimiento) |
+| `DELETE /api/ra/puntos/{id}` | Anula el QR (el registro queda) |
+| `GET /api/ra/publico/{código}` | **Sin sesión**: estado del QR para el celular; cuenta el escaneo si está activo |
+
+Supuestos de esta fase: la hoja va **en el piso** (la cruz sobre el punto
+marcado); cualquier miembro del proyecto crea QR; el código se guarda tal cual
+en la base de datos para poder volver a imprimir la hoja.
 
 ---
 

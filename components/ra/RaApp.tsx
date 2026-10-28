@@ -2,9 +2,13 @@
 
 import { CSSProperties, useCallback, useEffect, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
+import { descargar } from "../../lib/presupuesto/excel";
+import { coordenadasIfc } from "../../lib/ra/anclaje";
 import type { RaApi } from "../../lib/ra/client";
+import { TEXTO_ESTADO_QR } from "../../lib/ra/codigo";
+import { hojaPdf, nombreHoja } from "../../lib/ra/hoja";
 import { tamanoLegible } from "../../lib/ra/limites";
-import type { EstadoResponse, ModeloVista } from "../../lib/ra/types";
+import type { EstadoResponse, ModeloVista, PuntoVista } from "../../lib/ra/types";
 
 const AZUL = "#2f55b0";
 const dia = (ts: string | null) => (ts ? fechaHora(ts).slice(0, 10) : "—");
@@ -30,6 +34,7 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
   const [aviso, setAviso] = useState("");
   const [confirmar, setConfirmar] = useState<string | null>(null);
   const [verHistorial, setVerHistorial] = useState(false);
+  const [anular, setAnular] = useState<string | null>(null);
 
   const cargar = useCallback(async () => {
     setError("");
@@ -71,6 +76,39 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
       await cargar();
     } catch (err) {
       setError(mensaje(err));
+    }
+  }
+
+  async function anularQr(p: PuntoVista) {
+    setAnular(null);
+    setError("");
+    try {
+      await api.anularPunto(p.id);
+      setAviso(`Se anuló el QR «${p.nombre}»: ya no abre el modelo. Si ya está pegado en obra, retírelo.`);
+      await cargar();
+    } catch (err) {
+      setError(mensaje(err));
+    }
+  }
+
+  async function hoja(p: PuntoVista) {
+    const m = estado?.modelos.find((x) => x.id === p.modeloId);
+    if (!m) return;
+    try {
+      const blob = await hojaPdf({
+        nombre: p.nombre,
+        referencia: p.referencia,
+        url: p.url,
+        codigo: p.codigo,
+        vence: dia(p.vence),
+        proyecto: projectName,
+        modelo: m.nombre,
+        elemento: p.elemento,
+        coordenadas: coordenadasIfc(p.punto, m.origen),
+      });
+      descargar(blob, nombreHoja(p));
+    } catch (err) {
+      setError(`No se pudo generar la hoja: ${mensaje(err)}`);
     }
   }
 
@@ -166,6 +204,77 @@ export default function RaApp({ api, projectName }: { api: RaApi; projectName: s
                           ) : (
                             <button style={botonChico} onClick={() => setConfirmar(m.id)} title="Borra el archivo del almacenamiento ahora; el registro queda en el historial">
                               Eliminar
+                            </button>
+                          ))}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </section>
+      )}
+
+      {estado && (
+        <section style={caja}>
+          <h2 style={subtitulo}>Puntos QR ({estado.puntos.length})</h2>
+          {estado.puntos.length === 0 ? (
+            <p style={{ margin: 0 }}>Todavía no hay QR. Se crean en el panel del visor 3D, pestaña «Punto QR».</p>
+          ) : (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ borderCollapse: "collapse", width: "100%", fontSize: 13.5 }}>
+                <thead>
+                  <tr>
+                    {["Punto", "Modelo", "La flecha apunta", "Abre hasta", "Estado", "Escaneos", "Creado", ""].map((t) => (
+                      <th key={t} style={th}>
+                        {t}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody>
+                  {estado.puntos.map((p) => (
+                    <tr key={p.id} style={{ color: p.estado === "activo" ? undefined : "#6b7280" }}>
+                      <td style={td}>
+                        <b>{p.nombre}</b>
+                        {p.elemento && <div style={{ color: "#6b7280" }}>sobre {p.elemento}</div>}
+                      </td>
+                      <td style={td}>{p.modeloNombre || "—"}</td>
+                      <td style={td}>{p.referencia}</td>
+                      <td style={td}>{dia(p.vence)}</td>
+                      <td style={td}>
+                        <span style={{ fontWeight: 600, color: p.estado === "activo" ? "#2e6b22" : "#b3261e" }}>{TEXTO_ESTADO_QR[p.estado]}</span>
+                        {p.anulado && <div>{`el ${dia(p.anulado)}${p.anuladoPor ? ` por ${p.anuladoPor}` : ""}`}</div>}
+                      </td>
+                      <td style={tdNum}>
+                        {p.usos}
+                        {p.ultimoUso && <div style={{ color: "#6b7280" }}>último {dia(p.ultimoUso)}</div>}
+                      </td>
+                      <td style={td}>
+                        {dia(p.creado)}
+                        <div style={{ color: "#6b7280" }}>{p.creadoPor}</div>
+                      </td>
+                      <td style={{ ...td, whiteSpace: "nowrap" }}>
+                        {p.estado === "activo" && (
+                          <button style={botonChico} onClick={() => hoja(p)} title="La hoja para imprimir y pegar en obra">
+                            Hoja PDF
+                          </button>
+                        )}{" "}
+                        {p.puedeAnular &&
+                          (anular === p.id ? (
+                            <span>
+                              ¿Anular?{" "}
+                              <button style={{ ...botonChico, background: "#b3261e", color: "#fff", borderColor: "#b3261e" }} onClick={() => anularQr(p)}>
+                                Sí
+                              </button>{" "}
+                              <button style={botonChico} onClick={() => setAnular(null)}>
+                                No
+                              </button>
+                            </span>
+                          ) : (
+                            <button style={botonChico} onClick={() => setAnular(p.id)} title="El QR deja de abrir el modelo para siempre">
+                              Anular
                             </button>
                           ))}
                       </td>

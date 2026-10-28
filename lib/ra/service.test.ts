@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { Caller } from "../propiedades/service";
-import { confirmarSubida, Ctx, eliminar, estado, guardarConfig, iniciarSubida, limpiar } from "./service";
+import { anularPunto, archivoModelo, confirmarSubida, crearPunto, Ctx, eliminar, estado, guardarConfig, iniciarSubida, limpiar, publico } from "./service";
 import { archivosEnMemoria, memoryStore, RaStore } from "./store";
 
 const ANA: Caller = { id: "u-ana", name: "Ana Pérez", isAdmin: false };
@@ -146,5 +146,92 @@ describe("eliminación automática por falta de uso", () => {
   it("sin configuración guardada, el plazo es de 30 días", async () => {
     const m = montar();
     assert.equal((await estado(m.ctx(ANA))).config.diasSinUso, 30);
+  });
+});
+
+describe("puntos QR", () => {
+  const punto = (modeloId: string, extra: Record<string, unknown> = {}) => ({
+    modeloId,
+    nombre: "Acceso principal",
+    referencia: "Hacia el eje B, paralela a la fachada",
+    punto: [1.5, 0, -0.25],
+    rumbo: Math.PI / 2,
+    elemento: "Losa 1",
+    vence: "2026-11-26",
+    ...extra,
+  });
+
+  it("cualquier miembro crea un QR sobre un modelo listo; el código no se adivina y vence al final del día", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const p = await crearPunto(m.ctx(LUIS), punto(listo.id));
+    assert.equal(p.estado, "activo");
+    assert.match(p.codigo, /^[A-Za-z0-9_-]{22}$/);
+    assert.equal(p.url, `https://trimble-docs.vercel.app/ra/q/${p.codigo}`);
+    assert.equal(p.vence, "2026-11-27T04:59:59.000Z");
+    assert.equal(p.modeloNombre, "Torre A - estructura");
+    assert.equal("creadoPorId" in p, false);
+    assert.equal((await estado(m.ctx(ANA))).puntos.length, 1);
+  });
+  it("pide la referencia de la flecha y una fecha entre hoy y un año", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { referencia: "  " })), /hacia dónde apunta la flecha/);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { vence: "2026-10-26" })), /ya pasó/);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { vence: "2027-12-01" })), /máximo 365 días/);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { vence: "2026-02-30" })), /no es válida/);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id, { punto: [1, "a", 3] })), /punto elegido/);
+  });
+  it("no se crea sobre un modelo eliminado ni de otro proyecto", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    await assert.rejects(crearPunto(m.ctx(ADMIN, "proy-2"), punto(listo.id)), /no existe/);
+    await eliminar(m.ctx(ANA), listo.id);
+    await assert.rejects(crearPunto(m.ctx(ANA), punto(listo.id)), /ya no tiene archivo/);
+  });
+  it("el celular ve el QR activo, sin datos del proyecto, y cuenta el escaneo", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const p = await crearPunto(m.ctx(ANA), punto(listo.id));
+    const r = await publico(m.store, p.codigo, m.reloj());
+    assert.deepEqual(r, {
+      estado: "activo",
+      nombre: "Acceso principal",
+      referencia: "Hacia el eje B, paralela a la fachada",
+      vence: "2026-11-27T04:59:59.000Z",
+      modelo: { nombre: "Torre A - estructura", elementos: 40, triangulos: 1200, bytes: 5 },
+    });
+    const [vista] = (await estado(m.ctx(ANA))).puntos;
+    assert.equal(vista.usos, 1);
+  });
+  it("un código inventado o mal formado no existe", async () => {
+    const m = montar();
+    assert.deepEqual(await publico(m.store, "AbCdEfGhIjKlMnOpQrStUv"), { estado: "no-existe" });
+    assert.deepEqual(await publico(m.store, "../x"), { estado: "no-existe" });
+  });
+  it("anulado o vencido: el celular solo sabe el nombre y no se cuenta", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const a = await crearPunto(m.ctx(ANA), punto(listo.id));
+    const b = await crearPunto(m.ctx(ANA), punto(listo.id, { nombre: "Escalera", vence: "2026-10-28" }));
+    await assert.rejects(anularPunto(m.ctx(LUIS), a.id), /Solo quien creó el QR/);
+    assert.equal((await anularPunto(m.ctx(ADMIN), a.id)).estado, "anulado");
+    assert.deepEqual(await publico(m.store, a.codigo, m.reloj()), { estado: "anulado", nombre: "Acceso principal" });
+    m.avanzarDias(2);
+    assert.deepEqual(await publico(m.store, b.codigo, m.reloj()), { estado: "vencido", nombre: "Escalera" });
+    assert.ok((await estado(m.ctx(ANA))).puntos.every((p) => p.usos === 0));
+  });
+  it("si el modelo se elimina, sus QR dejan de abrir", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    const p = await crearPunto(m.ctx(ANA), punto(listo.id));
+    await eliminar(m.ctx(ANA), listo.id);
+    assert.equal((await publico(m.store, p.codigo, m.reloj())).estado, "sin-modelo");
+    assert.equal((await estado(m.ctx(ANA))).puntos[0].estado, "sin-modelo");
+  });
+  it("el panel recibe un enlace temporal al archivo del modelo listo", async () => {
+    const m = montar();
+    const listo = await prepararListo(m);
+    assert.match((await archivoModelo(m.ctx(LUIS), listo.id)).url, /\.raq$/);
   });
 });

@@ -42,11 +42,42 @@ create table if not exists public.ra_modelos (
 create index if not exists ra_modelos_proyecto on public.ra_modelos (project_id, creado desc);
 create index if not exists ra_modelos_vencen on public.ra_modelos (elimina_en) where estado <> 'eliminado';
 
+-- Puntos QR (fase 2): dónde va cada QR en el modelo y hacia dónde apunta su
+-- flecha. El código es el que lleva el QR; quien lo tenga abre el modelo sin
+-- iniciar sesión mientras no venza ni se anule. Nunca se borran: se anulan.
+create table if not exists public.ra_puntos (
+  id uuid primary key default gen_random_uuid(),
+  project_id text not null,
+  modelo_id uuid not null references public.ra_modelos (id),
+  codigo text not null unique check (codigo ~ '^[A-Za-z0-9_-]{22}$'),
+  nombre text not null,
+  -- Texto para quien pega la hoja en obra: hacia dónde debe apuntar la flecha.
+  referencia text not null default '',
+  -- Punto en el marco del modelo preparado (metros, y hacia arriba, relativo a su origen).
+  punto jsonb not null,
+  -- Dirección de la flecha en radianes (desde +z hacia +x del modelo).
+  rumbo double precision not null,
+  -- Elemento sobre el que se tomó el punto (para mostrarlo).
+  elemento text not null default '',
+  vence timestamptz not null,
+  creado timestamptz not null default now(),
+  creado_por text,
+  creado_por_id text,
+  anulado timestamptz,
+  anulado_por text,
+  usos integer not null default 0,
+  ultimo_uso timestamptz
+);
+
+create index if not exists ra_puntos_proyecto on public.ra_puntos (project_id, creado desc);
+
 alter table public.ra_config enable row level security;
 alter table public.ra_modelos enable row level security;
+alter table public.ra_puntos enable row level security;
 
 grant select, insert, update, delete on public.ra_config to service_role;
 grant select, insert, update, delete on public.ra_modelos to service_role;
+grant select, insert, update, delete on public.ra_puntos to service_role;
 
 -- Bucket privado para los archivos del celular (sin acceso público: el servidor
 -- entrega enlaces firmados que vencen). Solo existe en Supabase.

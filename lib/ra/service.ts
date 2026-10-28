@@ -1,5 +1,6 @@
 import { Caller, ServiceError } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
+import { DIAS_QR_MAX, esCodigo, estadoQr, fechaMasDias, finDelDia, generarCodigo, urlQr } from "./codigo";
 import type { RaStore } from "./store";
 import {
   ConfigRA,
@@ -8,9 +9,12 @@ import {
   HORAS_SUBIDA_INCOMPLETA,
   ModeloGuardado,
   ModeloVista,
+  PublicoResponse,
+  PuntoGuardado,
+  PuntoVista,
   SubidaResponse,
 } from "./types";
-import { validarDias, validarId, validarNuevoModelo } from "./validate";
+import { validarDias, validarId, validarNuevoModelo, validarNuevoPunto } from "./validate";
 
 /**
  * Rules of the AR extension (phase 1: models prepared for the phone).
@@ -19,6 +23,9 @@ import { validarDias, validarId, validarNuevoModelo } from "./validate";
  *   how many days an unused file is kept.
  * - The file is removed by itself once `diasSinUso` pass without use (owner's
  *   decision); the row stays as "eliminado" so there is a record of it.
+ * - QR points (phase 2): any member creates them on a ready model; only who
+ *   created one or an administrator cancels it. They are never deleted. The QR
+ *   opens without login (owner's decision) until it expires or is cancelled.
  */
 
 export interface Ctx {
@@ -84,8 +91,15 @@ export async function limpiar(store: RaStore, ahora: Date, limite = 50): Promise
 export async function estado(ctx: Ctx): Promise<EstadoResponse> {
   // Cleaning is best-effort: it must never keep the screen from opening.
   await limpiar(ctx.store, ahoraDe(ctx)).catch((err) => console.error("[ra] limpieza:", err));
-  const [cfg, modelos] = await Promise.all([config(ctx), ctx.store.listar(ctx.projectId)]);
-  return { config: cfg, modelos: modelos.map((m) => vista(ctx, m)), esAdmin: ctx.caller.isAdmin, almacenamiento: ctx.store.archivos.disponible };
+  const [cfg, modelos, puntos] = await Promise.all([config(ctx), ctx.store.listar(ctx.projectId), ctx.store.listarPuntos(ctx.projectId)]);
+  const porId = new Map(modelos.map((m) => [m.id, m]));
+  return {
+    config: cfg,
+    modelos: modelos.map((m) => vista(ctx, m)),
+    puntos: puntos.map((p) => vistaPunto(ctx, p, porId.get(p.modeloId) ?? null)),
+    esAdmin: ctx.caller.isAdmin,
+    almacenamiento: ctx.store.archivos.disponible,
+  };
 }
 
 export async function guardarConfig(ctx: Ctx, body: unknown): Promise<ConfigRA> {
@@ -154,4 +168,79 @@ export async function eliminar(ctx: Ctx, id: string): Promise<ModeloVista> {
     ctx,
     await ctx.store.actualizar(ctx.projectId, m.id, { estado: "eliminado", eliminado: ahoraDe(ctx).toISOString(), eliminadoPor: ctx.caller.name, motivoEliminacion: "manual" })
   );
+}
+
+// ------------------------------------------------------------------ QR points
+
+function vistaPunto(ctx: Ctx, p: PuntoGuardado, m: ModeloGuardado | null): PuntoVista {
+  const { creadoPorId, ...resto } = p;
+  return {
+    ...resto,
+    estado: estadoQr(p, m, ahoraDe(ctx)),
+    url: urlQr(p.codigo),
+    modeloNombre: m?.nombre ?? "",
+    puedeAnular: !p.anulado && (ctx.caller.isAdmin || creadoPorId === ctx.caller.id),
+  };
+}
+
+/** Today's date in Colombia, "AAAA-MM-DD". */
+const hoyColombia = (ahora: Date) => fechaMasDias(ahora, 0);
+
+/** A short-lived link to a ready model's file, for the viewer panel (to place the QR on it). */
+export async function archivoModelo(ctx: Ctx, id: string): Promise<{ url: string }> {
+  const m = await modelo(ctx, id);
+  if (m.estado !== "listo") throw new ServiceError("Ese modelo ya no tiene archivo; prepárelo de nuevo.", 409, "eliminado");
+  return { url: await ctx.store.archivos.firmar(m.ruta, 600) };
+}
+
+export async function crearPunto(ctx: Ctx, body: unknown): Promise<PuntoVista> {
+  const ahora = ahoraDe(ctx);
+  const datos = validarNuevoPunto(body, hoyColombia(ahora), DIAS_QR_MAX);
+  const m = await modelo(ctx, datos.modeloId);
+  if (m.estado !== "listo") throw new ServiceError("Ese modelo ya no tiene archivo; prepárelo de nuevo antes de crear el QR.", 409, "eliminado");
+  const p = await ctx.store.crearPunto({
+    id: globalThis.crypto.randomUUID(),
+    projectId: ctx.projectId,
+    modeloId: m.id,
+    codigo: generarCodigo(),
+    nombre: datos.nombre,
+    referencia: datos.referencia,
+    punto: datos.punto,
+    rumbo: datos.rumbo,
+    elemento: datos.elemento,
+    vence: finDelDia(datos.vence),
+    creado: ahora.toISOString(),
+    creadoPor: ctx.caller.name,
+    creadoPorId: ctx.caller.id,
+    anulado: null,
+    anuladoPor: null,
+    usos: 0,
+    ultimoUso: null,
+  });
+  return vistaPunto(ctx, p, m);
+}
+
+/** Cancels a QR for good: it stops opening (the record stays). */
+export async function anularPunto(ctx: Ctx, id: string): Promise<PuntoVista> {
+  const p = await ctx.store.obtenerPunto(ctx.projectId, validarId(id));
+  if (!p) throw new ServiceError("Ese QR no existe en este proyecto.", 404, "no-existe");
+  const m = await ctx.store.obtener(ctx.projectId, p.modeloId);
+  if (p.anulado) return vistaPunto(ctx, p, m);
+  if (p.creadoPorId !== ctx.caller.id && !ctx.caller.isAdmin) throw new ServiceError("Solo quien creó el QR o un administrador del proyecto puede anularlo.", 403, "ajeno");
+  return vistaPunto(ctx, await ctx.store.actualizarPunto(ctx.projectId, p.id, { anulado: ahoraDe(ctx).toISOString(), anuladoPor: ctx.caller.name }), m);
+}
+
+/**
+ * What the phone learns from a scanned code, without login. Counts the scan
+ * when the QR is active. Nothing about the project beyond the QR's own name.
+ */
+export async function publico(store: RaStore, codigo: string, ahora: Date = new Date()): Promise<PublicoResponse> {
+  if (!esCodigo(codigo)) return { estado: "no-existe" };
+  const p = await store.puntoPorCodigo(codigo);
+  if (!p) return { estado: "no-existe" };
+  const m = await store.obtener(p.projectId, p.modeloId);
+  const estado = estadoQr(p, m, ahora);
+  if (estado !== "activo" || !m) return { estado, nombre: p.nombre };
+  await store.actualizarPunto(p.projectId, p.id, { usos: p.usos + 1, ultimoUso: ahora.toISOString() });
+  return { estado, nombre: p.nombre, referencia: p.referencia, vence: p.vence, modelo: { nombre: m.nombre, elementos: m.elementos, triangulos: m.triangulos, bytes: m.bytes } };
 }

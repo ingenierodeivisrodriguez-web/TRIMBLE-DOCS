@@ -1,6 +1,8 @@
 import { ApiError, createRequester, TokenSource } from "../propiedades/client";
 import { expiresSoon } from "../propiedades/token";
-import type { ArchivoFuente, ConfigRA, EstadoResponse, ModeloVista, NuevoModelo, SubidaResponse } from "./types";
+import { descomprimir, desempaquetar } from "./formato";
+import type { ModeloRA } from "./modelo";
+import type { ArchivoFuente, ConfigRA, EstadoResponse, ModeloVista, NuevoModelo, NuevoPunto, PuntoVista, SubidaResponse } from "./types";
 
 export type Progreso = (cargados: number, total: number | null) => void;
 
@@ -13,6 +15,10 @@ export interface RaApi {
   /** Registers the model, uploads its file and confirms it. */
   subirModelo(datos: NuevoModelo, archivo: Uint8Array, alAvanzar?: Progreso): Promise<ModeloVista>;
   eliminar(id: string): Promise<ModeloVista>;
+  /** A ready model's file, read back (to place a QR on it). */
+  leerModelo(id: string, alAvanzar?: Progreso): Promise<ModeloRA>;
+  crearPunto(p: NuevoPunto): Promise<PuntoVista>;
+  anularPunto(id: string): Promise<PuntoVista>;
 }
 
 async function leerConProgreso(res: Response, alAvanzar?: Progreso): Promise<Uint8Array> {
@@ -77,5 +83,13 @@ export function raApi(projectId: string, auth: TokenSource): RaApi {
       return request<ModeloVista>(`/modelos/${encodeURIComponent(modelo.id)}/confirmar`, { method: "POST" });
     },
     eliminar: (id) => request<ModeloVista>(`/modelos/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    async leerModelo(id, alAvanzar) {
+      const { url } = await request<{ url: string }>(`/modelos/${encodeURIComponent(id)}/archivo`);
+      const res = await fetch(url);
+      if (!res.ok) throw new ApiError(`El almacenamiento no entregó el modelo (HTTP ${res.status}).`, res.status);
+      return desempaquetar(await descomprimir(await leerConProgreso(res, alAvanzar)));
+    },
+    crearPunto: (p) => request<PuntoVista>("/puntos", { method: "POST", body: JSON.stringify(p) }),
+    anularPunto: (id) => request<PuntoVista>(`/puntos/${encodeURIComponent(id)}`, { method: "DELETE" }),
   };
 }

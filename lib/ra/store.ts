@@ -1,6 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
-import type { ConfigRA, ModeloGuardado } from "./types";
+import type { ConfigRA, ModeloGuardado, PuntoGuardado } from "./types";
 
 /**
  * Persistence of the AR extension. Two implementations with the same rules:
@@ -34,6 +34,12 @@ export interface RaStore {
   actualizar(projectId: string, id: string, cambios: Partial<ModeloGuardado>): Promise<ModeloGuardado>;
   /** Models not yet deleted whose `eliminaEn` is before `antes` (any project). */
   vencidos(antes: string, limite: number): Promise<ModeloGuardado[]>;
+  listarPuntos(projectId: string): Promise<PuntoGuardado[]>;
+  obtenerPunto(projectId: string, id: string): Promise<PuntoGuardado | null>;
+  /** Any project: the phone only has the code. */
+  puntoPorCodigo(codigo: string): Promise<PuntoGuardado | null>;
+  crearPunto(p: PuntoGuardado): Promise<PuntoGuardado>;
+  actualizarPunto(projectId: string, id: string, cambios: Partial<PuntoGuardado>): Promise<PuntoGuardado>;
   archivos: ArchivosRA;
 }
 
@@ -88,6 +94,52 @@ const deFila = (f: Fila): ModeloGuardado => ({
   eliminado: (f.eliminado as string | null) ?? null,
   eliminadoPor: (f.eliminado_por as string | null) ?? null,
   motivoEliminacion: (f.motivo_eliminacion as ModeloGuardado["motivoEliminacion"]) ?? null,
+});
+
+const CAMPOS_PUNTO: Record<string, string> = {
+  id: "id",
+  projectId: "project_id",
+  modeloId: "modelo_id",
+  codigo: "codigo",
+  nombre: "nombre",
+  referencia: "referencia",
+  punto: "punto",
+  rumbo: "rumbo",
+  elemento: "elemento",
+  vence: "vence",
+  creado: "creado",
+  creadoPor: "creado_por",
+  creadoPorId: "creado_por_id",
+  anulado: "anulado",
+  anuladoPor: "anulado_por",
+  usos: "usos",
+  ultimoUso: "ultimo_uso",
+};
+
+const aFilaPunto = (p: Partial<PuntoGuardado>): Fila => {
+  const fila: Fila = {};
+  for (const [k, v] of Object.entries(p)) if (v !== undefined && CAMPOS_PUNTO[k]) fila[CAMPOS_PUNTO[k]] = v;
+  return fila;
+};
+
+const dePunto = (f: Fila): PuntoGuardado => ({
+  id: String(f.id),
+  projectId: String(f.project_id),
+  modeloId: String(f.modelo_id),
+  codigo: String(f.codigo),
+  nombre: String(f.nombre),
+  referencia: String(f.referencia ?? ""),
+  punto: f.punto as PuntoGuardado["punto"],
+  rumbo: Number(f.rumbo),
+  elemento: String(f.elemento ?? ""),
+  vence: String(f.vence),
+  creado: String(f.creado),
+  creadoPor: (f.creado_por as string | null) ?? null,
+  creadoPorId: (f.creado_por_id as string | null) ?? null,
+  anulado: (f.anulado as string | null) ?? null,
+  anuladoPor: (f.anulado_por as string | null) ?? null,
+  usos: Number(f.usos ?? 0),
+  ultimoUso: (f.ultimo_uso as string | null) ?? null,
 });
 
 function claveServidor(): { url: string; headers: Record<string, string> } | null {
@@ -189,6 +241,32 @@ function supabaseStore(): RaStore | null {
         await json<Fila[]>(`/ra_modelos?project_id=${eq(projectId)}&id=${eq(id)}`, { method: "PATCH", headers: { Prefer: "return=representation" }, body: JSON.stringify(aFila(resto)) })
       );
     },
+    async listarPuntos(projectId) {
+      return (await all<Fila>(`/ra_puntos?project_id=${eq(projectId)}&select=*&order=creado.desc`)).map(dePunto);
+    },
+    async obtenerPunto(projectId, id) {
+      const filas = await json<Fila[]>(`/ra_puntos?project_id=${eq(projectId)}&id=${eq(id)}&select=*`);
+      return filas[0] ? dePunto(filas[0]) : null;
+    },
+    async puntoPorCodigo(codigo) {
+      const filas = await json<Fila[]>(`/ra_puntos?codigo=${eq(codigo)}&select=*`);
+      return filas[0] ? dePunto(filas[0]) : null;
+    },
+    async crearPunto(p) {
+      const filas = await json<Fila[]>(`/ra_puntos`, { method: "POST", headers: { Prefer: "return=representation" }, body: JSON.stringify(aFilaPunto(p)) });
+      if (!filas[0]) throw new StoreError("No se pudo guardar el punto.");
+      return dePunto(filas[0]);
+    },
+    async actualizarPunto(projectId, id, cambios) {
+      const { id: _i, projectId: _p, codigo: _c, ...resto } = cambios;
+      const filas = await json<Fila[]>(`/ra_puntos?project_id=${eq(projectId)}&id=${eq(id)}`, {
+        method: "PATCH",
+        headers: { Prefer: "return=representation" },
+        body: JSON.stringify(aFilaPunto(resto)),
+      });
+      if (!filas[0]) throw new StoreError("No se encontró el punto.", 404);
+      return dePunto(filas[0]);
+    },
     async vencidos(antes, limite) {
       return (await json<Fila[]>(`/ra_modelos?estado=neq.eliminado&elimina_en=lt.${encodeURIComponent(antes)}&select=*&order=elimina_en.asc&limit=${limite}`)).map(deFila);
     },
@@ -220,7 +298,8 @@ export function archivosEnMemoria(): ArchivosRA & { contenido: Map<string, Uint8
 export function memoryStore(archivos: ArchivosRA = archivosEnMemoria()): RaStore {
   const configs = new Map<string, ConfigRA>();
   const modelos = new Map<string, ModeloGuardado>();
-  const copia = (m: ModeloGuardado) => structuredClone(m);
+  const puntos = new Map<string, PuntoGuardado>();
+  const copia = <T>(m: T) => structuredClone(m);
   return {
     archivos,
     async getConfig(projectId) {
@@ -257,6 +336,31 @@ export function memoryStore(archivos: ArchivosRA = archivosEnMemoria()): RaStore
         .sort((a, b) => (a.eliminaEn ?? "").localeCompare(b.eliminaEn ?? ""))
         .slice(0, limite)
         .map(copia);
+    },
+    async listarPuntos(projectId) {
+      return [...puntos.values()].filter((p) => p.projectId === projectId).sort((a, b) => b.creado.localeCompare(a.creado)).map(copia);
+    },
+    async obtenerPunto(projectId, id) {
+      const p = puntos.get(id);
+      return p && p.projectId === projectId ? copia(p) : null;
+    },
+    async puntoPorCodigo(codigo) {
+      const p = [...puntos.values()].find((x) => x.codigo === codigo);
+      return p ? copia(p) : null;
+    },
+    async crearPunto(p) {
+      if (!modelos.has(p.modeloId)) throw new StoreError("No se encontró el modelo.", 404);
+      if ([...puntos.values()].some((x) => x.codigo === p.codigo)) throw new StoreError("Código repetido.", 409);
+      puntos.set(p.id, copia(p));
+      return copia(p);
+    },
+    async actualizarPunto(projectId, id, cambios) {
+      const p = puntos.get(id);
+      if (!p || p.projectId !== projectId) throw new StoreError("No se encontró el punto.", 404);
+      const { id: _i, projectId: _p, codigo: _c, ...resto } = cambios;
+      const nuevo = { ...p, ...resto };
+      puntos.set(id, nuevo);
+      return copia(nuevo);
     },
   };
 }
