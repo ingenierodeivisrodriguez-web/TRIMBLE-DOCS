@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { PublicarApi } from "../../lib/publicar/client";
-import type { ProyectoInfo, PublicacionInfo, Recepcion } from "../../lib/publicar/types";
+import type { DestinoInfo, PublicacionInfo } from "../../lib/publicar/types";
 import { acceptButton, baseInput, labelStyle, message, Notice } from "../presupuesto/ui";
 import { card, linkBtn, select, texto, titulo } from "../compras/estilos";
 import Explorador, { Elegido } from "./Explorador";
@@ -31,9 +31,8 @@ export default function PublicarTab({
   onCambio: () => void;
 }) {
   const [elegidos, setElegidos] = useState<Elegido[]>([]);
-  const [proyectos, setProyectos] = useState<ProyectoInfo[] | null>(null);
+  const [destinos, setDestinos] = useState<DestinoInfo[] | null>(null);
   const [destino, setDestino] = useState("");
-  const [recepcion, setRecepcion] = useState<{ destinoNombre: string; recepcion: Recepcion | null } | null>(null);
   const [nota, setNota] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -41,26 +40,13 @@ export default function PublicarTab({
 
   useEffect(() => {
     api
-      .proyectos()
-      .then((r) => setProyectos(r.proyectos))
+      .destinos()
+      .then((r) => setDestinos(r.destinos))
       .catch((err) => setError(message(err)));
   }, [api]);
 
-  useEffect(() => {
-    setRecepcion(null);
-    if (!destino) return;
-    let vigente = true;
-    api
-      .recepcionHacia(destino)
-      .then((r) => vigente && setRecepcion(r))
-      .catch((err) => vigente && setError(message(err)));
-    return () => {
-      vigente = false;
-    };
-  }, [api, destino]);
-
-  const otros = (proyectos ?? []).filter((p) => !p.actual);
-  const listo = elegidos.length > 0 && !!destino && !!recepcion && !busy;
+  const elegido = destinos?.find((d) => d.id === destino) ?? null;
+  const listo = elegidos.length > 0 && !!elegido && !busy;
 
   function alternar(e: Elegido) {
     setHecho(null);
@@ -120,28 +106,37 @@ export default function PublicarTab({
             <label style={labelStyle} htmlFor="destino-publicar">
               Proyecto destino
             </label>
-            {proyectos && otros.length === 0 ? (
-              <Notice kind="warning">No perteneces a otro proyecto de Trimble Connect: para publicar necesitas ser miembro del proyecto destino.</Notice>
+            {destinos && destinos.length === 0 ? (
+              <Notice kind="warning">
+                No hay proyectos destino: aparecen los proyectos donde eres miembro y los que definieron una carpeta de recepción para este proyecto (pide a su
+                administrador que la defina en su pestaña &quot;Recibido en este proyecto&quot;).
+              </Notice>
             ) : (
               <select id="destino-publicar" value={destino} onChange={(e) => setDestino(e.target.value)} style={{ ...select, minWidth: 320 }}>
-                <option value="">{proyectos ? "Elige el proyecto destino…" : "Cargando tus proyectos…"}</option>
-                {otros.map((p) => (
-                  <option key={p.id} value={p.id}>
-                    {p.nombre}
+                <option value="">{destinos ? "Elige el proyecto destino…" : "Cargando los proyectos…"}</option>
+                {destinos?.map((d) => (
+                  <option key={d.id} value={d.id}>
+                    {d.nombre}
+                    {d.miembro ? "" : " (te espera con su carpeta de recepción)"}
                   </option>
                 ))}
               </select>
             )}
-            {destino && recepcion && (
-              <div style={{ marginTop: 6, fontSize: 13.5 }}>
-                {recepcion.recepcion ? (
-                  <>
-                    Llega a: <strong>{recepcion.recepcion.carpetaRuta}</strong>
-                  </>
+            {elegido && (
+              <div style={{ marginTop: 6, fontSize: 13.5, display: "grid", gap: 6 }}>
+                {elegido.recepcion ? (
+                  <div>
+                    Llega a: <strong>{elegido.recepcion.carpetaRuta}</strong>
+                  </div>
                 ) : (
                   <Notice kind="warning">
-                    El administrador de {recepcion.destinoNombre} aún no definió la carpeta de recepción para este proyecto. Puedes publicar: queda esperando y se copia
-                    cuando la defina (en su pestaña &quot;Recibido en este proyecto&quot;).
+                    El administrador de {elegido.nombre} aún no definió la carpeta de recepción para este proyecto. Puedes publicar: queda esperando y se copia cuando la
+                    defina (en su pestaña &quot;Recibido en este proyecto&quot;).
+                  </Notice>
+                )}
+                {!elegido.miembro && (
+                  <Notice kind="info">
+                    No eres miembro de {elegido.nombre}: la copia la hace la cuenta técnica, que debe estar invitada en los dos proyectos (pestaña &quot;Cuenta técnica&quot;).
                   </Notice>
                 )}
               </div>
@@ -162,7 +157,7 @@ export default function PublicarTab({
           {hecho && (
             <Notice kind={hecho.publicadas ? "info" : "warning"}>
               {hecho.publicadas
-                ? `${hecho.publicadas === 1 ? "Publicado" : `${hecho.publicadas} publicados`}: ${recepcion?.recepcion ? "se está copiando al destino (arriba se ve el avance)." : "quedan esperando la carpeta de recepción del destino."}`
+                ? `${hecho.publicadas === 1 ? "Publicado" : `${hecho.publicadas} publicados`}: ${elegido?.recepcion ? "se está copiando al destino (arriba se ve el avance)." : "quedan esperando la carpeta de recepción del destino."}`
                 : "No se publicó nada nuevo."}
               {hecho.avisos.map((a, i) => (
                 <div key={i}>{a}</div>

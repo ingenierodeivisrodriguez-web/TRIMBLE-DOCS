@@ -86,6 +86,29 @@ origen (`downloadurl?format=TRB`); si Trimble no acepta el TRB, se repite sin
 archivo. **Pendiente**: que el dueño diga, con un modelo real, cuál camino
 salió y si el visor del destino quedó listo sin "Conversión en curso".
 
+## Cuenta técnica (fases A y B, 28-10-2026)
+
+La decisión 3 ("alguien pertenece a los dos proyectos") **cambió**: al probar
+SELVIA ↔ otro proyecto de otra empresa, nadie estaba en ambos (la lista de
+destinos sale de `/projects/me` del usuario y la copia necesita leer y escribir
+con el mismo token). Ahora:
+
+- `lib/publicar/cuenta.ts`: conectar (PKCE con `lib/manuales/oauth.ts`, misma app
+  "apibasedatos" y `TRIMBLE_CLIENT_SECRET`; `redirect_uri` http://localhost y
+  se pega la dirección), `tokenTecnico` (refresh de un solo uso, turno en
+  `publicar_cuenta.turno_hasta`), `mantenerSesion` (cron diario
+  `/api/publicar/mantener` en `vercel.json`), desconectar (revoca y borra).
+  Solo conectan los ids de `PUBLICAR_ADMINS` (patrón de `CONTROL_OBRA_ADMINS`).
+- `ladosPara` en `service.ts`: cuenta técnica si abre los dos proyectos; si no,
+  el token del usuario si abre ambos; si no, aviso con a quién invitar.
+- Publicar sin ser miembro del destino exige su recepción activa para este
+  origen (consentimiento); `unirDestinos` (explorar.ts) suma esos destinos.
+  `recepciones.destino_nombre` (columna agregada con `add column if not
+  exists`) para mostrar el destino a quien no lo ve.
+- `revisarAcceso`: miembro, escritura en cada recepción, lectura de lo publicado.
+- Pendiente (solo si el dueño lo pide): fase C, copia automática diaria con el
+  mismo cron (ya hay token sin usuario).
+
 ## Publicación (fases 1 a 4, hechas el 28-10-2026)
 
 - `lib/publicar/service.ts` (recepciones, publicar, estado, `sincronizar`,

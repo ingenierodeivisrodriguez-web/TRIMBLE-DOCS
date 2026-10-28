@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { FolderDetails, RawFolderItem } from "../trimbleApi";
-import { listarProyectos, ordenarItems, TcExplorar, verCarpeta } from "./explorar";
+import { listarProyectos, ordenarItems, TcExplorar, unirDestinos, verCarpeta } from "./explorar";
 
 const item = (id: string, name: string, type: "FOLDER" | "FILE", extra: Partial<RawFolderItem> = {}): RawFolderItem => ({ id, name, type, createdOn: "2026-10-01", modifiedOn: "2026-10-02", ...extra });
 
@@ -76,4 +76,24 @@ test("una carpeta de otro proyecto o un id mal escrito se rechazan", async () =>
   const tc = tcFalso({ ajena: { id: "ajena", name: "X", parentId: null, projectId: "P9", permission: "FULL_ACCESS", path: [] } }, {});
   await assert.rejects(() => verCarpeta(tc, "P1", "ajena"), /no es de este proyecto/);
   await assert.rejects(() => verCarpeta(tc, "P1", "../x"), /carpeta no es válida/);
+});
+
+test("los destinos son mis otros proyectos y los que esperan a este con su carpeta de recepción", () => {
+  const rec = (destino: string, nombre: string, activa = true) =>
+    ({ id: `r-${destino}`, destinoProyecto: destino, origenProyecto: "P1", origenNombre: "Edificio Centro", destinoNombre: nombre, carpetaId: "c", carpetaRuta: `${nombre} / Recibidos`, activa, actualizado: "", actualizadoPor: null, actualizadoPorId: null });
+  const r = unirDestinos(
+    [
+      { id: "P1", nombre: "Edificio Centro", actual: true, region: "" },
+      { id: "P2", nombre: "Torre Norte", actual: false, region: "" },
+    ],
+    [rec("P2", "Torre Norte"), rec("P9", "Obra de otra empresa"), rec("P8", "Desactivada", false)],
+    "P1"
+  );
+  assert.deepEqual(
+    r.map((d) => [d.nombre, d.miembro, !!d.recepcion]),
+    [
+      ["Obra de otra empresa", false, true],
+      ["Torre Norte", true, true],
+    ]
+  );
 });

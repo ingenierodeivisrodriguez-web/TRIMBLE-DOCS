@@ -4,7 +4,7 @@
  */
 import type { FolderDetails, MyProject, ProjectDetails, RawFolderItem } from "../trimbleApi";
 import { esIdTrimble, PublicarError } from "./errores";
-import type { CarpetaInfo, ItemCarpeta, ProyectoInfo } from "./types";
+import type { CarpetaInfo, DestinoInfo, ItemCarpeta, ProyectoInfo, Recepcion } from "./types";
 
 /** Trimble Connect through the user's token. */
 export interface TcExplorar {
@@ -71,4 +71,20 @@ export async function verCarpeta(tc: TcExplorar, projectId: string, folderId: st
     carpeta: { id: carpeta.id, nombre: nombreDe(carpeta), ruta, permiso: carpeta.permission },
     items: ordenarItems(raw),
   };
+}
+
+/**
+ * Where this project can publish: the user's other projects, plus those
+ * whose reception folder expects this project (consent of their
+ * administrator: the technical account copies there).
+ */
+export function unirDestinos(proyectos: ProyectoInfo[], recepciones: Recepcion[], actual: string): DestinoInfo[] {
+  const destinos = new Map<string, DestinoInfo>();
+  for (const p of proyectos) if (!p.actual && p.id !== actual) destinos.set(p.id, { id: p.id, nombre: p.nombre, miembro: true, recepcion: null });
+  for (const r of recepciones) {
+    if (!r.activa || r.destinoProyecto === actual || r.origenProyecto !== actual) continue;
+    const ya = destinos.get(r.destinoProyecto);
+    destinos.set(r.destinoProyecto, { id: r.destinoProyecto, nombre: ya?.nombre ?? (r.destinoNombre || r.destinoProyecto), miembro: !!ya, recepcion: r });
+  }
+  return [...destinos.values()].sort((a, b) => porNombre.compare(a.nombre, b.nombre));
 }

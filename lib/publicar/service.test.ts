@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Caller } from "../propiedades/service";
 import { nubeFalsa } from "./pruebas/trimbleFalso";
-import { cambiarEstado, Ctx, getActividad, getPublicaciones, guardarRecepcion, desactivarRecepcion, PasoArchivo, publicar, recepcionHacia, sincronizar } from "./service";
+import { cambiarEstado, Ctx, getActividad, getPublicaciones, getRecepciones, guardarRecepcion, desactivarRecepcion, PasoArchivo, publicar, recepcionHacia, revisarAcceso, sincronizar } from "./service";
 import { memoryStore } from "./store";
 import type { PlanSincronizacion } from "./types";
 
@@ -22,19 +22,32 @@ function escenario(opciones: { sinCopiaTrimble?: boolean } = {}) {
   const detalles = nube.sembrarCarpeta(planos, "Detalles");
   nube.sembrarArchivo(detalles, "DET-01.pdf", "detalle 1");
   const recibidos = nube.sembrarCarpeta(proyectos.LAB.raiz, "Recibidos");
-  const ctx = (projectId: string, caller: Caller, miembroDe = ["SELVIA", "LAB"]): Ctx => ({
+  const sinAcceso = () => new Error("El proyecto no fue encontrado, o el usuario actual no tiene acceso a el.");
+  /** `tecnica`: the projects the technical account was invited to (none: not connected). */
+  const ctx = (projectId: string, caller: Caller, miembroDe = ["SELVIA", "LAB"], tecnica: string[] | null = null): Ctx => ({
     projectId,
     caller,
     store,
     deps: {
       aqui: lado(projectId),
       abrir: async (id) => {
-        if (!miembroDe.includes(id) || !(id in proyectos)) throw new Error("El proyecto no fue encontrado, o el usuario actual no tiene acceso a el.");
+        if (!miembroDe.includes(id) || !(id in proyectos)) throw sinAcceso();
         return lado(id);
       },
       nombreProyecto: async (id) => {
         if (!miembroDe.includes(id)) throw new Error("sin acceso");
         return NOMBRES[id] ?? id;
+      },
+      tecnico: {
+        cuenta: async () => (tecnica ? { email: "publicaciones@dyco.co" } : null),
+        abrir: async (id) => {
+          if (!tecnica?.includes(id)) throw sinAcceso();
+          return lado(id);
+        },
+        nombreProyecto: async (id) => {
+          if (!tecnica?.includes(id)) throw sinAcceso();
+          return NOMBRES[id] ?? id;
+        },
       },
       fetch: nube.fetchFalso,
     },
@@ -214,15 +227,73 @@ test("dos personas no copian el mismo archivo a la vez", async () => {
   assert.equal(e.enCarpeta(e.recibidos).length, 0);
 });
 
-test("sin acceso a los dos proyectos el plan avisa y no copia, y para publicar hay que ser miembro del destino", async () => {
+test("sin ser miembro del destino solo se publica si definió la carpeta de recepción; sin nadie en los dos ni cuenta técnica, el plan avisa", async () => {
+  const e = escenario();
+  const luis = () => e.ctx("SELVIA", LUIS, ["SELVIA"]);
+  await assert.rejects(() => publicar(luis(), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" }), /no ha definido una carpeta de recepción/);
+  await assert.rejects(() => recepcionHacia(luis(), "LAB"), /no ha definido una carpeta de recepción/);
+  await recibir(e);
+  const r = await publicar(luis(), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" });
+  assert.equal(r.publicadas.length, 1);
+  const { plan } = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"]));
+  assert.equal(plan.tareas.length, 0);
+  assert.match(plan.avisos[0], /miembro de los dos proyectos, o la cuenta técnica/);
+  assert.equal((await getActividad(e.ctx("OTRO", LUIS, ["OTRO"]), {})).entradas.length, 0, "otro proyecto no ve esta actividad");
+});
+
+test("con la cuenta técnica invitada a los dos proyectos se copia aunque nadie sea miembro de ambos", async () => {
+  const e = escenario();
+  const ambos = ["SELVIA", "LAB"];
+  // The destination's administrator isn't a member of SELVIA: its name comes through the technical account.
+  const r = await guardarRecepcion(e.ctx("LAB", ADMIN_LAB, ["LAB"], ambos), { origen: "SELVIA", carpetaId: e.recibidos });
+  assert.equal(r.recepciones[0].origenNombre, "Selvia");
+  assert.equal(r.recepciones[0].destinoNombre, "Laboratorio");
+  await publicar(e.ctx("SELVIA", LUIS, ["SELVIA"], ambos), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "Emisión" });
+  const { pasos } = await e.alDia(e.ctx("SELVIA", LUIS, ["SELVIA"], ambos));
+  assert.equal(pasos[0]?.ok, true, pasos[0]?.mensaje);
+  assert.equal(e.enCarpeta(e.recibidos).length, 1);
+  const { entradas } = await getActividad(e.ctx("LAB", ADMIN_LAB, ["LAB"]), {});
+  assert.equal(entradas[0].accion, "copiar");
+  assert.match(entradas[0].nota, /Copiado con la cuenta técnica/);
+  assert.equal(entradas[0].usuario, "Luis Pérez", "queda quien tenía la extensión abierta");
+  // A new version, reviewed from the destination by someone who only belongs there.
+  e.nube.sembrarArchivo(e.planos, "EST-001.pdf", "plano versión 2");
+  const otra = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"], ambos));
+  assert.equal(otra.pasos[0]?.ok, true);
+  assert.equal(e.enCarpeta(e.recibidos)[0].versiones.length, 2);
+});
+
+test("si la cuenta técnica no está invitada a uno de los proyectos, el aviso lo dice", async () => {
   const e = escenario();
   await recibir(e);
-  await assert.rejects(() => publicar(e.ctx("SELVIA", LUIS, ["SELVIA"]), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" }), /necesitas ser miembro/);
   await publicar(e.ctx("SELVIA", ANA), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" });
-  const { plan } = await e.alDia(e.ctx("LAB", LUIS, ["LAB"]));
+  const { plan } = await e.alDia(e.ctx("LAB", ADMIN_LAB, ["LAB"], ["LAB"]));
   assert.equal(plan.tareas.length, 0);
-  assert.match(plan.avisos[0], /miembro de los dos proyectos/);
-  assert.equal((await getActividad(e.ctx("OTRO", LUIS, ["OTRO"]), {})).entradas.length, 0, "otro proyecto no ve esta actividad");
+  assert.match(plan.avisos[0], /publicaciones@dyco\.co\) aún no es miembro de los dos proyectos/);
+});
+
+test("quien publica sin ver el destino le da su nombre real al proyecto origen en la recepción", async () => {
+  const e = escenario();
+  await guardarRecepcion(e.ctx("LAB", ADMIN_LAB, ["LAB"]), { origen: "SELVIA", carpetaId: e.recibidos });
+  assert.equal((await recepcionHacia(e.ctx("SELVIA", LUIS, ["SELVIA"]), "LAB")).recepcion?.origenNombre, "SELVIA", "el administrador no lo ve: queda el id");
+  await publicar(e.ctx("SELVIA", LUIS, ["SELVIA"]), { destino: "LAB", items: [{ tipo: "archivo", id: e.plano }], nota: "" });
+  const [rec] = (await getRecepciones(e.ctx("LAB", ADMIN_LAB, ["LAB"]))).recepciones;
+  assert.equal(rec.origenNombre, "Selvia");
+});
+
+test("la revisión de acceso dice qué le falta a la cuenta técnica en cada carpeta", async () => {
+  const e = escenario();
+  assert.match((await revisarAcceso(e.ctx("LAB", ADMIN_LAB))).comprobaciones[0].mensaje, /no está conectada/);
+  assert.match((await revisarAcceso(e.ctx("LAB", ADMIN_LAB, ["LAB"], ["SELVIA"]))).comprobaciones[1].mensaje, /Invita a publicaciones@dyco\.co a este proyecto/);
+  await recibir(e);
+  e.nube.carpetas.get(e.recibidos)!.permiso = "READ";
+  const { comprobaciones } = await revisarAcceso(e.ctx("LAB", ADMIN_LAB, ["LAB"], ["LAB", "SELVIA"]));
+  const rec = comprobaciones.find((c) => c.que.startsWith("Recepción de"))!;
+  assert.equal(rec.ok, false);
+  assert.match(rec.mensaje, /Solo puede leer «Laboratorio \/ Recibidos»/);
+  await publicar(e.ctx("SELVIA", ANA), { destino: "LAB", items: [{ tipo: "carpeta", id: e.planos }], nota: "" });
+  const desdeOrigen = (await revisarAcceso(e.ctx("SELVIA", ANA, ["SELVIA", "LAB"], ["LAB", "SELVIA"]))).comprobaciones;
+  assert.equal(desdeOrigen.find((c) => c.que === "Publicado: Planos")?.ok, true);
 });
 
 test("si Trimble no copia entre proyectos, el servidor sube el archivo y la copia se registra al confirmarse", async () => {

@@ -2,9 +2,11 @@
  * "Publicar entre proyectos": the destination's reception folders, the
  * publications and their files, keeping them up to date, and the activity.
  *
- * Everything in Trimble Connect happens with the caller's own token, so a
- * publication is kept up to date by whoever opens the extension (in the
- * origin or the destination) and belongs to both projects. A copy never
+ * Copies are made with the technical account when it is connected and
+ * invited to both projects; otherwise with the token of whoever opens the
+ * extension (in the origin or the destination), if they belong to both.
+ * Publishing to a project one isn't a member of needs its consent: an
+ * active reception folder for this project. A copy never
  * replaces silently what someone changed in the destination: it stays as a
  * "diferencia" until a person decides. Nothing is deleted anywhere.
  */
@@ -14,7 +16,7 @@ import type { Caller } from "../propiedades/service";
 import { ArchivoTrimble, copiarUltimaVersion, Lado, leerArchivo, situacionDe } from "./copiar";
 import { esIdTrimble, PublicarError } from "./errores";
 import type { PublicarStore } from "./store";
-import type { AccionActividad, ArchivoSeguido, EntradaActividad, PasoArchivo, PlanSincronizacion, Publicacion, PublicacionInfo, Recepcion, Tarea } from "./types";
+import type { AccionActividad, ArchivoSeguido, Comprobacion, EntradaActividad, PasoArchivo, PlanSincronizacion, Publicacion, PublicacionInfo, Recepcion, Tarea } from "./types";
 
 export type { PasoArchivo };
 
@@ -30,6 +32,13 @@ export interface Ctx {
     abrir(projectId: string): Promise<Lado>;
     /** A project's name; throws when the caller can't see it. */
     nombreProyecto(projectId: string): Promise<string>;
+    /** The technical account, when the server has it set up. */
+    tecnico?: {
+      /** Its e-mail, or null when it isn't connected; throws when its session lapsed. */
+      cuenta(): Promise<{ email: string } | null>;
+      abrir(projectId: string): Promise<Lado>;
+      nombreProyecto(projectId: string): Promise<string>;
+    };
     fetch?: typeof fetch;
     ahora?: () => Date;
   };
@@ -49,12 +58,55 @@ function ladoDe(ctx: Ctx, projectId: string): Promise<Lado> {
   return projectId === ctx.projectId ? Promise.resolve(ctx.deps.aqui) : ctx.deps.abrir(projectId);
 }
 
+/** A project's name, read with the caller's token or else the technical account's. */
 async function nombreDe(ctx: Ctx, projectId: string, porDefecto = ""): Promise<string> {
-  try {
-    return (await ctx.deps.nombreProyecto(projectId)) || porDefecto || projectId;
-  } catch {
-    return porDefecto || projectId;
+  for (const leer of [ctx.deps.nombreProyecto, ctx.deps.tecnico?.nombreProyecto]) {
+    if (!leer) continue;
+    try {
+      const nombre = await leer(projectId);
+      if (nombre) return nombre;
+    } catch {
+      // not visible with that token
+    }
   }
+  return porDefecto || projectId;
+}
+
+/**
+ * Which session copies between two projects: the technical account when it
+ * belongs to both, else the caller when they do; otherwise why not.
+ */
+async function ladosPara(ctx: Ctx, origen: string, destino: string): Promise<{ o: Lado; d: Lado; tecnica: boolean } | { aviso: string }> {
+  const ambos = async (abrir: (id: string) => Promise<Lado>) => {
+    try {
+      const [o, d] = await Promise.all([abrir(origen), abrir(destino)]);
+      return { o, d };
+    } catch {
+      return null;
+    }
+  };
+  let cuenta: { email: string } | null = null;
+  let fallo = "";
+  const t = ctx.deps.tecnico;
+  if (t) {
+    try {
+      cuenta = await t.cuenta();
+    } catch (err) {
+      fallo = err instanceof Error ? err.message : String(err);
+    }
+    if (cuenta) {
+      const r = await ambos((id) => t.abrir(id));
+      if (r) return { ...r, tecnica: true };
+    }
+  }
+  const r = await ambos((id) => ladoDe(ctx, id));
+  if (r) return { ...r, tecnica: false };
+  if (fallo) return { aviso: fallo.replace(/\.$/, "") };
+  return {
+    aviso: cuenta
+      ? `la cuenta técnica (${cuenta.email}) aún no es miembro de los dos proyectos: hay que invitarla en el que falte`
+      : "la copia la hace alguien que sea miembro de los dos proyectos, o la cuenta técnica cuando esté conectada e invitada a ambos",
+  };
 }
 
 function idDe(v: unknown, que: string): string {
@@ -208,6 +260,7 @@ export async function guardarRecepcion(ctx: Ctx, body: unknown) {
     destinoProyecto: ctx.projectId,
     origenProyecto: origen,
     origenNombre,
+    destinoNombre: nombreAqui,
     carpetaId: carpeta.id,
     carpetaRuta,
     activa: true,
@@ -241,13 +294,14 @@ export async function desactivarRecepcion(ctx: Ctx, body: unknown) {
 /** Where publishing to `destino` would arrive (the caller must belong to it). */
 export async function recepcionHacia(ctx: Ctx, destino: string): Promise<{ destinoNombre: string; recepcion: Recepcion | null }> {
   idDe(destino, "el proyecto destino");
-  try {
-    await ctx.deps.abrir(destino);
-  } catch {
-    throw new PublicarError("No eres miembro de ese proyecto en Trimble Connect.", 403, "sin-acceso");
-  }
+  const miembro = await ctx.deps.abrir(destino).then(
+    () => true,
+    () => false
+  );
   const r = await ctx.store.recepcion(destino, ctx.projectId);
-  return { destinoNombre: await nombreDe(ctx, destino), recepcion: r?.activa ? r : null };
+  const activa = r?.activa ? r : null;
+  if (!miembro && !activa) throw new PublicarError("No eres miembro de ese proyecto y no ha definido una carpeta de recepción para este proyecto.", 403, "sin-acceso");
+  return { destinoNombre: await nombreDe(ctx, destino, activa?.destinoNombre), recepcion: activa };
 }
 
 /** { destino, items: [{ tipo, id }], nota }: publishes files and folders of this project there. */
@@ -259,12 +313,21 @@ export async function publicar(ctx: Ctx, body: unknown): Promise<{ publicadas: s
   if (!items.length || items.length > 200) throw new PublicarError("Elige entre 1 y 200 archivos o carpetas.");
   const nota = typeof o.nota === "string" ? o.nota.trim() : "";
   if (nota.length > MAX_NOTA) throw new PublicarError(`La nota puede tener hasta ${MAX_NOTA} caracteres.`);
-  try {
-    await ctx.deps.abrir(destino);
-  } catch {
-    throw new PublicarError("Para publicar en ese proyecto necesitas ser miembro de él en Trimble Connect.", 403, "sin-acceso");
+  // Publishing where one isn't a member needs the destination's consent: its reception folder for this project.
+  const miembro = await ctx.deps.abrir(destino).then(
+    () => true,
+    () => false
+  );
+  const recepcion = await ctx.store.recepcion(destino, ctx.projectId);
+  if (!miembro && !recepcion?.activa) {
+    throw new PublicarError("Ese proyecto no ha definido una carpeta de recepción para este proyecto: pide a su administrador que la defina en «Recibido en este proyecto».", 403, "sin-recepcion");
   }
-  const [origenNombre, destinoNombre] = await Promise.all([nombreDe(ctx, ctx.projectId), nombreDe(ctx, destino)]);
+  const [origenNombre, destinoNombre] = await Promise.all([nombreDe(ctx, ctx.projectId), nombreDe(ctx, destino, recepcion?.destinoNombre)]);
+  // The destination's administrator may not see this project: give its reception folder the real name.
+  if (recepcion && (!recepcion.origenNombre || recepcion.origenNombre === ctx.projectId) && origenNombre !== ctx.projectId) {
+    const { id: _id, ...resto } = recepcion;
+    await ctx.store.guardarRecepcion({ ...resto, origenNombre });
+  }
   const c = ctx.deps.aqui.cliente;
   const publicadas: string[] = [];
   const avisos: string[] = [];
@@ -363,20 +426,22 @@ const nombreCompleto = (a: { subcarpeta: string; nombre: string }) => (a.subcarp
  */
 async function plan(ctx: Ctx): Promise<PlanSincronizacion> {
   const pubs = (await ctx.store.publicaciones(ctx.projectId)).filter((p) => p.estado === "activa");
-  const lados = new Map<string, Promise<Lado | null>>();
-  const abrir = (id: string) => {
-    if (!lados.has(id)) lados.set(id, ladoDe(ctx, id).catch(() => null));
-    return lados.get(id)!;
+  const pares = new Map<string, ReturnType<typeof ladosPara>>();
+  const ladosDe = (p: Publicacion) => {
+    const clave = `${p.origenProyecto}>${p.destinoProyecto}`;
+    if (!pares.has(clave)) pares.set(clave, ladosPara(ctx, p.origenProyecto, p.destinoProyecto));
+    return pares.get(clave)!;
   };
   const resultado: PlanSincronizacion = { tareas: [], avisos: [], diferencias: 0, revisadas: 0 };
   for (const p0 of pubs) {
     let p = p0;
     const etiqueta = `“${p.nombre}” (${p.origenNombre} → ${p.destinoNombre})`;
-    const [o, d] = await Promise.all([abrir(p.origenProyecto), abrir(p.destinoProyecto)]);
-    if (!o || !d) {
-      resultado.avisos.push(`${etiqueta}: la actualiza alguien que sea miembro de los dos proyectos.`);
+    const lados = await ladosDe(p);
+    if ("aviso" in lados) {
+      resultado.avisos.push(`${etiqueta}: ${lados.aviso}.`);
       continue;
     }
+    const { o, d } = lados;
     if (!p.destinoCarpetaId) {
       const r = await ctx.store.recepcion(p.destinoProyecto, p.origenProyecto);
       if (!r?.activa) {
@@ -457,17 +522,20 @@ async function contexto(ctx: Ctx, archivoId: string) {
   const s = await ctx.store.archivo(archivoId);
   if (!s) throw new PublicarError("No se encontró el archivo.", 404);
   const p = await publicacionDeAqui(ctx, s.publicacionId);
-  let o: Lado, d: Lado;
-  try {
-    [o, d] = await Promise.all([ladoDe(ctx, p.origenProyecto), ladoDe(ctx, p.destinoProyecto)]);
-  } catch {
-    throw new PublicarError("Para copiarlo necesitas ser miembro de los dos proyectos.", 403, "sin-acceso");
-  }
-  return { s, p, o, d };
+  const lados = await ladosPara(ctx, p.origenProyecto, p.destinoProyecto);
+  if ("aviso" in lados) throw new PublicarError(`No se puede copiar: ${lados.aviso}.`, 403, "sin-acceso");
+  return { s, p, ...lados };
 }
 
 /** Records a finished copy and frees the file. */
-async function terminar(ctx: Ctx, s: ArchivoSeguido, p: Publicacion, origen: { versionId: string | null; revision: number | null }, destino: { fileId: string | null; versionId: string | null; revision: number | null }) {
+async function terminar(
+  ctx: Ctx,
+  s: ArchivoSeguido,
+  p: Publicacion,
+  origen: { versionId: string | null; revision: number | null },
+  destino: { fileId: string | null; versionId: string | null; revision: number | null },
+  tecnica: boolean
+) {
   const accion: AccionActividad = s.estado === "diferencia" ? "reemplazar" : s.origenVersionId ? "actualizar" : "copiar";
   await ctx.store.actualizarArchivo(s.id, {
     estado: "al-dia",
@@ -489,7 +557,7 @@ async function terminar(ctx: Ctx, s: ArchivoSeguido, p: Publicacion, origen: { v
     actualizar: `Actualización automática – versión ${origen.revision ?? "?"} del origen.`,
     reemplazar: "Reemplazó lo que había en el destino, con la confirmación de quien lo revisó.",
   }[accion as "copiar" | "actualizar" | "reemplazar"];
-  await registrar(ctx, { ...p, publicacionId: p.id }, accion, { nombre: nombreCompleto(s), versionOrigen: origen.revision, versionDestino: destino.revision, nota });
+  await registrar(ctx, { ...p, publicacionId: p.id }, accion, { nombre: nombreCompleto(s), versionOrigen: origen.revision, versionDestino: destino.revision, nota: tecnica ? `${nota} Copiado con la cuenta técnica.` : nota });
 }
 
 /**
@@ -499,7 +567,7 @@ async function terminar(ctx: Ctx, s: ArchivoSeguido, p: Publicacion, origen: { v
  * it, only if it's still the version the person saw.
  */
 async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | null): Promise<PasoArchivo> {
-  const { s, p, o, d } = await contexto(ctx, archivoId);
+  const { s, p, o, d, tecnica } = await contexto(ctx, archivoId);
   if (p.estado !== "activa") return { ok: false, mensaje: "Esa publicación no está activa." };
   if (!p.destinoCarpetaId) return { ok: false, mensaje: "La publicación aún no tiene carpeta en el destino." };
   if (siVersion && s.estado !== "diferencia") return { ok: false, mensaje: "Ese archivo no tiene una diferencia por decidir." };
@@ -533,7 +601,7 @@ async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | nu
       const esLaNuestra = !!s.destinoVersionId && b.versionId === s.destinoVersionId;
       if (situacionDe(a, b) === "al-dia") {
         // Same content already there (ours or not): just remember it.
-        await terminar(ctx, s, p, a, { fileId: b.id, versionId: b.versionId, revision: b.revision });
+        await terminar(ctx, s, p, a, { fileId: b.id, versionId: b.versionId, revision: b.revision }, tecnica);
         return { ok: true, listo: true, mensaje: `“${s.nombre}” ya estaba igual en el destino.` };
       }
       if (!esLaNuestra) {
@@ -558,7 +626,7 @@ async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | nu
       return { ok: false, mensaje: r.mensaje };
     }
     if (r.metodo === "trimble") {
-      await terminar(ctx, s, p, a, { fileId: r.fileId ?? null, versionId: r.versionId ?? null, revision: r.revision ?? null });
+      await terminar(ctx, s, p, a, { fileId: r.fileId ?? null, versionId: r.versionId ?? null, revision: r.revision ?? null }, tecnica);
       return { ok: true, listo: true, mensaje: r.mensaje };
     }
     await ctx.store.actualizarArchivo(s.id, { copiandoUploadId: r.uploadId ?? null, copiandoVersionId: a.versionId, copiandoRevision: a.revision, enCursoHasta: iso(ctx, MINUTOS_SUBIDA), actualizado: iso(ctx) });
@@ -571,11 +639,11 @@ async function copiarArchivo(ctx: Ctx, archivoId: string, siVersion: string | nu
 
 /** Checks with Trimble an upload started by "copiar" and records it when it's done. */
 async function confirmar(ctx: Ctx, archivoId: string): Promise<PasoArchivo> {
-  const { s, p, d } = await contexto(ctx, archivoId);
+  const { s, p, d, tecnica } = await contexto(ctx, archivoId);
   if (!s.copiandoUploadId) return { ok: s.estado === "al-dia", listo: true, mensaje: s.estado === "al-dia" ? "Ya está al día." : "No hay una copia en curso." };
   const e = await estadoSubida(d.cliente, s.copiandoUploadId);
   if (e.status === "DONE") {
-    await terminar(ctx, s, p, { versionId: s.copiandoVersionId, revision: s.copiandoRevision }, { fileId: e.fileId, versionId: e.versionId, revision: e.revision });
+    await terminar(ctx, s, p, { versionId: s.copiandoVersionId, revision: s.copiandoRevision }, { fileId: e.fileId, versionId: e.versionId, revision: e.revision }, tecnica);
     return { ok: true, listo: true, mensaje: `Trimble confirmó la carga: versión ${e.revision ?? "?"} en el destino.` };
   }
   if (e.status === "ERROR" || e.status === "EXPIRED" || e.respuesta.estado === 404) {
@@ -585,6 +653,48 @@ async function confirmar(ctx: Ctx, archivoId: string): Promise<PasoArchivo> {
     return { ok: false, mensaje };
   }
   return { ok: true, listo: false, uploadId: s.copiandoUploadId, mensaje: "Trimble aún no confirma la carga." };
+}
+
+// ---------------------------------------------------------------- the technical account in this project
+
+/**
+ * What the technical account can do in this project: be a member, write in
+ * each reception folder (as destination) and read what is published (as
+ * origin). So each administrator sees what permission is missing.
+ */
+export async function revisarAcceso(ctx: Ctx): Promise<{ comprobaciones: Comprobacion[] }> {
+  const t = ctx.deps.tecnico;
+  const lista: Comprobacion[] = [];
+  let cuenta: { email: string } | null = null;
+  try {
+    cuenta = t ? await t.cuenta() : null;
+  } catch (err) {
+    return { comprobaciones: [{ que: "Cuenta técnica", ok: false, mensaje: err instanceof Error ? err.message : String(err) }] };
+  }
+  if (!t || !cuenta) return { comprobaciones: [{ que: "Cuenta técnica", ok: false, mensaje: "Todavía no está conectada." }] };
+  lista.push({ que: "Cuenta técnica", ok: true, mensaje: `Conectada como ${cuenta.email}.` });
+  let aqui: Lado;
+  try {
+    aqui = await t.abrir(ctx.projectId);
+  } catch {
+    lista.push({ que: "Miembro de este proyecto", ok: false, mensaje: `Invita a ${cuenta.email} a este proyecto en Trimble Connect (Equipo).` });
+    return { comprobaciones: lista };
+  }
+  lista.push({ que: "Miembro de este proyecto", ok: true, mensaje: "La cuenta técnica es miembro de este proyecto." });
+  for (const r of (await ctx.store.recepciones(ctx.projectId)).filter((x) => x.activa)) {
+    const { carpeta } = await leerCarpeta(aqui.cliente, r.carpetaId);
+    const escribe = carpeta?.permiso === "FULL_ACCESS";
+    lista.push({
+      que: `Recepción de ${r.origenNombre || r.origenProyecto}`,
+      ok: escribe,
+      mensaje: !carpeta ? `No ve «${r.carpetaRuta}»: dale acceso a esa carpeta.` : escribe ? `Puede subir archivos en «${r.carpetaRuta}».` : `Solo puede leer «${r.carpetaRuta}»: dale acceso completo para que pueda subir.`,
+    });
+  }
+  for (const p of (await ctx.store.publicaciones(ctx.projectId)).filter((x) => x.origenProyecto === ctx.projectId && x.estado === "activa")) {
+    const ve = p.tipo === "archivo" ? !!(await leerArchivo(aqui.cliente, p.itemId)).archivo : !!(await leerCarpeta(aqui.cliente, p.itemId)).carpeta;
+    lista.push({ que: `Publicado: ${p.nombre}`, ok: ve, mensaje: ve ? "La cuenta técnica lo puede leer." : `No lo ve: dale acceso de lectura a «${p.ruta}».` });
+  }
+  return { comprobaciones: lista };
 }
 
 // ---------------------------------------------------------------- activity

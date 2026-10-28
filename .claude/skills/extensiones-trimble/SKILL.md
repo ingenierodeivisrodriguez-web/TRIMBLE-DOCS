@@ -131,10 +131,11 @@ Herramientas incluidas:
 
 - Realidad aumentada: falta la prueba en obra con un Android real (protocolo en
   `/ra/guia#prueba`); ver `references/realidad-aumentada.md`.
-- Publicar entre proyectos: fases 0 a 4 en `main` (28-10-2026). Falta que el
-  dueño ejecute `supabase/publicar.sql`, la pruebe con dos proyectos reales y
-  diga cuál camino de copia evita la conversión del modelo en el destino. Ver
-  `references/publicar.md`.
+- Publicar entre proyectos: fases 0 a 4 y la cuenta técnica (A y B) en `main`
+  (28-10-2026). Falta: re-ejecutar `supabase/publicar.sql`, poner
+  `PUBLICAR_ADMINS` en Vercel, crear e invitar la cuenta técnica, conectarla y
+  probar entre empresas; y saber cuál camino de copia evita la conversión del
+  modelo. Ver `references/publicar.md`.
 
 - Ofrecido y **sin aprobar**: un párrafo en la política de privacidad
   (`app/bim-apps/privacidad/page.tsx`) sobre el proveedor de IA. No toques la

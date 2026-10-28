@@ -103,6 +103,44 @@ create table if not exists public.publicar_actividad (
 create index if not exists publicar_actividad_origen on public.publicar_actividad (origen_proyecto, creado desc);
 create index if not exists publicar_actividad_destino on public.publicar_actividad (destino_proyecto, creado desc);
 
+-- Agregadas después de la primera versión (se pueden correr sobre tablas ya creadas).
+alter table public.publicar_recepciones add column if not exists destino_nombre text not null default '';
+
+-- La cuenta técnica (un usuario de Trimble propio de la herramienta, invitado
+-- a los proyectos que publican y reciben): hace las copias cuando nadie es
+-- miembro de los dos proyectos. Una sola fila; las sesiones van cifradas con
+-- una clave que solo tiene el servidor. Al desconectarla se borra la fila.
+create table if not exists public.publicar_cuenta (
+  id smallint primary key default 1 check (id = 1),
+  refresh_cifrado text not null,
+  access_cifrado text,
+  access_expira timestamptz,
+  cuenta_id text,
+  cuenta_nombre text not null default '',
+  cuenta_email text not null default '',
+  conectada_por text,
+  conectada_en timestamptz not null default now(),
+  renovada_en timestamptz not null default now(),
+  -- Quién está renovando la sesión ahora (los refresh tokens son de un solo uso).
+  turno_hasta timestamptz
+);
+
+-- Inicios de conexión de la cuenta técnica pendientes (OAuth): duran 10 minutos.
+create table if not exists public.publicar_oauth_estados (
+  state text primary key,
+  verifier text not null,
+  redirect_uri text not null,
+  creado_por text,
+  expira timestamptz not null
+);
+
+alter table public.publicar_cuenta enable row level security;
+alter table public.publicar_oauth_estados enable row level security;
+revoke all on public.publicar_cuenta from anon, authenticated;
+revoke all on public.publicar_oauth_estados from anon, authenticated;
+grant select, insert, update, delete on public.publicar_cuenta to service_role;
+grant select, insert, update, delete on public.publicar_oauth_estados to service_role;
+
 alter table public.publicar_recepciones enable row level security;
 alter table public.publicar_publicaciones enable row level security;
 alter table public.publicar_archivos enable row level security;

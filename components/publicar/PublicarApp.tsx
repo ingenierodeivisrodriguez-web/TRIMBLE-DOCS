@@ -6,16 +6,18 @@ import type { PublicacionInfo } from "../../lib/publicar/types";
 import { message, Notice } from "../presupuesto/ui";
 import ActividadTab from "./ActividadTab";
 import CopiaProyectos from "./CopiaProyectos";
+import CuentaTab from "./CuentaTab";
 import PublicarTab from "./PublicarTab";
 import RecibidoTab from "./RecibidoTab";
 import Sincronizacion from "./Sincronizacion";
 
-type Pestana = "publicar" | "recibido" | "actividad" | "copia";
+type Pestana = "publicar" | "recibido" | "actividad" | "cuenta" | "copia";
 
 const PESTANAS: { id: Pestana; texto: string }[] = [
   { id: "publicar", texto: "Publicar" },
   { id: "recibido", texto: "Recibido en este proyecto" },
   { id: "actividad", texto: "Actividad" },
+  { id: "cuenta", texto: "Cuenta técnica" },
   { id: "copia", texto: "Copia a mano" },
 ];
 
@@ -86,8 +88,9 @@ export default function PublicarApp({ api, projectId, projectName }: { api: Publ
       )}
       {pestana === "recibido" && datos && <RecibidoTab api={api} projectId={projectId} publicaciones={datos.publicaciones} yo={datos.yo} esAdmin={datos.esAdmin} onCambio={() => setPedido((n) => n + 1)} />}
       {pestana === "actividad" && <ActividadTab api={api} recarga={recarga} />}
+      {pestana === "cuenta" && <CuentaTab api={api} />}
       {pestana === "copia" && <CopiaProyectos api={api} projectId={projectId} projectName={projectName} />}
-      {!datos && !error && pestana !== "actividad" && pestana !== "copia" && <p style={{ fontSize: 13.5, color: "var(--tc-gray-500)" }}>Cargando…</p>}
+      {!datos && !error && pestana !== "actividad" && pestana !== "cuenta" && pestana !== "copia" && <p style={{ fontSize: 13.5, color: "var(--tc-gray-500)" }}>Cargando…</p>}
     </div>
   );
 }

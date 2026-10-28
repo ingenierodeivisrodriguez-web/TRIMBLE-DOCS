@@ -1,5 +1,5 @@
 import { createRequester, TokenSource } from "../propiedades/client";
-import type { CarpetaInfo, CopiaResponse, EntradaActividad, PasoArchivo, PasoCopia, PlanSincronizacion, ProyectoInfo, PublicacionInfo, Recepcion } from "./types";
+import type { CarpetaInfo, Comprobacion, CopiaResponse, CuentaInfo, DestinoInfo, EntradaActividad, PasoArchivo, PasoCopia, PlanSincronizacion, ProyectoInfo, PublicacionInfo, Recepcion } from "./types";
 
 export interface PublicarApi {
   /** The projects the user belongs to (the current one first). */
@@ -22,6 +22,15 @@ export interface PublicarApi {
   /** Copies one followed file, confirms its upload, or replaces a difference (with the version seen). */
   pasoArchivo(paso: "copiar" | "confirmar" | "reemplazar", archivoId: string, siVersion?: string): Promise<PasoArchivo>;
   actividad(desde?: string, hasta?: string): Promise<{ entradas: EntradaActividad[] }>;
+  /** Where this project can publish (own projects, and those expecting it with a reception folder). */
+  destinos(): Promise<{ destinos: DestinoInfo[] }>;
+  cuenta(): Promise<CuentaInfo>;
+  /** PUBLICAR_ADMINS: the Trimble sign-in address for the technical account. */
+  conectarCuenta(): Promise<{ url: string }>;
+  completarCuenta(enlace: string): Promise<{ ok: boolean; titulo: string; texto: string }>;
+  desconectarCuenta(): Promise<CuentaInfo>;
+  /** What the technical account can do in this project. */
+  revisarCuenta(): Promise<{ comprobaciones: Comprobacion[] }>;
 }
 
 /** The HTTP client for /api/publicar, authenticated with the user's Trimble token. */
@@ -52,5 +61,11 @@ export function publicarApi(projectId: string, auth: TokenSource): PublicarApi {
       const s = q.toString();
       return request(`/actividad${s ? `?${s}` : ""}`);
     },
+    destinos: () => request("/destinos"),
+    cuenta: () => request("/cuenta"),
+    conectarCuenta: () => post("/cuenta/conectar", {}),
+    completarCuenta: (enlace) => post("/cuenta/completar", { enlace }),
+    desconectarCuenta: () => post("/cuenta/desconectar", {}),
+    revisarCuenta: () => request("/cuenta/revisar"),
   };
 }

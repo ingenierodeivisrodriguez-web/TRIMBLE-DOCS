@@ -3,8 +3,10 @@ import { getBearerToken, isValidProjectId } from "../access";
 import { clienteTrimble } from "../compras/cde";
 import { resolveCaller } from "../propiedades/caller";
 import { StoreError } from "../propiedades/store";
-import { getFolderDetails, getProjectDetails, listFolderItems, listMyProjects, listRegionProjects, listRegions, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
+import { canjearCodigo, oauthConfig, renovar, revocar } from "../manuales/oauth";
+import { getCurrentUser, getFolderDetails, getProjectDetails, listFolderItems, listMyProjects, listRegionProjects, listRegions, resolveProjectBaseUrl, TrimbleApiError } from "../trimbleApi";
 import type { DepsCopia, Lado } from "./copiar";
+import { DepsCuenta, leerAdministradores, tokenTecnico } from "./cuenta";
 import { PublicarError } from "./errores";
 import type { TcExplorar } from "./explorar";
 import type { Ctx } from "./service";
@@ -25,6 +27,25 @@ function tcCon(token: string): TcExplorar {
     proyecto: (baseUrl, projectId) => getProjectDetails(baseUrl, token, projectId),
     carpeta: (baseUrl, folderId) => getFolderDetails(baseUrl, token, folderId),
     items: (baseUrl, folderId) => listFolderItems(baseUrl, token, folderId),
+  };
+}
+
+/** Region-independent identity calls go to the master region. */
+const MASTER = "https://app.connect.trimble.com/tc/api/2.0";
+
+/** The technical account's settings: the Trimble app of Manuales, and PUBLICAR_ADMINS. */
+export function cuentaDeps(): DepsCuenta {
+  return {
+    oauth: oauthConfig(),
+    renovar,
+    canjear: canjearCodigo,
+    revocar,
+    usuario: (token) => getCurrentUser(MASTER, token),
+    // The Trimble app only accepts http://localhost: the administrator pastes the address it lands on.
+    redirectUri: process.env.PUBLICAR_REDIRECT_URI?.trim() || "http://localhost",
+    administradores: leerAdministradores(process.env.PUBLICAR_ADMINS),
+    esperar: (ms) => new Promise((r) => setTimeout(r, ms)),
+    ahora: () => Date.now(),
   };
 }
 
@@ -50,14 +71,37 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       const s = await resolveProjectBaseUrl(token, id);
       return { projectId: id, servidor: s, cliente: clienteTrimble(s, token) };
     };
+    const store = publicarStore();
+    // The technical account's token, read once per request (null: not connected).
+    let tecnica: Promise<string | null> | null = null;
+    const tokenTecnica = async () => {
+      const t = await (tecnica ??= tokenTecnico(store, cuentaDeps()));
+      if (!t) throw new PublicarError("La cuenta técnica no está conectada.", 503, "sin-cuenta");
+      return t;
+    };
     return await run({
       projectId,
       caller,
-      store: publicarStore(),
+      store,
       deps: {
         aqui,
         abrir,
         nombreProyecto: async (id) => (await getProjectDetails(await resolveProjectBaseUrl(token, id), token, id)).name ?? "",
+        tecnico: {
+          cuenta: async () => {
+            if (!(await (tecnica ??= tokenTecnico(store, cuentaDeps())))) return null;
+            return { email: (await store.getCuenta())?.cuentaEmail || "la cuenta técnica" };
+          },
+          abrir: async (id) => {
+            const t = await tokenTecnica();
+            const s = await resolveProjectBaseUrl(t, id);
+            return { projectId: id, servidor: s, cliente: clienteTrimble(s, t) };
+          },
+          nombreProyecto: async (id) => {
+            const t = await tokenTecnica();
+            return (await getProjectDetails(await resolveProjectBaseUrl(t, id), t, id)).name ?? "";
+          },
+        },
       },
       tc: tcCon(token),
       copia: { origen: aqui, destino: abrir },

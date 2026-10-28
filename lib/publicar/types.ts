@@ -67,6 +67,8 @@ export interface Recepcion {
   destinoProyecto: string;
   origenProyecto: string;
   origenNombre: string;
+  /** This project's name, so publishers who aren't members of it can see where they publish. */
+  destinoNombre: string;
   carpetaId: string;
   carpetaRuta: string;
   activa: boolean;
@@ -192,6 +194,38 @@ export interface PasoArchivo {
   ocupado?: boolean;
   /** The destination has another content: a person decides. */
   diferencia?: boolean;
+}
+
+/** A project one can publish to: one of the user's, or one whose reception folder expects this project. */
+export interface DestinoInfo {
+  id: string;
+  nombre: string;
+  /** The user belongs to it (otherwise only the technical account copies there). */
+  miembro: boolean;
+  recepcion: Recepcion | null;
+}
+
+/** The technical account as everyone sees it (never its tokens). */
+export interface CuentaInfo {
+  conectada: boolean;
+  email: string;
+  nombre: string;
+  conectadaEn: string | null;
+  renovadaEn: string | null;
+  conectadaPor: string | null;
+  /** This person may connect or disconnect it (their id is in PUBLICAR_ADMINS). */
+  administra: boolean;
+  /** Their Trimble user id, to add it to PUBLICAR_ADMINS. */
+  miId: string;
+  /** What the server is missing to use it at all. */
+  faltan: string[];
+}
+
+/** One check of what the technical account can do in this project. */
+export interface Comprobacion {
+  que: string;
+  ok: boolean;
+  mensaje: string;
 }
 
 /** The step of reviewing and copying the publications (the browser runs them in order). */

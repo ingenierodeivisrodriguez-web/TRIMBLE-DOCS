@@ -13,6 +13,8 @@ export interface PublicarStore {
   /** The reception folders of a destination project (active or not). */
   recepciones(destino: string): Promise<Recepcion[]>;
   recepcion(destino: string, origen: string): Promise<Recepcion | null>;
+  /** The active reception folders that expect publications from this project (in other projects). */
+  recepcionesDeOrigen(origen: string): Promise<Recepcion[]>;
   /** Creates or replaces the one for (destination, origin). */
   guardarRecepcion(r: Omit<Recepcion, "id">): Promise<Recepcion>;
   /** Publications where the project is the origin or the destination. */
@@ -30,6 +32,38 @@ export interface PublicarStore {
   registrar(e: Omit<EntradaActividad, "id" | "creado">): Promise<void>;
   /** The project's activity (as origin or destination), newest first. */
   actividad(proyecto: string, filtro: { desde?: string; hasta?: string; limite: number }): Promise<EntradaActividad[]>;
+  // The technical account (one row) and its pending sign-ins.
+  getCuenta(): Promise<CuentaTecnica | null>;
+  guardarCuenta(c: Omit<CuentaTecnica, "conectadaEn" | "renovadaEn">): Promise<void>;
+  /** After renewing: the new tokens (refresh tokens are single-use). */
+  guardarTokens(t: { refreshCifrado: string; accessCifrado: string; accessExpira: string }): Promise<void>;
+  borrarCuenta(): Promise<void>;
+  /** Takes the turn to renew the session for some seconds (false: someone else has it). */
+  tomarTurno(segundos: number): Promise<boolean>;
+  soltarTurno(): Promise<void>;
+  crearEstado(e: EstadoOauth): Promise<void>;
+  /** The pending sign-in with that state, once (null when unknown or expired). */
+  consumirEstado(state: string): Promise<EstadoOauth | null>;
+}
+
+export interface CuentaTecnica {
+  refreshCifrado: string;
+  accessCifrado: string | null;
+  accessExpira: string | null;
+  cuentaId: string | null;
+  cuentaNombre: string;
+  cuentaEmail: string;
+  conectadaPor: string | null;
+  conectadaEn: string;
+  renovadaEn: string;
+}
+
+export interface EstadoOauth {
+  state: string;
+  verifier: string;
+  redirectUri: string;
+  creadoPor: string | null;
+  expira: string;
 }
 
 const SETUP_HINT = "La base de datos de Publicar entre proyectos no está lista: ejecuta supabase/publicar.sql en el SQL Editor de Supabase.";
@@ -43,6 +77,7 @@ const deRecepcion = (f: Fila): Recepcion => ({
   destinoProyecto: String(f.destino_proyecto),
   origenProyecto: String(f.origen_proyecto),
   origenNombre: t(f.origen_nombre) ?? "",
+  destinoNombre: t(f.destino_nombre) ?? "",
   carpetaId: String(f.carpeta_id),
   carpetaRuta: t(f.carpeta_ruta) ?? "",
   activa: f.activa !== false,
@@ -55,6 +90,7 @@ const aRecepcion = (r: Partial<Recepcion>): Fila =>
     destino_proyecto: r.destinoProyecto,
     origen_proyecto: r.origenProyecto,
     origen_nombre: r.origenNombre,
+    destino_nombre: r.destinoNombre,
     carpeta_id: r.carpetaId,
     carpeta_ruta: r.carpetaRuta,
     activa: r.activa,
@@ -161,6 +197,18 @@ const deEntrada = (f: Fila): EntradaActividad => ({
   resultado: f.resultado === "aviso" || f.resultado === "error" ? f.resultado : "ok",
 });
 
+const deCuenta = (f: Fila): CuentaTecnica => ({
+  refreshCifrado: String(f.refresh_cifrado),
+  accessCifrado: t(f.access_cifrado),
+  accessExpira: t(f.access_expira),
+  cuentaId: t(f.cuenta_id),
+  cuentaNombre: t(f.cuenta_nombre) ?? "",
+  cuentaEmail: t(f.cuenta_email) ?? "",
+  conectadaPor: t(f.conectada_por),
+  conectadaEn: String(f.conectada_en),
+  renovadaEn: String(f.renovada_en),
+});
+
 function sinIndefinidos(f: Fila): Fila {
   return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined));
 }
@@ -188,6 +236,9 @@ function supabaseStore(): PublicarStore | null {
     async recepcion(destino, origen) {
       const filas = await json<Fila[]>(`/publicar_recepciones?destino_proyecto=${eq(destino)}&origen_proyecto=${eq(origen)}&select=*`);
       return filas[0] ? deRecepcion(filas[0]) : null;
+    },
+    async recepcionesDeOrigen(origen) {
+      return (await all<Fila>(`/publicar_recepciones?origen_proyecto=${eq(origen)}&activa=is.true&select=*&order=destino_nombre.asc`)).map(deRecepcion);
     },
     async guardarRecepcion(r) {
       const filas = await json<Fila[]>(`/publicar_recepciones?on_conflict=destino_proyecto,origen_proyecto`, {
@@ -266,6 +317,67 @@ function supabaseStore(): PublicarStore | null {
       const fechas = [filtro.desde ? `&creado=gte.${encodeURIComponent(filtro.desde)}` : "", filtro.hasta ? `&creado=lt.${encodeURIComponent(filtro.hasta)}` : ""].join("");
       return (await json<Fila[]>(`/publicar_actividad?or=(origen_proyecto.eq.${p},destino_proyecto.eq.${p})${fechas}&select=*&order=creado.desc,id.desc&limit=${filtro.limite}`)).map(deEntrada);
     },
+    async getCuenta() {
+      const f = (await json<Fila[]>(`/publicar_cuenta?id=eq.1&select=*`))[0];
+      return f ? deCuenta(f) : null;
+    },
+    async guardarCuenta(c) {
+      const ahora = new Date().toISOString();
+      await call(`/publicar_cuenta?on_conflict=id`, {
+        method: "POST",
+        headers: { Prefer: "resolution=merge-duplicates,return=minimal" },
+        body: JSON.stringify({
+          id: 1,
+          refresh_cifrado: c.refreshCifrado,
+          access_cifrado: c.accessCifrado,
+          access_expira: c.accessExpira,
+          cuenta_id: c.cuentaId,
+          cuenta_nombre: c.cuentaNombre,
+          cuenta_email: c.cuentaEmail,
+          conectada_por: c.conectadaPor,
+          conectada_en: ahora,
+          renovada_en: ahora,
+          turno_hasta: null,
+        }),
+      });
+    },
+    async guardarTokens(tk) {
+      await call(`/publicar_cuenta?id=eq.1`, {
+        method: "PATCH",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ refresh_cifrado: tk.refreshCifrado, access_cifrado: tk.accessCifrado, access_expira: tk.accessExpira, renovada_en: new Date().toISOString(), turno_hasta: null }),
+      });
+    },
+    async borrarCuenta() {
+      await call(`/publicar_cuenta?id=eq.1`, { method: "DELETE", headers: { Prefer: "return=minimal" } });
+    },
+    async tomarTurno(segundos) {
+      const ahora = new Date();
+      const filas = await json<Fila[]>(`/publicar_cuenta?id=eq.1&or=(turno_hasta.is.null,turno_hasta.lt.${encodeURIComponent(ahora.toISOString())})`, {
+        method: "PATCH",
+        headers: representar,
+        body: JSON.stringify({ turno_hasta: new Date(ahora.getTime() + segundos * 1000).toISOString() }),
+      });
+      return filas.length > 0;
+    },
+    async soltarTurno() {
+      await call(`/publicar_cuenta?id=eq.1`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ turno_hasta: null }) });
+    },
+    async crearEstado(e) {
+      // Old unfinished sign-ins go away first.
+      await call(`/publicar_oauth_estados?expira=lt.${encodeURIComponent(new Date().toISOString())}`, { method: "DELETE", headers: { Prefer: "return=minimal" } }).catch(() => undefined);
+      await call(`/publicar_oauth_estados`, {
+        method: "POST",
+        headers: { Prefer: "return=minimal" },
+        body: JSON.stringify({ state: e.state, verifier: e.verifier, redirect_uri: e.redirectUri, creado_por: e.creadoPor, expira: e.expira }),
+      });
+    },
+    async consumirEstado(state) {
+      const filas = await json<Fila[]>(`/publicar_oauth_estados?state=${eq(state)}`, { method: "DELETE", headers: representar });
+      const f = filas[0];
+      if (!f || Date.parse(String(f.expira)) < Date.now()) return null;
+      return { state: String(f.state), verifier: String(f.verifier), redirectUri: String(f.redirect_uri), creadoPor: t(f.creado_por), expira: String(f.expira) };
+    },
   };
 }
 
@@ -276,6 +388,8 @@ export function memoryStore(): PublicarStore {
   const publicaciones = new Map<string, Publicacion>();
   const archivos = new Map<string, ArchivoSeguido>();
   const actividad: EntradaActividad[] = [];
+  let cuenta: (CuentaTecnica & { turnoHasta: number | null }) | null = null;
+  const estados = new Map<string, EstadoOauth>();
   let contador = 0;
   const id = () => `00000000-0000-4000-8000-${String(++contador).padStart(12, "0")}`;
   const copia = <T>(x: T): T => structuredClone(x);
@@ -288,6 +402,9 @@ export function memoryStore(): PublicarStore {
     async recepcion(destino, origen) {
       const r = [...recepciones.values()].find((x) => x.destinoProyecto === destino && x.origenProyecto === origen);
       return r ? copia(r) : null;
+    },
+    async recepcionesDeOrigen(origen) {
+      return [...recepciones.values()].filter((r) => r.origenProyecto === origen && r.activa).sort((a, b) => a.destinoNombre.localeCompare(b.destinoNombre)).map(copia);
     },
     async guardarRecepcion(r) {
       const previa = [...recepciones.values()].find((x) => x.destinoProyecto === r.destinoProyecto && x.origenProyecto === r.origenProyecto);
@@ -354,6 +471,37 @@ export function memoryStore(): PublicarStore {
         .sort((a, b) => b.creado.localeCompare(a.creado) || b.id - a.id)
         .slice(0, filtro.limite)
         .map(copia);
+    },
+    async getCuenta() {
+      if (!cuenta) return null;
+      const { turnoHasta: _t, ...c } = cuenta;
+      return copia(c);
+    },
+    async guardarCuenta(c) {
+      const momento = new Date().toISOString();
+      cuenta = { ...c, conectadaEn: momento, renovadaEn: momento, turnoHasta: null };
+    },
+    async guardarTokens(tk) {
+      if (cuenta) cuenta = { ...cuenta, ...tk, renovadaEn: new Date().toISOString(), turnoHasta: null };
+    },
+    async borrarCuenta() {
+      cuenta = null;
+    },
+    async tomarTurno(segundos) {
+      if (!cuenta || (cuenta.turnoHasta && cuenta.turnoHasta > Date.now())) return false;
+      cuenta.turnoHasta = Date.now() + segundos * 1000;
+      return true;
+    },
+    async soltarTurno() {
+      if (cuenta) cuenta.turnoHasta = null;
+    },
+    async crearEstado(e) {
+      estados.set(e.state, { ...e });
+    },
+    async consumirEstado(state) {
+      const e = estados.get(state);
+      estados.delete(state);
+      return e && Date.parse(e.expira) >= Date.now() ? { ...e } : null;
     },
   };
 }

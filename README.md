@@ -3820,23 +3820,28 @@ aparece una versión nueva. Por eso la extensión **copia** cada versión: la le
 del origen y la sube con el mismo nombre a la carpeta del destino, donde
 Trimble la registra como versión nueva (el número de versión del destino no
 tiene que coincidir con el del origen). La copia la hace el servidor con la
-sesión de quien abre la extensión, que debe ser miembro de los dos proyectos.
+**cuenta técnica** (un usuario de Trimble de la herramienta que cada proyecto
+invita) o, si no está invitada, con la sesión de quien abre la extensión y es
+miembro de los dos proyectos.
 
 Decisiones del dueño (28-10-2026): solo **origen → destino** (un cambio hecho
 en el destino se muestra y se pregunta, nunca se pisa); la actualización es
 **al abrir la extensión**, con un botón "Revisar ahora" (sin cuenta técnica ni
-revisión programada por ahora); en el uso real **alguien pertenece a los dos
-proyectos**; el administrador del destino define una **carpeta de recepción
-fija** por proyecto origen y lo publicado llega ahí sin aceptarlo.
+revisión programada por ahora); el administrador del destino define una
+**carpeta de recepción fija** por proyecto origen y lo publicado llega ahí sin
+aceptarlo. La decisión "alguien pertenece a los dos proyectos" cambió el mismo
+día, al probarlo entre empresas distintas: nadie está en ambos, así que las
+copias las hace la **cuenta técnica** (abajo).
 
 Fases (todas el 28-10-2026): 0 prueba de copia en Trimble real · copia a mano ·
 1 configuración del proyecto destino · 2 Publicar y actividad · 3
-actualización al abrir · 4 actividad con filtros y cierre. Falta la prueba con
-proyectos reales de las fases 1 a 4.
+actualización al abrir · 4 actividad con filtros y cierre · A cuenta técnica ·
+B publicar y copiar con ella. Pendiente, si el dueño lo pide: C, la copia
+automática una vez al día sin que nadie abra la extensión.
 
 ### Cómo se usa
 
-La extensión tiene cuatro pestañas y, arriba, la **revisión de las
+La extensión tiene cinco pestañas y, arriba, la **revisión de las
 publicaciones**, que corre sola al abrir.
 
 1. **Recibido en este proyecto** (en el proyecto destino): un administrador
@@ -3910,6 +3915,38 @@ ahora" (también después de publicar o de definir una carpeta):
 Un archivo o una carpeta que ya no está en el origen queda **"Retirado en el
 origen"**: en el destino no se borra nada y deja de actualizarse.
 
+### Cuenta técnica (fases A y B)
+
+Para publicar entre proyectos donde nadie es miembro de los dos (empresas
+distintas). [`lib/publicar/cuenta.ts`](lib/publicar/cuenta.ts):
+
+- **Qué es**: un usuario de Trimble Connect de la herramienta (por ejemplo
+  publicaciones@dyco.co). Cada proyecto lo invita: el origen con **lectura** en
+  lo que publica, el destino con **acceso completo** en la carpeta de recepción.
+- **Conectarla** (pestaña **Cuenta técnica**): solo las personas cuyo id de
+  Trimble está en la variable `PUBLICAR_ADMINS` de Vercel (la pantalla muestra
+  el id de cada quien). "Conectar" da el enlace de inicio de sesión de Trimble
+  (la misma app y el mismo `TRIMBLE_CLIENT_SECRET` de Manuales); se entra con
+  el usuario de la cuenta técnica y la dirección `http://localhost/?code=…` a
+  la que llega el navegador se pega en la pantalla. La sesión queda cifrada en
+  `publicar_cuenta` (nunca en claro) y la renueva sola: al usarla y cada día con
+  `/api/publicar/mantener` (Vercel Cron, 11:30 UTC), porque Trimble pide
+  renovarla al menos cada 9 días. "Desconectar" la revoca en Trimble y borra la
+  fila.
+- **Revisar el acceso en este proyecto**: dice si la cuenta es miembro, si puede
+  subir en cada carpeta de recepción y si puede leer lo publicado, con lo que
+  falta en palabras.
+- **Publicar sin ser miembro del destino**: la lista de destinos trae también
+  los proyectos cuya carpeta de recepción espera a este proyecto ("te espera
+  con su carpeta de recepción"); esa carpeta es el permiso del destino. Sin
+  ella, solo se puede publicar en proyectos donde uno es miembro.
+- **Quién copia**: la cuenta técnica si es miembro de los dos proyectos; si no,
+  la sesión de quien abre la extensión si es miembro de ambos; si no, un aviso
+  que dice a quién invitar. La actividad anota "Copiado con la cuenta técnica" y
+  la persona que tenía la extensión abierta.
+- El nombre del proyecto origen se lee con la cuenta técnica (o lo pone quien
+  publica), así la tabla de recepciones ya no muestra el id.
+
 ### Actividad (fase 4)
 
 `publicar_actividad` solo recibe filas (el SQL quita `update` y `delete`).
@@ -3941,7 +3978,8 @@ Sin `delete` en ninguna tabla.
   revisión la vuelve a copiar.
 - Si un archivo se renombra en el origen, en el destino llega con el nombre
   nuevo como otro archivo (el anterior queda).
-- Publica cualquier miembro del origen que también lo sea del destino; si no
+- Publica cualquier miembro del origen que sea miembro del destino o que el
+  destino espere con su carpeta de recepción; si la cuenta (o la persona) no
   puede subir en la carpeta de recepción, Trimble lo rechaza y queda el error.
 - Se copia desde la última versión al publicar, no el historial anterior.
 - Sin exportar la actividad a Excel (no se pidió).
@@ -4008,8 +4046,10 @@ Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
 `POST /api/publicar/copia` (copia a mano), `GET|PUT /api/publicar/recepciones`,
 `POST /api/publicar/recepciones/desactivar`, `GET /api/publicar/recepcion?destino=`,
 `GET|POST /api/publicar/publicaciones`, `POST /api/publicar/publicaciones/estado`,
-`POST /api/publicar/sincronizar` (`{ paso: plan | copiar | confirmar | reemplazar }`) y
-`GET /api/publicar/actividad?desde=&hasta=`.
+`POST /api/publicar/sincronizar` (`{ paso: plan | copiar | confirmar | reemplazar }`),
+`GET /api/publicar/actividad?desde=&hasta=`, `GET /api/publicar/destinos`,
+`GET /api/publicar/cuenta`, `POST /api/publicar/cuenta/conectar|completar|desconectar`,
+`GET /api/publicar/cuenta/revisar` y `GET /api/publicar/mantener` (Cron).
 
 ## Cómo funciona (común a ambas extensiones)
 
