@@ -26,6 +26,7 @@ aparece).
 | Compras y Contratación | `https://trimble-docs.vercel.app/manifest-compras.json` |
 | Realidad aumentada (menú + visor; respaldo `manifest-ra-visor.json`) | `https://trimble-docs.vercel.app/manifest-ra.json` |
 | Publicar entre proyectos (ejecutar antes `supabase/publicar.sql`) | `https://trimble-docs.vercel.app/manifest-publicar.json` |
+| Flujo de aprobación (por ahora solo la prueba de la fase 0, sin SQL) | `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` |
 
 Realidad aumentada tiene su propia guía pública para los usuarios (oficina y
 obra, problemas frecuentes y prueba en obra): `https://trimble-docs.vercel.app/ra/guia`.

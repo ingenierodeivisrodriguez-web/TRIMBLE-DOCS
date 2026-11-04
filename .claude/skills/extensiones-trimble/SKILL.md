@@ -14,7 +14,9 @@ Contratación** (construida en 8 fases en octubre de 2026) y **Control de Obra**
 BIM (LOIN), **Realidad aumentada con QR** (modelo 1:1 en el celular, fijo en un
 QR pegado en un muro; 6 fases el 27-10-2026) y **Publicar entre proyectos**
 (documentos y carpetas a otro proyecto, versiones nuevas copiadas al abrir;
-fases 0 a 4 el 28-10-2026). El dueño es ingeniero civil en Colombia y escribe en español:
+fases 0 a 4 el 28-10-2026) y **Flujo de aprobación** (revisión y aprobación de
+entregables por flujos con hito y copia de lo aprobado; en construcción desde
+el 04-11-2026). El dueño es ingeniero civil en Colombia y escribe en español:
 responde en español, con palabras de obra (partida, insumo, APU, cuadrilla,
 rendimiento, metrado, jornal), sin jerga de programación.
 
@@ -112,6 +114,7 @@ Lee el archivo de referencia que corresponda antes de cambiar esa área:
 | Control de Obra: fases, decisiones D1–D13 y plan de actas, empresas, licencias, administradores, aislamiento por empresa, bitácora encadenada, flujos de aprobación, cómo probarlo | `references/control-obra.md` (y `docs/control-obra/plan-actas.md`) |
 | Realidad aumentada con QR: decisiones del dueño, por qué web-ifc y páginas públicas, marcos de coordenadas, alineación del visor, calibración en el muro, herramientas, cómo probar sin celular | `references/realidad-aumentada.md` |
 | Publicar entre proyectos: decisiones del dueño, por qué se copia cada versión, plan por fases, la prueba de copia (fase 0) y sus límites | `references/publicar.md` |
+| Flujo de aprobación: contradicciones de la especificación, las 11 decisiones del dueño (hito incluido), supuestos, fases y la prueba en Trimble real (fase 0) | `references/flujo-aprobacion.md` |
 | Pruebas, página de prueba con API falsa, navegador, despliegue, SQL, trucos de Windows | `references/flujo-desarrollo.md` |
 | Responder preguntas de uso: URLs de instalación, orden de trabajo, textos para el asistente, explicar cuadrillas | `references/guia-usuario.md` |
 
@@ -137,6 +140,10 @@ Herramientas incluidas:
   (managerbim@dyco.co). Falta: invitar esa cuenta a MANAGER PROJECT y probar
   SELVIA → MANAGER PROJECT; y saber cuál camino de copia evita la conversión
   del modelo. Ver `references/publicar.md`.
+- Flujo de aprobación: plan y decisiones aprobados (04-11-2026); fase 0 (prueba
+  en Trimble real) en `main`. Falta que el dueño la corra en un proyecto de
+  pruebas y pegue el resumen; con eso se arma la fase 1. Ver
+  `references/flujo-aprobacion.md`.
 
 - Ofrecido y **sin aprobar**: un párrafo en la política de privacidad
   (`app/bim-apps/privacidad/page.tsx`) sobre el proveedor de IA. No toques la

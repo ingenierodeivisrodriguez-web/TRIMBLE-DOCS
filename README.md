@@ -17,6 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fase 0, prueba en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4059,6 +4060,88 @@ Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
 `GET /api/publicar/cuenta`, `POST /api/publicar/cuenta/conectar|completar|desconectar`,
 `GET /api/publicar/cuenta/revisar` y `GET /api/publicar/mantener` (Cron).
 
+## Flujo de aprobación (proyecto, en construcción)
+
+Objetivo: automatizar la revisión y aprobación de los entregables del proyecto
+(modelos `.rvt`, planos `.pdf` y `.dwg`, fotos, documentos, Excel) y su paso
+controlado a una carpeta destino, para que en esa carpeta solo haya archivos
+aprobados. Pedido el 04-11-2026; el dueño aprobó el plan y las recomendaciones
+el mismo día.
+
+Cómo será:
+
+- Los **administradores del proyecto en Trimble** definen **flujos**. Cada flujo
+  tiene un **título o hito** que los archivos soportan (por ejemplo «Aprobar
+  diseño arquitectónico Torre 1»), sus carpetas de revisión (una o más, con sus
+  subcarpetas), su carpeta destino y sus pasos: **Realiza** (quien sube) y los
+  pasos que se agreguen o quiten (por defecto **Revisa → Aprueba**), con
+  personas o grupos de la lista de Trimble, por carpeta o por archivo.
+- Estados de un archivo: **Pendiente de revisión**, **Aprobado**, **Rechazado**
+  (con motivo obligatorio; vuelve a quien lo realizó) y **Nueva versión
+  pendiente de revisión**. Se aprueba la versión que se vio: si llega otra
+  mientras se revisa, se avisa.
+- Trimble no avisa cuando se sube un archivo: la extensión revisa las carpetas
+  **al abrirla** y con **«Revisar ahora»**. La fecha y quién subió cada versión
+  salen de Trimble, no de cuándo se detectó.
+- Aviso al revisor: bandeja **«Por revisar»** en la extensión y una **tarea
+  (ToDo) de Trimble** asignada a él, con el archivo adjunto.
+- Al aprobar el último paso, la extensión **copia** la última versión a la
+  carpeta destino, con el mismo nombre y con la sesión de quien aprobó: la
+  primera vez sale versión 1 y después versión 2, 3… Un archivo del destino que
+  no llegó por el flujo se muestra y se pregunta antes de reemplazarlo. Quien
+  sube un archivo no lo aprueba; en un paso asignado a un grupo basta con que
+  apruebe una persona del grupo.
+- La extensión **revisa y avisa** sobre los permisos de Trimble de las carpetas
+  (por ejemplo, quién puede subir directo a la carpeta destino); no los cambia.
+- Trazabilidad por archivo (quién subió, revisó, decidió, comentó y trasladó, y
+  cuándo), que nunca se edita ni se borra, exportable a PDF. Fechas DD-MM-AAAA.
+
+Fases: **0** prueba en Trimble real · **1** configuración (flujos con su hito,
+carpetas, pasos, personas y grupos) y SQL · **2** detección y registro · **3**
+revisión, rechazo y avisos · **4** copia a la carpeta destino · **5**
+trazabilidad, PDF y guía.
+
+### Fase 0: prueba en Trimble real
+
+Por ahora la extensión solo muestra la prueba. Con el usuario de quien la abre
+(sus permisos de Trimble), en cuatro pasos:
+
+1. **Equipo del proyecto**: lee las personas (administradores, invitados sin
+   entrar) y los grupos, y los miembros de cada grupo
+   (`GET /projects/{id}/users?groupId=`). Avisa si cada grupo trae a todo el
+   proyecto (señal de que Trimble no filtró por grupo) o si el número de
+   miembros no coincide con el que dice Trimble.
+2. **Archivo a revisar**: lee sus versiones y quién subió cada una (prueba
+   `GET /files/fs/{id}/versions` y `GET /files/{id}/versions`) y da el enlace
+   directo al visor de Trimble y a su carpeta. La persona dice si el enlace abrió
+   el archivo.
+3. **Copia a la carpeta destino**: copia la última versión a otra carpeta del
+   mismo proyecto con el mismo nombre (primero la copia dentro de Trimble,
+   `POST /files` con `fromFileVersionId`; si no, por el servidor, como en
+   Publicar). Si la carpeta ya tiene ese archivo, pide confirmación y lo copia
+   solo si no cambió desde que se vio: debe llegar como versión nueva. Pregunta a
+   Trimble cómo va el visor de la copia.
+4. **Tarea (ToDo)**: crea una tarea «Prueba Flujo de aprobación: revisar …»
+   asignada a una persona o a un grupo, con el enlace en la descripción. Como el
+   formato de `POST /todos` no está publicado, prueba `label` o `title` y
+   `assignees` como `[{ id, type: USER | GROUP }]` o `[id]` hasta que Trimble
+   acepte uno; luego adjunta el archivo (`POST /todos/{id}/attachments`) y lee
+   la tarea para confirmar a quién quedó asignada. La persona dice si la ve en
+   ToDo y si le llegó el correo.
+
+Al final arma un resumen para copiar y pegar. No guarda nada en Supabase ni
+borra nada: deja la copia en la carpeta elegida y la tarea de prueba, que se
+pueden borrar a mano.
+
+Código: [`lib/flujo-aprobacion/prueba.ts`](lib/flujo-aprobacion/prueba.ts)
+(pasos, con pruebas en `prueba.test.ts` sobre la nube falsa de Publicar),
+[`lib/flujo-aprobacion/routes.ts`](lib/flujo-aprobacion/routes.ts),
+[`components/flujo-aprobacion/PruebaFase0.tsx`](components/flujo-aprobacion/PruebaFase0.tsx).
+Reutiliza la copia de Publicar (`copiarUltimaVersion`) y su explorador de
+carpetas. Rutas, con `?projectId=` y el token del usuario:
+`GET /api/flujo-aprobacion/carpeta?folderId=` y `POST /api/flujo-aprobacion/prueba`
+(`{ paso: equipo | archivo | copiar | estado-subida | estado-visor | tarea }`).
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -4272,6 +4355,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Requisitos BIM (LOIN) | `https://trimble-docs.vercel.app/manifest-loin.json` |
    | Realidad aumentada | `https://trimble-docs.vercel.app/manifest-ra.json` |
    | Publicar entre proyectos | `https://trimble-docs.vercel.app/manifest-publicar.json` |
+   | Flujo de aprobación | `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;

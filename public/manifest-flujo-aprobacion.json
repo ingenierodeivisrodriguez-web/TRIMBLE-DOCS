@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/flujo-aprobacion",
+  "title": "Flujo de aprobación",
+  "description": "Revisión y aprobación de entregables del proyecto (modelos, planos, documentos) por flujos con título o hito: estados, aviso al revisor, rechazo con motivo, copia de lo aprobado a la carpeta destino y trazabilidad exportable a PDF.",
+  "icon": "https://trimble-docs.vercel.app/icon-flujo-aprobacion.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project"],
+  "enabled": true
+}

@@ -47,7 +47,8 @@ export default function Explorador({
   recarga = 0,
   conCarpetas = false,
 }: {
-  api: PublicarApi;
+  /** Only the folder listing is used (Flujo de aprobación passes its own). */
+  api: Pick<PublicarApi, "carpeta">;
   proyecto: string;
   elegir: "archivo" | "carpeta";
   seleccionados: string[];
