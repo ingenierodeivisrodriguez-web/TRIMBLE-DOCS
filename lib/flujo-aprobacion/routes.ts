@@ -3,9 +3,12 @@ import { getBearerToken, isValidProjectId } from "../access";
 import { clienteTrimble } from "../compras/cde";
 import { resolveCaller } from "../propiedades/caller";
 import type { Caller } from "../propiedades/service";
+import { StoreError } from "../propiedades/store";
 import type { TcExplorar } from "../publicar/explorar";
 import {
+  getFileDetails,
   getFolderDetails,
+  getFolderPermissions,
   getProjectDetails,
   listFolderItems,
   listMyProjects,
@@ -13,17 +16,31 @@ import {
   listProjectUsers,
   listRegionProjects,
   listRegions,
+  PathEntry,
+  ProjectDetails,
   resolveProjectBaseUrl,
   TrimbleApiError,
 } from "../trimbleApi";
 import { FlujoError } from "./errores";
 import type { DepsPrueba } from "./prueba";
+import type { Ctx, ElementoTrimble, TrimbleFlujo } from "./service";
+import { flujoStore } from "./store";
 
 export interface RouteContext {
   projectId: string;
   caller: Caller;
   tc: TcExplorar;
   prueba: DepsPrueba;
+  /** For the service (phase 1 on). */
+  ctx: Ctx;
+}
+
+/** A folder or file as the flow keeps it: "Proyecto / Diseño / Arquitectura" and the ids above it. */
+export function elementoDe(proyecto: Pick<ProjectDetails, "rootId" | "name">, id: string, nombre: string, path: PathEntry[]): ElementoTrimble {
+  if (id === proyecto.rootId) return { id, ruta: proyecto.name, ancestros: [] };
+  const arriba = path.filter((p) => p.id !== id);
+  const nombreDe = (p: PathEntry) => (p.id === proyecto.rootId ? proyecto.name : p.name);
+  return { id, ruta: [...arriba.map(nombreDe), nombre].join(" / "), ancestros: arriba.map((p) => p.id) };
 }
 
 /**
@@ -51,10 +68,36 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       carpeta: (baseUrl, folderId) => getFolderDetails(baseUrl, token, folderId),
       items: (baseUrl, folderId) => listFolderItems(baseUrl, token, folderId),
     };
+    let proyecto: Promise<ProjectDetails> | null = null;
+    const elProyecto = () => (proyecto ??= getProjectDetails(servidor, token, projectId));
+    const trimble: TrimbleFlujo = {
+      async carpeta(id) {
+        const [p, d] = await Promise.all([elProyecto(), getFolderDetails(servidor, token, id)]);
+        if (d.projectId && d.projectId !== projectId) throw new FlujoError("Esa carpeta no es de este proyecto.", 404);
+        return elementoDe(p, d.id, d.name, d.path);
+      },
+      async archivo(id) {
+        const [p, f] = await Promise.all([elProyecto(), getFileDetails(servidor, token, id)]);
+        return elementoDe(p, f.id, f.name, f.path);
+      },
+      personas: () => listProjectUsers(servidor, token, projectId),
+      grupos: () => listProjectGroups(servidor, token, projectId),
+      miembros: (groupId) => listProjectUsers(servidor, token, projectId, { groupId }),
+      permisos: (folderId) => getFolderPermissions(servidor, token, folderId),
+    };
     return await run({
       projectId,
       caller,
       tc,
+      // The store is opened only when used, so the phase 0 test works without the database.
+      ctx: {
+        projectId,
+        caller,
+        tc: trimble,
+        get store() {
+          return flujoStore();
+        },
+      },
       prueba: {
         projectId,
         lado: { projectId, servidor, cliente: clienteTrimble(servidor, token) },
@@ -75,6 +118,9 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
     }
     if (err instanceof TrimbleApiError && (err.status === 403 || err.status === 404)) {
       return NextResponse.json({ error: err.status === 404 ? "No existe o no tienes acceso en Trimble Connect." : "Trimble Connect negó el acceso con tu usuario.", code: "trimble-acceso" }, { status: err.status });
+    }
+    if (err instanceof StoreError) {
+      return NextResponse.json({ error: err.message }, { status: err.status });
     }
     console.error("[flujo-aprobacion]", err);
     return NextResponse.json({ error: err instanceof Error ? err.message : "Error inesperado." }, { status: 500 });

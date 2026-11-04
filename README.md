@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fase 0, prueba en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fase 1, configuración de los flujos) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4151,6 +4151,78 @@ Reutiliza la copia de Publicar (`copiarUltimaVersion`) y su explorador de
 carpetas. Rutas, con `?projectId=` y el token del usuario:
 `GET /api/flujo-aprobacion/carpeta?folderId=` y `POST /api/flujo-aprobacion/prueba`
 (`{ paso: equipo | archivo | copiar | estado-subida | estado-visor | tarea }`).
+La prueba sigue en la pestaña **Prueba de Trimble** para lo pendiente.
+
+### Fase 1: configuración de los flujos
+
+Antes de usarla hay que ejecutar **`supabase/flujo-aprobacion.sql`** en el SQL
+Editor de Supabase (se puede ejecutar varias veces sin perder datos).
+
+Pestaña **Flujos** (solo los administradores del proyecto en Trimble crean y
+cambian; los demás ven):
+
+- **+ Nuevo flujo** / **Editar**: el **título o hito** (obligatorio, no se
+  repite en el proyecto aunque cambien tildes o mayúsculas), las **carpetas de
+  revisión** (se abren en el explorador y se marcan con «Usar esta carpeta»;
+  hasta 20, con sus subcarpetas), la **carpeta destino** y los **pasos**:
+  «Realiza» siempre va primero y después de 1 a 5 pasos con **+ Adicionar
+  paso**, **− quitar**, ↑ ↓ y su nombre (por defecto Revisa → Aprueba). Al
+  aprobar el último paso el archivo pasa a la carpeta destino (fase 4).
+- **Quién hace qué**: se marcan carpetas o archivos (varios a la vez, dentro de
+  las carpetas de revisión), se elige una persona o un grupo de la lista de
+  Trimble y su papel: **Realiza** (sube y corrige), cada paso, o **Consulta**
+  (solo ve). La asignación de un archivo manda sobre la de su carpeta, y la
+  carpeta más cercana sobre las de arriba. Avisa los pasos que no tienen a
+  nadie en una carpeta de revisión completa (ahí solo los administradores
+  podrán actuar). «Quitar» deja la asignación inactiva, no la borra.
+- **Permisos en Trimble**: lee los permisos de la carpeta destino y de las de
+  revisión y avisa, **sin cambiarlos**: quién más puede subir directo al
+  destino sin pasar por el flujo (incluido «todos los miembros»), quién
+  aprueba pero no tiene acceso completo al destino (la copia con su usuario
+  fallaría), y quién está asignado en una carpeta de revisión sin acceso, o
+  realiza con solo lectura. Muestra además quién tiene qué en cada carpeta.
+- **Desactivar** (con confirmación): el flujo deja de revisar archivos nuevos;
+  no se borra y se puede **Activar** otra vez si nadie tomó sus carpetas.
+
+Reglas (aprobadas por el dueño el 04-11-2026), en el servidor y, las que
+pueden, también en la base de datos:
+
+1. Una carpeta solo puede estar en **un flujo activo**; en carpetas anidadas
+   manda el flujo de la más cercana (lo vigila además un *trigger* con bloqueo
+   por proyecto).
+2. Una carpeta destino y una de revisión **nunca una dentro de la otra** (lo
+   aprobado se volvería a revisar), en el mismo flujo o entre flujos.
+3. De 1 a **5 pasos** después de «Realiza», con nombres distintos.
+4. Si cambia un flujo, los archivos que ya estén en trámite seguirán con el
+   flujo con el que empezaron (se aplica desde la fase 2, cuando haya archivos).
+5. El **hito no se repite** en el proyecto (índice único).
+
+Quitar un paso o una carpeta que tiene asignaciones pide confirmación («Con
+este cambio quedan sin uso N asignaciones…») y luego las desactiva. Si otra
+persona guardó el flujo antes, el guardado se rechaza (409) y lo escrito sigue
+en pantalla. Las rutas de carpetas y archivos, sus carpetas de arriba y los
+nombres de personas y grupos se leen siempre de Trimble, nunca del navegador.
+
+Pestaña **Historial**: quién creó, cambió, activó o desactivó cada flujo y
+quién asignó o quitó papeles, con fecha DD-MM-AAAA; filtro por flujo. Solo se
+agregan filas.
+
+Base de datos (`supabase/flujo-aprobacion.sql`, RLS sin políticas, sin
+`delete`): `aprobacion_flujos` (hito, pasos, carpetas y destino en jsonb con
+sus carpetas de arriba, `version` para el guardado optimista),
+`aprobacion_asignaciones` (objetivo, papel, persona o grupo, `activa`; única
+mientras está activa) y `aprobacion_historial` (solo inserción).
+
+Código: reglas puras en [`lib/flujo-aprobacion/flujos.ts`](lib/flujo-aprobacion/flujos.ts)
+(conflictos, flujo de un archivo, responsables por cercanía, cobertura) y
+[`permisos.ts`](lib/flujo-aprobacion/permisos.ts); servicio en
+[`service.ts`](lib/flujo-aprobacion/service.ts); `store.ts` (Supabase y en
+memoria); pantallas en `components/flujo-aprobacion/` (`Flujos`,
+`EditorFlujo`, `Asignaciones`, `Permisos`, `Historial`). Rutas:
+`GET|POST /api/flujo-aprobacion/flujos`, `POST /api/flujo-aprobacion/flujos/estado`,
+`GET /api/flujo-aprobacion/equipo`, `POST /api/flujo-aprobacion/asignaciones`,
+`POST /api/flujo-aprobacion/asignaciones/quitar`,
+`GET /api/flujo-aprobacion/permisos?flujoId=` y `GET /api/flujo-aprobacion/historial?flujoId=`.
 
 ## Cómo funciona (común a ambas extensiones)
 
@@ -4365,7 +4437,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Requisitos BIM (LOIN) | `https://trimble-docs.vercel.app/manifest-loin.json` |
    | Realidad aumentada | `https://trimble-docs.vercel.app/manifest-ra.json` |
    | Publicar entre proyectos | `https://trimble-docs.vercel.app/manifest-publicar.json` |
-   | Flujo de aprobación | `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` |
+   | Flujo de aprobación (ejecutar antes `supabase/flujo-aprobacion.sql`) | `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
    proyecto, junto a las demas (Resumen Archivos con icono de carpeta azul;

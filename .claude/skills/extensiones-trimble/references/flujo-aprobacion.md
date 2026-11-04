@@ -67,9 +67,10 @@ exportación solo a PDF.
 
 0. **Prueba en Trimble real** (hecha el 04-11-2026 en Laboratorio; resultado
    abajo). Sin Supabase.
-1. Configuración: SQL `supabase/flujo-aprobacion.sql`, flujos con su hito,
-   carpetas de revisión (selección múltiple) y destino, pasos + / −, personas y
-   grupos por carpeta o archivo, revisión de permisos.
+1. **Configuración** (hecha el 04-11-2026, ver abajo): SQL
+   `supabase/flujo-aprobacion.sql`, flujos con su hito, carpetas de revisión
+   (selección múltiple) y destino, pasos + / −, personas y grupos por carpeta o
+   archivo, revisión de permisos, historial de la configuración.
 2. Detección y registro (al abrir y «Revisar ahora»), estados, mensaje de
    versión nueva, bandeja «Por revisar» y «Mis archivos».
 3. Revisión: aprobar por pasos, rechazar con motivo, avisos (bandeja + ToDo),
@@ -132,3 +133,52 @@ Sin probar todavía (antes de las fases 3 y 4, no frenan la 1): copiar otra vez
 el mismo archivo a la misma carpeta (¿llega como v2 con `mergeExisting`, o
 Trimble lo renombra?) y una tarea asignada a un grupo (`type: "GROUP"`), en un
 proyecto que tenga grupos.
+
+## Fase 1: configuración (`lib/flujo-aprobacion/flujos.ts`, `permisos.ts`, `service.ts`, `store.ts`)
+
+Las 5 reglas que el dueño aprobó al decir "Sigue con la fase 1" (04-11-2026):
+
+1. Una carpeta en **un solo flujo activo**; anidadas: manda la más cercana
+   (`flujoDe`). En SQL: *trigger* `aprobacion_revisar_carpetas` con
+   `pg_advisory_xact_lock` por proyecto (`carpeta-en-otro-flujo`).
+2. Destino y revisión **nunca uno dentro del otro**, en el mismo flujo o entre
+   flujos (`conflictos`; solo en el servicio: necesita las carpetas de arriba).
+3. 1 a **5 pasos** después de «Realiza» (`MIN_PASOS`, `MAX_PASOS`), nombres
+   distintos y distintos de «Realiza»/«Consulta».
+4. Los archivos en trámite siguen con el flujo con el que empezaron: guardar
+   **una copia de los pasos en cada archivo** desde la fase 2.
+5. Hito único en el proyecto (`hito_clave` sin tildes ni mayúsculas, índice
+   único sobre todos los flujos, activos o no: reactivar nunca choca).
+
+Piezas:
+- Los pasos tienen id estable (`p1`, `p2`… con `idsDePasos`): renombrar no
+  rompe las asignaciones. Papel = `realiza`, `consulta` o el id de un paso.
+- Carpetas y destino se guardan en jsonb con `ruta` y `ancestros` (ids de la
+  raíz hacia abajo), leídos de Trimble (`getFolderDetails ?fields=path`,
+  `elementoDe` en `routes.ts`, la raíz con el nombre del proyecto). Las
+  asignaciones guardan también `objetivo_ancestros`: así `responsablesDe`
+  resuelve por cercanía sin pedir nada a Trimble.
+- `responsablesDe(x, papel, asignaciones)`: las del objetivo más cercano que
+  tenga alguna para ese papel (archivo, luego sus carpetas hacia arriba). Lo
+  usarán las fases 2 y 3 para saber a quién avisar y quién puede aprobar.
+- Quitar un paso o una carpeta con asignaciones: 409
+  `confirmar-asignaciones` y, con `confirmar: true`, se desactivan.
+- Guardado optimista: `version` en la fila; PATCH con `version=eq.N`.
+- `permisos.ts`: ACL efectiva = propias + heredadas si la herencia está
+  encendida; acceso de una persona = su entrada propia, si no la mejor de sus
+  grupos y de `tc-groups:*`; administradores = acceso completo. Avisos:
+  `riesgo` (otros con acceso completo al destino), `falla` (aprobador del
+  último paso sin acceso completo al destino; asignado sin acceso en su
+  carpeta; «Realiza» con solo lectura), `info` (ACL vacía o no legible). No
+  se sabe si Trimble da prioridad a la entrada propia o a la mejor de grupos:
+  por eso los textos dicen "no aparece con…".
+- El `store` se abre solo cuando se usa (getter en `routes.ts`): la prueba de
+  la fase 0 sigue funcionando sin Supabase.
+- Pruebas: `flujos.test.ts`, `permisos.test.ts`, `service.test.ts` (servicio
+  real sobre `memoryStore` y un Trimble falso). SQL probado dos veces con
+  PGlite y sus reglas (en PGlite el rol `service_role` necesita `bypassrls`,
+  como en Supabase).
+- La página temporal del navegador monta `FlujoAprobacionApp` con el servicio
+  real sobre `memoryStore` (corre en el navegador) y un árbol de carpetas fijo.
+  Ahí el error llega como `FlujoError` y no como `ApiError`: la pantalla lee
+  `code` de cualquiera de los dos.
