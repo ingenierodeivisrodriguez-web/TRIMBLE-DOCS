@@ -4133,6 +4133,16 @@ Al final arma un resumen para copiar y pegar. No guarda nada en Supabase ni
 borra nada: deja la copia en la carpeta elegida y la tarea de prueba, que se
 pueden borrar a mano.
 
+Resultado en el proyecto Laboratorio (04-11-2026): las versiones salen de
+`GET /files/{id}/versions` con quién subió cada una; el enlace directo abre el
+archivo; la copia dentro de Trimble funciona en el mismo proyecto (un modelo en
+versión 12 llegó como versión 1 y el visor lo mostró sin «Conversión en
+curso»); la tarea se crea con `label` y `assignees: [{ id, type: "USER" }]`,
+aparece en ToDo y Trimble le manda el correo a la persona. Adjuntar el archivo a
+la tarea no funcionó (Trimble respondió `INVALID_JSON`): el enlace va en la
+descripción. Falta probar una tarea para un grupo (Laboratorio no tiene grupos)
+y una segunda copia del mismo archivo (debe llegar como versión 2).
+
 Código: [`lib/flujo-aprobacion/prueba.ts`](lib/flujo-aprobacion/prueba.ts)
 (pasos, con pruebas en `prueba.test.ts` sobre la nube falsa de Publicar),
 [`lib/flujo-aprobacion/routes.ts`](lib/flujo-aprobacion/routes.ts),

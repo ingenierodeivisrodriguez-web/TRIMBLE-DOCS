@@ -65,8 +65,8 @@ exportación solo a PDF.
 
 ## Fases
 
-0. **Prueba en Trimble real** (código en `main`; falta que el dueño la corra y
-   pegue el resumen). Sin Supabase.
+0. **Prueba en Trimble real** (hecha el 04-11-2026 en Laboratorio; resultado
+   abajo). Sin Supabase.
 1. Configuración: SQL `supabase/flujo-aprobacion.sql`, flujos con su hito,
    carpetas de revisión (selección múltiple) y destino, pasos + / −, personas y
    grupos por carpeta o archivo, revisión de permisos.
@@ -105,7 +105,30 @@ exportación solo a PDF.
   responde versiones y ToDos. La página temporal del navegador puede correr el
   `pasoPrueba` real sobre la nube falsa (es pura).
 
-Lo que falta saber de la fase 0: ruta y forma de las versiones, si el enlace
-abre el archivo, si la copia dentro del mismo proyecto evita la reconversión,
-el formato de ToDo que acepta Trimble, si adjunta el archivo, si asigna a
-grupos y si manda correo.
+## Resultado de la prueba real (Laboratorio, 04-11-2026)
+
+- Equipo: 4 personas, 2 administradores; **Laboratorio no tiene grupos**, así
+  que los miembros de grupo no se probaron aquí (Propiedades ya los lee en
+  producción con `listProjectUsers(…, { groupId })` para sus responsables).
+- Versiones: **`GET /files/{id}/versions`** sirve; `GET /files/fs/{id}/versions`
+  da 404 `INVALID_ENDPOINT`. Cada versión trae `modifiedBy` = quien la subió
+  (`createdBy` = quien creó el archivo). Hay nombres con doble espacio
+  ("USUARIO  DE PRUEBA"): juntar espacios al mostrarlos.
+- Enlace directo (`buildFileViewerUrl`): **abre el archivo**.
+- Copia en el mismo proyecto: **`POST /files` con `fromFileVersionId` funciona**
+  (copia dentro de Trimble, sin pasar por el servidor). Un `.rvt` en v12 llegó
+  como **v1** al destino y, según el dueño, el visor lo mostró **sin
+  «Conversión en curso»**. `GET /files/{id}/status` respondió
+  `{"status":-3601}` (código sin documentar): no usarlo para decidir nada.
+- ToDo: **`POST /todos` con `{ projectId, label, description, assignees: [{ id,
+  type: "USER" }] }` → 201**. Al leerla, `assignees` trae id, tipo, correo y
+  nombre. Llegó el correo de Trimble a la persona y la tarea se ve en ToDo.
+  `GET /todos/types` devolvió una lista vacía.
+- Adjuntar el archivo a la tarea **falló**: `POST /todos/{id}/attachments` con
+  `{ attachments: [fileId] }` y con `[{ id, type: FILE }]` → 400 `INVALID_JSON`.
+  El enlace en la descripción cumple el "enlace directo al archivo".
+
+Sin probar todavía (antes de las fases 3 y 4, no frenan la 1): copiar otra vez
+el mismo archivo a la misma carpeta (¿llega como v2 con `mergeExisting`, o
+Trimble lo renombra?) y una tarea asignada a un grupo (`type: "GROUP"`), en un
+proyecto que tenga grupos.
