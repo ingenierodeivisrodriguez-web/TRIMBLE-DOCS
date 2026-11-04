@@ -459,13 +459,20 @@ function supabaseStore(): ManualesStore | null {
   };
 }
 
-export function memoryStore(): ManualesStore {
+/**
+ * Same rules as the Supabase store, without a database. `ahora` is the clock
+ * for every timestamp it stamps (an annulment's reversal is dated with it, as
+ * the database does with now()); tests can fix it so they don't depend on
+ * the month they run in.
+ */
+export function memoryStore(ahora: () => Date = () => new Date()): ManualesStore {
   let cuenta: (CuentaTecnica & { turnoHasta: number }) | null = null;
   const estados = new Map<string, EstadoOauth>();
   const autorizados = new Map<string, Autorizado>();
   let venta: ConfigVenta = { ...VENTA_CERRADA };
   const ordenes = new Map<string, Orden>();
-  const now = () => new Date().toISOString();
+  const now = () => ahora().toISOString();
+  const ms = () => ahora().getTime();
   return {
     async getCuenta() {
       if (!cuenta) return null;
@@ -482,8 +489,8 @@ export function memoryStore(): ManualesStore {
       cuenta = null;
     },
     async tomarTurno(segundos) {
-      if (!cuenta || cuenta.turnoHasta > Date.now()) return false;
-      cuenta.turnoHasta = Date.now() + segundos * 1000;
+      if (!cuenta || cuenta.turnoHasta > ms()) return false;
+      cuenta.turnoHasta = ms() + segundos * 1000;
       return true;
     },
     async soltarTurno() {
@@ -495,7 +502,7 @@ export function memoryStore(): ManualesStore {
     async consumirEstado(state) {
       const e = estados.get(state);
       estados.delete(state);
-      return e && Date.parse(e.expira) > Date.now() ? e : null;
+      return e && Date.parse(e.expira) > ms() ? e : null;
     },
     async listarAutorizados() {
       return [...autorizados.values()].sort((a, b) => a.email.localeCompare(b.email));

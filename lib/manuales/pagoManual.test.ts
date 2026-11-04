@@ -30,7 +30,9 @@ describe("pagos manuales", () => {
   });
 
   it("respalda la licencia en los estados de cuenta, y se puede anular dejando el reverso", async () => {
-    const store = memoryStore();
+    // The store's clock on HOY (10 a. m. in Colombia): the reversal is dated
+    // with it, so it falls in October whatever month the tests run in.
+    const store = memoryStore(() => new Date(`${HOY}T15:00:00Z`));
     await agregar(store, { texto: "luis@x.com, ana@x.com, pepe@x.com", licencia: { meses: 12, inicio: "2026-10-08" } }, "Admin", HOY);
     const lista = async () => (await store.listarAutorizados()).map((a) => infoAutorizado(a, HOY));
     const ordenes = () => store.listarOrdenes({ pagadas: true, limite: 100 });
