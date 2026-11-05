@@ -30,6 +30,7 @@ const archivo = (extra: Partial<ArchivoRegistro> = {}): ArchivoRegistro => ({
   versionAprobadaId: null,
   revisionAprobada: null,
   firmas: [],
+  traslado: null,
   detectado: AHORA,
   actualizado: AHORA,
   ...extra,

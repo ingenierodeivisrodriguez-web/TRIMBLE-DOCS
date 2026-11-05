@@ -1,6 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
-import type { ArchivoRegistro, Asignacion, CarpetaFlujo, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo } from "./types";
+import type { ArchivoRegistro, Asignacion, CarpetaFlujo, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado } from "./types";
 
 /**
  * Persistence of "Flujo de aprobación". Two implementations with the same
@@ -41,6 +41,9 @@ export interface FlujoStore {
    * arrived in between).
    */
   decidirArchivo(id: string, esperado: { versionId: string | null; pasoActual: number; estado: EstadoArchivo }, cambios: Partial<Omit<ArchivoRegistro, "id" | "proyecto" | "fileId">>): Promise<ArchivoRegistro | null>;
+  /** Takes a file for copying it to the destination until `hasta`, unless someone else holds it (false). */
+  tomarTraslado(id: string, hasta: string, ahora: string): Promise<boolean>;
+  soltarTraslado(id: string): Promise<void>;
 }
 
 const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
@@ -165,6 +168,7 @@ const deArchivo = (f: Fila): ArchivoRegistro => ({
   subidoPor: t(f.subido_por) ?? "",
   subidoPorId: t(f.subido_por_id),
   firmas: arr<Firma>(f.firmas),
+  traslado: f.traslado && typeof f.traslado === "object" ? (f.traslado as Traslado) : null,
   versionAprobadaId: t(f.version_aprobada_id),
   revisionAprobada: n(f.revision_aprobada),
   detectado: String(f.detectado),
@@ -189,6 +193,7 @@ const aArchivo = (a: Partial<ArchivoRegistro>): Fila =>
     subido_por: a.subidoPor,
     subido_por_id: a.subidoPorId,
     firmas: a.firmas,
+    traslado: a.traslado,
     version_aprobada_id: a.versionAprobadaId,
     revision_aprobada: a.revisionAprobada,
     detectado: a.detectado,
@@ -296,6 +301,17 @@ function supabaseStore(): FlujoStore | null {
       });
       return filas[0] ? deArchivo(filas[0]) : null;
     },
+    async tomarTraslado(id, hasta, ahora) {
+      const filas = await json<Fila[]>(`/aprobacion_archivos?id=${eq(id)}&or=(traslado_hasta.is.null,traslado_hasta.lt.${encodeURIComponent(ahora)})`, {
+        method: "PATCH",
+        headers: representar,
+        body: JSON.stringify({ traslado_hasta: hasta }),
+      });
+      return filas.length > 0;
+    },
+    async soltarTraslado(id) {
+      await call(`/aprobacion_archivos?id=${eq(id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ traslado_hasta: null }) });
+    },
   };
 }
 
@@ -307,6 +323,7 @@ export function memoryStore(): FlujoStore {
   const historial: EntradaHistorial[] = [];
   const archivos = new Map<string, ArchivoRegistro>();
   const revisando = new Map<string, string>();
+  const trasladando = new Map<string, string>();
   let contador = 0;
   const id = () => `00000000-0000-4000-8000-${String(++contador).padStart(12, "0")}`;
   const copia = <T>(x: T): T => structuredClone(x);
@@ -408,6 +425,15 @@ export function memoryStore(): FlujoStore {
       const nuevo = { ...a, ...(sinIndefinidos(copia(cambios) as Fila) as Partial<ArchivoRegistro>) };
       archivos.set(aid, nuevo);
       return copia(nuevo);
+    },
+    async tomarTraslado(aid, hasta, momento) {
+      const actual = trasladando.get(aid);
+      if (!archivos.has(aid) || (actual && actual >= momento)) return false;
+      trasladando.set(aid, hasta);
+      return true;
+    },
+    async soltarTraslado(aid) {
+      trasladando.delete(aid);
     },
   };
 }

@@ -10,6 +10,7 @@ import type { Caller } from "../propiedades/service";
 import type { FolderPermissions, ProjectGroup, ProjectUser, RawFolderItem } from "../trimbleApi";
 import type { Limites } from "./recorrido";
 import type { Respuesta } from "../compras/cde";
+import type { Lado } from "../publicar/copiar";
 import { esIdTrimble, FlujoError } from "./errores";
 import {
   asignacionesAfectadas,
@@ -48,6 +49,10 @@ export interface TrimbleFlujo {
   version(fileId: string): Promise<string | null>;
   /** POST /todos with that body (phase 3). Answers never throw: the status says what happened. */
   crearTarea(cuerpo: Record<string, unknown>): Promise<Respuesta>;
+  /** This project through the caller's token, for copying to the destination (phase 4). */
+  lado: Lado;
+  /** For the content of a copy that goes through the server (tests). */
+  fetch?: typeof fetch;
 }
 
 export interface Ctx {

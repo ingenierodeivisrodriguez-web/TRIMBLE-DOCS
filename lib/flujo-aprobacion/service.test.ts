@@ -43,6 +43,7 @@ function escenario(o: { admin?: boolean; permisos?: Record<string, FolderPermiss
     items: async () => [],
     version: async () => null,
     crearTarea: async () => ({ estado: 201, cuerpo: { id: "todo" } }),
+    lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
   };
   const caller = (admin: boolean): Caller => ({ id: admin ? "ana" : "juan", name: admin ? "Ana Ruiz" : "Juan Pérez", isAdmin: admin });
   const ctx: Ctx = { projectId: "P", caller: caller(o.admin ?? true), store, tc, ahora: () => new Date("2026-11-05T15:00:00Z") };

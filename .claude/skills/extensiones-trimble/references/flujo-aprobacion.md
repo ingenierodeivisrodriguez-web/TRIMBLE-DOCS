@@ -76,7 +76,7 @@ exportación solo a PDF.
    archivos» y «Archivos».
 3. **Revisión** (hecha el 04-11-2026, ver abajo): aprobar por pasos, rechazar con motivo, avisos (bandeja + ToDo),
    aprobar solo la versión vista.
-4. Traslado: copia automática de la última versión con la sesión de quien
+4. **Traslado** (hecho el 04-11-2026, ver abajo): copia automática de la última versión con la sesión de quien
    aprobó; reintento por el aprobador o un administrador si falla.
 5. Trazabilidad por archivo y general, filtros, PDF, README, guía y protocolo.
 
@@ -284,3 +284,50 @@ origen = destino); si el destino ya tiene el nombre y no llegó por el flujo,
 mostrar y preguntar (regla 2); recrear subcarpetas; anotar quién trasladó y
 cuándo; reintento por el aprobador o un administrador. Antes, que el dueño
 pruebe la segunda copia como v2.
+
+## Fase 4: copia a la carpeta destino (`traslado.ts`, `trasladar.ts`)
+
+El dueño dijo "Sí, fase 4" (04-11-2026) sin haber probado aún la segunda copia
+como v2. Por eso el diseño evita lo no comprobado:
+
+- Primera copia (nada con ese nombre en el destino): `copiarUltimaVersion`
+  normal (POST /files `fromFileVersionId`, comprobado en real: v1, sin
+  reconversión; si falla, subida por el servidor).
+- Archivo ya en el destino y es la última copia del flujo
+  (`traslado.destinoVersionId`) o la versión que la persona confirmó
+  reemplazar: **solo subida** con `If-Match` (opción nueva `soloSubida` de
+  `copiarUltimaVersion`; lo comprobado en la prueba real de Publicar: mismo
+  nombre = versión nueva). No se usa `POST /files` con `mergeExisting` (no se
+  sabe si Trimble renombra).
+- Se copia **`versionAprobadaId`** (opción nueva `versionFija`: la descarga y
+  el TRB piden esa versión; en la nube falsa `downloadurl` ahora respeta
+  `versionId`).
+- `situacionDestino`: nuevo / version-nueva / diferencia. Diferencia → no se
+  toca; `traslado.diferenciaVersionId` + texto (versión, quién, fecha); se
+  reemplaza con `paso: "reemplazar", siVersion` = esa versión (si cambió otra
+  vez, vuelve a diferencia).
+- Subcarpetas: `carpetaDeRevision` (la más cercana del flujo) +
+  `subcarpetas` (nombres desde la ruta) → `asegurarRuta` (busca o crea con
+  `crearCarpeta`).
+- Quién: `puedeTrasladar` = hay `versionAprobadaId` y no está retirado; el
+  último aprobador (firma) o un administrador. Tras empezar una revisión nueva
+  (firmas vacías) solo un administrador.
+- Al aprobar el último paso, `decidir` llama a `trasladar` en la misma
+  petición (`aprobar` con `maxDuration = 300`); un error del traslado nunca
+  deshace la aprobación: queda `traslado.estado = "error"` y «Trasladar otra
+  vez».
+- Subida por el servidor → `en-curso` con `uploadId`; `confirmarTraslado`
+  (GET /files/fs/upload) → hecho / error; la pantalla pregunta cada 4 s (hasta
+  45 veces) por los que inició la persona (o todos, si es administrador).
+- Candado por archivo `traslado_hasta` (6 min); `trasladar` sobre algo ya
+  copiado responde "ya está"; sobre algo en curso, confirma.
+- Historial: `trasladado` (quién, versión aprobada, versión en destino),
+  `traslado-diferencia`, `traslado-error`.
+- Pruebas: `traslado.test.ts` (puras) y `trasladar.test.ts` (servicio con la
+  nube falsa de Publicar: v1, subcarpetas, v2 encima, ajeno con confirmación,
+  reintento con la versión aprobada, no duplicar).
+
+Para la fase 5: trazabilidad por archivo y general con filtros y PDF (quién
+subió y cuándo, quién revisó, decisión y fecha, comentarios, quién trasladó y
+cuándo); usar `aprobacion_historial` y `firmas`; las librerías de PDF ya
+usadas en Compras (`lib/compras/pdfOrden.ts`).

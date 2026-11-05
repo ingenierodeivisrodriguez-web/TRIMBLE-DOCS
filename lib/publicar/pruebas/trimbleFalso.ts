@@ -173,7 +173,8 @@ export function nubeFalsa(opciones: { rechazarFlujo?: boolean; sinCopiaTrimble?:
           const a = archivos.get(partes[2]);
           if (!a) return responder(404);
           if (url.searchParams.get("format") === "TRB") return ultima(a).modelo ? responder(200, { url: `https://s3.falso/modelo/${a.id}` }) : responder(404, { message: "no TRB" });
-          return responder(200, { url: `https://s3.falso/bajar/${a.id}/${ultima(a).versionId}` });
+          const pedida = url.searchParams.get("versionId");
+          return responder(200, { url: `https://s3.falso/bajar/${a.id}/${pedida && a.versiones.some((v) => v.versionId === pedida) ? pedida : ultima(a).versionId}` });
         }
         if (metodo === "GET" && partes[0] === "files" && partes.length === 2) {
           const a = archivos.get(partes[1]);

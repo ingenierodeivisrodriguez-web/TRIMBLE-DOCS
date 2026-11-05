@@ -41,6 +41,7 @@ async function escenario() {
     permisos: async () => ({ direct: { acl: {}, inheritance: true }, inherited: {} }),
     items: async (id) => arbol[id] ?? [],
     version: async (id) => arbol.arq.find((x) => x.id === id)?.versionId ?? null,
+    lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
     crearTarea: async (cuerpo) => {
       tareas.push(cuerpo);
       return { estado: 201, cuerpo: { id: `todo${tareas.length}` } };
@@ -85,7 +86,8 @@ test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa ve
   // Eva (same group) can't approve a step that is no longer hers.
   await assert.rejects(() => decidir(e.ctx("eva"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /El paso «Aprueba» de este archivo no es tuyo: lo tiene Pepe/);
   const r2 = await decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId, texto: "Cumple" }, "aprobar");
-  assert.equal(r2.mensaje, "«modelo.rvt» queda aprobado (versión 1). La copia a la carpeta destino llega en la fase 4.");
+  assert.match(r2.mensaje, /^«modelo.rvt» queda aprobado \(versión 1\)\. No se pudo leer el archivo en la carpeta de revisión/);
+  assert.equal(r2.traslado?.estado, "error", "this fake Trimble has no files: the copy fails and can be retried");
   a = await e.modelo();
   assert.equal(a.estado, "aprobado");
   assert.equal(a.revisionAprobada, 1);

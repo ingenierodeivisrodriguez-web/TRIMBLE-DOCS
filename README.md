@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fases 1 a 3, configuración, registro, aprobar y rechazar con avisos) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fases 1 a 4, configuración, registro, aprobar y rechazar con avisos, copia al destino) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4334,6 +4334,53 @@ Código: [`lib/flujo-aprobacion/decision.ts`](lib/flujo-aprobacion/decision.ts)
 (servicio). Columna `aprobacion_archivos.firmas`. Rutas:
 `POST /api/flujo-aprobacion/aprobar` y `POST /api/flujo-aprobacion/rechazar`
 (`{ archivoId, versionId, texto }`).
+
+### Fase 4: copia a la carpeta destino
+
+Hay que volver a ejecutar **`supabase/flujo-aprobacion.sql`** (agrega la
+columna del traslado).
+
+**Al aprobar el último paso**, la extensión copia enseguida la **versión
+aprobada** a la carpeta destino del flujo, con el mismo nombre y con la sesión
+de quien aprobó:
+
+- Si el destino no tiene ese archivo, Trimble lo copia por dentro (como en la
+  prueba de la fase 0: llega como **versión 1** y sin volver a convertir el
+  modelo). Si esa copia no se puede, se sube por el servidor.
+- Si el destino tiene la **última copia que hizo el flujo**, la nueva llega
+  encima como **versión 2, 3…** del mismo archivo (una subida que Trimble solo
+  acepta si esa sigue siendo la última versión: así se comprobó en la prueba
+  real de Publicar).
+- Si el destino tiene un archivo con ese nombre **que no llegó por el flujo**
+  (o alguien lo cambió después de la última copia), **no se reemplaza**: el
+  archivo muestra «En destino hay otro archivo con ese nombre», con su versión,
+  quién y cuándo, y el aprobador o un administrador decide **«Reemplazar en el
+  destino»** (la aprobada queda encima como versión nueva; la otra sigue en el
+  historial de versiones de Trimble; nada se borra).
+- Las **subcarpetas** entre la carpeta de revisión y el archivo se crean
+  dentro del destino (Arquitectura / Torre 1 / plano.pdf → Aprobados / Torre 1
+  / plano.pdf).
+- Se copia **la versión aprobada**, aunque después haya llegado otra que espera
+  revisión.
+
+Cuando la copia va por el servidor, Trimble tarda un momento en confirmarla:
+la pantalla pregunta sola cada pocos segundos («Copia al destino en curso…» →
+«En destino: versión 2»). Si algo falla (por ejemplo, quien aprobó no puede
+escribir en la carpeta destino), el archivo dice por qué y **«Trasladar otra
+vez»**. Solo **quien aprobó el último paso o un administrador** trasladan,
+reintentan o reemplazan (si ya empezó la revisión de una versión nueva, solo un
+administrador). Dos personas no copian el mismo archivo a la vez. El historial
+dice **quién copió, cuándo y qué versión**, y en qué versión quedó en el
+destino.
+
+Código: [`lib/flujo-aprobacion/traslado.ts`](lib/flujo-aprobacion/traslado.ts)
+(reglas: subcarpetas, quién traslada, qué hay en el destino) y
+[`trasladar.ts`](lib/flujo-aprobacion/trasladar.ts) (copiar, confirmar,
+reemplazar), con la copia de Publicar (`copiarUltimaVersion`, que ganó dos
+opciones: solo subida y versión fija). Columnas `aprobacion_archivos.traslado`
+(jsonb) y `traslado_hasta` (candado). Ruta:
+`POST /api/flujo-aprobacion/trasladar` (`{ archivoId, paso: trasladar |
+confirmar | reemplazar, siVersion }`); `aprobar` puede trabajar hasta 300 s.
 
 ## Cómo funciona (común a ambas extensiones)
 

@@ -87,6 +87,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       items: (folderId) => listFolderItems(servidor, token, folderId),
       version: async (fileId) => (await getFileDetails(servidor, token, fileId)).versionId || null,
       crearTarea: (cuerpo) => clienteTrimble(servidor, token).pedir("POST", "/todos", { cuerpo }),
+      lado: { projectId, servidor, cliente: clienteTrimble(servidor, token) },
     };
     return await run({
       projectId,

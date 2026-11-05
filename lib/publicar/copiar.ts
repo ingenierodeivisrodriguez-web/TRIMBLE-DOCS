@@ -255,6 +255,14 @@ export async function copiarUltimaVersion(o: {
   carpetaId: string;
   enDestino: { versionId: string | null } | null;
   sinModelo?: boolean;
+  /**
+   * Straight to an upload, without Trimble's own copy (Flujo de aprobación:
+   * a new version of a file already in the destination, the way the phase 0
+   * test of Publicar confirmed it works).
+   */
+  soloSubida?: boolean;
+  /** Download exactly `archivo.versionId` (not the latest): Flujo de aprobación copies the approved one. */
+  versionFija?: boolean;
   fetch?: Fetch;
   reloj?: () => number;
 }): Promise<ResultadoCopia> {
@@ -262,8 +270,8 @@ export async function copiarUltimaVersion(o: {
   const fetchFn = o.fetch ?? fetch;
   if (!a.versionId) return { ok: false, mensaje: "Trimble no dio la versión del archivo en el origen." };
 
-  const copia = await d.cliente.pedir("POST", "/files", { cuerpo: { parentId: carpetaId, parentType: "FOLDER", fromFileVersionId: a.versionId, mergeExisting: !!enDestino } });
-  if (ok(copia)) {
+  const copia = o.soloSubida ? null : await d.cliente.pedir("POST", "/files", { cuerpo: { parentId: carpetaId, parentType: "FOLDER", fromFileVersionId: a.versionId, mergeExisting: !!enDestino } });
+  if (copia && ok(copia)) {
     let b = archivoDe(copia.cuerpo);
     if (!b) {
       const hallado = await buscarEnCarpeta(d.cliente, carpetaId, a.nombre, "FILE");
@@ -280,13 +288,14 @@ export async function copiarUltimaVersion(o: {
       revision: b?.revision ?? null,
     };
   }
-  const sinCopiaTrimble = `La copia dentro de Trimble no se pudo (${explicarEstado(copia.estado)}).`;
+  const sinCopiaTrimble = copia ? ` La copia dentro de Trimble no se pudo (${explicarEstado(copia.estado)}).` : "";
+  const deVersion = o.versionFija ? `&versionId=${encodeURIComponent(a.versionId)}` : "";
 
   // The origin's converted model, unless a previous try with it failed.
   let modelo: "copiado" | "sin-modelo" | "rechazado" | "omitido" = "omitido";
   let urlModeloOrigen: string | null = null;
   if (!o.sinModelo) {
-    const r = await origen.cliente.pedir("GET", `/files/fs/${encodeURIComponent(a.id)}/downloadurl?format=TRB`);
+    const r = await origen.cliente.pedir("GET", `/files/fs/${encodeURIComponent(a.id)}/downloadurl?format=TRB${deVersion}`);
     urlModeloOrigen = ok(r) && typeof (r.cuerpo as { url?: unknown } | null)?.url === "string" ? (r.cuerpo as { url: string }).url : null;
     if (!urlModeloOrigen) modelo = "sin-modelo";
   }
@@ -298,7 +307,7 @@ export async function copiarUltimaVersion(o: {
     s = await abrirSubida(d.cliente, carpetaId, a.nombre, { conModelo: false, ...condicion });
   }
   if (!s.uploadId || !s.url) return { ok: false, mensaje: `Trimble no abrió la subida en el destino: ${explicarEstado(s.respuesta.estado)}`, http: s.respuesta.estado };
-  const bajada = await urlDescarga(origen.cliente, a.id);
+  const bajada = await urlDescarga(origen.cliente, a.id, o.versionFija ? a.versionId : null);
   if (!bajada.url) return { ok: false, mensaje: `Trimble no dio el enlace del archivo en el origen: ${explicarEstado(bajada.respuesta.estado)}`, http: bajada.respuesta.estado };
 
   const envio = await copiarContenido(bajada.url, s.url, fetchFn, o.reloj);
@@ -321,7 +330,7 @@ export async function copiarUltimaVersion(o: {
   }[modelo];
   return {
     ok: true,
-    mensaje: `Copiado por el servidor: ${formatBytes(envio.bytes ?? 0)} en ${duracion(envio.ms)}${v ? ` (${v})` : ""}.${sobreModelo} ${sinCopiaTrimble}`,
+    mensaje: `Copiado por el servidor: ${formatBytes(envio.bytes ?? 0)} en ${duracion(envio.ms)}${v ? ` (${v})` : ""}.${sobreModelo}${sinCopiaTrimble}`,
     metodo: "servidor",
     listo: false,
     uploadId: s.uploadId,

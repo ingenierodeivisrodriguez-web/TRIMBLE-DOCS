@@ -86,6 +86,7 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
         pasos: nuevoTramite.pasos,
         pasoActual: 0,
         firmas: [],
+        traslado: null,
         versionId: v.versionId,
         revision: v.revision,
         subido: v.subido,
@@ -100,7 +101,7 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
     }
     if (r.flujoId !== flujo.id) {
       // Moved into this flow's folders: a new review with this flow.
-      plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-cambio-flujo", cambios: { ...deTrimble(v), ...nuevoTramite, flujoId: flujo.id, estado: "pendiente", versionAprobadaId: null, revisionAprobada: null } });
+      plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-cambio-flujo", cambios: { ...deTrimble(v), ...nuevoTramite, flujoId: flujo.id, estado: "pendiente", versionAprobadaId: null, revisionAprobada: null, traslado: null } });
       continue;
     }
     if (r.versionId !== v.versionId) {

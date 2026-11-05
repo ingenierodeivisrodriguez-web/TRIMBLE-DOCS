@@ -4,6 +4,7 @@ import { useMemo, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
 import { ESPERANDO, textoEstado } from "../../lib/flujo-aprobacion/registro";
+import { puedeTrasladar, textoTraslado } from "../../lib/flujo-aprobacion/traslado";
 import type { ArchivoInfo, EntradaHistorial, EstadoArchivo } from "../../lib/flujo-aprobacion/types";
 import { acceptButton, baseInput, C, labelStyle, message, Notice } from "../presupuesto/ui";
 import { botonPeligro, card, etiqueta, linkBtn, select, td, texto, th, titulo } from "../compras/estilos";
@@ -160,6 +161,11 @@ export default function Archivos({ api, modo, datos, error, onCambio }: { api: F
                     setAbierto(null);
                     onCambio();
                   }}
+                  trasladable={puedeTrasladar(a, { id: datos.yo, esAdmin: datos.esAdmin }) === null}
+                  onTraslado={(texto, error) => {
+                    setResultado({ kind: error ? "error" : "info", texto });
+                    onCambio();
+                  }}
                 />
               ))}
             </tbody>
@@ -180,6 +186,8 @@ function FilaArchivo({
   onHistorial,
   onDecidir,
   onDecidido,
+  trasladable,
+  onTraslado,
 }: {
   api: FlujoApi;
   a: ArchivoInfo;
@@ -189,6 +197,8 @@ function FilaArchivo({
   onHistorial: () => void;
   onDecidir: () => void;
   onDecidido: (r: { mensaje: string; aviso: string | null }) => void;
+  trasladable: boolean;
+  onTraslado: (texto: string, error: boolean) => void;
 }) {
   const [color, fondo] = COLOR[a.estado];
   const carpeta = a.ruta.slice(0, Math.max(0, a.ruta.length - a.nombre.length - 3));
@@ -212,6 +222,7 @@ function FilaArchivo({
               {f.comoAdmin ? " (admin.)" : ""}, {fechaHora(f.fecha).slice(0, 10)}
             </div>
           ))}
+          {a.traslado && <EstadoTraslado api={api} a={a} trasladable={trasladable} onTraslado={onTraslado} />}
         </td>
         <td style={td}>
           {a.pasoNombre ? (
@@ -279,6 +290,53 @@ function FilaArchivo({
   );
 }
 
+const COLOR_TRASLADO: Record<NonNullable<ArchivoInfo["traslado"]>["estado"], string> = {
+  hecho: "#1e6b2c",
+  "en-curso": "#8a5a00",
+  pendiente: "#8a5a00",
+  diferencia: "#a1261b",
+  error: "#a1261b",
+};
+
+/**
+ * Where the approved version stands in the destination folder, and what the
+ * approver or an administrator can do: copy again after an error, or replace a
+ * file with that name that didn't come from the flow (after seeing it).
+ */
+function EstadoTraslado({ api, a, trasladable, onTraslado }: { api: FlujoApi; a: ArchivoInfo; trasladable: boolean; onTraslado: (texto: string, error: boolean) => void }) {
+  const [ocupado, setOcupado] = useState(false);
+  const t = a.traslado!;
+  async function pedir(paso: "trasladar" | "reemplazar") {
+    setOcupado(true);
+    try {
+      const r = await api.traslado(paso, a.id, paso === "reemplazar" ? t.diferenciaVersionId : null);
+      onTraslado(r.mensaje, r.traslado?.estado === "error");
+    } catch (err) {
+      onTraslado(message(err), true);
+    } finally {
+      setOcupado(false);
+    }
+  }
+  return (
+    <div style={{ marginTop: 4, fontSize: 12, color: COLOR_TRASLADO[t.estado] }} title={t.mensaje || undefined}>
+      {t.estado === "hecho" ? "➜ " : t.estado === "en-curso" ? "⏳ " : "⚠ "}
+      {textoTraslado(t, fechaHora)}
+      {(t.estado === "error" || t.estado === "pendiente") && t.mensaje && <div style={{ color: "var(--tc-gray-700)" }}>{t.mensaje}</div>}
+      {t.estado === "diferencia" && <div style={{ color: "var(--tc-gray-700)" }}>{t.diferenciaTexto}</div>}
+      {trasladable && (t.estado === "error" || t.estado === "pendiente") && (
+        <button type="button" disabled={ocupado} onClick={() => pedir("trasladar")} style={{ ...linkBtn, fontSize: 12, display: "block", marginTop: 2 }}>
+          {ocupado ? "Copiando…" : "Trasladar otra vez"}
+        </button>
+      )}
+      {trasladable && t.estado === "diferencia" && (
+        <button type="button" disabled={ocupado} onClick={() => pedir("reemplazar")} style={{ ...linkBtn, fontSize: 12, display: "block", marginTop: 2 }} title="La versión aprobada queda encima como versión nueva; la otra sigue en el historial de versiones de Trimble">
+          {ocupado ? "Copiando…" : "Reemplazar en el destino (queda como versión nueva)"}
+        </button>
+      )}
+    </div>
+  );
+}
+
 /** Approve (optional comment) or reject (reason required) the step the file waits for, on the version shown. */
 function Decision({ api, a, onDecidido }: { api: FlujoApi; a: ArchivoInfo; onDecidido: (r: { mensaje: string; aviso: string | null }) => void }) {
   const [comentario, setComentario] = useState("");
@@ -310,7 +368,7 @@ function Decision({ api, a, onDecidido }: { api: FlujoApi; a: ArchivoInfo; onDec
           Ábrela en Trimble
         </a>{" "}
         antes de decidir.
-        {ultimo ? " Es el último paso: al aprobar, el archivo queda aprobado." : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
+        {ultimo ? " Es el último paso: al aprobar, el archivo queda aprobado y se copia a la carpeta destino." : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
       </div>
       <label>
         <span style={labelStyle}>Comentario (opcional al aprobar) o motivo del rechazo (obligatorio)</span>

@@ -1,6 +1,6 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { CarpetaInfo } from "../publicar/types";
-import type { ArchivoInfo, AvisoPermisos, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision } from "./types";
+import type { ArchivoInfo, AvisoPermisos, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
 
 export interface DatosFlujoEnvio {
   id?: string;
@@ -30,7 +30,9 @@ export interface FlujoApi {
   revisar(flujoId: string): Promise<ResumenRevision>;
   archivos(): Promise<{ yo: string; esAdmin: boolean; archivos: ArchivoInfo[] }>;
   /** Approves or rejects the step a file waits for, on the version seen (phase 3). */
-  decidir(decision: "aprobar" | "rechazar", archivoId: string, versionId: string | null, texto: string): Promise<{ mensaje: string; aviso: string | null }>;
+  decidir(decision: "aprobar" | "rechazar", archivoId: string, versionId: string | null, texto: string): Promise<{ mensaje: string; aviso: string | null; traslado: Traslado | null }>;
+  /** Copies the approved version to the destination, confirms an upload, or replaces a file seen there (phase 4). */
+  traslado(paso: "trasladar" | "confirmar" | "reemplazar", archivoId: string, siVersion?: string | null): Promise<{ traslado: Traslado | null; mensaje: string }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -61,5 +63,6 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     revisar: (flujoId) => post("/revisar", { flujoId }),
     archivos: () => request("/archivos"),
     decidir: (decision, archivoId, versionId, texto) => post(`/${decision}`, { archivoId, versionId, texto }),
+    traslado: (paso, archivoId, siVersion) => post("/trasladar", { paso, archivoId, ...(siVersion ? { siVersion } : {}) }),
   };
 }

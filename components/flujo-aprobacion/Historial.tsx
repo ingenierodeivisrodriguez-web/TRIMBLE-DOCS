@@ -25,6 +25,9 @@ const ACCIONES: Record<string, string> = {
   rechazado: "Rechazó",
   "aviso-enviado": "Avisó (tarea de Trimble)",
   "aviso-fallido": "Aviso no enviado",
+  trasladado: "Trasladó al destino",
+  "traslado-diferencia": "Traslado en espera",
+  "traslado-error": "Traslado fallido",
 };
 
 /** Everything that changed in the configuration, newest first; it is never edited or deleted. */
@@ -51,7 +54,7 @@ export default function Historial({ api, flujos, recarga }: { api: FlujoApi; flu
       <h2 style={titulo}>Historial</h2>
       <p style={texto}>
         Quién creó, cambió, activó o desactivó cada flujo, quién asignó o quitó papeles, y qué archivos y versiones se subieron (con la fecha de Trimble). No se edita ni se
-        borra. Incluye cada aprobación y rechazo con su comentario, y los avisos enviados.
+        borra. Incluye cada aprobación y rechazo con su comentario, los avisos enviados y quién copió cada versión a la carpeta destino.
       </p>
       <label style={{ display: "inline-block", marginBottom: 8 }}>
         <span style={labelStyle}>Flujo</span>

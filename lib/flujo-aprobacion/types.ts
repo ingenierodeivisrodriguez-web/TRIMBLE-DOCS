@@ -210,6 +210,8 @@ export interface ArchivoRegistro {
   revisionAprobada: number | null;
   /** The decisions of this review, step by step (phase 3); emptied when a new review starts. */
   firmas: Firma[];
+  /** The copy of the approved version to the destination folder (phase 4); null until the first approval. */
+  traslado: Traslado | null;
   detectado: string;
   actualizado: string;
 }
@@ -229,6 +231,40 @@ export interface Firma {
   versionId: string | null;
   /** Comment on an approval; the reason of a rejection (required). */
   comentario: string;
+}
+
+/**
+ * Copying the approved version to the destination folder (phase 4):
+ * - pendiente: to do (or to do again after an error);
+ * - en-curso: an upload was opened and Trimble hasn't confirmed it;
+ * - hecho: it is there (`destino*` says which file and version);
+ * - diferencia: the destination has a file with that name that didn't come
+ *   from the flow (or changed after the last copy): it is only replaced when
+ *   the approver or an administrator confirms, seeing `diferencia*`;
+ * - error: it couldn't be done (`mensaje` says why); it can be retried.
+ */
+export interface Traslado {
+  estado: "pendiente" | "en-curso" | "hecho" | "diferencia" | "error";
+  mensaje: string;
+  /** The approved version being (or last) copied. */
+  versionId: string | null;
+  revision: number | null;
+  /** Where: the destination folder (or its subfolder) and its path. */
+  carpetaId: string | null;
+  carpetaRuta: string;
+  /** The open upload, while en-curso. */
+  uploadId: string | null;
+  /** The last copy the flow made in the destination. */
+  destinoFileId: string | null;
+  destinoVersionId: string | null;
+  destinoRevision: number | null;
+  /** Who did it and when. */
+  por: string | null;
+  porId: string | null;
+  fecha: string | null;
+  /** The other content seen in the destination (diferencia). */
+  diferenciaVersionId: string | null;
+  diferenciaTexto: string;
 }
 
 /** A Trimble ToDo to send: to whom, its title and text. */

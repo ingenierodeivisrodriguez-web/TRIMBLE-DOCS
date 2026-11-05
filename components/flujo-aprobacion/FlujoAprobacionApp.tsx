@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
 import { ESPERANDO } from "../../lib/flujo-aprobacion/registro";
 import type { ArchivoInfo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
@@ -52,6 +52,33 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
     cargar();
     cargarArchivos();
   }, [cargar, cargarArchivos]);
+
+  // Copies to the destination that went through an upload: ask Trimble every few seconds
+  // until it confirms them (only the person who started one, or an administrator).
+  const intentos = useRef(new Map<string, number>());
+  const [vuelta, setVuelta] = useState(0);
+  useEffect(() => {
+    if (!archivos) return;
+    const enCurso = archivos.archivos.filter(
+      (a) => a.traslado?.estado === "en-curso" && (a.traslado.porId === archivos.yo || archivos.esAdmin) && (intentos.current.get(a.id) ?? 0) < 45
+    );
+    if (!enCurso.length) return;
+    const t = setTimeout(async () => {
+      let cambio = false;
+      for (const a of enCurso) {
+        intentos.current.set(a.id, (intentos.current.get(a.id) ?? 0) + 1);
+        try {
+          const r = await api.traslado("confirmar", a.id);
+          if (r.traslado?.estado !== "en-curso") cambio = true;
+        } catch {
+          // Asked again on the next round.
+        }
+      }
+      if (cambio) cargarArchivos();
+      else setVuelta((n) => n + 1);
+    }, 4000);
+    return () => clearTimeout(t);
+  }, [archivos, vuelta, api, cargarArchivos]);
 
   const cambio = (e: EstadoFlujos) => {
     setDatos(e);

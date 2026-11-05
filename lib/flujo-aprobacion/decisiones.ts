@@ -11,7 +11,8 @@ import { avisoRechazo, avisosRevision, enviarAviso } from "./avisos";
 import { planDecision, puedeDecidir, revisarTexto } from "./decision";
 import { FlujoError } from "./errores";
 import type { Ctx } from "./service";
-import type { ArchivoRegistro, Asignacion, Aviso, EntradaHistorial } from "./types";
+import { ResultadoTraslado, trasladar } from "./trasladar";
+import type { ArchivoRegistro, Asignacion, Aviso, EntradaHistorial, Traslado } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** ToDos sent per review or decision. */
@@ -54,7 +55,7 @@ export async function avisarRevision(ctx: Ctx, flujoId: string, archivos: Archiv
 }
 
 /** { archivoId, versionId (the one seen), texto }: approves or rejects the step the file waits for. */
-export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "rechazar"): Promise<{ mensaje: string; aviso: string | null }> {
+export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "rechazar"): Promise<{ mensaje: string; aviso: string | null; traslado: Traslado | null }> {
   const o = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   if (typeof o.archivoId !== "string" || !UUID.test(o.archivoId)) throw new FlujoError("El archivo no es válido.");
   const texto = revisarTexto(decision, o.texto);
@@ -104,11 +105,17 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
   }
   await ctx.store.registrarVarios(lineas);
 
+  // The last step: the approved version goes to the destination folder now, with the approver's session.
+  let traslado: ResultadoTraslado | null = null;
+  if (plan.accion === "aprobado") {
+    traslado = await trasladar(ctx, a.id).catch((err: unknown) => ({ traslado: null, mensaje: `No se pudo copiar a la carpeta destino: ${err instanceof Error ? err.message : String(err)}` }));
+  }
+
   const mensaje =
     plan.accion === "rechazado"
       ? `«${a.nombre}» queda rechazado (versión ${a.revision ?? "?"}).`
       : plan.accion === "aprobado"
-        ? `«${a.nombre}» queda aprobado (versión ${a.revision ?? "?"}). La copia a la carpeta destino llega en la fase 4.`
+        ? `«${a.nombre}» queda aprobado (versión ${a.revision ?? "?"}). ${traslado?.mensaje ?? ""}`.trim()
         : `Aprobaste «${plan.firma.paso}» de «${a.nombre}»: pasa a «${plan.siguiente?.nombre}».`;
-  return { mensaje, aviso };
+  return { mensaje, aviso, traslado: traslado?.traslado ?? null };
 }

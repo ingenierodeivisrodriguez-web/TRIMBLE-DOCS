@@ -184,3 +184,13 @@ grant select, insert, update on public.aprobacion_archivos to service_role;
 -- "revision", "versionId", "comentario" }]. Se vacía al empezar una revisión
 -- nueva (versión nueva); lo anterior queda en el historial.
 alter table public.aprobacion_archivos add column if not exists firmas jsonb not null default '[]'::jsonb;
+
+-- ------------------------------------------------------------------ fase 4
+-- La copia de la versión aprobada a la carpeta destino: { "estado": pendiente |
+-- en-curso | hecho | diferencia | error, "mensaje", "versionId", "revision",
+-- "carpetaId", "carpetaRuta", "uploadId", "destinoFileId", "destinoVersionId",
+-- "destinoRevision", "por", "porId", "fecha", "diferenciaVersionId",
+-- "diferenciaTexto" }. "traslado_hasta" evita que dos personas copien el mismo
+-- archivo a la vez.
+alter table public.aprobacion_archivos add column if not exists traslado jsonb;
+alter table public.aprobacion_archivos add column if not exists traslado_hasta timestamptz;

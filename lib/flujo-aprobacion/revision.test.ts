@@ -55,6 +55,7 @@ function escenario() {
     permisos: async () => ({ direct: { acl: {}, inheritance: true }, inherited: {} }),
     items: async (id) => (arbol[id] ? arbol[id] : Promise.reject(new Error("403"))),
     version: async (id) => Object.values(arbol).flat().find((x) => x.id === id)?.versionId ?? null,
+    lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
     crearTarea: async (cuerpo) => {
       tareas.push(cuerpo);
       return { estado: 201, cuerpo: { id: `todo${tareas.length}` } };

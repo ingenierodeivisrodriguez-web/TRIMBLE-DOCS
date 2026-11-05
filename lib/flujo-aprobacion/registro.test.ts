@@ -59,6 +59,7 @@ const registrado = (fileId: string, revision: number, extra: Partial<ArchivoRegi
   versionAprobadaId: null,
   revisionAprobada: null,
   firmas: [],
+  traslado: null,
   detectado: "2026-11-01T16:00:00.000Z",
   actualizado: "2026-11-01T16:00:00.000Z",
   ...extra,

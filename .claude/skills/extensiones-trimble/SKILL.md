@@ -140,12 +140,12 @@ Herramientas incluidas:
   (managerbim@dyco.co). Falta: invitar esa cuenta a MANAGER PROJECT y probar
   SELVIA → MANAGER PROJECT; y saber cuál camino de copia evita la conversión
   del modelo. Ver `references/publicar.md`.
-- Flujo de aprobación: fases 0 a 3 en `main` (configuración, registro de
+- Flujo de aprobación: fases 0 a 4 en `main` (configuración, registro de
   archivos al abrir, aprobar/rechazar con firmas y avisos por tareas de
-  Trimble). El dueño debe ejecutar otra vez `supabase/flujo-aprobacion.sql`.
-  Sin probar en Trimble real: tarea a un grupo y segunda copia como v2 (la
-  fase 4 la necesita). Siguiente: fase 4 (copia a la carpeta destino) con su
-  OK. Ver `references/flujo-aprobacion.md`.
+  Trimble, copia de lo aprobado a la carpeta destino). El dueño debe ejecutar
+  otra vez `supabase/flujo-aprobacion.sql`. Sin probar en Trimble real: tarea a
+  un grupo y la copia completa en un proyecto real. Siguiente: fase 5
+  (trazabilidad y PDF) con su OK. Ver `references/flujo-aprobacion.md`.
 
 - Ofrecido y **sin aprobar**: un párrafo en la política de privacidad
   (`app/bim-apps/privacidad/page.tsx`) sobre el proveedor de IA. No toques la
