@@ -40,6 +40,7 @@ function escenario(o: { admin?: boolean; permisos?: Record<string, FolderPermiss
     grupos: async () => [{ id: "g-arq", name: "Arquitectura" }],
     miembros: async (g) => (g === "g-arq" ? [PERSONAS[1]] : []),
     permisos: async (id) => o.permisos?.[id] ?? { direct: { acl: {}, inheritance: true }, inherited: {} },
+    items: async () => [],
   };
   const caller = (admin: boolean): Caller => ({ id: admin ? "ana" : "juan", name: admin ? "Ana Ruiz" : "Juan Pérez", isAdmin: admin });
   const ctx: Ctx = { projectId: "P", caller: caller(o.admin ?? true), store, tc, ahora: () => new Date("2026-11-05T15:00:00Z") };

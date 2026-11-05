@@ -94,6 +94,9 @@ export interface Flujo {
   creadoPor: string | null;
   actualizado: string;
   actualizadoPor: string | null;
+  /** When its folders were last reviewed, and by whom (phase 2). */
+  revisado?: string | null;
+  revisadoPor?: string | null;
 }
 
 /** "realiza" (uploads and corrects), "consulta" (only sees), or the id of a review step. */
@@ -124,11 +127,19 @@ export interface EntradaHistorial {
   creado: string;
   proyecto: string;
   flujoId: string | null;
-  /** flujo-creado · flujo-modificado · flujo-desactivado · flujo-activado · asignacion-agregada · asignacion-quitada */
+  /**
+   * flujo-creado · flujo-modificado · flujo-desactivado · flujo-activado · asignacion-agregada · asignacion-quitada ·
+   * archivo-detectado · version-reemplazada · nueva-version · archivo-retirado · archivo-reaparecido · archivo-cambio-flujo
+   */
   accion: string;
   usuario: string | null;
   usuarioId: string | null;
   detalle: string;
+  /** For a file's lines (phase 2 on): which file, which version, and when it happened in Trimble. */
+  archivoId?: string | null;
+  fileId?: string | null;
+  version?: number | null;
+  ocurrido?: string | null;
 }
 
 /** What the screen gets: flows with their assignments, and whether the caller administers them. */
@@ -156,4 +167,91 @@ export interface PermisosCarpeta {
   completo: string[];
   lectura: string[];
   sinAcceso: string[];
+}
+
+// ---------------------------------------------------------------- phase 2
+
+/**
+ * State of a file in its flow: pendiente (first version under review),
+ * nueva-version (a new version after a decision), aprobado, rechazado (phase
+ * 3), retirado (deleted or moved out of the review folders: kept, never deleted).
+ */
+export type EstadoArchivo = "pendiente" | "nueva-version" | "aprobado" | "rechazado" | "retirado";
+
+/** A file of a review folder as the flow registered it. */
+export interface ArchivoRegistro {
+  id: string;
+  proyecto: string;
+  flujoId: string;
+  /** Trimble's file id. */
+  fileId: string;
+  nombre: string;
+  /** "Proyecto / Diseño / Arquitectura / modelo.rvt". */
+  ruta: string;
+  carpetaId: string | null;
+  /** Folder ids above the file, root first. */
+  ancestros: string[];
+  /** Extension in lower case ("rvt", "pdf"…). */
+  tipo: string;
+  estado: EstadoArchivo;
+  /** The flow's steps when this review started: a later change of the flow doesn't touch it. */
+  pasos: PasoFlujo[];
+  /** Index in `pasos` of the step it waits for. */
+  pasoActual: number;
+  /** The version under review (the latest one Trimble had when seen). */
+  versionId: string | null;
+  revision: number | null;
+  /** When and by whom that version was uploaded, as Trimble says. */
+  subido: string | null;
+  subidoPor: string;
+  subidoPorId: string | null;
+  /** The last approved version (phase 3). */
+  versionAprobadaId: string | null;
+  revisionAprobada: number | null;
+  detectado: string;
+  actualizado: string;
+}
+
+/** What a folder walk found: a file with its latest version. */
+export interface ArchivoVisto {
+  fileId: string;
+  nombre: string;
+  versionId: string | null;
+  revision: number | null;
+  subido: string | null;
+  subidoPor: string;
+  subidoPorId: string | null;
+  carpetaId: string;
+  ancestros: string[];
+  ruta: string;
+}
+
+/** The result of reviewing one flow's folders. */
+export interface ResumenRevision {
+  flujoId: string;
+  hito: string;
+  /** Someone else is reviewing this flow right now. */
+  ocupado: boolean;
+  /** Every folder was read in time (only then are missing files checked). */
+  completo: boolean;
+  nuevos: number;
+  nuevasVersiones: number;
+  retirados: number;
+  reaparecidos: number;
+  sinCambios: number;
+  carpetas: number;
+  mensaje: string;
+}
+
+/** A registered file as the screens show it. */
+export interface ArchivoInfo extends ArchivoRegistro {
+  hito: string;
+  /** The step it waits for ("Revisa"), or "" when it waits for nobody. */
+  pasoNombre: string;
+  /** Who has that step on this file (names), closest assignment first. */
+  responsables: string[];
+  /** Whether the caller is one of them (administrators: always, for pending files). */
+  meToca: boolean;
+  /** Trimble's viewer at the version under review. */
+  enlace: string;
 }

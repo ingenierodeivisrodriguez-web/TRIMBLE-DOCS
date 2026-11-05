@@ -1,6 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
-import type { Asignacion, CarpetaFlujo, EntradaHistorial, Flujo, PasoFlujo } from "./types";
+import type { ArchivoRegistro, Asignacion, CarpetaFlujo, EntradaHistorial, EstadoArchivo, Flujo, PasoFlujo } from "./types";
 
 /**
  * Persistence of "Flujo de aprobación". Two implementations with the same
@@ -23,8 +23,18 @@ export interface FlujoStore {
   crearAsignaciones(a: Omit<Asignacion, "id">[]): Promise<Asignacion[]>;
   desactivarAsignaciones(ids: string[]): Promise<void>;
   registrar(e: Omit<EntradaHistorial, "id" | "creado">): Promise<void>;
-  /** Newest first; of one flow when given. */
-  historial(proyecto: string, filtro: { flujoId?: string; limite: number }): Promise<EntradaHistorial[]>;
+  /** Several lines at once (a first review may find hundreds of files). */
+  registrarVarios(es: Omit<EntradaHistorial, "id" | "creado">[]): Promise<void>;
+  /** Newest first; of one flow or one file when given. */
+  historial(proyecto: string, filtro: { flujoId?: string; archivoId?: string; limite: number }): Promise<EntradaHistorial[]>;
+  /** Takes the review of a flow's folders until `hasta`, unless someone else holds it (false). */
+  tomarRevision(flujoId: string, hasta: string, ahora: string): Promise<boolean>;
+  /** Releases it and notes when and by whom it was done. */
+  terminarRevision(flujoId: string, momento: string, por: string): Promise<void>;
+  /** Every registered file of the project. */
+  archivos(proyecto: string): Promise<ArchivoRegistro[]>;
+  crearArchivos(a: Omit<ArchivoRegistro, "id">[]): Promise<ArchivoRegistro[]>;
+  actualizarArchivo(id: string, cambios: Partial<Omit<ArchivoRegistro, "id" | "proyecto" | "fileId">>): Promise<ArchivoRegistro>;
 }
 
 const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
@@ -49,6 +59,8 @@ const deFlujo = (f: Fila): Flujo => ({
   creadoPor: t(f.creado_por),
   actualizado: String(f.actualizado),
   actualizadoPor: t(f.actualizado_por),
+  revisado: t(f.revisado),
+  revisadoPor: t(f.revisado_por),
 });
 const aFlujo = (f: Partial<Flujo>): Fila =>
   sinIndefinidos({
@@ -106,7 +118,74 @@ const deEntrada = (f: Fila): EntradaHistorial => ({
   usuario: t(f.usuario),
   usuarioId: t(f.usuario_id),
   detalle: t(f.detalle) ?? "",
+  archivoId: t(f.archivo_id),
+  fileId: t(f.file_id),
+  version: typeof f.version === "number" ? f.version : null,
+  ocurrido: t(f.ocurrido),
 });
+
+const aEntrada = (e: Omit<EntradaHistorial, "id" | "creado">): Fila => ({
+  proyecto: e.proyecto,
+  flujo_id: e.flujoId,
+  accion: e.accion,
+  usuario: e.usuario,
+  usuario_id: e.usuarioId,
+  detalle: e.detalle,
+  archivo_id: e.archivoId ?? null,
+  file_id: e.fileId ?? null,
+  version: e.version ?? null,
+  ocurrido: e.ocurrido ?? null,
+});
+
+const ESTADOS: EstadoArchivo[] =["pendiente", "nueva-version", "aprobado", "rechazado", "retirado"];
+const n = (v: unknown) => (typeof v === "number" ? v : v === null || v === undefined ? null : Number(v));
+
+const deArchivo = (f: Fila): ArchivoRegistro => ({
+  id: String(f.id),
+  proyecto: String(f.proyecto),
+  flujoId: String(f.flujo_id),
+  fileId: String(f.file_id),
+  nombre: String(f.nombre),
+  ruta: t(f.ruta) ?? "",
+  carpetaId: t(f.carpeta_id),
+  ancestros: arr<string>(f.ancestros),
+  tipo: t(f.tipo) ?? "",
+  estado: ESTADOS.includes(f.estado as EstadoArchivo) ? (f.estado as EstadoArchivo) : "pendiente",
+  pasos: arr<PasoFlujo>(f.pasos),
+  pasoActual: Number(f.paso_actual ?? 0),
+  versionId: t(f.version_id),
+  revision: n(f.revision),
+  subido: t(f.subido),
+  subidoPor: t(f.subido_por) ?? "",
+  subidoPorId: t(f.subido_por_id),
+  versionAprobadaId: t(f.version_aprobada_id),
+  revisionAprobada: n(f.revision_aprobada),
+  detectado: String(f.detectado),
+  actualizado: String(f.actualizado),
+});
+const aArchivo = (a: Partial<ArchivoRegistro>): Fila =>
+  sinIndefinidos({
+    proyecto: a.proyecto,
+    flujo_id: a.flujoId,
+    file_id: a.fileId,
+    nombre: a.nombre,
+    ruta: a.ruta,
+    carpeta_id: a.carpetaId,
+    ancestros: a.ancestros,
+    tipo: a.tipo,
+    estado: a.estado,
+    pasos: a.pasos,
+    paso_actual: a.pasoActual,
+    version_id: a.versionId,
+    revision: a.revision,
+    subido: a.subido,
+    subido_por: a.subidoPor,
+    subido_por_id: a.subidoPorId,
+    version_aprobada_id: a.versionAprobadaId,
+    revision_aprobada: a.revisionAprobada,
+    detectado: a.detectado,
+    actualizado: a.actualizado,
+  });
 
 function sinIndefinidos(f: Fila): Fila {
   return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined));
@@ -159,15 +238,46 @@ function supabaseStore(): FlujoStore | null {
       await call(`/aprobacion_asignaciones?id=in.${lista(ids)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ activa: false }) });
     },
     async registrar(e) {
-      await call(`/aprobacion_historial`, {
-        method: "POST",
-        headers: { Prefer: "return=minimal" },
-        body: JSON.stringify({ proyecto: e.proyecto, flujo_id: e.flujoId, accion: e.accion, usuario: e.usuario, usuario_id: e.usuarioId, detalle: e.detalle }),
-      });
+      await call(`/aprobacion_historial`, { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(aEntrada(e)) });
+    },
+    async registrarVarios(es) {
+      // Every row with the same keys, as PostgREST asks for a bulk insert.
+      for (let i = 0; i < es.length; i += 500) {
+        await call(`/aprobacion_historial`, { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(es.slice(i, i + 500).map(aEntrada)) });
+      }
     },
     async historial(proyecto, filtro) {
       const deFlujoId = filtro.flujoId ? `&flujo_id=${eq(filtro.flujoId)}` : "";
-      return (await json<Fila[]>(`/aprobacion_historial?proyecto=${eq(proyecto)}${deFlujoId}&select=*&order=creado.desc,id.desc&limit=${filtro.limite}`)).map(deEntrada);
+      const deArchivoId = filtro.archivoId ? `&archivo_id=${eq(filtro.archivoId)}` : "";
+      return (await json<Fila[]>(`/aprobacion_historial?proyecto=${eq(proyecto)}${deFlujoId}${deArchivoId}&select=*&order=creado.desc,id.desc&limit=${filtro.limite}`)).map(deEntrada);
+    },
+    async tomarRevision(flujoId, hasta, ahora) {
+      const filas = await json<Fila[]>(`/aprobacion_flujos?id=${eq(flujoId)}&or=(revisando_hasta.is.null,revisando_hasta.lt.${encodeURIComponent(ahora)})`, {
+        method: "PATCH",
+        headers: representar,
+        body: JSON.stringify({ revisando_hasta: hasta }),
+      });
+      return filas.length > 0;
+    },
+    async terminarRevision(flujoId, momento, por) {
+      await call(`/aprobacion_flujos?id=${eq(flujoId)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ revisando_hasta: null, revisado: momento, revisado_por: por }) });
+    },
+    async archivos(proyecto) {
+      return (await all<Fila>(`/aprobacion_archivos?proyecto=${eq(proyecto)}&select=*&order=ruta.asc`)).map(deArchivo);
+    },
+    async crearArchivos(a) {
+      if (!a.length) return [];
+      const out: ArchivoRegistro[] = [];
+      // In batches, so a big first review doesn't send one huge request.
+      for (let i = 0; i < a.length; i += 200) {
+        out.push(...(await json<Fila[]>(`/aprobacion_archivos`, { method: "POST", headers: representar, body: JSON.stringify(a.slice(i, i + 200).map(aArchivo)) })).map(deArchivo));
+      }
+      return out;
+    },
+    async actualizarArchivo(id, cambios) {
+      const filas = await json<Fila[]>(`/aprobacion_archivos?id=${eq(id)}`, { method: "PATCH", headers: representar, body: JSON.stringify(aArchivo(cambios)) });
+      if (!filas[0]) throw new StoreError("No se encontró el archivo.", 404);
+      return deArchivo(filas[0]);
     },
   };
 }
@@ -178,6 +288,8 @@ export function memoryStore(): FlujoStore {
   const flujos = new Map<string, Flujo>();
   const asignaciones = new Map<string, Asignacion>();
   const historial: EntradaHistorial[] = [];
+  const archivos = new Map<string, ArchivoRegistro>();
+  const revisando = new Map<string, string>();
   let contador = 0;
   const id = () => `00000000-0000-4000-8000-${String(++contador).padStart(12, "0")}`;
   const copia = <T>(x: T): T => structuredClone(x);
@@ -234,12 +346,44 @@ export function memoryStore(): FlujoStore {
     async registrar(e) {
       historial.push({ ...copia(e), id: historial.length + 1, creado: ahora() });
     },
+    async registrarVarios(es) {
+      for (const e of es) historial.push({ ...copia(e), id: historial.length + 1, creado: ahora() });
+    },
     async historial(proyecto, filtro) {
       return historial
-        .filter((e) => e.proyecto === proyecto && (!filtro.flujoId || e.flujoId === filtro.flujoId))
+        .filter((e) => e.proyecto === proyecto && (!filtro.flujoId || e.flujoId === filtro.flujoId) && (!filtro.archivoId || e.archivoId === filtro.archivoId))
         .sort((a, b) => b.creado.localeCompare(a.creado) || b.id - a.id)
         .slice(0, filtro.limite)
         .map(copia);
+    },
+    async tomarRevision(fid, hasta, momento) {
+      const actual = revisando.get(fid);
+      if (!flujos.has(fid) || (actual && actual >= momento)) return false;
+      revisando.set(fid, hasta);
+      return true;
+    },
+    async terminarRevision(fid, momento, por) {
+      revisando.delete(fid);
+      const f = flujos.get(fid);
+      if (f) flujos.set(fid, { ...f, revisado: momento, revisadoPor: por });
+    },
+    async archivos(proyecto) {
+      return [...archivos.values()].filter((a) => a.proyecto === proyecto).sort((a, b) => a.ruta.localeCompare(b.ruta)).map(copia);
+    },
+    async crearArchivos(lista) {
+      if (lista.some((a) => [...archivos.values()].some((x) => x.proyecto === a.proyecto && x.fileId === a.fileId))) throw new StoreError("Ya existe.", 409);
+      return lista.map((a) => {
+        const nuevo = { ...copia(a), id: id() };
+        archivos.set(nuevo.id, nuevo);
+        return copia(nuevo);
+      });
+    },
+    async actualizarArchivo(aid, cambios) {
+      const a = archivos.get(aid);
+      if (!a) throw new StoreError("No se encontró el archivo.", 404);
+      const nuevo = { ...a, ...(sinIndefinidos(copia(cambios) as Fila) as Partial<ArchivoRegistro>) };
+      archivos.set(aid, nuevo);
+      return copia(nuevo);
     },
   };
 }

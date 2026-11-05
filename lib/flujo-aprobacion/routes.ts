@@ -84,6 +84,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       grupos: () => listProjectGroups(servidor, token, projectId),
       miembros: (groupId) => listProjectUsers(servidor, token, projectId, { groupId }),
       permisos: (folderId) => getFolderPermissions(servidor, token, folderId),
+      items: (folderId) => listFolderItems(servidor, token, folderId),
     };
     return await run({
       projectId,

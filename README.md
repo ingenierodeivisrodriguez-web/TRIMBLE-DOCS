@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fase 1, configuración de los flujos) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fases 1 y 2, configuración y registro de archivos) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4223,6 +4223,62 @@ memoria); pantallas en `components/flujo-aprobacion/` (`Flujos`,
 `GET /api/flujo-aprobacion/equipo`, `POST /api/flujo-aprobacion/asignaciones`,
 `POST /api/flujo-aprobacion/asignaciones/quitar`,
 `GET /api/flujo-aprobacion/permisos?flujoId=` y `GET /api/flujo-aprobacion/historial?flujoId=`.
+
+### Fase 2: detección y registro de archivos
+
+Hay que volver a ejecutar **`supabase/flujo-aprobacion.sql`** (agrega la tabla
+de archivos y columnas nuevas; no se pierde nada).
+
+Trimble no avisa cuando se sube un archivo. Por eso, **al abrir la extensión**
+se revisan las carpetas de revisión de cada flujo activo (un flujo detrás de
+otro) y con **«Revisar ahora»** se repite. La revisión la hace el servidor con
+la sesión de quien abre la extensión, así que ve lo que Trimble le deja ver.
+Un aviso arriba dice qué encontró («3 archivos nuevos, 1 versión nueva»).
+
+- Un archivo nuevo queda **Pendiente de revisión** con su versión, quién la
+  subió y cuándo **según Trimble** (no cuándo se detectó), su tipo y su ruta,
+  y una **copia de los pasos** del flujo: si después cambian los pasos del
+  flujo, los archivos en trámite siguen con los suyos (regla 4).
+- **Versión nueva mientras espera**: se revisa la última desde el primer paso
+  y queda en el historial («Subió la versión 6 mientras la versión 5 esperaba
+  revisión…»). **Después de aprobado o rechazado** (fase 3) queda como **Nueva
+  versión pendiente de revisión**, con los pasos actuales del flujo.
+- Las subcarpetas entran al flujo de su carpeta; una subcarpeta que es carpeta
+  de revisión de otro flujo se deja a ese flujo (manda el más cercano).
+- Un archivo registrado que ya no aparece se marca **Retirado** solo si la
+  revisión fue **completa** (se leyeron todas las carpetas a tiempo), la hizo
+  un **administrador** (que ve todas las carpetas) y Trimble confirma que ya no
+  está o que se movió fuera del flujo. Nunca se borra; si vuelve, recupera su
+  estado. Renombrar o mover dentro del flujo solo actualiza la ruta.
+- Dos personas no revisan el mismo flujo a la vez (la segunda espera, unos
+  minutos como mucho). Cada revisión tiene un tope de 50 s, 1500 carpetas y
+  5000 archivos; si no alcanza, lo dice y no retira nada.
+
+Pestañas nuevas:
+
+- **Por revisar (N)**: los archivos que esperan el paso de la persona (por
+  ella o por su grupo; manda la asignación más cercana al archivo). **A quien
+  subió una versión no le toca revisarla.** El administrador puede «Ver todos
+  los pendientes». Aprobar y rechazar llegan en la fase 3.
+- **Mis archivos**: los que tienen su última versión subida por la persona y en
+  qué van.
+- **Archivos**: todos, con filtros por flujo, estado y texto.
+
+Cada archivo muestra flujo (hito), estado y versión, el paso que espera y
+quién lo tiene, quién subió y cuándo, un enlace que lo abre en Trimble en la
+versión en revisión, y su **historial**. El historial general (pestaña
+Historial) incluye ya lo que se sube, ordenado por la fecha de Trimble.
+
+Código: [`lib/flujo-aprobacion/registro.ts`](lib/flujo-aprobacion/registro.ts)
+(plan de registro, estados, a quién le toca),
+[`recorrido.ts`](lib/flujo-aprobacion/recorrido.ts) (recorrido de carpetas con
+tope), [`revision.ts`](lib/flujo-aprobacion/revision.ts) (servicio);
+pantallas `RevisionCarpetas` y `Archivos`. Tabla `aprobacion_archivos` (uno por
+archivo de Trimble, sin borrado) y columnas nuevas en `aprobacion_flujos`
+(`revisando_hasta`, `revisado`, `revisado_por`) y en `aprobacion_historial`
+(`archivo_id`, `file_id`, `version`, `ocurrido`). Rutas:
+`POST /api/flujo-aprobacion/revisar` (`{ flujoId }`) y
+`GET /api/flujo-aprobacion/archivos`; el historial acepta `?archivoId=`.
 
 ## Cómo funciona (común a ambas extensiones)
 

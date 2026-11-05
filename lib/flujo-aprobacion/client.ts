@@ -1,6 +1,6 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { CarpetaInfo } from "../publicar/types";
-import type { AvisoPermisos, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse } from "./types";
+import type { ArchivoInfo, AvisoPermisos, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision } from "./types";
 
 export interface DatosFlujoEnvio {
   id?: string;
@@ -25,7 +25,10 @@ export interface FlujoApi {
   asignar(datos: { flujoId: string; objetivos: { tipo: "carpeta" | "archivo"; id: string }[]; quien: { tipo: "persona" | "grupo"; id: string }; papel: string }): Promise<EstadoFlujos & { mensaje: string }>;
   quitarAsignacion(id: string): Promise<EstadoFlujos>;
   permisos(flujoId: string): Promise<{ avisos: AvisoPermisos[]; carpetas: PermisosCarpeta[] }>;
-  historial(flujoId?: string): Promise<{ entradas: EntradaHistorial[] }>;
+  historial(flujoId?: string, archivoId?: string): Promise<{ entradas: EntradaHistorial[] }>;
+  /** Walks one flow's review folders and registers what changed (phase 2). */
+  revisar(flujoId: string): Promise<ResumenRevision>;
+  archivos(): Promise<{ yo: string; esAdmin: boolean; archivos: ArchivoInfo[] }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -46,6 +49,14 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     asignar: (datos) => post("/asignaciones", datos),
     quitarAsignacion: (id) => post("/asignaciones/quitar", { id }),
     permisos: (flujoId) => request(`/permisos?flujoId=${encodeURIComponent(flujoId)}`),
-    historial: (flujoId) => request(`/historial${flujoId ? `?flujoId=${encodeURIComponent(flujoId)}` : ""}`),
+    historial: (flujoId, archivoId) => {
+      const q = new URLSearchParams();
+      if (flujoId) q.set("flujoId", flujoId);
+      if (archivoId) q.set("archivoId", archivoId);
+      const s = q.toString();
+      return request(`/historial${s ? `?${s}` : ""}`);
+    },
+    revisar: (flujoId) => post("/revisar", { flujoId }),
+    archivos: () => request("/archivos"),
   };
 }

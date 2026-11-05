@@ -71,8 +71,9 @@ exportación solo a PDF.
    `supabase/flujo-aprobacion.sql`, flujos con su hito, carpetas de revisión
    (selección múltiple) y destino, pasos + / −, personas y grupos por carpeta o
    archivo, revisión de permisos, historial de la configuración.
-2. Detección y registro (al abrir y «Revisar ahora»), estados, mensaje de
-   versión nueva, bandeja «Por revisar» y «Mis archivos».
+2. **Detección y registro** (hecha el 04-11-2026, ver abajo): al abrir y
+   «Revisar ahora», estados, mensaje de versión nueva, «Por revisar», «Mis
+   archivos» y «Archivos».
 3. Revisión: aprobar por pasos, rechazar con motivo, avisos (bandeja + ToDo),
    aprobar solo la versión vista.
 4. Traslado: copia automática de la última versión con la sesión de quien
@@ -182,3 +183,55 @@ Piezas:
   real sobre `memoryStore` (corre en el navegador) y un árbol de carpetas fijo.
   Ahí el error llega como `FlujoError` y no como `ApiError`: la pantalla lee
   `code` de cualquiera de los dos.
+
+## Fase 2: detección y registro (`registro.ts`, `recorrido.ts`, `revision.ts`)
+
+El dueño dijo "Sí, fase 2" (04-11-2026). Decisiones tomadas por lo más simple
+(declaradas al entregar):
+
+- La revisión la pide el navegador al abrir (cada flujo activo, uno tras otro)
+  y con «Revisar ahora»; corre en el servidor con la sesión de quien abre.
+  `POST /api/flujo-aprobacion/revisar { flujoId }`, `maxDuration = 120`.
+- Candado por flujo: `aprobacion_flujos.revisando_hasta` (3 min), tomado con
+  PATCH filtrado (`tomarRevision`), sin tocar `version`; al terminar se anota
+  `revisado` y `revisado_por`. El *trigger* de carpetas corre también en ese
+  PATCH (no choca: lo probó PGlite).
+- `recorrer`: BFS en tandas de 6 carpetas, tope 50 s / 1500 carpetas / 5000
+  archivos; no entra en subcarpetas que son carpeta de revisión de cualquier
+  flujo activo (el más cercano manda; evita contar dos veces). Una carpeta que
+  no se lee (403) o un tope deja `completo = false`.
+- Quién subió = `modifiedBy` del item de la carpeta (la fase 0 confirmó que
+  `modifiedBy` de una versión es quien la subió); fecha = `modifiedOn`.
+- `planRegistro`: nuevo → `pendiente` con copia de `pasos` y `pasoActual 0`;
+  versión distinta esperando → `version-reemplazada` (mismos pasos, paso 0);
+  versión distinta tras aprobado/rechazado → `nueva-version` con los pasos
+  actuales del flujo (un trámite nuevo); viene de otro flujo →
+  `archivo-cambio-flujo` (pendiente, sin aprobada); retirado que vuelve →
+  recupera su estado (`estadoAlReaparecer`); renombrado o movido dentro del
+  flujo → solo ruta, sin historial.
+- Retirar: solo con recorrido completo, por un **administrador**, y si
+  `tc.archivo` da 404 o el archivo quedó fuera del flujo (`flujoDe`); hasta 50
+  comprobaciones por revisión. Un miembro ve el aviso "N archivos registrados
+  no aparecieron en tu revisión".
+- Historial por archivo en `aprobacion_historial` (`archivo_id`, `file_id`,
+  `version`, `ocurrido` = fecha de Trimble). Al subir: `usuario` = quien subió;
+  el detalle dice quién lo registró. `registrarVarios` inserta en lotes de 500
+  con todas las columnas (PostgREST pide las mismas claves en un lote). El
+  servicio ordena por `ocurrido ?? creado`.
+- `meToca`: el caller (o uno de sus grupos, `caller.memberOfGroups`) tiene el
+  paso actual por `responsablesDe` y **no subió esa versión** (regla 9, ya
+  aplicada para la bandeja; la fase 3 la debe exigir también al aprobar).
+- Todos los miembros ven todos los archivos registrados (el papel «Consulta»
+  aún no restringe nada).
+- Pestañas: Por revisar (con «Ver todos los pendientes» para administradores),
+  Mis archivos (`subidoPorId === yo`), Archivos (filtros), Flujos, Historial,
+  Prueba de Trimble. `RevisionCarpetas` muestra el resultado arriba.
+- Pruebas: `registro.test.ts`, `recorrido.test.ts`, `revision.test.ts`
+  (servicio real sobre `memoryStore` con un árbol de carpetas que la prueba
+  cambia). La página temporal monta la app con el servicio real y un árbol fijo;
+  `window.nuevaVersion("f1")` simula una subida.
+
+Para la fase 3: aprobar/rechazar deben comprobar que la versión vista sigue
+siendo `versionId` (si llegó otra, rechazar con aviso), avanzar `pasoActual`,
+guardar firmas por paso, exigir que quien subió no apruebe, y al último paso
+dejar `aprobado` + `versionAprobadaId`/`revisionAprobada`.

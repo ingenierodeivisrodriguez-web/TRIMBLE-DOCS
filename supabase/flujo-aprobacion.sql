@@ -119,3 +119,61 @@ revoke update, delete, truncate on table public.aprobacion_historial from public
 grant select, insert, update on public.aprobacion_flujos to service_role;
 grant select, insert, update on public.aprobacion_asignaciones to service_role;
 grant select, insert on public.aprobacion_historial to service_role;
+
+-- ------------------------------------------------------------------ fase 2
+-- Archivos de las carpetas de revisión, registrados al abrir la extensión o
+-- con "Revisar ahora". Uno por archivo de Trimble. No se borra: un archivo que
+-- ya no está queda "retirado".
+
+-- Cuándo y quién revisó por última vez las carpetas de un flujo, y quién lo
+-- está revisando ahora (para que dos personas no registren lo mismo a la vez).
+alter table public.aprobacion_flujos add column if not exists revisando_hasta timestamptz;
+alter table public.aprobacion_flujos add column if not exists revisado timestamptz;
+alter table public.aprobacion_flujos add column if not exists revisado_por text;
+
+create table if not exists public.aprobacion_archivos (
+  id uuid primary key default gen_random_uuid(),
+  proyecto text not null,
+  flujo_id uuid not null references public.aprobacion_flujos (id),
+  -- Id del archivo en Trimble Connect.
+  file_id text not null,
+  nombre text not null,
+  ruta text not null default '',
+  carpeta_id text,
+  -- Ids de las carpetas de arriba (de la raíz hacia abajo).
+  ancestros text[] not null default '{}',
+  tipo text not null default '',
+  estado text not null default 'pendiente'
+    check (estado in ('pendiente', 'nueva-version', 'aprobado', 'rechazado', 'retirado')),
+  -- Copia de los pasos del flujo cuando empezó esta revisión (un cambio del
+  -- flujo no toca los archivos en trámite).
+  pasos jsonb not null default '[]'::jsonb,
+  paso_actual integer not null default 0,
+  -- La versión en revisión (la última que tenía Trimble al verla).
+  version_id text,
+  revision integer,
+  -- Cuándo y quién subió esa versión, según Trimble.
+  subido timestamptz,
+  subido_por text not null default '',
+  subido_por_id text,
+  -- La última versión aprobada (fase 3).
+  version_aprobada_id text,
+  revision_aprobada integer,
+  detectado timestamptz not null default now(),
+  actualizado timestamptz not null default now(),
+  unique (proyecto, file_id)
+);
+
+create index if not exists aprobacion_archivos_flujo on public.aprobacion_archivos (flujo_id);
+
+alter table public.aprobacion_historial add column if not exists archivo_id uuid;
+alter table public.aprobacion_historial add column if not exists file_id text;
+alter table public.aprobacion_historial add column if not exists version integer;
+-- Cuándo pasó en Trimble (por ejemplo, cuándo se subió la versión); "creado" es cuándo se anotó.
+alter table public.aprobacion_historial add column if not exists ocurrido timestamptz;
+create index if not exists aprobacion_historial_archivo on public.aprobacion_historial (archivo_id, creado desc);
+
+alter table public.aprobacion_archivos enable row level security;
+revoke all on public.aprobacion_archivos from anon, authenticated;
+revoke delete, truncate on table public.aprobacion_archivos from public, anon, authenticated, service_role;
+grant select, insert, update on public.aprobacion_archivos to service_role;

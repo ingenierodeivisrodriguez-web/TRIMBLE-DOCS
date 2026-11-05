@@ -7,7 +7,8 @@
  * and assignments are deactivated, and every change goes to the history.
  */
 import type { Caller } from "../propiedades/service";
-import type { FolderPermissions, ProjectGroup, ProjectUser } from "../trimbleApi";
+import type { FolderPermissions, ProjectGroup, ProjectUser, RawFolderItem } from "../trimbleApi";
+import type { Limites } from "./recorrido";
 import { esIdTrimble, FlujoError } from "./errores";
 import {
   asignacionesAfectadas,
@@ -40,6 +41,8 @@ export interface TrimbleFlujo {
   grupos(): Promise<ProjectGroup[]>;
   miembros(groupId: string): Promise<ProjectUser[]>;
   permisos(folderId: string): Promise<FolderPermissions>;
+  /** A folder's files and subfolders (phase 2). */
+  items(folderId: string): Promise<RawFolderItem[]>;
 }
 
 export interface Ctx {
@@ -48,6 +51,9 @@ export interface Ctx {
   store: FlujoStore;
   tc: TrimbleFlujo;
   ahora?: () => Date;
+  /** For the folder walk's time budget (tests). */
+  reloj?: () => number;
+  limites?: Limites;
 }
 
 /** Targets of one "who does what" request. */
@@ -304,9 +310,16 @@ export async function permisosFlujo(ctx: Ctx, flujoId: string): Promise<{ avisos
   return { avisos: [...avisos, ...r.avisos], carpetas: r.carpetas };
 }
 
-/** The configuration history, newest first (of one flow when given). */
-export async function historial(ctx: Ctx, flujoId: string | null): Promise<{ entradas: EntradaHistorial[] }> {
-  return { entradas: await ctx.store.historial(ctx.projectId, { flujoId: flujoId ? idFlujo(flujoId) : undefined, limite: 200 }) };
+/** The history, newest first (of one flow, or of one registered file, when given). */
+export async function historial(ctx: Ctx, flujoId: string | null, archivoId: string | null = null): Promise<{ entradas: EntradaHistorial[] }> {
+  const entradas = await ctx.store.historial(ctx.projectId, {
+    flujoId: flujoId ? idFlujo(flujoId) : undefined,
+    archivoId: archivoId ? idFlujo(archivoId) : undefined,
+    limite: archivoId ? 500 : 300,
+  });
+  // By when it happened (an upload's date is Trimble's, not when it was noted).
+  const cuando = (e: EntradaHistorial) => e.ocurrido ?? e.creado;
+  return { entradas: entradas.sort((a, b) => cuando(b).localeCompare(cuando(a)) || b.id - a.id) };
 }
 
 export type { Asignacion, Flujo };

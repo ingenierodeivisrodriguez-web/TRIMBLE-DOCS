@@ -14,6 +14,12 @@ const ACCIONES: Record<string, string> = {
   "flujo-activado": "Activó el flujo",
   "asignacion-agregada": "Asignó",
   "asignacion-quitada": "Quitó una asignación",
+  "archivo-detectado": "Subió un archivo",
+  "version-reemplazada": "Subió otra versión",
+  "nueva-version": "Subió una versión nueva",
+  "archivo-retirado": "Archivo retirado",
+  "archivo-reaparecido": "Archivo que vuelve",
+  "archivo-cambio-flujo": "Archivo que cambió de flujo",
 };
 
 /** Everything that changed in the configuration, newest first; it is never edited or deleted. */
@@ -38,7 +44,10 @@ export default function Historial({ api, flujos, recarga }: { api: FlujoApi; flu
   return (
     <section style={{ ...card, maxWidth: 1100 }}>
       <h2 style={titulo}>Historial</h2>
-      <p style={texto}>Quién creó, cambió, activó o desactivó cada flujo y quién asignó o quitó papeles. No se edita ni se borra. Las revisiones y aprobaciones de archivos llegarán aquí en las fases siguientes.</p>
+      <p style={texto}>
+        Quién creó, cambió, activó o desactivó cada flujo, quién asignó o quitó papeles, y qué archivos y versiones se subieron (con la fecha de Trimble). No se edita ni se
+        borra. Las revisiones y aprobaciones llegarán aquí en la fase 3.
+      </p>
       <label style={{ display: "inline-block", marginBottom: 8 }}>
         <span style={labelStyle}>Flujo</span>
         <select value={flujoId} onChange={(e) => setFlujoId(e.target.value)} style={{ ...select, minWidth: 280 }}>
@@ -67,7 +76,9 @@ export default function Historial({ api, flujos, recarga }: { api: FlujoApi; flu
             <tbody>
               {entradas.map((e) => (
                 <tr key={e.id}>
-                  <td style={{ ...td, whiteSpace: "nowrap" }}>{fechaHora(e.creado)}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap" }} title={e.ocurrido ? `Anotado el ${fechaHora(e.creado)}` : undefined}>
+                    {fechaHora(e.ocurrido ?? e.creado)}
+                  </td>
                   <td style={td}>{e.usuario ?? ""}</td>
                   <td style={{ ...td, whiteSpace: "nowrap" }}>{ACCIONES[e.accion] ?? e.accion}</td>
                   {!flujoId && <td style={td}>{hitoDe(e.flujoId)}</td>}
