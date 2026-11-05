@@ -28,6 +28,7 @@ import {
 } from "./flujos";
 import { aclEfectiva, Acl, Equipo as EquipoPermisos, gruposQueImportan, revisarPermisos } from "./permisos";
 import { nombrePersona } from "./prueba";
+import { armarTrazas, FiltroTraza, Traza } from "./trazabilidad";
 import { HITO_REPETIDO, FlujoStore } from "./store";
 import type { Asignacion, AvisoPermisos, CarpetaFlujo, Equipo, EstadoFlujos, EntradaHistorial, Flujo, PermisosCarpeta } from "./types";
 
@@ -333,3 +334,31 @@ export async function historial(ctx: Ctx, flujoId: string | null, archivoId: str
 }
 
 export type { Asignacion, Flujo };
+
+const DIA = /^\d{4}-\d{2}-\d{2}$/;
+const ESTADOS_ARCHIVO = ["pendiente", "nueva-version", "aprobado", "rechazado", "retirado"];
+
+/**
+ * Traceability (phase 5): the registered files that match the filter
+ * (?flujoId=&estado=&desde=AAAA-MM-DD&hasta=&texto=, or ?archivoId= for one),
+ * each with everything that happened to it, in order. Any project member.
+ */
+export async function trazabilidad(ctx: Ctx, q: { get(nombre: string): string | null }): Promise<{ trazas: Traza[]; filtro: FiltroTraza; hitos: Record<string, string>; por: string }> {
+  const opcional = (k: string) => q.get(k)?.trim() || undefined;
+  const flujoId = opcional("flujoId");
+  const archivoId = opcional("archivoId");
+  if (flujoId && !UUID.test(flujoId)) throw new FlujoError("El flujo no es válido.");
+  if (archivoId && !UUID.test(archivoId)) throw new FlujoError("El archivo no es válido.");
+  const estado = opcional("estado");
+  if (estado && !ESTADOS_ARCHIVO.includes(estado)) throw new FlujoError("El estado no es válido.");
+  const desde = opcional("desde");
+  const hasta = opcional("hasta");
+  if ((desde && !DIA.test(desde)) || (hasta && !DIA.test(hasta))) throw new FlujoError("Las fechas no son válidas.");
+  if (desde && hasta && desde > hasta) throw new FlujoError("La fecha inicial es posterior a la final.");
+  const filtro: FiltroTraza = { flujoId, estado: estado as FiltroTraza["estado"], desde, hasta, texto: opcional("texto")?.slice(0, 100) };
+  const [flujos, archivos, entradas] = await Promise.all([ctx.store.flujos(ctx.projectId), ctx.store.archivos(ctx.projectId), ctx.store.historialArchivos(ctx.projectId)]);
+  const hitos = new Map(flujos.map((f) => [f.id, f.hito]));
+  const elegidos = archivoId ? archivos.filter((a) => a.id === archivoId) : archivos;
+  if (archivoId && !elegidos.length) throw new FlujoError("Ese archivo no está registrado en este proyecto.", 404);
+  return { trazas: armarTrazas(elegidos, entradas, hitos, filtro), filtro, hitos: Object.fromEntries(hitos), por: ctx.caller.name };
+}

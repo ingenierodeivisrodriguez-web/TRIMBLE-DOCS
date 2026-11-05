@@ -27,6 +27,8 @@ export interface FlujoStore {
   registrarVarios(es: Omit<EntradaHistorial, "id" | "creado">[]): Promise<void>;
   /** Newest first; of one flow or one file when given. */
   historial(proyecto: string, filtro: { flujoId?: string; archivoId?: string; limite: number }): Promise<EntradaHistorial[]>;
+  /** Every history line about a file in the project (for traceability), a page at a time. */
+  historialArchivos(proyecto: string): Promise<EntradaHistorial[]>;
   /** Takes the review of a flow's folders until `hasta`, unless someone else holds it (false). */
   tomarRevision(flujoId: string, hasta: string, ahora: string): Promise<boolean>;
   /** Releases it and notes when and by whom it was done. */
@@ -264,6 +266,9 @@ function supabaseStore(): FlujoStore | null {
       const deArchivoId = filtro.archivoId ? `&archivo_id=${eq(filtro.archivoId)}` : "";
       return (await json<Fila[]>(`/aprobacion_historial?proyecto=${eq(proyecto)}${deFlujoId}${deArchivoId}&select=*&order=creado.desc,id.desc&limit=${filtro.limite}`)).map(deEntrada);
     },
+    async historialArchivos(proyecto) {
+      return (await all<Fila>(`/aprobacion_historial?proyecto=${eq(proyecto)}&archivo_id=not.is.null&select=*&order=id.asc`)).map(deEntrada);
+    },
     async tomarRevision(flujoId, hasta, ahora) {
       const filas = await json<Fila[]>(`/aprobacion_flujos?id=${eq(flujoId)}&or=(revisando_hasta.is.null,revisando_hasta.lt.${encodeURIComponent(ahora)})`, {
         method: "PATCH",
@@ -389,6 +394,9 @@ export function memoryStore(): FlujoStore {
         .sort((a, b) => b.creado.localeCompare(a.creado) || b.id - a.id)
         .slice(0, filtro.limite)
         .map(copia);
+    },
+    async historialArchivos(proyecto) {
+      return historial.filter((e) => e.proyecto === proyecto && e.archivoId).map(copia);
     },
     async tomarRevision(fid, hasta, momento) {
       const actual = revisando.get(fid);

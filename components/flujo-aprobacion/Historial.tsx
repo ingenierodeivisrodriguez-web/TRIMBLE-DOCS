@@ -3,32 +3,11 @@
 import { useEffect, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
+import { ACCIONES } from "../../lib/flujo-aprobacion/trazabilidad";
 import type { EntradaHistorial, Flujo } from "../../lib/flujo-aprobacion/types";
 import { card, select, td, texto, th, titulo } from "../compras/estilos";
 import { C, labelStyle, message, Notice } from "../presupuesto/ui";
 
-const ACCIONES: Record<string, string> = {
-  "flujo-creado": "Creó el flujo",
-  "flujo-modificado": "Cambió el flujo",
-  "flujo-desactivado": "Desactivó el flujo",
-  "flujo-activado": "Activó el flujo",
-  "asignacion-agregada": "Asignó",
-  "asignacion-quitada": "Quitó una asignación",
-  "archivo-detectado": "Subió un archivo",
-  "version-reemplazada": "Subió otra versión",
-  "nueva-version": "Subió una versión nueva",
-  "archivo-retirado": "Archivo retirado",
-  "archivo-reaparecido": "Archivo que vuelve",
-  "archivo-cambio-flujo": "Archivo que cambió de flujo",
-  "aprobado-paso": "Aprobó un paso",
-  aprobado: "Aprobó",
-  rechazado: "Rechazó",
-  "aviso-enviado": "Avisó (tarea de Trimble)",
-  "aviso-fallido": "Aviso no enviado",
-  trasladado: "Trasladó al destino",
-  "traslado-diferencia": "Traslado en espera",
-  "traslado-error": "Traslado fallido",
-};
 
 /** Everything that changed in the configuration, newest first; it is never edited or deleted. */
 export default function Historial({ api, flujos, recarga }: { api: FlujoApi; flujos: Flujo[]; recarga: number }) {

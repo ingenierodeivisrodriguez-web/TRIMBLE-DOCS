@@ -1,5 +1,6 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { CarpetaInfo } from "../publicar/types";
+import type { FiltroTraza, Traza } from "./trazabilidad";
 import type { ArchivoInfo, AvisoPermisos, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
 
 export interface DatosFlujoEnvio {
@@ -33,6 +34,8 @@ export interface FlujoApi {
   decidir(decision: "aprobar" | "rechazar", archivoId: string, versionId: string | null, texto: string): Promise<{ mensaje: string; aviso: string | null; traslado: Traslado | null }>;
   /** Copies the approved version to the destination, confirms an upload, or replaces a file seen there (phase 4). */
   traslado(paso: "trasladar" | "confirmar" | "reemplazar", archivoId: string, siVersion?: string | null): Promise<{ traslado: Traslado | null; mensaje: string }>;
+  /** Each file with what happened to it, for the filter (phase 5). */
+  trazabilidad(filtro: Record<string, string>): Promise<{ trazas: Traza[]; filtro: FiltroTraza; hitos: Record<string, string>; por: string }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -64,5 +67,10 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     archivos: () => request("/archivos"),
     decidir: (decision, archivoId, versionId, texto) => post(`/${decision}`, { archivoId, versionId, texto }),
     traslado: (paso, archivoId, siVersion) => post("/trasladar", { paso, archivoId, ...(siVersion ? { siVersion } : {}) }),
+    trazabilidad: (filtro) => {
+      const q = new URLSearchParams(Object.entries(filtro).filter(([, v]) => v));
+      const s = q.toString();
+      return request(`/trazabilidad${s ? `?${s}` : ""}`);
+    },
   };
 }

@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fases 1 a 4, configuración, registro, aprobar y rechazar con avisos, copia al destino) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4060,7 +4060,7 @@ Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
 `GET /api/publicar/cuenta`, `POST /api/publicar/cuenta/conectar|completar|desconectar`,
 `GET /api/publicar/cuenta/revisar` y `GET /api/publicar/mantener` (Cron).
 
-## Flujo de aprobación (proyecto, en construcción)
+## Flujo de aprobación (proyecto)
 
 Objetivo: automatizar la revisión y aprobación de los entregables del proyecto
 (modelos `.rvt`, planos `.pdf` y `.dwg`, fotos, documentos, Excel) y su paso
@@ -4381,6 +4381,80 @@ opciones: solo subida y versión fija). Columnas `aprobacion_archivos.traslado`
 (jsonb) y `traslado_hasta` (candado). Ruta:
 `POST /api/flujo-aprobacion/trasladar` (`{ archivoId, paso: trasladar |
 confirmar | reemplazar, siVersion }`); `aprobar` puede trabajar hasta 300 s.
+
+### Fase 5: trazabilidad y PDF
+
+Pestaña **Trazabilidad** (cualquier miembro del proyecto): por cada archivo, un
+resumen (flujo, ubicación, estado y versiones, última subida, última decisión,
+traslado) y **todos sus movimientos en orden**: quién subió cada versión y
+cuándo (fecha de Trimble), quién revisó, la decisión y su fecha, los
+comentarios y motivos, los avisos enviados, y quién lo copió a la carpeta
+destino y cuándo. Sale del historial, que nunca se edita ni se borra.
+
+- Filtros: flujo (hito), estado, **desde / hasta** (días de Colombia; con
+  fechas salen solo los archivos con movimientos en esos días, y solo esos
+  movimientos) y texto (nombre o carpeta).
+- **Exportar PDF**: todo lo que se ve con los filtros. **PDF de este archivo**:
+  solo uno. Carta horizontal, con el proyecto, los filtros, quién lo generó y
+  cuándo, y «Página n de m». Se arma en el navegador (jsPDF, como en Compras).
+
+Código: [`lib/flujo-aprobacion/trazabilidad.ts`](lib/flujo-aprobacion/trazabilidad.ts)
+(armar y filtrar; también da los nombres de las acciones a la pestaña
+Historial), [`pdfTrazabilidad.ts`](lib/flujo-aprobacion/pdfTrazabilidad.ts),
+pantalla `Trazabilidad`. Ruta: `GET /api/flujo-aprobacion/trazabilidad`
+(`?flujoId=&estado=&desde=AAAA-MM-DD&hasta=&texto=` o `?archivoId=`).
+
+### Guía rápida
+
+1. Instale la extensión con
+   `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` y ejecute
+   `supabase/flujo-aprobacion.sql` en Supabase (una vez; se puede repetir).
+2. **Flujos → + Nuevo flujo** (administrador del proyecto): título o hito,
+   carpetas de revisión, carpeta destino y pasos (por ejemplo Revisa →
+   Aprueba). **Guardar**.
+3. **Quién hace qué → + Asignar**: marque carpetas o archivos, elija persona o
+   grupo de Trimble y el papel (Realiza, cada paso, Consulta). Revise los
+   avisos de pasos sin nadie.
+4. **Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
+   ejemplo, quién puede subir directo a la carpeta destino, o un aprobador sin
+   acceso completo a ella).
+5. Los modeladores suben sus archivos a las carpetas de revisión, como siempre.
+   Al abrir la extensión (o con **Revisar ahora**) se registran y los
+   revisores reciben la tarea de Trimble.
+6. Cada revisor, en **Por revisar → Decidir**: abre el archivo en Trimble,
+   aprueba (con comentario si quiere) o rechaza con el motivo.
+7. Al aprobar el último paso la versión aprobada pasa sola a la carpeta
+   destino. Si algo queda en espera (otro archivo con ese nombre) o falla, el
+   archivo lo dice y quien aprobó (o un administrador) lo resuelve.
+8. Un rechazado: quien lo subió ve el motivo en **Mis archivos**, corrige y
+   sube la versión nueva con el mismo nombre en la misma carpeta.
+9. **Trazabilidad**: consulte y exporte a PDF.
+
+### Protocolo de prueba en Trimble real
+
+En un proyecto de pruebas, con dos usuarios (A administra, B modela) y un grupo
+de Trimble con al menos un miembro:
+
+1. A crea un flujo «Prueba flujo» con una carpeta de revisión (con una
+   subcarpeta), una carpeta destino vacía y dos pasos (Revisa → Aprueba);
+   asigna Revisa al **grupo** y Aprueba a A. Revisa los permisos.
+2. B sube un `.rvt` a la subcarpeta y un `.pdf` a la carpeta de revisión.
+   Alguien abre la extensión: deben quedar 2 archivos pendientes y **una tarea
+   de Trimble para el grupo** (si Trimble no acepta grupos, una por miembro).
+   Comprobar que llegó el correo.
+3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; tarea para A) y
+   rechaza el `.pdf` con motivo (tarea para B con el motivo).
+4. A aprueba el `.rvt`: debe aparecer en la carpeta destino, **dentro de la
+   misma subcarpeta**, como **versión 1**, y abrirse en el visor sin
+   «Conversión en curso».
+5. B sube una versión nueva del `.rvt`; se aprueba otra vez: en el destino
+   debe quedar **el mismo archivo en versión 2** (no un archivo nuevo).
+6. A sube a mano a la carpeta destino un archivo con el mismo nombre del
+   `.pdf`; B lo corrige y se aprueba: debe quedar «En destino hay otro archivo
+   con ese nombre» hasta que A pulse «Reemplazar en el destino».
+7. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
+   estén quién subió, quién revisó, decisiones con fecha, motivos y quién
+   trasladó.
 
 ## Cómo funciona (común a ambas extensiones)
 

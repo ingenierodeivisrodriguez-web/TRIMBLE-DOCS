@@ -78,7 +78,7 @@ exportación solo a PDF.
    aprobar solo la versión vista.
 4. **Traslado** (hecho el 04-11-2026, ver abajo): copia automática de la última versión con la sesión de quien
    aprobó; reintento por el aprobador o un administrador si falla.
-5. Trazabilidad por archivo y general, filtros, PDF, README, guía y protocolo.
+5. **Trazabilidad** (hecha el 04-11-2026, ver abajo): por archivo y general, filtros, PDF, README, guía y protocolo.
 
 ## Fase 0 (`lib/flujo-aprobacion/prueba.ts`, `components/flujo-aprobacion/PruebaFase0.tsx`)
 
@@ -331,3 +331,34 @@ Para la fase 5: trazabilidad por archivo y general con filtros y PDF (quién
 subió y cuándo, quién revisó, decisión y fecha, comentarios, quién trasladó y
 cuándo); usar `aprobacion_historial` y `firmas`; las librerías de PDF ya
 usadas en Compras (`lib/compras/pdfOrden.ts`).
+
+## Fase 5: trazabilidad y PDF (`trazabilidad.ts`, `pdfTrazabilidad.ts`)
+
+El dueño dijo "Sí, fase 5" (04-11-2026). Con esto las 6 fases (0–5) están en
+código; falta la prueba completa en Trimble real (protocolo en el README,
+"Protocolo de prueba en Trimble real").
+
+- `armarTrazas`: por archivo, las líneas de `aprobacion_historial` con
+  `archivo_id` (todas: `store.historialArchivos` lee por páginas con `all()`,
+  porque PostgREST corta en 1000), ordenadas por `ocurrido ?? creado`; filtros
+  por flujo, estado, texto y días de Colombia (`diaColombia` vía `fechaHora`,
+  porque las noches colombianas ya son otro día en UTC). Con fechas, solo
+  archivos con movimientos en esos días.
+- `resumenTraza`: flujo, ubicación, estado y versiones, última subida, última
+  decisión, traslado. No se "parsean" los textos del historial: el detalle de
+  cada línea ya dice paso, decisión y comentario.
+- `ACCIONES` (nombres de las acciones) vive en `trazabilidad.ts` y lo usa
+  también la pestaña Historial.
+- `trazabilidad(ctx, q)` en `service.ts` valida filtros (`AAAA-MM-DD`, estado,
+  uuid) y devuelve `por` (quien consulta) para el PDF. Cualquier miembro.
+- PDF con jsPDF en el navegador (como Compras), carta horizontal, columnas
+  Fecha / Quién / Qué / Versión / Detalle, salto de página con "(continúa)" y
+  cabecera repetida, "Página n de m". Nombre: `Trazabilidad - <proyecto o
+  archivo> - DD-MM-AAAA.pdf`. La pantalla usa su propia función de descarga
+  (la de `lib/presupuesto/excel.ts` arrastra la tabla OmniClass).
+- Pruebas: `trazabilidad.test.ts`, `pdfTrazabilidad.test.ts` (páginas y nombre)
+  y la última de `trasladar.test.ts` (servicio de punta a punta).
+
+Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
+decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
+restringir lo que ve el papel «Consulta», avance del hito.

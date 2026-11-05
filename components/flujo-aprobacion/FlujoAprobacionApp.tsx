@@ -10,8 +10,9 @@ import Flujos from "./Flujos";
 import Historial from "./Historial";
 import PruebaFase0 from "./PruebaFase0";
 import RevisionCarpetas from "./RevisionCarpetas";
+import Trazabilidad from "./Trazabilidad";
 
-type Pestana = "por-revisar" | "mios" | "todos" | "flujos" | "historial" | "prueba";
+type Pestana = "por-revisar" | "mios" | "todos" | "trazabilidad" | "flujos" | "historial" | "prueba";
 
 /**
  * "Flujo de aprobación": on opening, the review folders of every active flow
@@ -90,6 +91,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
     { id: "por-revisar", texto: `Por revisar${porRevisar ? ` (${porRevisar})` : ""}` },
     { id: "mios", texto: "Mis archivos" },
     { id: "todos", texto: "Archivos" },
+    { id: "trazabilidad", texto: "Trazabilidad" },
     { id: "flujos", texto: "Flujos" },
     { id: "historial", texto: "Historial" },
     { id: "prueba", texto: "Prueba de Trimble" },
@@ -133,6 +135,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
         </Notice>
       )}
       {(pestana === "por-revisar" || pestana === "mios" || pestana === "todos") && <Archivos api={api} modo={pestana} datos={archivos} error={errorArchivos} onCambio={cargarArchivos} />}
+      {pestana === "trazabilidad" && <Trazabilidad api={api} flujos={datos?.flujos ?? []} projectName={projectName} />}
       {pestana === "flujos" && datos && <Flujos api={api} projectId={projectId} datos={datos} onCambio={cambio} />}
       {pestana === "historial" && <Historial api={api} flujos={datos?.flujos ?? []} recarga={recarga} />}
       {pestana === "prueba" && <PruebaFase0 api={api} projectId={projectId} projectName={projectName} />}

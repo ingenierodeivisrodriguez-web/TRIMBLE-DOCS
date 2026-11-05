@@ -151,3 +151,21 @@ secuencia constructiva paso a paso.
   manual en el diálogo de la partida (✎).
 - **"No veo el cambio"**: recargar la pestaña de Trimble Connect después del
   despliegue.
+
+## Flujo de aprobación: orden de trabajo
+
+1. Ejecutar `supabase/flujo-aprobacion.sql` e instalar el manifiesto.
+2. Flujos → + Nuevo flujo (administrador del proyecto): hito, carpetas de
+   revisión, carpeta destino, pasos (Revisa → Aprueba).
+3. Quién hace qué: personas o grupos de Trimble por carpeta o archivo; luego
+   «Revisar permisos de Trimble» y corregir en Trimble lo que avise.
+4. Se sube a las carpetas de revisión como siempre; al abrir la extensión se
+   registra y los revisores reciben una tarea (ToDo) de Trimble con correo.
+5. Por revisar → Decidir: aprobar (comentario opcional) o rechazar (motivo
+   obligatorio). Quien subió una versión no la decide.
+6. El último paso aprobado copia la versión a la carpeta destino (v1, luego
+   v2, v3…); un archivo ajeno con el mismo nombre espera «Reemplazar».
+7. Trazabilidad: consultar con filtros y exportar a PDF.
+
+Protocolo completo de prueba en Trimble real: README, sección "Protocolo de
+prueba en Trimble real" de Flujo de aprobación.

@@ -169,3 +169,25 @@ test("trasladar otra vez lo que ya está en el destino no hace una copia nueva",
   assert.equal(r.mensaje, "La versión aprobada ya está en la carpeta destino.");
   assert.equal(e.enDestino()[0].versiones.length, 1);
 });
+
+test("la trazabilidad de un archivo cuenta quién subió, quién aprobó y quién trasladó, y rechaza filtros malos", async () => {
+  const e = await escenario();
+  await e.aprobar(e.modelo);
+  const { trazabilidad } = await import("./service");
+  const r = await trazabilidad(e.admin, new URLSearchParams({ estado: "aprobado" }));
+  assert.equal(r.trazas.length, 1);
+  assert.deepEqual(
+    r.trazas[0].eventos.filter((x) => x.accion !== "aviso-enviado").map((x) => [x.que, x.quien]),
+    [
+      ["Subió un archivo", "Juan"],
+      ["Aprobó", "Pepe"],
+      ["Trasladó al destino", "Pepe"],
+    ]
+  );
+  assert.equal(r.hitos[e.f.id], "Aprobar Torre 1");
+  const una = await trazabilidad(e.como("luz"), new URLSearchParams({ archivoId: r.trazas[0].archivo.id }));
+  assert.equal(una.trazas.length, 1, "any member can read it");
+  await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ desde: "04-11-2026" })), /Las fechas no son válidas/);
+  await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ desde: "2026-11-05", hasta: "2026-11-01" })), /posterior a la final/);
+  await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ estado: "borrado" })), /El estado no es válido/);
+});
