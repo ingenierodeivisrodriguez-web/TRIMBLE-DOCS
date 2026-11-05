@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fases 1 y 2, configuración y registro de archivos) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (en construcción: fases 1 a 3, configuración, registro, aprobar y rechazar con avisos) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4279,6 +4279,61 @@ archivo de Trimble, sin borrado) y columnas nuevas en `aprobacion_flujos`
 (`archivo_id`, `file_id`, `version`, `ocurrido`). Rutas:
 `POST /api/flujo-aprobacion/revisar` (`{ flujoId }`) y
 `GET /api/flujo-aprobacion/archivos`; el historial acepta `?archivoId=`.
+
+### Fase 3: aprobar, rechazar y avisos
+
+Hay que volver a ejecutar **`supabase/flujo-aprobacion.sql`** (agrega la
+columna de firmas).
+
+En **Por revisar**, cada archivo tiene **Decidir**: dice qué versión y qué paso
+se deciden, con el enlace para abrirla en Trimble, un cuadro de texto y dos
+botones.
+
+- **Aprobar «paso»** (comentario opcional): el archivo pasa al paso siguiente;
+  si era el último, queda **Aprobado** y esa versión queda como la aprobada (la
+  copia a la carpeta destino llega en la fase 4).
+- **Rechazar** (el **motivo es obligatorio**): queda **Rechazado**; quien subió
+  la versión ve el motivo en «Mis archivos», la corrige y sube la versión nueva
+  con el mismo nombre en la misma carpeta. Al registrarla queda como **Nueva
+  versión pendiente** y empieza otra vez desde el primer paso.
+
+Reglas:
+
+- Decide quien tiene el paso, o **cualquier persona del grupo** que lo tiene
+  (basta con una), o un **administrador** del proyecto (queda anotado «como
+  administrador»).
+- **Quien subió una versión nunca la aprueba ni la rechaza**, aunque sea
+  administrador.
+- Se decide sobre **la versión que se vio**: si llegó otra al registro, o ya
+  hay una más nueva en Trimble, se rechaza la decisión y se pide revisar la
+  nueva. Si dos personas deciden a la vez, la segunda recibe «otra persona
+  decidió…» y no cambia nada.
+- Cada decisión queda como **firma** del archivo (paso, quién, fecha, versión,
+  comentario o motivo) y en el historial. Una versión nueva empieza sin firmas;
+  las anteriores siguen en el historial.
+
+**Avisos (tareas de Trimble)**: con el formato que confirmó la prueba de la
+fase 0 (Trimble manda el correo a la persona).
+
+- Al registrar archivos o versiones nuevas: **una tarea** por grupo de archivos
+  que esperan a las mismas personas en el mismo paso («Revisar 3 archivos
+  (Revisa) — Aprobar diseño Torre 1»), con el enlace de cada uno (hasta 15; el
+  resto se cuenta).
+- Al aprobar un paso: una tarea a quien tiene el siguiente.
+- Al rechazar: una tarea a **quien subió** la versión, con el motivo y dónde
+  subir la corrección.
+- Si Trimble no acepta una tarea para un grupo, se manda a cada miembro. Un
+  aviso que falla nunca frena el registro ni la decisión: queda en el historial
+  («Aviso no enviado»). Adjuntar el archivo a la tarea no funcionó en la prueba:
+  el enlace va en la descripción. Las tareas no se cierran solas: cada persona
+  las marca como hechas en Trimble.
+
+Código: [`lib/flujo-aprobacion/decision.ts`](lib/flujo-aprobacion/decision.ts)
+(quién decide y qué cambia), [`avisos.ts`](lib/flujo-aprobacion/avisos.ts)
+(armar y enviar las tareas), [`decisiones.ts`](lib/flujo-aprobacion/decisiones.ts)
+(servicio). Columna `aprobacion_archivos.firmas`. Rutas:
+`POST /api/flujo-aprobacion/aprobar` y `POST /api/flujo-aprobacion/rechazar`
+(`{ archivoId, versionId, texto }`).
 
 ## Cómo funciona (común a ambas extensiones)
 

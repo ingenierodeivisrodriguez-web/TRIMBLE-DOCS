@@ -8,7 +8,7 @@
  * every folder) and after Trimble confirms it is gone or out of the flow.
  */
 import { fechaHora } from "../compras/formato";
-import { buildFileViewerUrl } from "../format";
+import { avisarRevision, enlaceDe } from "./decisiones";
 import { FlujoError } from "./errores";
 import { flujoDe } from "./flujos";
 import { LIMITES, recorrer } from "./recorrido";
@@ -80,9 +80,11 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     }
 
     // New versions, files that reappear or come from another flow, renames.
+    const aAvisar: ArchivoRegistro[] = [...creados];
     await enTandas(plan.actualizar, async (c: Cambio) => {
       const a = await ctx.store.actualizarArchivo(c.id, c.cambios);
       if (!c.accion) return;
+      if (ESPERANDO.includes(a.estado) && c.accion !== "archivo-reaparecido") aAvisar.push(a);
       const subio = c.accion === "version-reemplazada" || c.accion === "nueva-version";
       lineas.push(
         linea(a, c.accion, detalleCambio(c, flujo.hito, fechaHora), subio ? { usuario: a.subidoPor || null, usuarioId: a.subidoPorId } : { usuario: ctx.caller.name, usuarioId: ctx.caller.id }, subio ? a.subido : momento)
@@ -106,6 +108,11 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
         retirados++;
       }
     }
+
+    // A Trimble ToDo to whoever has the first step of what now waits (phase 3).
+    const asignaciones = (await ctx.store.asignaciones(ctx.projectId)).filter((x) => x.activa && x.flujoId === flujo.id);
+    const avisados = await avisarRevision(ctx, flujo.id, aAvisar, asignaciones, flujo.hito, momento);
+    lineas.push(...avisados.lineas);
     await ctx.store.registrarVarios(lineas);
 
     const nuevasVersiones = plan.actualizar.filter((c) => c.accion === "nueva-version" || c.accion === "version-reemplazada").length;
@@ -120,6 +127,8 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     const avisos = [
       r.completo ? "" : ` Revisión incompleta (${r.motivo}): lo que no se vio no se marcó como retirado.`,
       r.completo && faltan > 0 && !ctx.caller.isAdmin ? ` ${contar(faltan, "archivo registrado no apareció", "archivos registrados no aparecieron")} en tu revisión; solo la de un administrador los confirma como retirados.` : "",
+      avisados.enviados ? ` Se avisó a los revisores con ${contar(avisados.enviados, "tarea", "tareas")} de Trimble.` : "",
+      avisados.fallidos ? ` ${contar(avisados.fallidos, "aviso no se pudo enviar", "avisos no se pudieron enviar")} (ver Historial).` : "",
     ].join("");
     return {
       ...base,
@@ -155,7 +164,7 @@ export async function listarArchivos(ctx: Ctx): Promise<{ yo: string; esAdmin: b
         pasoNombre: ESPERANDO.includes(a.estado) ? (a.pasos[a.pasoActual]?.nombre ?? "") : "",
         responsables: resp.map((r) => (r.quienTipo === "grupo" ? `${r.quienNombre} (grupo)` : r.quienNombre)),
         meToca: meToca(a, resp, ctx.caller.id, mios),
-        enlace: buildFileViewerUrl(ctx.projectId, { id: a.fileId, ext: a.tipo, versionId: a.versionId ?? a.fileId }),
+        enlace: enlaceDe(ctx.projectId, a),
       };
     }),
   };

@@ -38,6 +38,7 @@ function escenario() {
   arbol.t1 = [archivo("detalle", "detalle.dwg", 2)];
   arbol.fach = [archivo("fachada", "fachada.pdf", 1)];
   const borrados = new Set<string>();
+  const tareas: Record<string, unknown>[] = [];
   const tc: TrimbleFlujo = {
     async carpeta(id) {
       if (!CARPETAS[id]) throw new FlujoError("No existe.", 404);
@@ -53,11 +54,16 @@ function escenario() {
     miembros: async () => [],
     permisos: async () => ({ direct: { acl: {}, inheritance: true }, inherited: {} }),
     items: async (id) => (arbol[id] ? arbol[id] : Promise.reject(new Error("403"))),
+    version: async (id) => Object.values(arbol).flat().find((x) => x.id === id)?.versionId ?? null,
+    crearTarea: async (cuerpo) => {
+      tareas.push(cuerpo);
+      return { estado: 201, cuerpo: { id: `todo${tareas.length}` } };
+    },
   };
   const caller = (id: string, isAdmin: boolean, grupos: string[] = []): Caller => ({ id, name: PERSONAS.find((p) => p.id === id)!.firstName, isAdmin, memberOfGroups: async (ids) => new Set(ids.filter((g) => grupos.includes(g))) });
   const ctx = (c: Caller): Ctx => ({ projectId: "P", caller: c, store, tc, ahora: () => new Date("2026-11-04T20:00:00Z") });
   const admin = ctx(caller("ana", true));
-  return { store, arbol, archivo, borrados, admin, como: (id: string, grupos: string[] = []) => ctx(caller(id, false, grupos)) };
+  return { store, arbol, archivo, borrados, tareas, admin, como: (id: string, grupos: string[] = []) => ctx(caller(id, false, grupos)) };
 }
 
 async function conFlujo(e: ReturnType<typeof escenario>) {

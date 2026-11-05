@@ -29,6 +29,8 @@ export interface FlujoApi {
   /** Walks one flow's review folders and registers what changed (phase 2). */
   revisar(flujoId: string): Promise<ResumenRevision>;
   archivos(): Promise<{ yo: string; esAdmin: boolean; archivos: ArchivoInfo[] }>;
+  /** Approves or rejects the step a file waits for, on the version seen (phase 3). */
+  decidir(decision: "aprobar" | "rechazar", archivoId: string, versionId: string | null, texto: string): Promise<{ mensaje: string; aviso: string | null }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -58,5 +60,6 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     },
     revisar: (flujoId) => post("/revisar", { flujoId }),
     archivos: () => request("/archivos"),
+    decidir: (decision, archivoId, versionId, texto) => post(`/${decision}`, { archivoId, versionId, texto }),
   };
 }

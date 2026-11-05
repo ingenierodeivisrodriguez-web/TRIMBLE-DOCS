@@ -71,7 +71,7 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
     if (vistosIds.has(v.fileId)) continue;
     vistosIds.add(v.fileId);
     const r = porFile.get(v.fileId);
-    const nuevoTramite = { pasos: flujo.pasos.map((p) => ({ ...p })), pasoActual: 0, actualizado: momento };
+    const nuevoTramite = { pasos: flujo.pasos.map((p) => ({ ...p })), pasoActual: 0, firmas: [], actualizado: momento };
     if (!r) {
       plan.crear.push({
         proyecto: flujo.proyecto,
@@ -85,6 +85,7 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
         estado: "pendiente",
         pasos: nuevoTramite.pasos,
         pasoActual: 0,
+        firmas: [],
         versionId: v.versionId,
         revision: v.revision,
         subido: v.subido,
@@ -104,7 +105,7 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
     }
     if (r.versionId !== v.versionId) {
       if (r.estado === "pendiente" || r.estado === "nueva-version") {
-        plan.actualizar.push({ id: r.id, antes: r, accion: "version-reemplazada", cambios: { ...deTrimble(v), pasoActual: 0, actualizado: momento } });
+        plan.actualizar.push({ id: r.id, antes: r, accion: "version-reemplazada", cambios: { ...deTrimble(v), pasoActual: 0, firmas: [], actualizado: momento } });
       } else if (r.estado === "retirado") {
         plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-reaparecido", cambios: { ...deTrimble(v), ...nuevoTramite, estado: r.versionAprobadaId ? "nueva-version" : "pendiente" } });
       } else {

@@ -208,8 +208,36 @@ export interface ArchivoRegistro {
   /** The last approved version (phase 3). */
   versionAprobadaId: string | null;
   revisionAprobada: number | null;
+  /** The decisions of this review, step by step (phase 3); emptied when a new review starts. */
+  firmas: Firma[];
   detectado: string;
   actualizado: string;
+}
+
+/** A decision on one step of a file's review. */
+export interface Firma {
+  pasoId: string;
+  paso: string;
+  decision: "aprobado" | "rechazado";
+  quien: string;
+  quienId: string;
+  /** Approved as a project administrator, without having the step assigned. */
+  comoAdmin: boolean;
+  fecha: string;
+  /** The version decided on. */
+  revision: number | null;
+  versionId: string | null;
+  /** Comment on an approval; the reason of a rejection (required). */
+  comentario: string;
+}
+
+/** A Trimble ToDo to send: to whom, its title and text. */
+export interface Aviso {
+  titulo: string;
+  descripcion: string;
+  para: { tipo: "persona" | "grupo"; id: string; nombre: string }[];
+  /** The registered files it is about. */
+  archivos: string[];
 }
 
 /** What a folder walk found: a file with its latest version. */

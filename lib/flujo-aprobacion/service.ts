@@ -9,6 +9,7 @@
 import type { Caller } from "../propiedades/service";
 import type { FolderPermissions, ProjectGroup, ProjectUser, RawFolderItem } from "../trimbleApi";
 import type { Limites } from "./recorrido";
+import type { Respuesta } from "../compras/cde";
 import { esIdTrimble, FlujoError } from "./errores";
 import {
   asignacionesAfectadas,
@@ -43,6 +44,10 @@ export interface TrimbleFlujo {
   permisos(folderId: string): Promise<FolderPermissions>;
   /** A folder's files and subfolders (phase 2). */
   items(folderId: string): Promise<RawFolderItem[]>;
+  /** The id of a file's latest version in Trimble right now (phase 3). */
+  version(fileId: string): Promise<string | null>;
+  /** POST /todos with that body (phase 3). Answers never throw: the status says what happened. */
+  crearTarea(cuerpo: Record<string, unknown>): Promise<Respuesta>;
 }
 
 export interface Ctx {

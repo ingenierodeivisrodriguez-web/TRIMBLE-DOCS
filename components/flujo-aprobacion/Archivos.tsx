@@ -5,8 +5,8 @@ import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
 import { ESPERANDO, textoEstado } from "../../lib/flujo-aprobacion/registro";
 import type { ArchivoInfo, EntradaHistorial, EstadoArchivo } from "../../lib/flujo-aprobacion/types";
-import { baseInput, C, labelStyle, message, Notice } from "../presupuesto/ui";
-import { card, etiqueta, linkBtn, select, td, texto, th, titulo } from "../compras/estilos";
+import { acceptButton, baseInput, C, labelStyle, message, Notice } from "../presupuesto/ui";
+import { botonPeligro, card, etiqueta, linkBtn, select, td, texto, th, titulo } from "../compras/estilos";
 
 export type ModoArchivos = "por-revisar" | "mios" | "todos";
 
@@ -18,49 +18,47 @@ const COLOR: Record<EstadoArchivo, [string, string]> = {
   retirado: ["#5f6b7a", "#eceff3"],
 };
 const porRuta = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
+const pequeno = { padding: "4px 12px", fontSize: 13.5 } as const;
+
+type Datos = { yo: string; esAdmin: boolean; archivos: ArchivoInfo[] };
+
+/** Whether the caller can approve or reject this file now (the server checks it again). */
+const puedeDecidir = (a: ArchivoInfo, d: Datos) => ESPERANDO.includes(a.estado) && a.subidoPorId !== d.yo && (a.meToca || d.esAdmin);
 
 /**
- * The registered files: what waits for the caller ("Por revisar"), what the
- * caller uploaded ("Mis archivos"), or all of them with filters. Each one
- * opens in Trimble at the version under review and shows its history.
+ * The registered files: what waits for the caller ("Por revisar", where they
+ * approve or reject), what the caller uploaded ("Mis archivos"), or all of
+ * them with filters. Each one opens in Trimble at the version under review and
+ * shows its signatures and history.
  */
-export default function Archivos({
-  api,
-  modo,
-  datos,
-  error,
-}: {
-  api: FlujoApi;
-  modo: ModoArchivos;
-  datos: { yo: string; esAdmin: boolean; archivos: ArchivoInfo[] } | null;
-  error: string;
-}) {
+export default function Archivos({ api, modo, datos, error, onCambio }: { api: FlujoApi; modo: ModoArchivos; datos: Datos | null; error: string; onCambio: () => void }) {
   const [verTodos, setVerTodos] = useState(false);
   const [flujo, setFlujo] = useState("");
   const [estado, setEstado] = useState("");
   const [buscar, setBuscar] = useState("");
-  const [abierto, setAbierto] = useState<string | null>(null);
+  const [abierto, setAbierto] = useState<{ id: string; que: "historial" | "decidir" } | null>(null);
   const [historial, setHistorial] = useState<{ id: string; entradas: EntradaHistorial[] | null; error: string } | null>(null);
+  const [resultado, setResultado] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
 
   const filas = useMemo(() => {
     if (!datos) return [];
-    const texto = buscar.trim().toLowerCase();
+    const q = buscar.trim().toLowerCase();
     return datos.archivos
       .filter((a) => {
         if (modo === "por-revisar") return ESPERANDO.includes(a.estado) && (a.meToca || (datos.esAdmin && verTodos));
         if (modo === "mios") return a.subidoPorId === datos.yo;
         return true;
       })
-      .filter((a) => (!flujo || a.flujoId === flujo) && (!estado || a.estado === estado) && (!texto || a.ruta.toLowerCase().includes(texto)))
+      .filter((a) => (!flujo || a.flujoId === flujo) && (!estado || a.estado === estado) && (!q || a.ruta.toLowerCase().includes(q)))
       .sort((a, b) => porRuta.compare(a.hito, b.hito) || porRuta.compare(a.ruta, b.ruta));
   }, [datos, modo, verTodos, flujo, estado, buscar]);
 
   async function verHistorial(a: ArchivoInfo) {
-    if (abierto === a.id) {
+    if (abierto?.id === a.id && abierto.que === "historial") {
       setAbierto(null);
       return;
     }
-    setAbierto(a.id);
+    setAbierto({ id: a.id, que: "historial" });
     setHistorial({ id: a.id, entradas: null, error: "" });
     try {
       const r = await api.historial(undefined, a.id);
@@ -72,9 +70,12 @@ export default function Archivos({
 
   const flujos = useMemo(() => [...new Map((datos?.archivos ?? []).map((a) => [a.flujoId, a.hito])).entries()], [datos]);
   const TITULOS: Record<ModoArchivos, [string, string]> = {
-    "por-revisar": ["Por revisar", "Los archivos que esperan tu paso (por ti o por tu grupo). A quien subió una versión no le toca revisarla. Aprobar y rechazar llegan en la fase 3."],
-    mios: ["Mis archivos", "Los archivos cuya última versión subiste tú, y en qué van."],
-    todos: ["Archivos", "Todos los archivos registrados en las carpetas de revisión, con su estado."],
+    "por-revisar": [
+      "Por revisar",
+      "Los archivos que esperan tu paso (por ti o por tu grupo: basta con una persona del grupo). Ábrelo en Trimble, revísalo y apruébalo o recházalo con el motivo. A quien subió una versión no le toca revisarla.",
+    ],
+    mios: ["Mis archivos", "Los archivos cuya última versión subiste tú, y en qué van. Si te rechazan uno, corrígelo y sube la versión nueva con el mismo nombre en la misma carpeta."],
+    todos: ["Archivos", "Todos los archivos registrados en las carpetas de revisión, con su estado y sus firmas."],
   };
 
   return (
@@ -82,6 +83,11 @@ export default function Archivos({
       <h2 style={titulo}>{TITULOS[modo][0]}</h2>
       <p style={texto}>{TITULOS[modo][1]}</p>
       {error && <Notice kind="error">{error}</Notice>}
+      {resultado && (
+        <Notice kind={resultado.kind} style={{ marginBottom: 10 }}>
+          {resultado.texto}
+        </Notice>
+      )}
       <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end", marginBottom: 10 }}>
         {modo === "por-revisar" && datos?.esAdmin && (
           <label style={{ fontSize: 13.5, cursor: "pointer" }}>
@@ -125,7 +131,7 @@ export default function Archivos({
           {modo === "por-revisar" ? "No tienes archivos esperando tu revisión." : modo === "mios" ? "No hay archivos registrados cuya última versión hayas subido tú." : "No hay archivos registrados con estos filtros."}
         </p>
       )}
-      {filas.length > 0 && (
+      {datos && filas.length > 0 && (
         <div style={{ overflowX: "auto", border: `1px solid ${C.border}`, borderRadius: 4 }}>
           <table style={{ borderCollapse: "collapse", width: "100%" }}>
             <thead>
@@ -140,7 +146,21 @@ export default function Archivos({
             </thead>
             <tbody>
               {filas.map((a) => (
-                <FilaArchivo key={a.id} a={a} abierto={abierto === a.id} historial={historial?.id === a.id ? historial : null} onHistorial={() => verHistorial(a)} />
+                <FilaArchivo
+                  key={a.id}
+                  api={api}
+                  a={a}
+                  puede={puedeDecidir(a, datos)}
+                  abierto={abierto?.id === a.id ? abierto.que : null}
+                  historial={historial?.id === a.id ? historial : null}
+                  onHistorial={() => verHistorial(a)}
+                  onDecidir={() => setAbierto(abierto?.id === a.id && abierto.que === "decidir" ? null : { id: a.id, que: "decidir" })}
+                  onDecidido={(r) => {
+                    setResultado({ kind: "info", texto: [r.mensaje, r.aviso].filter(Boolean).join(" ") });
+                    setAbierto(null);
+                    onCambio();
+                  }}
+                />
               ))}
             </tbody>
           </table>
@@ -151,9 +171,28 @@ export default function Archivos({
   );
 }
 
-function FilaArchivo({ a, abierto, historial, onHistorial }: { a: ArchivoInfo; abierto: boolean; historial: { entradas: EntradaHistorial[] | null; error: string } | null; onHistorial: () => void }) {
+function FilaArchivo({
+  api,
+  a,
+  puede,
+  abierto,
+  historial,
+  onHistorial,
+  onDecidir,
+  onDecidido,
+}: {
+  api: FlujoApi;
+  a: ArchivoInfo;
+  puede: boolean;
+  abierto: "historial" | "decidir" | null;
+  historial: { entradas: EntradaHistorial[] | null; error: string } | null;
+  onHistorial: () => void;
+  onDecidir: () => void;
+  onDecidido: (r: { mensaje: string; aviso: string | null }) => void;
+}) {
   const [color, fondo] = COLOR[a.estado];
   const carpeta = a.ruta.slice(0, Math.max(0, a.ruta.length - a.nombre.length - 3));
+  const rechazo = a.estado === "rechazado" ? [...a.firmas].reverse().find((f) => f.decision === "rechazado") : undefined;
   return (
     <>
       <tr style={{ background: a.estado === "nueva-version" ? "#fffaf2" : undefined }}>
@@ -167,13 +206,29 @@ function FilaArchivo({ a, abierto, historial, onHistorial }: { a: ArchivoInfo; a
         <td style={td}>
           <span style={etiqueta(color, fondo)}>{textoEstado(a)}</span>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)", marginTop: 2 }}>Versión {a.revision ?? "?"}</div>
+          {a.firmas.map((f, i) => (
+            <div key={i} style={{ fontSize: 12, color: f.decision === "aprobado" ? "#1e6b2c" : "#a1261b" }} title={f.comentario || undefined}>
+              {f.decision === "aprobado" ? "✓" : "✗"} {f.paso}: {f.quien}
+              {f.comoAdmin ? " (admin.)" : ""}, {fechaHora(f.fecha).slice(0, 10)}
+            </div>
+          ))}
         </td>
         <td style={td}>
           {a.pasoNombre ? (
             <>
               <strong>{a.pasoNombre}</strong>
-              {a.pasos.length > 1 && <span style={{ color: "var(--tc-gray-500)" }}> (paso {a.pasoActual + 2} de {a.pasos.length + 1})</span>}
+              {a.pasos.length > 1 && (
+                <span style={{ color: "var(--tc-gray-500)" }}>
+                  {" "}
+                  (paso {a.pasoActual + 2} de {a.pasos.length + 1})
+                </span>
+              )}
               <div style={{ fontSize: 12.5, color: "var(--tc-gray-700)" }}>{a.responsables.length ? a.responsables.join(", ") : "Sin asignar: solo administradores"}</div>
+            </>
+          ) : rechazo ? (
+            <>
+              <strong>Corregir y subir una versión nueva</strong>
+              <div style={{ fontSize: 12.5, color: "#a1261b" }}>Motivo: {rechazo.comentario}</div>
             </>
           ) : (
             "—"
@@ -184,12 +239,24 @@ function FilaArchivo({ a, abierto, historial, onHistorial }: { a: ArchivoInfo; a
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>{a.subido ? fechaHora(a.subido) : ""}</div>
         </td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>
+          {puede && (
+            <button type="button" style={{ ...acceptButton, ...pequeno, marginRight: 8 }} onClick={onDecidir}>
+              {abierto === "decidir" ? "Cerrar" : "Decidir"}
+            </button>
+          )}
           <button type="button" style={linkBtn} onClick={onHistorial}>
-            {abierto ? "Cerrar" : "Historial"}
+            {abierto === "historial" ? "Cerrar" : "Historial"}
           </button>
         </td>
       </tr>
-      {abierto && (
+      {abierto === "decidir" && (
+        <tr>
+          <td style={{ ...td, background: "#f6f8fb" }} colSpan={6}>
+            <Decision api={api} a={a} onDecidido={onDecidido} />
+          </td>
+        </tr>
+      )}
+      {abierto === "historial" && (
         <tr>
           <td style={{ ...td, background: "#f6f8fb" }} colSpan={6}>
             {historial?.error && <Notice kind="error">{historial.error}</Notice>}
@@ -209,5 +276,58 @@ function FilaArchivo({ a, abierto, historial, onHistorial }: { a: ArchivoInfo; a
         </tr>
       )}
     </>
+  );
+}
+
+/** Approve (optional comment) or reject (reason required) the step the file waits for, on the version shown. */
+function Decision({ api, a, onDecidido }: { api: FlujoApi; a: ArchivoInfo; onDecidido: (r: { mensaje: string; aviso: string | null }) => void }) {
+  const [comentario, setComentario] = useState("");
+  const [ocupado, setOcupado] = useState<"aprobar" | "rechazar" | null>(null);
+  const [error, setError] = useState("");
+  const ultimo = a.pasoActual === a.pasos.length - 1;
+
+  async function decidir(decision: "aprobar" | "rechazar") {
+    if (decision === "rechazar" && comentario.trim().length < 3) {
+      setError("Escribe el motivo del rechazo: el modelador lo necesita para corregir.");
+      return;
+    }
+    setOcupado(decision);
+    setError("");
+    try {
+      onDecidido(await api.decidir(decision, a.id, a.versionId, comentario));
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setOcupado(null);
+    }
+  }
+
+  return (
+    <div style={{ display: "grid", gap: 8, maxWidth: 760 }}>
+      <div style={{ fontSize: 13.5 }}>
+        Decides sobre la <strong>versión {a.revision ?? "?"}</strong> de «{a.nombre}» en el paso <strong>«{a.pasoNombre}»</strong>.{" "}
+        <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={linkBtn}>
+          Ábrela en Trimble
+        </a>{" "}
+        antes de decidir.
+        {ultimo ? " Es el último paso: al aprobar, el archivo queda aprobado." : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
+      </div>
+      <label>
+        <span style={labelStyle}>Comentario (opcional al aprobar) o motivo del rechazo (obligatorio)</span>
+        <textarea value={comentario} onChange={(e) => setComentario(e.target.value)} maxLength={1000} rows={3} style={{ ...baseInput, width: "100%", fontSize: 14, resize: "vertical" }} placeholder="Por ejemplo: faltan los ejes en la planta del piso 3" />
+      </label>
+      {error && <Notice kind="error">{error}</Notice>}
+      <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+        <button type="button" disabled={!!ocupado} onClick={() => decidir("aprobar")} style={{ ...acceptButton, ...pequeno }}>
+          {ocupado === "aprobar" ? "Aprobando…" : `Aprobar «${a.pasoNombre}»`}
+        </button>
+        <button type="button" disabled={!!ocupado} onClick={() => decidir("rechazar")} style={{ ...botonPeligro, ...pequeno }}>
+          {ocupado === "rechazar" ? "Rechazando…" : "Rechazar"}
+        </button>
+        <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", alignSelf: "center" }}>
+          Se avisa por tarea de Trimble a {ultimo ? "quien subió el archivo si lo rechazas" : "quien siga, o a quien subió el archivo si lo rechazas"}.
+        </span>
+      </div>
+    </div>
   );
 }

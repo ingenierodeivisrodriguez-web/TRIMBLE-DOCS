@@ -177,3 +177,10 @@ alter table public.aprobacion_archivos enable row level security;
 revoke all on public.aprobacion_archivos from anon, authenticated;
 revoke delete, truncate on table public.aprobacion_archivos from public, anon, authenticated, service_role;
 grant select, insert, update on public.aprobacion_archivos to service_role;
+
+-- ------------------------------------------------------------------ fase 3
+-- Las decisiones de la revisión en curso, paso por paso: [{ "pasoId", "paso",
+-- "decision": aprobado | rechazado, "quien", "quienId", "comoAdmin", "fecha",
+-- "revision", "versionId", "comentario" }]. Se vacía al empezar una revisión
+-- nueva (versión nueva); lo anterior queda en el historial.
+alter table public.aprobacion_archivos add column if not exists firmas jsonb not null default '[]'::jsonb;

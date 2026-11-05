@@ -1,6 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
-import type { ArchivoRegistro, Asignacion, CarpetaFlujo, EntradaHistorial, EstadoArchivo, Flujo, PasoFlujo } from "./types";
+import type { ArchivoRegistro, Asignacion, CarpetaFlujo, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo } from "./types";
 
 /**
  * Persistence of "Flujo de aprobación". Two implementations with the same
@@ -35,6 +35,12 @@ export interface FlujoStore {
   archivos(proyecto: string): Promise<ArchivoRegistro[]>;
   crearArchivos(a: Omit<ArchivoRegistro, "id">[]): Promise<ArchivoRegistro[]>;
   actualizarArchivo(id: string, cambios: Partial<Omit<ArchivoRegistro, "id" | "proyecto" | "fileId">>): Promise<ArchivoRegistro>;
+  /**
+   * A decision: saves only while the file is still at the version, step and
+   * state the person decided on (null when someone decided or a new version
+   * arrived in between).
+   */
+  decidirArchivo(id: string, esperado: { versionId: string | null; pasoActual: number; estado: EstadoArchivo }, cambios: Partial<Omit<ArchivoRegistro, "id" | "proyecto" | "fileId">>): Promise<ArchivoRegistro | null>;
 }
 
 const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
@@ -158,6 +164,7 @@ const deArchivo = (f: Fila): ArchivoRegistro => ({
   subido: t(f.subido),
   subidoPor: t(f.subido_por) ?? "",
   subidoPorId: t(f.subido_por_id),
+  firmas: arr<Firma>(f.firmas),
   versionAprobadaId: t(f.version_aprobada_id),
   revisionAprobada: n(f.revision_aprobada),
   detectado: String(f.detectado),
@@ -181,6 +188,7 @@ const aArchivo = (a: Partial<ArchivoRegistro>): Fila =>
     subido: a.subido,
     subido_por: a.subidoPor,
     subido_por_id: a.subidoPorId,
+    firmas: a.firmas,
     version_aprobada_id: a.versionAprobadaId,
     revision_aprobada: a.revisionAprobada,
     detectado: a.detectado,
@@ -278,6 +286,15 @@ function supabaseStore(): FlujoStore | null {
       const filas = await json<Fila[]>(`/aprobacion_archivos?id=${eq(id)}`, { method: "PATCH", headers: representar, body: JSON.stringify(aArchivo(cambios)) });
       if (!filas[0]) throw new StoreError("No se encontró el archivo.", 404);
       return deArchivo(filas[0]);
+    },
+    async decidirArchivo(id, esperado, cambios) {
+      const version = esperado.versionId === null ? "version_id=is.null" : `version_id=${eq(esperado.versionId)}`;
+      const filas = await json<Fila[]>(`/aprobacion_archivos?id=${eq(id)}&${version}&paso_actual=eq.${esperado.pasoActual}&estado=${eq(esperado.estado)}`, {
+        method: "PATCH",
+        headers: representar,
+        body: JSON.stringify(aArchivo(cambios)),
+      });
+      return filas[0] ? deArchivo(filas[0]) : null;
     },
   };
 }
@@ -381,6 +398,13 @@ export function memoryStore(): FlujoStore {
     async actualizarArchivo(aid, cambios) {
       const a = archivos.get(aid);
       if (!a) throw new StoreError("No se encontró el archivo.", 404);
+      const nuevo = { ...a, ...(sinIndefinidos(copia(cambios) as Fila) as Partial<ArchivoRegistro>) };
+      archivos.set(aid, nuevo);
+      return copia(nuevo);
+    },
+    async decidirArchivo(aid, esperado, cambios) {
+      const a = archivos.get(aid);
+      if (!a || a.versionId !== esperado.versionId || a.pasoActual !== esperado.pasoActual || a.estado !== esperado.estado) return null;
       const nuevo = { ...a, ...(sinIndefinidos(copia(cambios) as Fila) as Partial<ArchivoRegistro>) };
       archivos.set(aid, nuevo);
       return copia(nuevo);

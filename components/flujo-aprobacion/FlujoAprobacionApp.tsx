@@ -105,7 +105,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
           {error}
         </Notice>
       )}
-      {(pestana === "por-revisar" || pestana === "mios" || pestana === "todos") && <Archivos api={api} modo={pestana} datos={archivos} error={errorArchivos} />}
+      {(pestana === "por-revisar" || pestana === "mios" || pestana === "todos") && <Archivos api={api} modo={pestana} datos={archivos} error={errorArchivos} onCambio={cargarArchivos} />}
       {pestana === "flujos" && datos && <Flujos api={api} projectId={projectId} datos={datos} onCambio={cambio} />}
       {pestana === "historial" && <Historial api={api} flujos={datos?.flujos ?? []} recarga={recarga} />}
       {pestana === "prueba" && <PruebaFase0 api={api} projectId={projectId} projectName={projectName} />}
