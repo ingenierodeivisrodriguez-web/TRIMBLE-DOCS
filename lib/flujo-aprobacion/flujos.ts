@@ -33,7 +33,20 @@ export interface DatosFlujo {
   carpetas: string[];
   destino: string;
   pasos: { id?: string; nombre: string }[];
+  /** "AAAA-MM-DD" or empty. */
+  vence?: string | null;
+  notas?: string;
 }
+
+/** Whether "AAAA-MM-DD" is a real calendar day. */
+export function esDia(s: string): boolean {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(s)) return false;
+  const d = new Date(`${s}T00:00:00Z`);
+  return !Number.isNaN(d.getTime()) && d.toISOString().slice(0, 10) === s;
+}
+
+/** "2026-11-25" → "25-11-2026". */
+export const diaVisible = (s: string) => `${s.slice(8, 10)}-${s.slice(5, 7)}-${s.slice(0, 4)}`;
 
 /** Why these data can't be saved as a flow, or null. */
 export function revisarDatos(d: DatosFlujo): string | null {
@@ -53,6 +66,8 @@ export function revisarDatos(d: DatosFlujo): string | null {
     if (vistos.has(clave)) return `Dos pasos se llaman «${nombre}»: usa nombres distintos.`;
     vistos.add(clave);
   }
+  if (d.vence && !esDia(d.vence)) return "La fecha de vencimiento no es válida.";
+  if ((d.notas ?? "").length > 2000) return "Las notas admiten hasta 2000 caracteres.";
   return null;
 }
 
@@ -154,7 +169,7 @@ export function describirPasos(pasos: PasoFlujo[]): string {
 }
 
 /** What changed in a flow, in words, for the history. */
-export function cambiosFlujo(antes: Pick<Flujo, "hito" | "pasos" | "carpetas" | "destino">, despues: Pick<Flujo, "hito" | "pasos" | "carpetas" | "destino">): string {
+export function cambiosFlujo(antes: Pick<Flujo, "hito" | "pasos" | "carpetas" | "destino" | "vence" | "notas">, despues: Pick<Flujo, "hito" | "pasos" | "carpetas" | "destino" | "vence" | "notas">): string {
   const partes: string[] = [];
   if (antes.hito !== despues.hito) partes.push(`Hito: «${despues.hito}» (antes «${antes.hito}»).`);
   if (describirPasos(antes.pasos) !== describirPasos(despues.pasos)) partes.push(`Pasos: ${describirPasos(despues.pasos)} (antes ${describirPasos(antes.pasos)}).`);
@@ -163,5 +178,8 @@ export function cambiosFlujo(antes: Pick<Flujo, "hito" | "pasos" | "carpetas" | 
   if (agregadas.length) partes.push(`Carpetas de revisión agregadas: ${agregadas.join("; ")}.`);
   if (quitadas.length) partes.push(`Carpetas de revisión quitadas: ${quitadas.join("; ")}.`);
   if (antes.destino.id !== despues.destino.id) partes.push(`Carpeta destino: ${despues.destino.ruta} (antes ${antes.destino.ruta}).`);
+  const v = (x: string | null | undefined) => (x ? diaVisible(x) : "sin fecha");
+  if ((antes.vence ?? null) !== (despues.vence ?? null)) partes.push(`Vencimiento: ${v(despues.vence)} (antes ${v(antes.vence)}).`);
+  if ((antes.notas ?? "") !== (despues.notas ?? "")) partes.push("Cambió las notas.");
   return partes.join(" ") || "Sin cambios.";
 }

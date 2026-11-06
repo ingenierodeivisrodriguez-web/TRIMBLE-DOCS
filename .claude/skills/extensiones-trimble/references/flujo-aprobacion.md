@@ -348,17 +348,54 @@ código; falta la prueba completa en Trimble real (protocolo en el README,
   decisión, traslado. No se "parsean" los textos del historial: el detalle de
   cada línea ya dice paso, decisión y comentario.
 - `ACCIONES` (nombres de las acciones) vive en `trazabilidad.ts` y lo usa
-  también la pestaña Historial.
+  también el bloque Historial del panel.
 - `trazabilidad(ctx, q)` en `service.ts` valida filtros (`AAAA-MM-DD`, estado,
   uuid) y devuelve `por` (quien consulta) para el PDF. Cualquier miembro.
 - PDF con jsPDF en el navegador (como Compras), carta horizontal, columnas
   Fecha / Quién / Qué / Versión / Detalle, salto de página con "(continúa)" y
   cabecera repetida, "Página n de m". Nombre: `Trazabilidad - <proyecto o
   archivo> - DD-MM-AAAA.pdf`. La pantalla usa su propia función de descarga
-  (la de `lib/presupuesto/excel.ts` arrastra la tabla OmniClass).
+  (la de `lib/presupuesto/excel.ts` arrastra la tabla OmniClass); desde la
+  pantalla única está en `components/flujo-aprobacion/descargas.ts`.
 - Pruebas: `trazabilidad.test.ts`, `pdfTrazabilidad.test.ts` (páginas y nombre)
   y la última de `trasladar.test.ts` (servicio de punta a punta).
 
+## Una sola pantalla (06-11-2026)
+
+El dueño pidió, con la pantalla de **paquetes** de Trimble como referencia,
+"que todo se haga en una sola pantalla, no en pestañas" y que al dar clic en la
+fila del flujo aparezcan sus detalles. Propuse el diseño con tres campos nuevos
+(fecha de vencimiento, notas, comentarios) y respondió "Sí, adelante".
+
+- **Sin pestañas**: `FlujoAprobacionApp` = cabecera (Buscar flujo, «Tienes N
+  archivos por revisar» que activa el filtro `porRevisar`, **Nuevo** solo
+  administradores, ⋮ con «Exportar trazabilidad (todos los flujos)…» y «Prueba
+  de conexión con Trimble…» en `Modal`), `RevisionCarpetas`, `ListaFlujos` y un
+  `aside` pegajoso de `min(560px, 46%)`; bajo 1000 px el panel es `fixed`
+  encima de la lista. Estado del panel: `detalle | nuevo | editar | null`. El
+  bucle que confirma traslados (cada 4 s, hasta 45 veces) quedó en la app.
+- **`lib/flujo-aprobacion/lista.ts`** (puro, `lista.test.ts`): `filasFlujos`
+  (activos primero, por hito), `estaVencido` = activo && `vence < hoy` && hay
+  archivos esperando revisión (`ESPERANDO`: pendiente o nueva versión; los rechazados no cuentan), `responsablesFlujo`
+  (nombres de las asignaciones activas de pasos), `opcionesFiltro` y
+  `filtrarFilas` (propietario = `creadoPor`, quien `persona:id|grupo:id`,
+  estado, vence `vencidos|7dias|sin-fecha`, porRevisar, texto). "Hoy" es el día
+  de Colombia.
+- **Panel** (`PanelFlujo`): ⬇ PDF del flujo, papelera = desactivar (con
+  confirmación; regla 3: nada se borra), ⋮ (Editar, Revisar permisos de
+  Trimble, Activar, Desactivar…); bloques plegables Detalles, Archivos (chips
+  Me toca / Todos / Subidos por mí; decidir aquí), Quién hace qué + Permisos
+  (administradores), Historial (últimas 15) y Comentarios.
+- **Datos nuevos** (SQL reejecutable): `aprobacion_flujos.vence date` y `notas
+  text default ''`; tabla `aprobacion_comentarios` (identity, flujo, texto
+  1–2000, usuario) **solo inserción** (`revoke update, delete`). `guardarFlujo`
+  valida la fecha (`esDia`) y hasta 2000 caracteres de notas; el historial
+  dice «Vencimiento: X (antes Y).» y «Cambió las notas.». `comentar`: cualquier
+  miembro. Ruta `GET|POST /api/flujo-aprobacion/comentarios`.
+- `EditorFlujo` acepta `enPanel`; tras crear, abre el flujo nuevo buscándolo por
+  `hitoClave`. Se borró `Flujos.tsx` (lo reemplazan `ListaFlujos` + `PanelFlujo`).
+
 Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
 decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
-restringir lo que ve el papel «Consulta», avance del hito.
+restringir lo que ve el papel «Consulta», avance del hito, avisar por tarea
+cuando un flujo vence.

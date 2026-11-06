@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; desde el 06-11-2026 todo en una sola pantalla con panel de detalles, fecha de vencimiento, notas y comentarios; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4151,15 +4151,16 @@ Reutiliza la copia de Publicar (`copiarUltimaVersion`) y su explorador de
 carpetas. Rutas, con `?projectId=` y el token del usuario:
 `GET /api/flujo-aprobacion/carpeta?folderId=` y `POST /api/flujo-aprobacion/prueba`
 (`{ paso: equipo | archivo | copiar | estado-subida | estado-visor | tarea }`).
-La prueba sigue en la pestaña **Prueba de Trimble** para lo pendiente.
+La prueba sigue en el menú **⋮ → Prueba de conexión con Trimble…** para lo pendiente.
 
 ### Fase 1: configuración de los flujos
 
 Antes de usarla hay que ejecutar **`supabase/flujo-aprobacion.sql`** en el SQL
 Editor de Supabase (se puede ejecutar varias veces sin perder datos).
 
-Pestaña **Flujos** (solo los administradores del proyecto en Trimble crean y
-cambian; los demás ven):
+**Flujos** (solo los administradores del proyecto en Trimble crean y cambian;
+los demás ven; desde el 06-11-2026 todo esto está en la pantalla única, ver
+más abajo):
 
 - **+ Nuevo flujo** / **Editar**: el **título o hito** (obligatorio, no se
   repite en el proyecto aunque cambien tildes o mayúsculas), las **carpetas de
@@ -4203,9 +4204,8 @@ persona guardó el flujo antes, el guardado se rechaza (409) y lo escrito sigue
 en pantalla. Las rutas de carpetas y archivos, sus carpetas de arriba y los
 nombres de personas y grupos se leen siempre de Trimble, nunca del navegador.
 
-Pestaña **Historial**: quién creó, cambió, activó o desactivó cada flujo y
-quién asignó o quitó papeles, con fecha DD-MM-AAAA; filtro por flujo. Solo se
-agregan filas.
+**Historial**: quién creó, cambió, activó o desactivó cada flujo y quién
+asignó o quitó papeles, con fecha DD-MM-AAAA. Solo se agregan filas.
 
 Base de datos (`supabase/flujo-aprobacion.sql`, RLS sin políticas, sin
 `delete`): `aprobacion_flujos` (hito, pasos, carpetas y destino en jsonb con
@@ -4217,8 +4217,8 @@ Código: reglas puras en [`lib/flujo-aprobacion/flujos.ts`](lib/flujo-aprobacion
 (conflictos, flujo de un archivo, responsables por cercanía, cobertura) y
 [`permisos.ts`](lib/flujo-aprobacion/permisos.ts); servicio en
 [`service.ts`](lib/flujo-aprobacion/service.ts); `store.ts` (Supabase y en
-memoria); pantallas en `components/flujo-aprobacion/` (`Flujos`,
-`EditorFlujo`, `Asignaciones`, `Permisos`, `Historial`). Rutas:
+memoria); pantallas en `components/flujo-aprobacion/` (`EditorFlujo`,
+`Asignaciones`, `Permisos`, `Historial`). Rutas:
 `GET|POST /api/flujo-aprobacion/flujos`, `POST /api/flujo-aprobacion/flujos/estado`,
 `GET /api/flujo-aprobacion/equipo`, `POST /api/flujo-aprobacion/asignaciones`,
 `POST /api/flujo-aprobacion/asignaciones/quitar`,
@@ -4254,7 +4254,8 @@ Un aviso arriba dice qué encontró («3 archivos nuevos, 1 versión nueva»).
   minutos como mucho). Cada revisión tiene un tope de 50 s, 1500 carpetas y
   5000 archivos; si no alcanza, lo dice y no retira nada.
 
-Pestañas nuevas:
+Listas de archivos (hoy dentro del panel de cada flujo, ver «Una sola
+pantalla»):
 
 - **Por revisar (N)**: los archivos que esperan el paso de la persona (por
   ella o por su grupo; manda la asignación más cercana al archivo). **A quien
@@ -4384,7 +4385,7 @@ confirmar | reemplazar, siVersion }`); `aprobar` puede trabajar hasta 300 s.
 
 ### Fase 5: trazabilidad y PDF
 
-Pestaña **Trazabilidad** (cualquier miembro del proyecto): por cada archivo, un
+**Trazabilidad** (cualquier miembro del proyecto): por cada archivo, un
 resumen (flujo, ubicación, estado y versiones, última subida, última decisión,
 traslado) y **todos sus movimientos en orden**: quién subió cada versión y
 cuándo (fecha de Trimble), quién revisó, la decisión y su fecha, los
@@ -4399,36 +4400,96 @@ destino y cuándo. Sale del historial, que nunca se edita ni se borra.
   cuándo, y «Página n de m». Se arma en el navegador (jsPDF, como en Compras).
 
 Código: [`lib/flujo-aprobacion/trazabilidad.ts`](lib/flujo-aprobacion/trazabilidad.ts)
-(armar y filtrar; también da los nombres de las acciones a la pestaña
-Historial), [`pdfTrazabilidad.ts`](lib/flujo-aprobacion/pdfTrazabilidad.ts),
+(armar y filtrar; también da los nombres de las acciones al historial),
+[`pdfTrazabilidad.ts`](lib/flujo-aprobacion/pdfTrazabilidad.ts),
 pantalla `Trazabilidad`. Ruta: `GET /api/flujo-aprobacion/trazabilidad`
 (`?flujoId=&estado=&desde=AAAA-MM-DD&hasta=&texto=` o `?archivoId=`).
+
+### Una sola pantalla (ajuste del 06-11-2026)
+
+Pedido por el dueño con la pantalla de paquetes de Trimble como referencia:
+**todo en una sola pantalla, sin pestañas**, y al dar clic en la fila de un
+flujo aparecen sus detalles. Hay que volver a ejecutar
+**`supabase/flujo-aprobacion.sql`** (agrega la fecha de vencimiento, las notas
+y la tabla de comentarios; no se pierde nada).
+
+**Arriba**: el título, **Buscar flujo**, el aviso **«Tienes N archivos por
+revisar»** (un clic deja solo los flujos donde la persona tiene algo por
+revisar), **Nuevo** (administradores) y **⋮** con **Exportar trazabilidad
+(todos los flujos)…** y **Prueba de conexión con Trimble…** (se abren en una
+ventana encima). Debajo sigue la revisión de carpetas (**Revisar ahora**).
+
+**La lista de flujos**, una fila por flujo: **Nombre** (el hito),
+**Archivos**, **Por revisar** (los que esperan a quien mira), **Fecha de
+vencimiento**, **Responsables** (quién revisa y aprueba) y **Estado**: Activo,
+**Vencido** (en rojo: la fecha ya pasó y quedan archivos esperando revisión) o
+Desactivado. Filtros: Propietario (quién lo creó), Usuarios, Grupos, Estado,
+Fecha de vencimiento (vencidos, próximos 7 días, sin fecha) y «Tengo por
+revisar». Los activos van primero. El **⋮** de cada fila tiene Ver detalles,
+PDF de trazabilidad, Editar, Activar y Desactivar….
+
+**El panel de la derecha** (al dar clic en una fila; en pantallas angostas se
+abre encima de la lista), con el hito, **⬇** (PDF de la trazabilidad de ese
+flujo), la **papelera** (desactivar, con confirmación; nada se borra) y **⋮**
+(Editar, Revisar permisos de Trimble, Activar, Desactivar…). Bloques que se
+abren y cierran:
+
+- **Detalles**: estado, vencimiento, pasos y quién tiene cada uno (Realiza,
+  cada paso, Consulta), carpetas de revisión y destino, cuántos archivos hay
+  en cada estado, notas, quién lo creó y modificó, y la última revisión de
+  carpetas.
+- **Archivos** del flujo, con **Me toca (N)**, **Todos** y **Subidos por mí**,
+  filtro por estado y buscador. Desde aquí se **decide** (aprobar o rechazar)
+  y se ve el historial y el traslado de cada archivo, como antes.
+- **Quién hace qué** (asignaciones) y, para administradores, los **permisos de
+  Trimble**.
+- **Historial** del flujo (las últimas 15 entradas y «Ver las N entradas»).
+- **Comentarios** del flujo: cualquier miembro del proyecto escribe (Enter
+  envía, Mayús+Enter salta de línea); salen con nombre y fecha y **no se
+  editan ni se borran**.
+
+**Nuevo** y **Editar** abren el formulario del flujo en el mismo panel, con dos
+campos nuevos: **Fecha de vencimiento** (opcional; «Quitar la fecha») y
+**Notas** (hasta 2000 caracteres). El historial anota «Vencimiento: … (antes
+…)» y «Cambió las notas».
+
+Código: [`lib/flujo-aprobacion/lista.ts`](lib/flujo-aprobacion/lista.ts) (filas,
+vencido, responsables y filtros, con pruebas en `lista.test.ts`); pantallas
+`FlujoAprobacionApp`, `ListaFlujos`, `PanelFlujo`, `Archivos`, `Historial`,
+`Comentarios`, `MenuPuntos` y `descargas.ts`. Columnas
+`aprobacion_flujos.vence` (fecha) y `notas`, y tabla `aprobacion_comentarios`
+(solo inserción). Ruta: `GET|POST /api/flujo-aprobacion/comentarios`
+(`?flujoId=` / `{ flujoId, texto }`).
 
 ### Guía rápida
 
 1. Instale la extensión con
    `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` y ejecute
    `supabase/flujo-aprobacion.sql` en Supabase (una vez; se puede repetir).
-2. **Flujos → + Nuevo flujo** (administrador del proyecto): título o hito,
-   carpetas de revisión, carpeta destino y pasos (por ejemplo Revisa →
-   Aprueba). **Guardar**.
-3. **Quién hace qué → + Asignar**: marque carpetas o archivos, elija persona o
-   grupo de Trimble y el papel (Realiza, cada paso, Consulta). Revise los
-   avisos de pasos sin nadie.
-4. **Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
+2. **Nuevo** (administrador del proyecto): título o hito, carpetas de
+   revisión, carpeta destino, pasos (por ejemplo Revisa → Aprueba) y, si se
+   quiere, fecha de vencimiento y notas. **Guardar**: el flujo queda abierto
+   en el panel de la derecha.
+3. En el panel, **Quién hace qué → + Asignar**: marque carpetas o archivos,
+   elija persona o grupo de Trimble y el papel (Realiza, cada paso, Consulta).
+   Revise los avisos de pasos sin nadie.
+4. **⋮ → Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
    ejemplo, quién puede subir directo a la carpeta destino, o un aprobador sin
    acceso completo a ella).
 5. Los modeladores suben sus archivos a las carpetas de revisión, como siempre.
    Al abrir la extensión (o con **Revisar ahora**) se registran y los
    revisores reciben la tarea de Trimble.
-6. Cada revisor, en **Por revisar → Decidir**: abre el archivo en Trimble,
-   aprueba (con comentario si quiere) o rechaza con el motivo.
+6. Cada revisor pulsa **«Tienes N archivos por revisar»**, abre el flujo y en
+   **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
+   comentario si quiere) o rechaza con el motivo.
 7. Al aprobar el último paso la versión aprobada pasa sola a la carpeta
    destino. Si algo queda en espera (otro archivo con ese nombre) o falla, el
    archivo lo dice y quien aprobó (o un administrador) lo resuelve.
-8. Un rechazado: quien lo subió ve el motivo en **Mis archivos**, corrige y
-   sube la versión nueva con el mismo nombre en la misma carpeta.
-9. **Trazabilidad**: consulte y exporte a PDF.
+8. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
+   mí**, corrige y sube la versión nueva con el mismo nombre en la misma
+   carpeta.
+9. **Trazabilidad**: ⬇ en el panel (un flujo) o **⋮ → Exportar trazabilidad**
+   (todos, con filtros). Los comentarios del flujo quedan en su panel.
 
 ### Protocolo de prueba en Trimble real
 

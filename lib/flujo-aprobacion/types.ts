@@ -97,6 +97,20 @@ export interface Flujo {
   /** When its folders were last reviewed, and by whom (phase 2). */
   revisado?: string | null;
   revisadoPor?: string | null;
+  /** Due date of the milestone, "AAAA-MM-DD" (optional). */
+  vence?: string | null;
+  /** Free notes about the flow. */
+  notas?: string;
+}
+
+/** A comment on a flow: only added, never edited or deleted. */
+export interface Comentario {
+  id: number;
+  creado: string;
+  flujoId: string;
+  texto: string;
+  usuario: string | null;
+  usuarioId: string | null;
 }
 
 /** "realiza" (uploads and corrects), "consulta" (only sees), or the id of a review step. */

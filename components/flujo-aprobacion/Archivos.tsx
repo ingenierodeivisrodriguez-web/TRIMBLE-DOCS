@@ -7,7 +7,7 @@ import { ESPERANDO, textoEstado } from "../../lib/flujo-aprobacion/registro";
 import { puedeTrasladar, textoTraslado } from "../../lib/flujo-aprobacion/traslado";
 import type { ArchivoInfo, EntradaHistorial, EstadoArchivo } from "../../lib/flujo-aprobacion/types";
 import { acceptButton, baseInput, C, labelStyle, message, Notice } from "../presupuesto/ui";
-import { botonPeligro, card, etiqueta, linkBtn, select, td, texto, th, titulo } from "../compras/estilos";
+import { botonPeligro, etiqueta, linkBtn, select, td, texto, th } from "../compras/estilos";
 
 export type ModoArchivos = "por-revisar" | "mios" | "todos";
 
@@ -32,9 +32,19 @@ const puedeDecidir = (a: ArchivoInfo, d: Datos) => ESPERANDO.includes(a.estado) 
  * them with filters. Each one opens in Trimble at the version under review and
  * shows its signatures and history.
  */
-export default function Archivos({ api, modo, datos, error, onCambio }: { api: FlujoApi; modo: ModoArchivos; datos: Datos | null; error: string; onCambio: () => void }) {
-  const [verTodos, setVerTodos] = useState(false);
-  const [flujo, setFlujo] = useState("");
+export type VistaArchivos = "me-toca" | "todos" | "mios";
+
+/**
+ * The files of one flow, inside its side panel: what waits for the caller
+ * («Me toca»: decide there), all of them, or what the caller uploaded. Each
+ * one opens in Trimble at the version under review and shows its signatures,
+ * where its copy to the destination stands, and its history.
+ */
+export default function Archivos({ api, flujoId, datos, error, onCambio }: { api: FlujoApi; flujoId: string; datos: Datos | null; error: string; onCambio: () => void }) {
+  const delFlujo = useMemo(() => (datos?.archivos ?? []).filter((a) => a.flujoId === flujoId), [datos, flujoId]);
+  const meTocan = delFlujo.filter((a) => ESPERANDO.includes(a.estado) && a.meToca).length;
+  const mios = delFlujo.filter((a) => a.subidoPorId === datos?.yo).length;
+  const [vista, setVista] = useState<VistaArchivos>(meTocan ? "me-toca" : "todos");
   const [estado, setEstado] = useState("");
   const [buscar, setBuscar] = useState("");
   const [abierto, setAbierto] = useState<{ id: string; que: "historial" | "decidir" } | null>(null);
@@ -44,15 +54,11 @@ export default function Archivos({ api, modo, datos, error, onCambio }: { api: F
   const filas = useMemo(() => {
     if (!datos) return [];
     const q = buscar.trim().toLowerCase();
-    return datos.archivos
-      .filter((a) => {
-        if (modo === "por-revisar") return ESPERANDO.includes(a.estado) && (a.meToca || (datos.esAdmin && verTodos));
-        if (modo === "mios") return a.subidoPorId === datos.yo;
-        return true;
-      })
-      .filter((a) => (!flujo || a.flujoId === flujo) && (!estado || a.estado === estado) && (!q || a.ruta.toLowerCase().includes(q)))
-      .sort((a, b) => porRuta.compare(a.hito, b.hito) || porRuta.compare(a.ruta, b.ruta));
-  }, [datos, modo, verTodos, flujo, estado, buscar]);
+    return delFlujo
+      .filter((a) => (vista === "me-toca" ? ESPERANDO.includes(a.estado) && a.meToca : vista === "mios" ? a.subidoPorId === datos.yo : true))
+      .filter((a) => (!estado || a.estado === estado) && (!q || a.ruta.toLowerCase().includes(q)))
+      .sort((a, b) => porRuta.compare(a.ruta, b.ruta));
+  }, [datos, delFlujo, vista, estado, buscar]);
 
   async function verHistorial(a: ArchivoInfo) {
     if (abierto?.id === a.id && abierto.que === "historial") {
@@ -69,67 +75,53 @@ export default function Archivos({ api, modo, datos, error, onCambio }: { api: F
     }
   }
 
-  const flujos = useMemo(() => [...new Map((datos?.archivos ?? []).map((a) => [a.flujoId, a.hito])).entries()], [datos]);
-  const TITULOS: Record<ModoArchivos, [string, string]> = {
-    "por-revisar": [
-      "Por revisar",
-      "Los archivos que esperan tu paso (por ti o por tu grupo: basta con una persona del grupo). Ábrelo en Trimble, revísalo y apruébalo o recházalo con el motivo. A quien subió una versión no le toca revisarla.",
-    ],
-    mios: ["Mis archivos", "Los archivos cuya última versión subiste tú, y en qué van. Si te rechazan uno, corrígelo y sube la versión nueva con el mismo nombre en la misma carpeta."],
-    todos: ["Archivos", "Todos los archivos registrados en las carpetas de revisión, con su estado y sus firmas."],
-  };
+  const chip = (v: VistaArchivos, texto: string, n: number) => (
+    <button
+      key={v}
+      type="button"
+      onClick={() => setVista(v)}
+      style={{
+        border: `1px solid ${vista === v ? "var(--tc-blue-600)" : C.border}`,
+        background: vista === v ? "#e8f0fb" : "#fff",
+        color: vista === v ? "var(--tc-blue-800)" : "var(--tc-gray-700)",
+        borderRadius: 14,
+        padding: "3px 11px",
+        fontSize: 13,
+        cursor: "pointer",
+        fontFamily: "inherit",
+        fontWeight: v === "me-toca" && n > 0 ? 600 : 400,
+      }}
+    >
+      {texto} ({n})
+    </button>
+  );
 
   return (
-    <section style={{ ...card, maxWidth: 1200 }}>
-      <h2 style={titulo}>{TITULOS[modo][0]}</h2>
-      <p style={texto}>{TITULOS[modo][1]}</p>
+    <div>
       {error && <Notice kind="error">{error}</Notice>}
       {resultado && (
-        <Notice kind={resultado.kind} style={{ marginBottom: 10 }}>
+        <Notice kind={resultado.kind} style={{ marginBottom: 8 }}>
           {resultado.texto}
         </Notice>
       )}
-      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", alignItems: "end", marginBottom: 10 }}>
-        {modo === "por-revisar" && datos?.esAdmin && (
-          <label style={{ fontSize: 13.5, cursor: "pointer" }}>
-            <input type="checkbox" checked={verTodos} onChange={(e) => setVerTodos(e.target.checked)} /> Ver todos los pendientes (administrador)
-          </label>
-        )}
-        {modo === "todos" && (
-          <>
-            <label>
-              <span style={labelStyle}>Flujo</span>
-              <select value={flujo} onChange={(e) => setFlujo(e.target.value)} style={{ ...select, minWidth: 220 }}>
-                <option value="">Todos</option>
-                {flujos.map(([id, hito]) => (
-                  <option key={id} value={id}>
-                    {hito}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span style={labelStyle}>Estado</span>
-              <select value={estado} onChange={(e) => setEstado(e.target.value)} style={select}>
-                <option value="">Todos</option>
-                {(Object.keys(COLOR) as EstadoArchivo[]).map((e) => (
-                  <option key={e} value={e}>
-                    {textoEstado({ estado: e, revisionAprobada: null })}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              <span style={labelStyle}>Buscar</span>
-              <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Nombre o carpeta" style={{ ...baseInput, width: 220 }} />
-            </label>
-          </>
-        )}
+      <div style={{ display: "flex", gap: 6, flexWrap: "wrap", alignItems: "center", marginBottom: 8 }}>
+        {chip("me-toca", "Me toca", meTocan)}
+        {chip("todos", "Todos", delFlujo.length)}
+        {chip("mios", "Subidos por mí", mios)}
+        <select value={estado} onChange={(e) => setEstado(e.target.value)} style={{ ...select, fontSize: 13 }} aria-label="Estado">
+          <option value="">Todos los estados</option>
+          {(Object.keys(COLOR) as EstadoArchivo[]).map((e) => (
+            <option key={e} value={e}>
+              {textoEstado({ estado: e, revisionAprobada: null })}
+            </option>
+          ))}
+        </select>
+        <input value={buscar} onChange={(e) => setBuscar(e.target.value)} placeholder="Buscar archivo" style={{ ...baseInput, width: 140, fontSize: 13 }} />
       </div>
       {!datos && !error && <p style={{ ...texto, margin: 0 }}>Cargando…</p>}
       {datos && filas.length === 0 && (
-        <p style={{ ...texto, margin: 0 }}>
-          {modo === "por-revisar" ? "No tienes archivos esperando tu revisión." : modo === "mios" ? "No hay archivos registrados cuya última versión hayas subido tú." : "No hay archivos registrados con estos filtros."}
+        <p style={{ ...texto, margin: 0, fontSize: 13.5 }}>
+          {vista === "me-toca" ? "No tienes archivos esperando tu revisión en este flujo." : vista === "mios" ? "No hay archivos de este flujo cuya última versión hayas subido tú." : "No hay archivos registrados con estos filtros."}
         </p>
       )}
       {datos && filas.length > 0 && (
@@ -138,10 +130,8 @@ export default function Archivos({ api, modo, datos, error, onCambio }: { api: F
             <thead>
               <tr>
                 <th style={th}>Archivo</th>
-                <th style={th}>Flujo (hito)</th>
                 <th style={th}>Estado</th>
                 <th style={th}>Espera</th>
-                <th style={th}>Subió</th>
                 <th style={th} />
               </tr>
             </thead>
@@ -162,8 +152,8 @@ export default function Archivos({ api, modo, datos, error, onCambio }: { api: F
                     onCambio();
                   }}
                   trasladable={puedeTrasladar(a, { id: datos.yo, esAdmin: datos.esAdmin }) === null}
-                  onTraslado={(texto, error) => {
-                    setResultado({ kind: error ? "error" : "info", texto });
+                  onTraslado={(texto, err) => {
+                    setResultado({ kind: err ? "error" : "info", texto });
                     onCambio();
                   }}
                 />
@@ -172,8 +162,7 @@ export default function Archivos({ api, modo, datos, error, onCambio }: { api: F
           </table>
         </div>
       )}
-      {datos && filas.length > 0 && <p style={{ fontSize: 12.5, color: "var(--tc-gray-500)", margin: "6px 0 0" }}>{filas.length === 1 ? "1 archivo" : `${filas.length} archivos`}</p>}
-    </section>
+    </div>
   );
 }
 
@@ -211,8 +200,11 @@ function FilaArchivo({
             {a.nombre}
           </a>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>{carpeta}</div>
+          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>
+            Subió {a.subidoPor || "—"}
+            {a.subido ? `, ${fechaHora(a.subido)}` : ""}
+          </div>
         </td>
-        <td style={td}>{a.hito}</td>
         <td style={td}>
           <span style={etiqueta(color, fondo)}>{textoEstado(a)}</span>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)", marginTop: 2 }}>Versión {a.revision ?? "?"}</div>
@@ -245,13 +237,9 @@ function FilaArchivo({
             "—"
           )}
         </td>
-        <td style={td}>
-          {a.subidoPor || "—"}
-          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>{a.subido ? fechaHora(a.subido) : ""}</div>
-        </td>
         <td style={{ ...td, whiteSpace: "nowrap" }}>
           {puede && (
-            <button type="button" style={{ ...acceptButton, ...pequeno, marginRight: 8 }} onClick={onDecidir}>
+            <button type="button" style={{ ...acceptButton, ...pequeno, display: "block", marginBottom: 4 }} onClick={onDecidir}>
               {abierto === "decidir" ? "Cerrar" : "Decidir"}
             </button>
           )}
@@ -262,14 +250,14 @@ function FilaArchivo({
       </tr>
       {abierto === "decidir" && (
         <tr>
-          <td style={{ ...td, background: "#f6f8fb" }} colSpan={6}>
+          <td style={{ ...td, background: "#f6f8fb" }} colSpan={4}>
             <Decision api={api} a={a} onDecidido={onDecidido} />
           </td>
         </tr>
       )}
       {abierto === "historial" && (
         <tr>
-          <td style={{ ...td, background: "#f6f8fb" }} colSpan={6}>
+          <td style={{ ...td, background: "#f6f8fb" }} colSpan={4}>
             {historial?.error && <Notice kind="error">{historial.error}</Notice>}
             {!historial?.entradas && !historial?.error && "Cargando…"}
             {historial?.entradas && historial.entradas.length === 0 && "Sin historial."}

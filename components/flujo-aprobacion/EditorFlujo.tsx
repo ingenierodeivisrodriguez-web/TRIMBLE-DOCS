@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
-import { revisarDatos } from "../../lib/flujo-aprobacion/flujos";
+import { claveHito, revisarDatos } from "../../lib/flujo-aprobacion/flujos";
 import { EstadoFlujos, Flujo, MAX_PASOS, MIN_PASOS } from "../../lib/flujo-aprobacion/types";
 import { ApiError } from "../../lib/propiedades/client";
 import { botonSecundario, card, linkBtn, subtitulo, texto, titulo } from "../compras/estilos";
@@ -29,14 +29,19 @@ export default function EditorFlujo({
   flujo,
   onGuardado,
   onCancelar,
+  enPanel = false,
 }: {
   api: FlujoApi;
   projectId: string;
   flujo: Flujo | null;
-  onGuardado: (e: EstadoFlujos) => void;
+  onGuardado: (e: EstadoFlujos, id: string | null) => void;
   onCancelar: () => void;
+  /** Inside the side panel: no card around it. */
+  enPanel?: boolean;
 }) {
   const [hito, setHito] = useState(flujo?.hito ?? "");
+  const [vence, setVence] = useState(flujo?.vence ?? "");
+  const [notas, setNotas] = useState(flujo?.notas ?? "");
   const [carpetas, setCarpetas] = useState<Carpeta[]>(flujo?.carpetas.map((c) => ({ id: c.id, ruta: c.ruta })) ?? []);
   const [destino, setDestino] = useState<Carpeta | null>(flujo ? { id: flujo.destino.id, ruta: flujo.destino.ruta } : null);
   const [pasos, setPasos] = useState<{ id?: string; nombre: string }[]>(flujo?.pasos.map((p) => ({ ...p })) ?? [{ nombre: "Revisa" }, { nombre: "Aprueba" }]);
@@ -45,7 +50,7 @@ export default function EditorFlujo({
   const [confirmar, setConfirmar] = useState("");
   const [ocupado, setOcupado] = useState(false);
 
-  const datos = { hito, carpetas: carpetas.map((c) => c.id), destino: destino?.id ?? "", pasos };
+  const datos = { hito, carpetas: carpetas.map((c) => c.id), destino: destino?.id ?? "", pasos, vence, notas };
   const problema = revisarDatos(datos);
 
   function cambiarPaso(i: number, nombre: string) {
@@ -71,7 +76,9 @@ export default function EditorFlujo({
     try {
       const r = await api.guardarFlujo({ ...datos, ...(flujo ? { id: flujo.id, version: flujo.version } : {}), ...(conConfirmacion ? { confirmar: true } : {}) });
       setConfirmar("");
-      onGuardado(r);
+      // The saved flow (new ones: the one with this milestone).
+      const guardado = flujo ? flujo.id : (r.flujos.find((f) => f.hitoClave === claveHito(hito))?.id ?? null);
+      onGuardado(r, guardado);
     } catch (err) {
       // ApiError over HTTP; the service's own error when called directly (same code).
       if ((err instanceof ApiError || err instanceof Error) && (err as { code?: string }).code === "confirmar-asignaciones") setConfirmar(err.message);
@@ -82,13 +89,29 @@ export default function EditorFlujo({
   }
 
   return (
-    <section style={{ ...card, maxWidth: 1000, borderColor: "var(--tc-blue-500)" }}>
+    <section style={enPanel ? { padding: 0 } : { ...card, maxWidth: 1000, borderColor: "var(--tc-blue-500)" }}>
       <h2 style={titulo}>{flujo ? `Editar «${flujo.hito}»` : "Nuevo flujo"}</h2>
 
       <label style={labelStyle} htmlFor="hito">
         Título o hito del flujo: el nombre que soportan sus archivos
       </label>
       <input id="hito" value={hito} onChange={(e) => setHito(e.target.value)} maxLength={120} placeholder="Por ejemplo: Aprobar diseño arquitectónico Torre 1" style={{ ...baseInput, width: "100%", fontSize: 15 }} />
+
+      <div style={{ display: "flex", gap: 12, flexWrap: "wrap", marginTop: 10 }}>
+        <label>
+          <span style={labelStyle}>Fecha de vencimiento (opcional)</span>
+          <input type="date" value={vence} onChange={(e) => setVence(e.target.value)} style={baseInput} />
+        </label>
+        {vence && (
+          <button type="button" style={{ ...linkBtn, alignSelf: "end", marginBottom: 6 }} onClick={() => setVence("")}>
+            Quitar la fecha
+          </button>
+        )}
+      </div>
+      <label style={{ display: "block", marginTop: 10 }}>
+        <span style={labelStyle}>Notas</span>
+        <textarea value={notas} onChange={(e) => setNotas(e.target.value)} maxLength={2000} rows={3} placeholder="Por ejemplo: entrega del diseñador arquitectónico, revisar contra la lista de chequeo del contrato" style={{ ...baseInput, width: "100%", resize: "vertical" }} />
+      </label>
 
       <h3 style={subtitulo}>Carpetas de revisión</h3>
       <p style={{ ...texto, margin: "0 0 6px", fontSize: 13.5 }}>Donde se suben los archivos que pasan por el flujo (con sus subcarpetas).</p>

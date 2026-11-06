@@ -1,6 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
-import type { ArchivoRegistro, Asignacion, CarpetaFlujo, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado } from "./types";
+import type { ArchivoRegistro, Asignacion, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado } from "./types";
 
 /**
  * Persistence of "Flujo de aprobación". Two implementations with the same
@@ -29,6 +29,9 @@ export interface FlujoStore {
   historial(proyecto: string, filtro: { flujoId?: string; archivoId?: string; limite: number }): Promise<EntradaHistorial[]>;
   /** Every history line about a file in the project (for traceability), a page at a time. */
   historialArchivos(proyecto: string): Promise<EntradaHistorial[]>;
+  /** A flow's comments, oldest first. */
+  comentarios(flujoId: string): Promise<Comentario[]>;
+  agregarComentario(c: Omit<Comentario, "id" | "creado"> & { proyecto: string }): Promise<Comentario>;
   /** Takes the review of a flow's folders until `hasta`, unless someone else holds it (false). */
   tomarRevision(flujoId: string, hasta: string, ahora: string): Promise<boolean>;
   /** Releases it and notes when and by whom it was done. */
@@ -72,6 +75,17 @@ const deFlujo = (f: Fila): Flujo => ({
   actualizadoPor: t(f.actualizado_por),
   revisado: t(f.revisado),
   revisadoPor: t(f.revisado_por),
+  vence: t(f.vence),
+  notas: t(f.notas) ?? "",
+});
+
+const deComentario = (f: Fila): Comentario => ({
+  id: Number(f.id),
+  creado: String(f.creado),
+  flujoId: String(f.flujo_id),
+  texto: String(f.texto),
+  usuario: t(f.usuario),
+  usuarioId: t(f.usuario_id),
 });
 const aFlujo = (f: Partial<Flujo>): Fila =>
   sinIndefinidos({
@@ -86,6 +100,8 @@ const aFlujo = (f: Partial<Flujo>): Fila =>
     creado_por: f.creadoPor,
     actualizado: f.actualizado,
     actualizado_por: f.actualizadoPor,
+    vence: f.vence,
+    notas: f.notas,
   });
 
 const deAsignacion = (f: Fila): Asignacion => ({
@@ -266,6 +282,18 @@ function supabaseStore(): FlujoStore | null {
       const deArchivoId = filtro.archivoId ? `&archivo_id=${eq(filtro.archivoId)}` : "";
       return (await json<Fila[]>(`/aprobacion_historial?proyecto=${eq(proyecto)}${deFlujoId}${deArchivoId}&select=*&order=creado.desc,id.desc&limit=${filtro.limite}`)).map(deEntrada);
     },
+    async comentarios(flujoId) {
+      return (await all<Fila>(`/aprobacion_comentarios?flujo_id=${eq(flujoId)}&select=*&order=id.asc`)).map(deComentario);
+    },
+    async agregarComentario(c) {
+      const filas = await json<Fila[]>(`/aprobacion_comentarios`, {
+        method: "POST",
+        headers: representar,
+        body: JSON.stringify({ proyecto: c.proyecto, flujo_id: c.flujoId, texto: c.texto, usuario: c.usuario, usuario_id: c.usuarioId }),
+      });
+      if (!filas[0]) throw new StoreError("No se guardó el comentario.", 500);
+      return deComentario(filas[0]);
+    },
     async historialArchivos(proyecto) {
       return (await all<Fila>(`/aprobacion_historial?proyecto=${eq(proyecto)}&archivo_id=not.is.null&select=*&order=id.asc`)).map(deEntrada);
     },
@@ -326,6 +354,7 @@ export function memoryStore(): FlujoStore {
   const flujos = new Map<string, Flujo>();
   const asignaciones = new Map<string, Asignacion>();
   const historial: EntradaHistorial[] = [];
+  const comentarios: Comentario[] = [];
   const archivos = new Map<string, ArchivoRegistro>();
   const revisando = new Map<string, string>();
   const trasladando = new Map<string, string>();
@@ -394,6 +423,14 @@ export function memoryStore(): FlujoStore {
         .sort((a, b) => b.creado.localeCompare(a.creado) || b.id - a.id)
         .slice(0, filtro.limite)
         .map(copia);
+    },
+    async comentarios(flujoId) {
+      return comentarios.filter((c) => c.flujoId === flujoId).map(copia);
+    },
+    async agregarComentario(c) {
+      const nuevo: Comentario = { id: comentarios.length + 1, creado: ahora(), flujoId: c.flujoId, texto: c.texto, usuario: c.usuario, usuarioId: c.usuarioId };
+      comentarios.push(nuevo);
+      return copia(nuevo);
     },
     async historialArchivos(proyecto) {
       return historial.filter((e) => e.proyecto === proyecto && e.archivoId).map(copia);

@@ -229,3 +229,33 @@ test("la revisión de permisos lee Trimble y avisa, sin cambiar nada", async () 
   );
   assert.deepEqual(r.carpetas[0].completo, ["Arquitectura (grupo)"]);
 });
+
+test("el flujo guarda su vencimiento y sus notas, y el cambio queda en el historial", async () => {
+  const { ctx } = escenario();
+  const f = (await guardarFlujo(ctx, nuevo({ vence: "2026-11-25", notas: "Entrega del diseñador arquitectónico" }))).flujos[0];
+  assert.equal(f.vence, "2026-11-25");
+  assert.equal(f.notas, "Entrega del diseñador arquitectónico");
+  assert.match((await historial(ctx, f.id)).entradas[0].detalle, /Vence el 25-11-2026\./);
+  const r = await guardarFlujo(ctx, { ...nuevo({ vence: "", notas: "Entrega del diseñador arquitectónico" }), id: f.id, version: f.version, pasos: f.pasos });
+  assert.equal(r.flujos[0].vence, null);
+  assert.equal((await historial(ctx, f.id)).entradas[0].detalle, "Vencimiento: sin fecha (antes 25-11-2026).");
+  await assert.rejects(() => guardarFlujo(ctx, nuevo({ hito: "Otro", carpetas: ["est"], destino: "apr2", vence: "2026-13-01" })), /fecha de vencimiento no es válida/);
+});
+
+test("cualquier miembro comenta un flujo; los comentarios quedan con quién y cuándo, en orden", async () => {
+  const { ctx, comoMiembro } = escenario();
+  const { comentarios, comentar } = await import("./service");
+  const f = (await guardarFlujo(ctx, nuevo())).flujos[0];
+  await comentar(ctx, { flujoId: f.id, texto: "  Recuerden subir los planos en PDF y DWG.  " });
+  const r = await comentar(comoMiembro, { flujoId: f.id, texto: "Listo, subo hoy." });
+  assert.deepEqual(
+    r.comentarios.map((c) => [c.usuario, c.texto]),
+    [
+      ["Ana Ruiz", "Recuerden subir los planos en PDF y DWG."],
+      ["Juan Pérez", "Listo, subo hoy."],
+    ]
+  );
+  assert.equal((await comentarios(comoMiembro, f.id)).comentarios.length, 2);
+  await assert.rejects(() => comentar(ctx, { flujoId: f.id, texto: "   " }), /Escribe el comentario/);
+  await assert.rejects(() => comentar(ctx, { flujoId: f.id, texto: "x".repeat(2001) }), /hasta 2000/);
+});

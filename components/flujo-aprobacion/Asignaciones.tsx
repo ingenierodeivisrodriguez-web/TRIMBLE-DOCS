@@ -84,7 +84,6 @@ export default function Asignaciones({
 
   return (
     <div>
-      <h3 style={subtitulo}>Quién hace qué</h3>
       {cobertura.map((t) => (
         <Notice key={t} kind="warning" style={{ marginBottom: 6 }}>
           {t}

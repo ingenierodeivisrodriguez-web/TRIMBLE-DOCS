@@ -194,3 +194,26 @@ alter table public.aprobacion_archivos add column if not exists firmas jsonb not
 -- archivo a la vez.
 alter table public.aprobacion_archivos add column if not exists traslado jsonb;
 alter table public.aprobacion_archivos add column if not exists traslado_hasta timestamptz;
+
+-- ------------------------------------------- pantalla única (06-11-2026)
+-- Fecha de vencimiento del hito (opcional) y notas del flujo.
+alter table public.aprobacion_flujos add column if not exists vence date;
+alter table public.aprobacion_flujos add column if not exists notas text not null default '';
+
+-- Comentarios de un flujo: solo se agregan, nunca se cambian ni se borran.
+create table if not exists public.aprobacion_comentarios (
+  id bigint generated always as identity primary key,
+  creado timestamptz not null default now(),
+  proyecto text not null,
+  flujo_id uuid not null references public.aprobacion_flujos (id),
+  texto text not null check (char_length(texto) between 1 and 2000),
+  usuario text,
+  usuario_id text
+);
+
+create index if not exists aprobacion_comentarios_flujo on public.aprobacion_comentarios (flujo_id, creado);
+
+alter table public.aprobacion_comentarios enable row level security;
+revoke all on public.aprobacion_comentarios from anon, authenticated;
+revoke update, delete, truncate on table public.aprobacion_comentarios from public, anon, authenticated, service_role;
+grant select, insert on public.aprobacion_comentarios to service_role;

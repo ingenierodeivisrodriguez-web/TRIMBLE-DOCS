@@ -19,6 +19,7 @@ import {
   conflictos,
   dentroDe,
   describirPasos,
+  diaVisible,
   idsDePasos,
   limpiarTexto,
   nombrePapel,
@@ -30,7 +31,7 @@ import { aclEfectiva, Acl, Equipo as EquipoPermisos, gruposQueImportan, revisarP
 import { nombrePersona } from "./prueba";
 import { armarTrazas, FiltroTraza, Traza } from "./trazabilidad";
 import { HITO_REPETIDO, FlujoStore } from "./store";
-import type { Asignacion, AvisoPermisos, CarpetaFlujo, Equipo, EstadoFlujos, EntradaHistorial, Flujo, PermisosCarpeta } from "./types";
+import type { Asignacion, AvisoPermisos, CarpetaFlujo, Comentario, Equipo, EstadoFlujos, EntradaHistorial, Flujo, PermisosCarpeta } from "./types";
 
 /** A folder or file of this project as Trimble has it: its path in words and the folder ids above it. */
 export type ElementoTrimble = CarpetaFlujo;
@@ -125,7 +126,9 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujo
     const x = obj(p);
     return { id: typeof x.id === "string" && /^p\d{1,4}$/.test(x.id) ? x.id : undefined, nombre: typeof x.nombre === "string" ? x.nombre.slice(0, 200) : "" };
   });
-  const error = revisarDatos({ hito, carpetas: carpetasIds, destino: destinoId, pasos: pasosIn });
+  const vence = typeof o.vence === "string" && o.vence.trim() ? o.vence.trim() : null;
+  const notas = typeof o.notas === "string" ? o.notas.trim() : "";
+  const error = revisarDatos({ hito, carpetas: carpetasIds, destino: destinoId, pasos: pasosIn, vence, notas });
   if (error) throw new FlujoError(error);
 
   const todos = await ctx.store.flujos(ctx.projectId);
@@ -158,8 +161,10 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujo
       creadoPor: ctx.caller.name,
       actualizado: momento,
       actualizadoPor: ctx.caller.name,
+      vence,
+      notas,
     });
-    await registrar(ctx, creado.id, "flujo-creado", `«${creado.hito}»: ${describirPasos(pasos)}. Revisión: ${carpetas.map((c) => c.ruta).join("; ")}. Destino: ${destino.ruta}.`);
+    await registrar(ctx, creado.id, "flujo-creado", `«${creado.hito}»: ${describirPasos(pasos)}. Revisión: ${carpetas.map((c) => c.ruta).join("; ")}. Destino: ${destino.ruta}.${vence ? ` Vence el ${diaVisible(vence)}.` : ""}`);
     return estado(ctx);
   }
 
@@ -173,7 +178,7 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujo
       "confirmar-asignaciones"
     );
   }
-  const guardado = await ctx.store.actualizarFlujo(antes.id, antes.version, { hito: hitoLimpio, hitoClave: clave, pasos, carpetas, destino, actualizado: momento, actualizadoPor: ctx.caller.name });
+  const guardado = await ctx.store.actualizarFlujo(antes.id, antes.version, { hito: hitoLimpio, hitoClave: clave, pasos, carpetas, destino, vence, notas, actualizado: momento, actualizadoPor: ctx.caller.name });
   if (!guardado) throw new FlujoError(conVersion, 409, "version-conflict");
   if (afectadas.length) await ctx.store.desactivarAsignaciones(afectadas.map((a) => a.id));
   await registrar(ctx, antes.id, "flujo-modificado", `${cambiosFlujo(antes, guardado)}${afectadas.length ? ` Asignaciones desactivadas: ${afectadas.length}.` : ""}`);
@@ -361,4 +366,23 @@ export async function trazabilidad(ctx: Ctx, q: { get(nombre: string): string | 
   const elegidos = archivoId ? archivos.filter((a) => a.id === archivoId) : archivos;
   if (archivoId && !elegidos.length) throw new FlujoError("Ese archivo no está registrado en este proyecto.", 404);
   return { trazas: armarTrazas(elegidos, entradas, hitos, filtro), filtro, hitos: Object.fromEntries(hitos), por: ctx.caller.name };
+}
+
+/** A flow's comments, oldest first (any project member). */
+export async function comentarios(ctx: Ctx, flujoId: string): Promise<{ comentarios: Comentario[] }> {
+  const flujo = await ctx.store.flujo(idFlujo(flujoId));
+  if (!flujo || flujo.proyecto !== ctx.projectId) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
+  return { comentarios: await ctx.store.comentarios(flujo.id) };
+}
+
+/** { flujoId, texto }: adds a comment to a flow (any project member). Comments are never edited or deleted. */
+export async function comentar(ctx: Ctx, body: unknown): Promise<{ comentarios: Comentario[] }> {
+  const o = obj(body);
+  const flujo = await ctx.store.flujo(idFlujo(o.flujoId));
+  if (!flujo || flujo.proyecto !== ctx.projectId) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
+  const texto = typeof o.texto === "string" ? o.texto.trim() : "";
+  if (!texto) throw new FlujoError("Escribe el comentario.");
+  if (texto.length > 2000) throw new FlujoError("El comentario admite hasta 2000 caracteres.");
+  await ctx.store.agregarComentario({ proyecto: ctx.projectId, flujoId: flujo.id, texto, usuario: ctx.caller.name, usuarioId: ctx.caller.id });
+  return { comentarios: await ctx.store.comentarios(flujo.id) };
 }

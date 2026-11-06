@@ -1,7 +1,7 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { CarpetaInfo } from "../publicar/types";
 import type { FiltroTraza, Traza } from "./trazabilidad";
-import type { ArchivoInfo, AvisoPermisos, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
+import type { ArchivoInfo, AvisoPermisos, Comentario, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
 
 export interface DatosFlujoEnvio {
   id?: string;
@@ -12,6 +12,9 @@ export interface DatosFlujoEnvio {
   pasos: { id?: string; nombre: string }[];
   /** Deactivate the assignments the change leaves without sense. */
   confirmar?: boolean;
+  /** "AAAA-MM-DD" or empty. */
+  vence?: string;
+  notas?: string;
 }
 
 export interface FlujoApi {
@@ -36,6 +39,8 @@ export interface FlujoApi {
   traslado(paso: "trasladar" | "confirmar" | "reemplazar", archivoId: string, siVersion?: string | null): Promise<{ traslado: Traslado | null; mensaje: string }>;
   /** Each file with what happened to it, for the filter (phase 5). */
   trazabilidad(filtro: Record<string, string>): Promise<{ trazas: Traza[]; filtro: FiltroTraza; hitos: Record<string, string>; por: string }>;
+  comentarios(flujoId: string): Promise<{ comentarios: Comentario[] }>;
+  comentar(flujoId: string, texto: string): Promise<{ comentarios: Comentario[] }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -72,5 +77,7 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
       const s = q.toString();
       return request(`/trazabilidad${s ? `?${s}` : ""}`);
     },
+    comentarios: (flujoId) => request(`/comentarios?flujoId=${encodeURIComponent(flujoId)}`),
+    comentar: (flujoId, texto) => post("/comentarios", { flujoId, texto }),
   };
 }

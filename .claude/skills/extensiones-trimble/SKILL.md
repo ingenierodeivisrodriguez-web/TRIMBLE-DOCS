@@ -142,9 +142,10 @@ Herramientas incluidas:
   del modelo. Ver `references/publicar.md`.
 - Flujo de aprobación: las 6 fases (0 a 5) en `main`: configuración, registro
   al abrir, aprobar/rechazar con firmas y tareas de Trimble, copia al destino,
-  trazabilidad y PDF. El dueño debe ejecutar otra vez
-  `supabase/flujo-aprobacion.sql` y hacer la prueba en Trimble real (protocolo
-  en el README). Ver `references/flujo-aprobacion.md`.
+  trazabilidad y PDF; desde el 06-11-2026 en una sola pantalla (lista de
+  flujos + panel de detalles) con vencimiento, notas y comentarios. El dueño
+  debe ejecutar otra vez `supabase/flujo-aprobacion.sql` y hacer la prueba en
+  Trimble real (protocolo en el README). Ver `references/flujo-aprobacion.md`.
 
 - Ofrecido y **sin aprobar**: un párrafo en la política de privacidad
   (`app/bim-apps/privacidad/page.tsx`) sobre el proveedor de IA. No toques la
