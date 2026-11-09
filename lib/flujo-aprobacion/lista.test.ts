@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cambiosFlujo, claveHito, revisarDatos } from "./flujos";
-import { estaVencido, filasFlujos, filtrarFilas, opcionesFiltro, responsablesFlujo, sumarDias } from "./lista";
+import { cambiosFlujo, claveHito, describirCierre, primerasDecisiones, revisarDatos, textoCerrado } from "./flujos";
+import { estadoDocumento, estadoDocumentos, estaVencido, filasFlujos, filtrarFilas, opcionesFiltro, responsablesFlujo, sumarDias } from "./lista";
 import type { EstadoArchivo, Flujo, PasoFlujo, Responsable } from "./types";
 
 const HOY = "2026-11-06";
@@ -27,21 +27,23 @@ const flujo = (id: string, hito: string, extra: Partial<Flujo> = {}): Flujo => (
   actualizadoPor: null,
   ...extra,
 });
-const archivo = (flujoId: string, estado: EstadoArchivo, meToca = false) => ({ flujoId, estado, meToca });
+const DOS_PASOS = pasos(null, null);
+/** A registered file waiting at step `pasoActual` of a two-step flow (Revisa, Aprueba). */
+const archivo = (flujoId: string, estado: EstadoArchivo, meToca = false, pasoActual = 0, conPasos: PasoFlujo[] = DOS_PASOS) => ({ flujoId, estado, meToca, pasos: conPasos, pasoActual });
 
 const TORRE = flujo("f1", "Aprobar Torre 1", { vence: "2026-11-05", pasos: pasos({ tipo: "grupo", id: "g-arq", nombre: "Arquitectura" }, persona("pepe", "Pepe Gómez")) });
 const ESTRUCTURA = flujo("f2", "Aprobar estructura", { vence: "2026-11-10", creadoPor: "Deivis", pasos: pasos(persona("luz", "Luz Mora"), persona("luz", "Luz Mora")) });
 const VIEJO = flujo("f3", "Aprobar anteproyecto", { activo: false });
-const ARCHIVOS = [archivo("f1", "pendiente", true), archivo("f1", "nueva-version"), archivo("f1", "aprobado"), archivo("f2", "aprobado")];
+const ARCHIVOS = [archivo("f1", "pendiente", true), archivo("f1", "nueva-version", false, 1), archivo("f1", "aprobado"), archivo("f2", "aprobado")];
 
-test("cada fila trae archivos, pendientes, lo que me toca, responsables por paso y estado", () => {
+test("cada fila trae archivos, pendientes, lo que me toca, responsables por paso, estado del documento y vencimiento", () => {
   const filas = filasFlujos([VIEJO, ESTRUCTURA, TORRE], ARCHIVOS, HOY);
   assert.deepEqual(
-    filas.map((f) => [f.flujo.hito, f.archivos, f.pendientes, f.porRevisar, f.estado]),
+    filas.map((f) => [f.flujo.hito, f.archivos, f.pendientes, f.porRevisar, f.estado, f.detalleEstado, f.vencido, f.cierre]),
     [
-      ["Aprobar estructura", 1, 0, 0, "activo"],
-      ["Aprobar Torre 1", 3, 2, 1, "vencido"],
-      ["Aprobar anteproyecto", 0, 0, 0, "desactivado"],
+      ["Aprobar estructura", 1, 0, 0, "aprobado", "1 aprobado", false, null],
+      ["Aprobar Torre 1", 3, 2, 1, "por-revisar", "1 por revisar, 1 por aprobar, 1 aprobado", true, null],
+      ["Aprobar anteproyecto", 0, 0, 0, "sin-archivos", "Ningún archivo registrado todavía", false, null],
     ]
   );
   assert.deepEqual(responsablesFlujo(TORRE), ["Arquitectura (grupo)", "Pepe Gómez"], "step order");
@@ -66,6 +68,9 @@ test("los filtros: propietario, persona o grupo asignado, estado, vencimiento, t
   assert.deepEqual(hitos({ quien: "persona:luz" }), ["Aprobar estructura"]);
   assert.deepEqual(hitos({ quien: "persona:pepe" }), ["Aprobar Torre 1"]);
   assert.deepEqual(hitos({ estado: "desactivado" }), ["Aprobar anteproyecto"]);
+  assert.deepEqual(hitos({ estado: "aprobado" }), ["Aprobar estructura"]);
+  assert.deepEqual(hitos({ estado: "por-revisar" }), ["Aprobar Torre 1"]);
+  assert.deepEqual(hitos({ estado: "rechazado" }), []);
   assert.deepEqual(hitos({ vence: "vencidos" }), ["Aprobar Torre 1"]);
   assert.deepEqual(hitos({ vence: "7dias" }), ["Aprobar estructura"]);
   assert.deepEqual(hitos({ vence: "sin-fecha" }), ["Aprobar anteproyecto"]);
@@ -90,4 +95,42 @@ test("vencimiento y notas se validan y quedan en los cambios del flujo", () => {
   assert.match(revisarDatos({ ...base, notas: "x".repeat(2001) })!, /hasta 2000/);
   const f = { hito: "A", pasos: [], archivos: [] };
   assert.equal(cambiosFlujo({ ...f, vence: null, notas: "" }, { ...f, vence: "2026-11-25", notas: "Nueva" }), "Vencimiento: 25-11-2026 (antes sin fecha). Cambió las notas.");
+});
+
+test("estado del documento: espera un paso que no es el último (por revisar), el último (por aprobar), aprobado o rechazado", () => {
+  assert.equal(estadoDocumento(archivo("f", "pendiente", false, 0)), "por-revisar");
+  assert.equal(estadoDocumento(archivo("f", "nueva-version", false, 1)), "por-aprobar");
+  assert.equal(estadoDocumento(archivo("f", "pendiente", false, 0, [{ id: "p1", nombre: "Aprueba", responsable: null }])), "por-aprobar", "a single step is the approval");
+  assert.equal(estadoDocumento(archivo("f", "aprobado")), "aprobado");
+  assert.equal(estadoDocumento(archivo("f", "rechazado")), "rechazado");
+  assert.equal(estadoDocumento(archivo("f", "retirado")), null, "a retired file doesn't count");
+});
+
+test("con varios archivos: rechazado si alguno lo está, luego lo que espera, y aprobado solo cuando todos lo están", () => {
+  assert.deepEqual(estadoDocumentos([archivo("f", "pendiente", false, 1), archivo("f", "rechazado"), archivo("f", "pendiente", false, 1)]), { estado: "rechazado", detalle: "1 rechazado, 2 por aprobar" });
+  assert.deepEqual(estadoDocumentos([archivo("f", "aprobado"), archivo("f", "pendiente", false, 1)]), { estado: "por-aprobar", detalle: "1 por aprobar, 1 aprobado" });
+  assert.deepEqual(estadoDocumentos([archivo("f", "aprobado"), archivo("f", "aprobado"), archivo("f", "retirado")]), { estado: "aprobado", detalle: "2 aprobados" });
+  assert.deepEqual(estadoDocumentos([archivo("f", "retirado")]), { estado: "sin-archivos", detalle: "Ningún archivo registrado todavía" });
+});
+
+test("el flujo queda cerrado desde su primera decisión: cuándo y de quién, en DD-MM-AAAA", () => {
+  const cierres = primerasDecisiones([
+    { id: 9, flujoId: "f1", accion: "aprobado", creado: "2026-11-09T21:00:00.000Z", usuario: "Pepe Gómez" },
+    { id: 3, flujoId: "f1", accion: "aprobado-paso", creado: "2026-11-09T19:30:00.000Z", usuario: "Luz Mora" },
+    { id: 1, flujoId: "f1", accion: "flujo-creado", creado: "2026-11-08T12:00:00.000Z", usuario: "Ana Ruiz" },
+    { id: 2, flujoId: null, accion: "rechazado", creado: "2026-11-08T13:00:00.000Z", usuario: "Otro" },
+    { id: 5, flujoId: "f2", accion: "rechazado", creado: "2026-11-10T04:30:00.000Z", usuario: null },
+  ]);
+  assert.deepEqual(cierres, { f1: { fecha: "2026-11-09T19:30:00.000Z", quien: "Luz Mora" }, f2: { fecha: "2026-11-10T04:30:00.000Z", quien: "" } });
+  assert.equal(describirCierre(cierres.f1), "09-11-2026, de Luz Mora");
+  assert.equal(describirCierre(cierres.f2), "09-11-2026, de alguien", "Colombian calendar day");
+  assert.match(textoCerrado("Aprobar Torre 1", cierres.f1), /«Aprobar Torre 1» ya tiene decisiones \(la primera el 09-11-2026, de Luz Mora\): el flujo quedó cerrado y no se puede editar, activar ni desactivar/);
+  const filas = filasFlujos([TORRE, ESTRUCTURA], ARCHIVOS, HOY, cierres);
+  assert.deepEqual(
+    filas.map((f) => [f.flujo.id, f.cierre?.quien ?? null]),
+    [
+      ["f2", ""],
+      ["f1", "Luz Mora"],
+    ]
+  );
 });

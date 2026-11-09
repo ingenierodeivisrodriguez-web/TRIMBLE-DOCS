@@ -147,7 +147,10 @@ Herramientas incluidas:
   09-11-2026 (fase A del ajuste) cualquier miembro crea el flujo marcando sus
   archivos y un responsable por paso, sin carpeta destino, y (fase B) al
   aprobar el último paso el responsable decide si pone la versión en una
-  carpeta donde tenga permiso. El dueño debe ejecutar otra vez
+  carpeta donde tenga permiso; la columna Estado muestra el estado del
+  documento (por revisar, por aprobar, aprobado, rechazado) y desde la primera
+  decisión el flujo queda cerrado (no se edita, activa ni desactiva). El dueño
+  debe ejecutar otra vez
   `supabase/flujo-aprobacion.sql` y hacer la prueba en Trimble real (protocolo
   en el README). Ver `references/flujo-aprobacion.md`.
 

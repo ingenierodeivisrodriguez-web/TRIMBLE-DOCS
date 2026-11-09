@@ -24,15 +24,17 @@ import {
   limpiarTexto,
   nombreDeRuta,
   PasoEnvio,
+  primerasDecisiones,
   puedeCambiar,
   revisarDatos,
+  textoCerrado,
 } from "./flujos";
 import { aclEfectiva, Acl, Equipo as EquipoPermisos, gruposQueImportan, revisarPermisos } from "./permisos";
 import { nombrePersona } from "./prueba";
 import { revisarFlujo } from "./revision";
 import { armarTrazas, FiltroTraza, Traza } from "./trazabilidad";
 import { HITO_REPETIDO, FlujoStore } from "./store";
-import type { ArchivoFlujo, AvisoPermisos, CarpetaFlujo, Comentario, Equipo, EstadoFlujos, EntradaHistorial, Flujo, PasoFlujo, PermisosCarpeta, Responsable } from "./types";
+import type { ArchivoFlujo, AvisoPermisos, CarpetaFlujo, Cierre, Comentario, Equipo, EstadoFlujos, EntradaHistorial, Flujo, PasoFlujo, PermisosCarpeta, Responsable } from "./types";
 
 /** A folder or file of this project as Trimble has it: its path in words and the folder ids above it. */
 export type ElementoTrimble = CarpetaFlujo;
@@ -105,9 +107,21 @@ async function enTandas<T, R>(xs: T[], f: (x: T) => Promise<R>): Promise<R[]> {
   return out;
 }
 
-/** Every flow of the project, who is asking and whether they administer it. */
+/** The flows closed by a first decision (from the history, which is never edited). */
+async function cierres(ctx: Ctx): Promise<Record<string, Cierre>> {
+  return primerasDecisiones(await ctx.store.decisiones(ctx.projectId));
+}
+
+/** Once a flow has a decision nobody edits, activates or deactivates it, administrators included (09-11-2026). */
+async function exigirAbierto(ctx: Ctx, f: Flujo) {
+  const c = (await cierres(ctx))[f.id];
+  if (c) throw new FlujoError(textoCerrado(f.hito, c), 409, "flujo-cerrado");
+}
+
+/** Every flow of the project, which ones are closed, who is asking and whether they administer it. */
 export async function estado(ctx: Ctx): Promise<EstadoFlujos> {
-  return { esAdmin: ctx.caller.isAdmin, yo: ctx.caller.id, flujos: await ctx.store.flujos(ctx.projectId) };
+  const [flujos, cerrados] = await Promise.all([ctx.store.flujos(ctx.projectId), cierres(ctx)]);
+  return { esAdmin: ctx.caller.isAdmin, yo: ctx.caller.id, flujos, cierres: cerrados };
 }
 
 /** The steps as the browser sent them (responsible: only its type and id). */
@@ -154,7 +168,10 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujo
   const todos = await ctx.store.flujos(ctx.projectId);
   const antes = flujoId ? todos.find((f) => f.id === flujoId) : undefined;
   if (flujoId && !antes) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
-  if (antes) exigirPermiso(ctx, antes);
+  if (antes) {
+    exigirPermiso(ctx, antes);
+    await exigirAbierto(ctx, antes);
+  }
   if (antes && o.version !== antes.version) throw new FlujoError(conVersion, 409, "version-conflict");
   const hitoLimpio = limpiarTexto(hito);
   const clave = claveHito(hitoLimpio);
@@ -224,6 +241,7 @@ export async function cambiarEstado(ctx: Ctx, body: unknown): Promise<EstadoFluj
   const f = todos.find((x) => x.id === id);
   if (!f) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
   exigirPermiso(ctx, f);
+  await exigirAbierto(ctx, f);
   if (o.version !== f.version) throw new FlujoError(conVersion, 409, "version-conflict");
   if (f.activo === o.activo) return estado(ctx);
   if (o.activo) {

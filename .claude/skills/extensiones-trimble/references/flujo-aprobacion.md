@@ -517,9 +517,62 @@ Fase B (el dueño dijo "Sí, fase B", hecha el 09-11-2026; sin cambios de SQL):
   carpeta propia / solo lectura / nombre en otro flujo sin decidir nada, v2 en
   la misma carpeta y diferencia en otra).
 
+## Estado del documento y flujo cerrado (09-11-2026)
+
+Pedido del dueño (con captura de la columna Estado): "1. configura para que
+despues de tomar la desicion no se pueda editar, desactivar, activar; 2. en la
+columna de estado que se muestre el estado del flujo del documento ejemplo: por
+revisar, por aprobar, aprobado, rechazado, solo el aprobado verde y el rojo
+rechazado, los otros en gris". Propuse el plan y dijo "Sí, hazlo así". Sin
+cambios de SQL.
+
+- **Estado del documento** (`lista.ts`): `estadoDocumento` por archivo:
+  esperando un paso que no es el último = `por-revisar`; el último (o el único)
+  = `por-aprobar`; `aprobado`, `rechazado`; retirado = no cuenta.
+  `estadoDocumentos` por flujo, en este orden: rechazado si alguno (espera
+  corrección) > por-revisar > por-aprobar > aprobado (solo si todos);
+  `sin-archivos` si no hay ninguno. `detalleEstado` = la cuenta en palabras
+  («1 rechazado, 2 por aprobar»), en el `title` y al lado en el panel.
+  `FilaFlujo` ya no tiene `EstadoFila` (activo/vencido/desactivado): tiene
+  `estado`, `detalleEstado`, `vencido` (la fecha se pinta de rojo) y `cierre`.
+  Desactivado = etiqueta gris pequeña aparte; filtro Estado = los 4 estados +
+  «desactivado» (`!activo`).
+- **Flujo cerrado** desde la **primera decisión** de cualquier paso en
+  cualquier archivo (no solo la del último paso: si se pudiera cambiar un
+  responsable después de una firma, cambiaría quién firma lo que sigue, porque
+  `responsablesArchivo` lee el responsable actual del flujo). Nadie edita,
+  activa ni desactiva, **ni los administradores**. El flujo sigue revisando
+  versiones nuevas, decidiendo, copiando a carpetas, comentando y con PDF;
+  «Revisar permisos» sigue. Un flujo desactivado que luego tuvo una decisión
+  (decidir no exige flujo activo) ya no se reactiva.
+- La fuente es el **historial** (no el registro: las firmas se vacían con cada
+  versión nueva y con «version-reemplazada»): `store.decisiones(proyecto)` =
+  líneas `aprobado-paso | aprobado | rechazado` con `flujo_id` (solo `id,
+  flujo_id, accion, creado, usuario`, paginado con `all`, orden `id.asc`);
+  `primerasDecisiones` (en `flujos.ts`, con `ACCIONES_DECISION`) toma la más
+  antigua por flujo → `Cierre { fecha, quien }`. `estado()` devuelve
+  `cierres` (en cada carga: una consulta más); `exigirAbierto` en
+  `guardarFlujo` (al editar, después de `exigirPermiso`) y `cambiarEstado`:
+  409 `flujo-cerrado` con `textoCerrado` («…ya tiene decisiones (la primera el
+  DD-MM-AAAA, de X): el flujo quedó cerrado…»).
+- Pantalla: `ListaFlujos` (`ESTADO_DOCUMENTO`, `EtiquetaEstado` con `ayuda` y
+  `desactivado`, `ayudaEstado`; ⋮ sin Editar/Activar/Desactivar si `cierre`),
+  `PanelFlujo` (`editable = puede && !cierre`: ⋮, papelera y confirmación de
+  desactivar; aviso gris «Flujo cerrado desde la primera decisión…»; «esperando
+  decisión» en vez de «por revisar» en el dato Archivos), `FlujoAprobacionApp`
+  (pasa `datos.cierres`; un panel «editar» de un flujo cerrado muestra los
+  detalles; después de decidir vuelve a leer los flujos: lo encontró la prueba
+  en el navegador, el aviso de cerrado no salía hasta recargar).
+- Datos reales del 09-11-2026 (consulta de lectura): «aprobar torre 2»
+  (CIRCUITOS TR1.rvt aprobado por Jaiden) y «flujo de aprobacion» (desactivado,
+  Proyecto2.rvt aprobado) quedan cerrados; «aprobar diseño estructural» (3
+  pendientes en su único paso) = Por aprobar, editable.
+- Pruebas: `lista.test.ts` (estados por archivo y por flujo, filtros, cierre y
+  `describirCierre` en día de Colombia) y `decisiones.test.ts` (después de la
+  primera decisión nadie edita ni desactiva y sigue revisando versiones nuevas;
+  un desactivado con decisión no se reactiva).
+
 Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
 decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
-avance del hito, avisar por tarea cuando un flujo vence, avisar cuando el
-responsable de un paso es quien subió el archivo (no puede decidir su propia
-versión), poner una misma versión aprobada en varias carpetas (hoy, una por
-versión).
+avance del hito, avisar por tarea cuando un flujo vence, poner una misma
+versión aprobada en varias carpetas (hoy, una por versión).

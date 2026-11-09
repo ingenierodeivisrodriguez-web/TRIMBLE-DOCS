@@ -1,24 +1,37 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { diaVisible } from "../../lib/flujo-aprobacion/flujos";
-import type { EstadoFila, FilaFlujo, FiltroLista } from "../../lib/flujo-aprobacion/lista";
+import { describirCierre, diaVisible } from "../../lib/flujo-aprobacion/flujos";
+import type { EstadoDocumento, FilaFlujo, FiltroLista } from "../../lib/flujo-aprobacion/lista";
 import type { Flujo } from "../../lib/flujo-aprobacion/types";
 import { C } from "../presupuesto/ui";
 import MenuPuntos from "./MenuPuntos";
 
-export const ESTADO_FILA: Record<EstadoFila, { texto: string; color: string; fondo: string; icono: string }> = {
-  activo: { texto: "Activo", color: "#fff", fondo: "#6b9e3f", icono: "✓" },
-  vencido: { texto: "Vencido", color: "#fff", fondo: "#c0392b", icono: "!" },
-  desactivado: { texto: "Desactivado", color: "#4b5563", fondo: "#e5e7eb", icono: "–" },
+const GRIS = { color: "#4b5563", fondo: "#e5e7eb", icono: "#4b5563" };
+
+/** Where the flow's documents stand: only approved is green and rejected red; the rest is gray. */
+export const ESTADO_DOCUMENTO: Record<EstadoDocumento, { texto: string; color: string; fondo: string; icono: string; signo: string }> = {
+  "por-revisar": { texto: "Por revisar", ...GRIS, signo: "…" },
+  "por-aprobar": { texto: "Por aprobar", ...GRIS, signo: "…" },
+  aprobado: { texto: "Aprobado", color: "#fff", fondo: "#6b9e3f", icono: "#6b9e3f", signo: "✓" },
+  rechazado: { texto: "Rechazado", color: "#fff", fondo: "#c0392b", icono: "#c0392b", signo: "✕" },
+  "sin-archivos": { texto: "Sin archivos", ...GRIS, signo: "–" },
 };
 
-export function EtiquetaEstado({ estado }: { estado: EstadoFila }) {
-  const e = ESTADO_FILA[estado];
+/** "Hover" text of the state: the count in words and, for a closed flow, since when. */
+export function ayudaEstado(fila: Pick<FilaFlujo, "detalleEstado" | "cierre">): string {
+  return `${fila.detalleEstado}.${fila.cierre ? ` Flujo cerrado desde la primera decisión (${describirCierre(fila.cierre)}): no se puede editar, activar ni desactivar.` : ""}`;
+}
+
+export function EtiquetaEstado({ estado, ayuda, desactivado }: { estado: EstadoDocumento; ayuda?: string; desactivado?: boolean }) {
+  const e = ESTADO_DOCUMENTO[estado];
   return (
-    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: e.fondo, color: e.color, borderRadius: 3, padding: "3px 10px", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
-      <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "rgba(255,255,255,.85)", color: e.fondo, fontSize: 10, fontWeight: 700 }}>{e.icono}</span>
-      {e.texto}
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, flexWrap: "wrap" }} title={ayuda}>
+      <span style={{ display: "inline-flex", alignItems: "center", gap: 6, background: e.fondo, color: e.color, borderRadius: 3, padding: "3px 10px", fontSize: 13, fontWeight: 600, whiteSpace: "nowrap" }}>
+        <span style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "rgba(255,255,255,.85)", color: e.icono, fontSize: 10, fontWeight: 700 }}>{e.signo}</span>
+        {e.texto}
+      </span>
+      {desactivado && <span style={{ border: "1px solid #d1d5db", color: "#6b7280", borderRadius: 3, padding: "1px 6px", fontSize: 11.5, whiteSpace: "nowrap" }}>Desactivado</span>}
     </span>
   );
 }
@@ -102,8 +115,10 @@ export default function ListaFlujos({
         </select>
         <select value={filtro.estado ?? ""} onChange={(e) => cambiar({ estado: e.target.value as FiltroLista["estado"] })} style={filtroSelect} aria-label="Estado">
           <option value="">Estado</option>
-          <option value="activo">Activo</option>
-          <option value="vencido">Vencido</option>
+          <option value="por-revisar">Por revisar</option>
+          <option value="por-aprobar">Por aprobar</option>
+          <option value="aprobado">Aprobado</option>
+          <option value="rechazado">Rechazado</option>
           <option value="desactivado">Desactivado</option>
         </select>
         <select value={filtro.vence ?? ""} onChange={(e) => cambiar({ vence: e.target.value as FiltroLista["vence"] })} style={filtroSelect} aria-label="Fecha de vencimiento">
@@ -146,6 +161,8 @@ export default function ListaFlujos({
             {filas.map((f) => {
               const activa = seleccionado === f.flujo.id;
               const vence = f.flujo.vence;
+              // Closed by its first decision: nobody edits, activates or deactivates it.
+              const editable = puedeEditar(f.flujo) && !f.cierre;
               return (
                 <tr
                   key={f.flujo.id}
@@ -167,21 +184,21 @@ export default function ListaFlujos({
                       <span style={{ color: "var(--tc-gray-500)" }}>—</span>
                     )}
                   </td>
-                  <td style={{ ...td, whiteSpace: "nowrap", color: f.estado === "vencido" ? "#c0392b" : "var(--tc-blue-700)", fontWeight: f.estado === "vencido" ? 600 : 400 }}>{vence ? diaVisible(vence) : <span style={{ color: "var(--tc-gray-500)" }}>—</span>}</td>
+                  <td style={{ ...td, whiteSpace: "nowrap", color: f.vencido ? "#c0392b" : "var(--tc-blue-700)", fontWeight: f.vencido ? 600 : 400 }} title={f.vencido ? "Vencido: pasó la fecha y hay archivos esperando decisión" : undefined}>{vence ? diaVisible(vence) : <span style={{ color: "var(--tc-gray-500)" }}>—</span>}</td>
                   <td style={{ ...td, color: "var(--tc-blue-700)" }} title={f.responsables.join(", ")}>
                     {f.responsables.length ? `${f.responsables.slice(0, 2).join(", ")}${f.responsables.length > 2 ? ` y ${f.responsables.length - 2} más` : ""}` : <span style={{ color: "var(--tc-gray-500)" }}>Sin asignar</span>}
                   </td>
                   <td style={td}>
-                    <EtiquetaEstado estado={f.estado} />
+                    <EtiquetaEstado estado={f.estado} ayuda={ayudaEstado(f)} desactivado={!f.flujo.activo} />
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>
                     <MenuPuntos
                       opciones={[
                         { texto: "Ver detalles", onClick: () => onSeleccionar(f.flujo.id) },
                         { texto: "PDF de trazabilidad", onClick: () => onPdf(f.flujo) },
-                        { texto: "Editar", onClick: () => onEditar(f.flujo), oculto: !puedeEditar(f.flujo) },
-                        { texto: "Activar", onClick: () => onActivar(f.flujo), oculto: !puedeEditar(f.flujo) || f.flujo.activo },
-                        { texto: "Desactivar…", onClick: () => onDesactivar(f.flujo), oculto: !puedeEditar(f.flujo) || !f.flujo.activo, peligro: true },
+                        { texto: "Editar", onClick: () => onEditar(f.flujo), oculto: !editable },
+                        { texto: "Activar", onClick: () => onActivar(f.flujo), oculto: !editable || f.flujo.activo },
+                        { texto: "Desactivar…", onClick: () => onDesactivar(f.flujo), oculto: !editable || !f.flujo.activo, peligro: true },
                       ]}
                     />
                   </td>

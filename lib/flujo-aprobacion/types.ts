@@ -161,8 +161,21 @@ export interface EstadoFlujos {
   esAdmin: boolean;
   yo: string;
   flujos: Flujo[];
+  /** The flows closed by a first decision, by flow id. */
+  cierres: Record<string, Cierre>;
   /** After saving: what registering its files did (or why it waits for the next review). */
   mensaje?: string;
+}
+
+/**
+ * A flow's first decision (a step approved, an approval or a rejection, on any
+ * of its files): from then on nobody edits, activates or deactivates the flow
+ * (owner's request of 09-11-2026). It keeps reviewing new versions of its files.
+ */
+export interface Cierre {
+  /** When, as the history recorded it. */
+  fecha: string;
+  quien: string;
 }
 
 /** The project's team as Trimble lists it, for picking who does what. */

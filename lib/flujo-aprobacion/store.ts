@@ -1,5 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
+import { ACCIONES_DECISION } from "./flujos";
 import type { ArchivoFlujo, ArchivoRegistro, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado } from "./types";
 
 /**
@@ -24,6 +25,8 @@ export interface FlujoStore {
   historial(proyecto: string, filtro: { flujoId?: string; archivoId?: string; limite: number }): Promise<EntradaHistorial[]>;
   /** Every history line about a file in the project (for traceability), a page at a time. */
   historialArchivos(proyecto: string): Promise<EntradaHistorial[]>;
+  /** The decision lines of the project's history (flow, action, when, who), oldest first: they close their flows. */
+  decisiones(proyecto: string): Promise<Pick<EntradaHistorial, "id" | "flujoId" | "accion" | "creado" | "usuario">[]>;
   /** A flow's comments, oldest first. */
   comentarios(flujoId: string): Promise<Comentario[]>;
   agregarComentario(c: Omit<Comentario, "id" | "creado"> & { proyecto: string }): Promise<Comentario>;
@@ -252,6 +255,16 @@ function supabaseStore(): FlujoStore | null {
     async historialArchivos(proyecto) {
       return (await all<Fila>(`/aprobacion_historial?proyecto=${eq(proyecto)}&archivo_id=not.is.null&select=*&order=id.asc`)).map(deEntrada);
     },
+    async decisiones(proyecto) {
+      const acciones = ACCIONES_DECISION.join(",");
+      return (await all<Fila>(`/aprobacion_historial?proyecto=${eq(proyecto)}&accion=in.(${acciones})&flujo_id=not.is.null&select=id,flujo_id,accion,creado,usuario&order=id.asc`)).map((f) => ({
+        id: Number(f.id),
+        flujoId: t(f.flujo_id),
+        accion: String(f.accion),
+        creado: String(f.creado),
+        usuario: t(f.usuario) ?? "",
+      }));
+    },
     async tomarRevision(flujoId, hasta, ahora) {
       const filas = await json<Fila[]>(`/aprobacion_flujos?id=${eq(flujoId)}&or=(revisando_hasta.is.null,revisando_hasta.lt.${encodeURIComponent(ahora)})`, {
         method: "PATCH",
@@ -370,6 +383,11 @@ export function memoryStore(): FlujoStore {
     },
     async historialArchivos(proyecto) {
       return historial.filter((e) => e.proyecto === proyecto && e.archivoId).map(copia);
+    },
+    async decisiones(proyecto) {
+      return historial
+        .filter((e) => e.proyecto === proyecto && e.flujoId && ACCIONES_DECISION.includes(e.accion))
+        .map((e) => ({ id: e.id, flujoId: e.flujoId, accion: e.accion, creado: e.creado, usuario: e.usuario }));
     },
     async tomarRevision(fid, hasta, momento) {
       const actual = revisando.get(fid);

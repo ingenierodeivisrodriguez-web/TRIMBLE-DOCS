@@ -4423,12 +4423,14 @@ ventana encima). Debajo sigue la revisión de carpetas (**Revisar ahora**).
 
 **La lista de flujos**, una fila por flujo: **Nombre** (el hito),
 **Archivos**, **Por revisar** (los que esperan a quien mira), **Fecha de
-vencimiento**, **Responsables** (quién revisa y aprueba) y **Estado**: Activo,
-**Vencido** (en rojo: la fecha ya pasó y quedan archivos esperando revisión) o
-Desactivado. Filtros: Propietario (quién lo creó), Usuarios, Grupos, Estado,
-Fecha de vencimiento (vencidos, próximos 7 días, sin fecha) y «Tengo por
-revisar». Los activos van primero. El **⋮** de cada fila tiene Ver detalles,
-PDF de trazabilidad, Editar, Activar y Desactivar….
+vencimiento** (en rojo si ya pasó y quedan archivos esperando decisión),
+**Responsables** (quién revisa y aprueba) y **Estado** (desde el 09-11-2026, el
+estado del documento: Por revisar, Por aprobar, Aprobado o Rechazado; ver
+«Estado del documento y flujo cerrado»). Filtros: Propietario (quién lo creó),
+Usuarios, Grupos, Estado, Fecha de vencimiento (vencidos, próximos 7 días, sin
+fecha) y «Tengo por revisar». Los activos van primero. El **⋮** de cada fila
+tiene Ver detalles, PDF de trazabilidad, Editar, Activar y Desactivar… (las
+tres últimas solo mientras el flujo no tenga decisiones).
 
 **El panel de la derecha** (al dar clic en una fila; en pantallas angostas se
 abre encima de la lista), con el hito, **⬇** (PDF de la trazabilidad de ese
@@ -4476,7 +4478,9 @@ aprobado, en la sección siguiente). Hay que volver a ejecutar
 
 - **Cualquier miembro del proyecto** crea un flujo con **Nuevo**. Lo cambian
   (archivos, pasos, responsables, activar o desactivar, revisar permisos)
-  **quien lo creó y los administradores** del proyecto en Trimble.
+  **quien lo creó y los administradores** del proyecto en Trimble, hasta su
+  primera decisión (después queda cerrado; ver «Estado del documento y flujo
+  cerrado»).
 - **Archivos del flujo**: en el explorador del formulario cada archivo tiene su
   casilla; se marcan varios, de distintas carpetas, y «Marcar todos» marca los
   de la carpeta abierta (hasta 100 por flujo). Los marcados salen arriba con ✕
@@ -4580,6 +4584,65 @@ permiso de Trimble y regla de revisión; `trasladar(…, { carpetaId })`),
 `ElegirCarpeta`, `PonerEnCarpeta`). Rutas: `POST /api/flujo-aprobacion/aprobar`
 acepta `destino` y `POST /api/flujo-aprobacion/trasladar` acepta `carpetaId`.
 
+### Estado del documento y flujo cerrado (ajuste del 09-11-2026)
+
+Pedido por el dueño: (1) después de tomar la decisión el flujo no se puede
+editar, desactivar ni activar; (2) la columna **Estado** de la lista muestra el
+estado del flujo del documento (por revisar, por aprobar, aprobado,
+rechazado), solo aprobado en verde y rechazado en rojo, los demás en gris.
+Aceptó el plan tal como se propuso. No cambia la base de datos.
+
+**Columna Estado** (y la etiqueta del panel de detalles):
+
+- **Por revisar** (gris): el archivo espera un paso que no es el último (por
+  ejemplo «Revisa»).
+- **Por aprobar** (gris): espera el último paso (por ejemplo «Aprueba»; en un
+  flujo de un solo paso, ese).
+- **Aprobado** (verde) y **Rechazado** (rojo).
+- **Sin archivos** (gris): todavía no hay archivos registrados.
+- Con **varios archivos**: «Rechazado» si alguno está rechazado (espera una
+  corrección); si no, «Por revisar» o «Por aprobar» si alguno espera; y
+  «Aprobado» solo cuando todos lo están. Al pasar el mouse se ve la cuenta
+  («1 rechazado, 2 por aprobar»), que el panel también muestra al lado. Los
+  retirados no cuentan.
+- Un flujo desactivado lleva además una etiqueta gris pequeña **Desactivado**.
+- «Vencido» ya no es un estado: la fecha de vencimiento sale en rojo. El filtro
+  **Estado** ofrece Por revisar, Por aprobar, Aprobado, Rechazado y
+  Desactivado.
+
+**Flujo cerrado**: desde la **primera decisión** (aprobar o rechazar un paso,
+en cualquiera de sus archivos) **nadie** puede **editar, activar ni desactivar**
+el flujo, ni quien lo creó ni un administrador. Se cierra desde la primera
+firma porque, si después se cambiara un responsable, cambiaría quién firma lo
+que sigue.
+
+- El ⋮ de la lista y el del panel ya no ofrecen Editar, Activar ni
+  Desactivar…, ni sale la papelera; el panel dice **«Flujo cerrado desde la
+  primera decisión (DD-MM-AAAA, de quién)»**. El servidor también lo rechaza
+  (409 `flujo-cerrado`) aunque alguien lo intente por fuera de la pantalla.
+- El flujo **sigue trabajando**: revisa las versiones nuevas de sus archivos
+  (un rechazado se corrige y vuelve a pasar por los mismos pasos), se sigue
+  decidiendo, se pone lo aprobado en una carpeta, se comenta y se saca el PDF.
+  «Revisar permisos de Trimble» sigue disponible.
+- Un flujo que ya estaba **desactivado** cuando tuvo su primera decisión
+  queda así: no se vuelve a activar.
+- La fecha y la persona salen del **historial** (la primera línea «Aprobó un
+  paso», «Aprobó» o «Rechazó» del flujo), que nunca se edita; por eso el
+  cierre no se pierde cuando llega una versión nueva y se borran las firmas de
+  la revisión anterior.
+- Con los datos del 09-11-2026: «aprobar torre 2» (aprobado) y «flujo de
+  aprobacion» (aprobado y desactivado) quedan cerrados; «aprobar diseño
+  estructural» (3 archivos por aprobar) se puede seguir editando.
+
+Código: [`lib/flujo-aprobacion/lista.ts`](lib/flujo-aprobacion/lista.ts)
+(`estadoDocumento`, `estadoDocumentos`, filas con `vencido` y `cierre`),
+[`flujos.ts`](lib/flujo-aprobacion/flujos.ts) (`primerasDecisiones`,
+`textoCerrado`), `store.ts` (`decisiones`: las líneas de decisión del
+historial), `service.ts` (`estado` devuelve `cierres`; `guardarFlujo` y
+`cambiarEstado` rechazan un flujo cerrado); pantallas `ListaFlujos`,
+`PanelFlujo` y `FlujoAprobacionApp` (después de decidir vuelve a leer los
+flujos).
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -4609,6 +4672,10 @@ acepta `destino` y `POST /api/flujo-aprobacion/trasladar` acepta `carpetaId`.
 7. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
    mí**, corrige y sube la versión nueva con el mismo nombre en la misma
    carpeta.
+8. La columna **Estado** dice en qué va cada flujo (Por revisar, Por aprobar,
+   Aprobado en verde, Rechazado en rojo). Desde la **primera decisión** el flujo
+   queda **cerrado**: ya no se edita, activa ni desactiva (revise archivos,
+   pasos y responsables antes de que alguien decida).
 9. **Trazabilidad**: ⬇ en el panel (un flujo) o **⋮ → Exportar trazabilidad**
    (todos, con filtros). Los comentarios del flujo quedan en su panel.
 
@@ -4623,7 +4690,9 @@ de Trimble con al menos un miembro (actualizado el 09-11-2026, fases A y B):
    **una tarea de Trimble para el grupo** (si Trimble no acepta grupos, una por
    miembro). Comprobar que llegó el correo.
 2. Otro miembro que no creó el flujo no ve «Editar»; A (administrador) sí.
-   B revisa los permisos de Trimble desde el ⋮.
+   B revisa los permisos de Trimble desde el ⋮. Antes de que nadie decida, B
+   quita un archivo del flujo (queda **Retirado**, sin borrarse en Trimble) y
+   lo vuelve a marcar. La columna Estado dice **Por revisar**.
 3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; tarea para A) y
    rechaza el `.pdf` con motivo (tarea para B con el motivo).
 4. A aprueba el `.rvt` eligiendo **Ponerla también en una carpeta**:
@@ -4642,8 +4711,11 @@ de Trimble con al menos un miembro (actualizado el 09-11-2026, fases A y B):
    con el mismo nombre: debe quedar «En «carpeta» hay otro archivo con ese
    nombre» hasta que A pulse «Reemplazar ahí».
 8. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
-   «Prueba flujo». B quita un archivo del flujo: queda **Retirado**, sin
-   borrarse en Trimble.
+   «Prueba flujo». Desde la decisión del paso 3, ni B ni A ven Editar,
+   Activar ni Desactivar en «Prueba flujo», y el panel dice «Flujo cerrado
+   desde la primera decisión (fecha, quién)». Después del paso 3 (el `.pdf`
+   rechazado) el Estado decía **Rechazado** (rojo); ahora, con los dos
+   aprobados, **Aprobado** (verde).
 9. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
    estén quién subió, quién revisó, decisiones con fecha, motivos, qué carpeta
    eligió el responsable y quién copió la versión ahí.

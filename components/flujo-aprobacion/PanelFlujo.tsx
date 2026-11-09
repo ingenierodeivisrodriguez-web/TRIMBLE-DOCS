@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
-import { diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
+import { describirCierre, diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
 import type { FilaFlujo } from "../../lib/flujo-aprobacion/lista";
 import type { ArchivoInfo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
 import { botonPeligro, botonSecundario } from "../compras/estilos";
@@ -12,7 +12,7 @@ import Archivos from "./Archivos";
 import Comentarios from "./Comentarios";
 import { descargarTrazabilidad } from "./descargas";
 import Historial from "./Historial";
-import { EtiquetaEstado } from "./ListaFlujos";
+import { ayudaEstado, EtiquetaEstado } from "./ListaFlujos";
 import MenuPuntos from "./MenuPuntos";
 import Permisos from "./Permisos";
 
@@ -94,8 +94,10 @@ export default function PanelFlujo({
   const permisosRef = useRef<HTMLDivElement>(null);
   // Whoever created the flow, or a project administrator.
   const puede = puedeCambiar(f, { id: datos.yo, esAdmin: datos.esAdmin });
+  // Closed by its first decision: nobody edits, activates or deactivates it (09-11-2026).
+  const editable = puede && !fila.cierre;
 
-  useEffect(() => setDesactivar(pedirDesactivar), [pedirDesactivar, f.id]);
+  useEffect(() => setDesactivar(pedirDesactivar && !fila.cierre), [pedirDesactivar, f.id, fila.cierre]);
   useEffect(() => setAviso(null), [f.id]);
 
   const alternar = (s: Seccion) =>
@@ -150,7 +152,7 @@ export default function PanelFlujo({
             </svg>
           )}
         </button>
-        {puede && f.activo && (
+        {editable && f.activo && (
           <button type="button" onClick={() => setDesactivar(true)} style={icono} title="Desactivar el flujo (no se borra)" aria-label="Desactivar">
             <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
               <path d="M5 6h10l-.8 10.2a1 1 0 0 1-1 .8H6.8a1 1 0 0 1-1-.8zM3.5 6h13M8 6V4h4v2" stroke="#4b5563" strokeWidth="1.7" fill="#6b7280" fillOpacity=".25" strokeLinejoin="round" />
@@ -159,14 +161,14 @@ export default function PanelFlujo({
         )}
         <MenuPuntos
           opciones={[
-            { texto: "Editar", onClick: onEditar, oculto: !puede },
+            { texto: "Editar", onClick: onEditar, oculto: !editable },
             { texto: "Revisar permisos de Trimble", onClick: verPermisos, oculto: !puede },
-            { texto: "Activar", onClick: () => void cambiarEstado(true), oculto: !puede || f.activo },
-            { texto: "Desactivar…", onClick: () => setDesactivar(true), oculto: !puede || !f.activo, peligro: true },
+            { texto: "Activar", onClick: () => void cambiarEstado(true), oculto: !editable || f.activo },
+            { texto: "Desactivar…", onClick: () => setDesactivar(true), oculto: !editable || !f.activo, peligro: true },
           ]}
         />
       </div>
-      {desactivar && (
+      {desactivar && editable && (
         <Notice kind="warning" style={{ margin: "0 16px 10px" }}>
           Al desactivar «{f.hito}» deja de revisar versiones nuevas de sus archivos. No se borra: su configuración, sus archivos y su historial se conservan y se puede volver a activar.
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
@@ -186,22 +188,28 @@ export default function PanelFlujo({
       )}
 
       <Bloque titulo="Detalles" abierto={abiertas.has("detalles")} onAlternar={() => alternar("detalles")}>
-        <div style={{ marginBottom: 10 }}>
-          <EtiquetaEstado estado={fila.estado} />
+        <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+          <EtiquetaEstado estado={fila.estado} ayuda={ayudaEstado(fila)} desactivado={!f.activo} />
+          <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>{fila.detalleEstado}</span>
         </div>
-        <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.estado === "vencido" ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.estado === "vencido" ? " (vencido, con archivos por revisar)" : ""}</span> : "Sin fecha"}</Dato>
+        {fila.cierre && (
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--tc-gray-700)", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 4, padding: "7px 10px" }}>
+            <strong>Flujo cerrado</strong> desde la primera decisión ({describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Sigue revisando las versiones nuevas de sus archivos.
+          </p>
+        )}
+        <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.vencido ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.vencido ? " (vencido, con archivos esperando decisión)" : ""}</span> : "Sin fecha"}</Dato>
         <Dato etiqueta="Pasos y responsables">
           <div>
             <strong>Realiza:</strong> quien sube cada versión (y la corrige si la rechazan)
           </div>
           {f.pasos.map((p) => (
             <div key={p.id}>
-              <strong>{p.nombre}:</strong> {p.responsable ? nombreResponsable(p.responsable) : <span style={{ color: "#a1261b" }}>sin responsable{puede ? " (edita el flujo para elegirlo)" : ""}</span>}
+              <strong>{p.nombre}:</strong> {p.responsable ? nombreResponsable(p.responsable) : <span style={{ color: "#a1261b" }}>sin responsable{editable ? " (edita el flujo para elegirlo)" : " (lo decide un administrador)"}</span>}
             </div>
           ))}
         </Dato>
         <Dato etiqueta="Archivos">
-          {f.archivos.length} {f.archivos.length === 1 ? "elegido" : "elegidos"} · {fila.pendientes} por revisar{fila.porRevisar ? ` (${fila.porRevisar} te tocan)` : ""}
+          {f.archivos.length} {f.archivos.length === 1 ? "elegido" : "elegidos"} · {fila.pendientes} esperando decisión{fila.porRevisar ? ` (${fila.porRevisar} te tocan)` : ""}
         </Dato>
         {f.destino && <Dato etiqueta="Carpeta destino (flujo anterior)">{f.destino.ruta}</Dato>}
         {f.notas && <Dato etiqueta="Notas"><span style={{ whiteSpace: "pre-wrap" }}>{f.notas}</span></Dato>}

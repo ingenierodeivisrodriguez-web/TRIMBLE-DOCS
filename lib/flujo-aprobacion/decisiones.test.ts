@@ -5,7 +5,7 @@ import type { ProjectUser, RawFolderItem } from "../trimbleApi";
 import { decidir } from "./decisiones";
 import { FlujoError } from "./errores";
 import { listarArchivos, revisarFlujo } from "./revision";
-import { Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
+import { cambiarEstado, Ctx, estado, guardarFlujo, historial, TrimbleFlujo } from "./service";
 import { memoryStore } from "./store";
 
 const persona = (id: string, firstName: string, role = "USER"): ProjectUser => ({ id, firstName, lastName: "", email: `${id}@obra.co`, role, status: "ACTIVE" });
@@ -189,4 +189,46 @@ test("dos personas del grupo aprueban a la vez: la segunda recibe que ya se deci
   assert.equal(dos.status, "rejected");
   assert.match(String((dos as PromiseRejectedResult).reason?.message), /Otra persona decidió sobre este archivo/);
   assert.equal((await e.modelo()).firmas.length, 1);
+});
+
+/** The flow's own steps again (Revisa = group Arquitectura, Aprueba = Pepe), with a due date. */
+const mismosPasos = (f: { id: string; version: number; hito: string }, vence: string) => ({
+  id: f.id,
+  version: f.version,
+  hito: f.hito,
+  archivos: ["modelo"],
+  pasos: [
+    { id: "p1", nombre: "Revisa", responsable: { tipo: "grupo" as const, id: "g-arq" } },
+    { id: "p2", nombre: "Aprueba", responsable: { tipo: "persona" as const, id: "pepe" } },
+  ],
+  vence,
+});
+const cerrado = (err: unknown) => err instanceof FlujoError && err.code === "flujo-cerrado" && err.status === 409 && /ya tiene decisiones \(la primera el \d\d-\d\d-\d{4}, de Luz\): el flujo quedó cerrado y no se puede editar, activar ni desactivar/.test(err.message);
+
+test("después de la primera decisión el flujo queda cerrado: ni el creador ni un administrador lo editan o desactivan, y sigue revisando versiones nuevas", async () => {
+  const e = await escenario();
+  // Before any decision its creator (an administrator here) still changes it.
+  const antes = await guardarFlujo(e.admin, mismosPasos(e.f, "2026-11-20"));
+  assert.deepEqual(antes.cierres, {});
+  const a = await e.modelo();
+  await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId }, "aprobar");
+  const st = await estado(e.ctx("juan"));
+  const f = st.flujos[0];
+  assert.equal(st.cierres[f.id]?.quien, "Luz", "everyone sees it closed");
+  await assert.rejects(() => guardarFlujo(e.admin, mismosPasos(f, "2026-11-30")), cerrado);
+  await assert.rejects(() => cambiarEstado(e.admin, { id: f.id, version: f.version, activo: false }), cerrado);
+  assert.equal((await estado(e.admin)).flujos[0].vence, "2026-11-20", "nothing changed");
+  // A rejected or corrected document still goes through the same steps.
+  e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2)];
+  assert.match((await revisarFlujo(e.ctx("juan"), { flujoId: f.id })).mensaje, /1 versión nueva/);
+});
+
+test("un flujo desactivado que ya tiene una decisión no se vuelve a activar", async () => {
+  const e = await escenario();
+  const st = await cambiarEstado(e.admin, { id: e.f.id, version: e.f.version, activo: false });
+  assert.equal(st.flujos[0].activo, false, "without decisions it can be deactivated");
+  const a = await e.modelo();
+  await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId }, "aprobar");
+  const f = (await estado(e.admin)).flujos[0];
+  await assert.rejects(() => cambiarEstado(e.admin, { id: f.id, version: f.version, activo: true }), cerrado);
 });

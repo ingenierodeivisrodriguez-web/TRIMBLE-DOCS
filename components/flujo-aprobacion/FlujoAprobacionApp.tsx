@@ -120,7 +120,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
   };
 
   const hoy = diaColombia(new Date().toISOString());
-  const filas = useMemo(() => (datos ? filasFlujos(datos.flujos, archivos?.archivos ?? [], hoy) : []), [datos, archivos, hoy]);
+  const filas = useMemo(() => (datos ? filasFlujos(datos.flujos, archivos?.archivos ?? [], hoy, datos.cierres) : []), [datos, archivos, hoy]);
   const visibles = useMemo(() => filtrarFilas(filas, filtro, hoy), [filas, filtro, hoy]);
   const opciones = useMemo(() => opcionesFiltro(filas), [filas]);
   const seleccionada = panel && panel.tipo !== "nuevo" ? filas.find((f) => f.flujo.id === panel.id) : undefined;
@@ -143,7 +143,8 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
 
   const abierto = !!panel && (panel.tipo === "nuevo" || !!seleccionada);
   const contenidoPanel =
-    panel?.tipo === "nuevo" || (panel?.tipo === "editar" && seleccionada) ? (
+    // A flow closed by its first decision is never edited: its details show instead.
+    panel?.tipo === "nuevo" || (panel?.tipo === "editar" && seleccionada && !seleccionada.cierre) ? (
       <div style={{ padding: 16 }}>
         <EditorFlujo
           key={panel.tipo === "nuevo" ? "nuevo" : panel.id}
@@ -162,7 +163,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
           onCancelar={() => setPanel(panel.tipo === "editar" ? { tipo: "detalle", id: panel.id } : null)}
         />
       </div>
-    ) : panel?.tipo === "detalle" && seleccionada && datos ? (
+    ) : (panel?.tipo === "detalle" || panel?.tipo === "editar") && seleccionada && datos ? (
       <PanelFlujo
         key={seleccionada.flujo.id}
         api={api}
@@ -173,9 +174,13 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
         archivos={archivos}
         errorArchivos={errorArchivos}
         recarga={recarga}
-        pedirDesactivar={!!panel.desactivar}
+        pedirDesactivar={panel.tipo === "detalle" && !!panel.desactivar}
         onCambio={cambio}
-        onCambioArchivos={cargarArchivos}
+        onCambioArchivos={() => {
+          cargarArchivos();
+          // A decision closes the flow: read the flows again.
+          cargar();
+        }}
         onEditar={() => setPanel({ tipo: "editar", id: seleccionada.flujo.id })}
         onCerrar={() => setPanel(null)}
       />

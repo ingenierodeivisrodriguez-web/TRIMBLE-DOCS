@@ -8,7 +8,8 @@
  * - since 09-11-2026 there are no review folders, no destination chosen in
  *   advance and no "who does what" by folder (the owner's decision).
  */
-import { ArchivoFlujo, Flujo, MAX_ARCHIVOS, MAX_PASOS, MIN_PASOS, PasoFlujo, Responsable } from "./types";
+import { fechaHora } from "../compras/formato";
+import { ArchivoFlujo, Cierre, Flujo, MAX_ARCHIVOS, MAX_PASOS, MIN_PASOS, PasoFlujo, Responsable } from "./types";
 
 /** The name of the first step: whoever uploads the file and corrects it if it is rejected. */
 export const PAPEL_REALIZA = "realiza";
@@ -146,4 +147,29 @@ export function cambiosFlujo(antes: Pick<Flujo, "hito" | "pasos" | "archivos" | 
 /** Whether the caller may change a flow: whoever created it, or a project administrator. */
 export function puedeCambiar(f: Pick<Flujo, "creadoPorId">, quien: { id: string; esAdmin: boolean }): boolean {
   return quien.esAdmin || (!!f.creadoPorId && f.creadoPorId === quien.id);
+}
+
+/** History actions that are a decision on a file: the first one closes the flow (09-11-2026). */
+export const ACCIONES_DECISION = ["aprobado-paso", "aprobado", "rechazado"];
+
+/** The first decision of each flow, from history lines in any order. */
+export function primerasDecisiones(entradas: { flujoId?: string | null; accion: string; creado: string; usuario: string | null; id?: number }[]): Record<string, Cierre> {
+  const out: Record<string, Cierre & { id: number }> = {};
+  for (const e of entradas) {
+    if (!e.flujoId || !ACCIONES_DECISION.includes(e.accion)) continue;
+    const antes = out[e.flujoId];
+    const id = e.id ?? 0;
+    if (!antes || e.creado < antes.fecha || (e.creado === antes.fecha && id < antes.id)) out[e.flujoId] = { fecha: e.creado, quien: e.usuario ?? "", id };
+  }
+  return Object.fromEntries(Object.entries(out).map(([k, { fecha, quien }]) => [k, { fecha, quien }]));
+}
+
+/** "09-11-2026, de Jaiden Rincon": when the flow was closed and by whose decision. */
+export function describirCierre(c: Cierre): string {
+  return `${fechaHora(c.fecha).slice(0, 10) || "fecha sin registrar"}, de ${c.quien || "alguien"}`;
+}
+
+/** Why a closed flow can't be edited, activated or deactivated. */
+export function textoCerrado(hito: string, c: Cierre): string {
+  return `«${hito}» ya tiene decisiones (la primera el ${describirCierre(c)}): el flujo quedó cerrado y no se puede editar, activar ni desactivar. Sigue revisando las versiones nuevas de sus archivos.`;
 }
