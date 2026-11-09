@@ -39,8 +39,8 @@ export type ElementoTrimble = CarpetaFlujo;
 
 /** Trimble Connect through the caller's token. */
 export interface TrimbleFlujo {
-  /** A folder of this project; throws when the caller can't see it or it is of another project. */
-  carpeta(id: string): Promise<ElementoTrimble>;
+  /** A folder of this project and the caller's access to it, as Trimble says; throws when the caller can't see it or it is of another project. */
+  carpeta(id: string): Promise<ElementoTrimble & { permiso?: "READ" | "FULL_ACCESS" | null }>;
   /** A file of this project (where it is now); throws with status 404 when it doesn't exist. */
   archivo(id: string): Promise<ElementoTrimble>;
   personas(): Promise<ProjectUser[]>;

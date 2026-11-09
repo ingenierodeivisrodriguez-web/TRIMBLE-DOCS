@@ -113,8 +113,11 @@ export function describirResponsables(pasos: PasoFlujo[]): string {
   return pasos.map((p) => `${p.nombre}: ${p.responsable ? nombreResponsable(p.responsable) : "sin responsable"}`).join("; ");
 }
 
-/** "Obra / Diseño / modelo.rvt" → "modelo.rvt". */
-export const nombreDeRuta = (ruta: string) => ruta.slice(ruta.lastIndexOf(" / ") + 3);
+/** "Obra / Diseño / modelo.rvt" → "modelo.rvt"; "Obra" → "Obra". */
+export const nombreDeRuta = (ruta: string) => {
+  const i = ruta.lastIndexOf(" / ");
+  return i < 0 ? ruta : ruta.slice(i + 3);
+};
 
 /** What changed in a flow, in words, for the history. */
 export function cambiosFlujo(antes: Pick<Flujo, "hito" | "pasos" | "archivos" | "vence" | "notas">, despues: Pick<Flujo, "hito" | "pasos" | "archivos" | "vence" | "notas">): string {

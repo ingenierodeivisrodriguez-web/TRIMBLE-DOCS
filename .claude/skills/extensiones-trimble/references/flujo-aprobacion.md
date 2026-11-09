@@ -471,16 +471,47 @@ Fase A (hecha el 09-11-2026):
   el flujo y le pone carpeta y destino con `store.actualizarFlujo`, como uno
   viejo).
 
-Fase B (pendiente, el dueño debe aprobarla): al aprobar el último paso,
-«Aprobar» o «Aprobar y poner en una carpeta…» (explorador de carpetas), con
-revisión de acceso completo del responsable (`accesoDe`) y prohibida la
-carpeta del propio archivo; «Poner en una carpeta…» para lo ya aprobado;
-proponer la última carpeta usada (v2, v3 por nombre igual); trazabilidad con
-quién eligió la carpeta. Reusar `copiarUltimaVersion` y la lógica de
-`trasladar` (diferencia, subida con `If-Match`), sin `carpetaDeRevision`.
+Fase B (el dueño dijo "Sí, fase B", hecha el 09-11-2026; sin cambios de SQL):
+
+- `decidir` acepta `destino` (id de carpeta) solo al aprobar el **último paso**
+  de un flujo **sin destino**; `carpetaElegida` (en `trasladar.ts`) lo revisa
+  **antes** de decidir: id válido, carpeta del proyecto (`tc.carpeta`), **no
+  de solo lectura** según `permission` de `GET /folders/{id}` (el permiso del
+  propio usuario que da Trimble; `null` = Trimble no dijo: se deja intentar y
+  Trimble decide en la copia) y `chocaConRevision` (no la carpeta del archivo;
+  no donde un archivo con el mismo nombre, sin distinguir mayúsculas, va por un
+  flujo **activo** y no retirado). Si falla, no se aprueba nada.
+- El detalle de la línea `aprobado` agrega «Eligió ponerla en «ruta».». Luego
+  `trasladar(ctx, id, { carpetaId })`: copia directa a la carpeta (sin
+  `carpetaDeRevision` ni subcarpetas), con la misma lógica de `situacionDestino`
+  (nuevo / versión nueva con `If-Match` / diferencia → «Reemplazar ahí»).
+  Sin `carpetaId` usa `traslado.carpetaId` (reintento o reemplazo); sin
+  ninguna → `sin-carpeta`. Texto del traslado: «Puso la versión N aprobada en
+  «ruta», la carpeta que eligió: versión M ahí (copia dentro de Trimble).»
+  (los flujos viejos conservan «Copió … en el destino …»).
+- `textoTraslado` dice la carpeta («En «ruta»: versión 2 (fecha, quién)»);
+  sin `carpetaRuta`, «la carpeta destino».
+- Pantalla `Archivos`: `Decision` con «¿Qué hacer con la versión aprobada?»
+  (Dejarla donde está / Ponerla también en una carpeta, explorador en modo
+  carpeta, propone `traslado.carpetaId` de la versión anterior) y botón
+  «Aprobar y poner en «carpeta»»; `PonerEnCarpeta` («Poner en una carpeta…» u
+  «otra carpeta…» si la copia de esa versión falló o quedó en diferencia);
+  «Copiar otra vez» y «Reemplazar ahí». `PanelFlujo` volvió a recibir
+  `projectId` (el explorador lo pide).
+- `puedeTrasladar` sigue igual (quien aprobó el último paso o un
+  administrador); textos: «puede ponerlo en una carpeta», «Solo se copia una
+  versión aprobada…».
+- `nombreDeRuta` devuelve la ruta entera cuando no hay « / » (la carpeta raíz:
+  antes salía «boratorio»; lo encontró la prueba en el navegador).
+- Pruebas: `traslado.test.ts` (`chocaConRevision`, textos) y `trasladar.test.ts`
+  (`escenario({ nuevo: true })`: copia a la carpeta elegida sin recrear
+  subcarpetas, aprobar sin carpeta y después `trasladar` con `carpetaId`,
+  carpeta propia / solo lectura / nombre en otro flujo sin decidir nada, v2 en
+  la misma carpeta y diferencia en otra).
 
 Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
 decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, avisar cuando el
 responsable de un paso es quien subió el archivo (no puede decidir su propia
+versión), poner una misma versión aprobada en varias carpetas (hoy, una por
 versión).

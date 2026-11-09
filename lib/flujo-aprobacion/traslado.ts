@@ -1,13 +1,16 @@
 /**
- * Copying the approved version to the destination folder (phase 4), as pure
+ * Copying the approved version to a folder (phases 4 and B), as pure
  * functions:
  * - only the approved version is copied, with the same name; the first time it
- *   is version 1 in the destination, then 2, 3… (a new version of that file);
- * - the subfolders between the review folder and the file are recreated under
- *   the destination;
- * - a file with that name in the destination that the flow didn't put there (or
- *   that changed after the flow's last copy) is shown and only replaced when the
- *   approver or an administrator confirms (the owner's rule 2);
+ *   is version 1 there, then 2, 3… (a new version of that file);
+ * - flows made before 09-11-2026 copy to their destination folder, recreating
+ *   the subfolders between the review folder and the file; newer flows copy to
+ *   the folder the responsible chooses when approving (or later);
+ * - never where a file with that name goes through an active flow (the file's
+ *   own folder included): the copy would be a new version of it, back to review;
+ * - a file with that name there that the flow didn't put (or that changed after
+ *   the flow's last copy) is shown and only replaced when the approver or an
+ *   administrator confirms (the owner's rule 2);
  * - only who approved the last step, or an administrator, copies or retries.
  */
 import { dentroDe } from "./flujos";
@@ -41,11 +44,30 @@ export function aprobador(a: Pick<ArchivoRegistro, "firmas">): { id: string; nom
  * can still copy the previously approved one.
  */
 export function puedeTrasladar(a: Pick<ArchivoRegistro, "estado" | "versionAprobadaId" | "firmas">, quien: { id: string; esAdmin: boolean }): string | null {
-  if (!a.versionAprobadaId || a.estado === "retirado") return "Solo se traslada una versión aprobada de un archivo que sigue en la carpeta de revisión.";
+  if (!a.versionAprobadaId || a.estado === "retirado") return "Solo se copia una versión aprobada de un archivo que sigue en el flujo.";
   if (quien.esAdmin) return null;
   const quienAprobo = aprobador(a);
   if (quienAprobo?.id === quien.id) return null;
-  return `Solo quien lo aprobó${quienAprobo ? ` (${quienAprobo.nombre})` : ""} o un administrador puede trasladarlo.`;
+  return `Solo quien lo aprobó${quienAprobo ? ` (${quienAprobo.nombre})` : ""} o un administrador puede ponerlo en una carpeta.`;
+}
+
+/**
+ * Why the approved version can't go to that folder (null: it can): it is the
+ * file's own folder, or a file with that name goes through an active flow
+ * there (the copy would be a new version of it and come back to review).
+ */
+export function chocaConRevision(
+  a: Pick<ArchivoRegistro, "id" | "carpetaId" | "nombre">,
+  carpeta: Pick<CarpetaFlujo, "id" | "ruta">,
+  registrados: Pick<ArchivoRegistro, "id" | "carpetaId" | "nombre" | "estado" | "flujoId">[],
+  flujos: Pick<Flujo, "id" | "hito" | "activo">[]
+): string | null {
+  if (a.carpetaId === carpeta.id) return `«${carpeta.ruta}» es la carpeta donde está el archivo: la copia sería una versión nueva del mismo archivo y volvería a revisión. Elige otra carpeta.`;
+  const activos = new Map(flujos.filter((f) => f.activo).map((f) => [f.id, f.hito]));
+  const nombre = a.nombre.toLowerCase();
+  const otro = registrados.find((r) => r.id !== a.id && r.carpetaId === carpeta.id && r.nombre.toLowerCase() === nombre && r.estado !== "retirado" && activos.has(r.flujoId));
+  if (otro) return `En «${carpeta.ruta}» está «${otro.nombre}», que va por el flujo «${activos.get(otro.flujoId)}»: la copia sería una versión nueva de ese archivo y volvería a revisión. Elige otra carpeta.`;
+  return null;
 }
 
 /**
@@ -81,19 +103,20 @@ export function trasladoInicial(a: Pick<ArchivoRegistro, "versionAprobadaId" | "
   };
 }
 
-/** "En destino: versión 2 (04-11-2026 18:20, Luz)", "Traslado en curso…" and the like. */
+/** "En «Obra / Aprobados»: versión 2 (04-11-2026 18:20, Luz)", "Copia a «…» en curso…" and the like. */
 export function textoTraslado(t: Traslado | null, fecha: (iso: string) => string): string {
   if (!t) return "";
+  const donde = t.carpetaRuta ? `«${t.carpetaRuta}»` : "la carpeta destino";
   switch (t.estado) {
     case "hecho":
-      return `En destino: versión ${t.destinoRevision ?? "?"}${t.fecha ? ` (${fecha(t.fecha)}${t.por ? `, ${t.por}` : ""})` : ""}`;
+      return `En ${donde}: versión ${t.destinoRevision ?? "?"}${t.fecha ? ` (${fecha(t.fecha)}${t.por ? `, ${t.por}` : ""})` : ""}`;
     case "en-curso":
-      return "Copia al destino en curso…";
+      return `Copia a ${donde} en curso…`;
     case "diferencia":
-      return "En destino hay otro archivo con ese nombre";
+      return `En ${donde} hay otro archivo con ese nombre`;
     case "error":
-      return "No se pudo copiar al destino";
+      return `No se pudo copiar a ${donde}`;
     default:
-      return "Copia al destino pendiente";
+      return `Copia a ${donde} pendiente`;
   }
 }

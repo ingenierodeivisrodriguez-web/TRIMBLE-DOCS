@@ -88,6 +88,7 @@ test("los pasos, sus responsables y los cambios del flujo se dicen en palabras",
   assert.equal(describirPasos(f.pasos), "Realiza → Revisa → Aprueba");
   assert.equal(describirResponsables(f.pasos), "Revisa: Arquitectura (grupo); Aprueba: Ana Ruiz");
   assert.equal(nombreDeRuta(MODELO.ruta), "modelo.rvt");
+  assert.equal(nombreDeRuta("Laboratorio"), "Laboratorio", "the project's root folder");
   assert.equal(
     cambiosFlujo(f, {
       hito: "Aprobar diseño arquitectónico Torre 1",

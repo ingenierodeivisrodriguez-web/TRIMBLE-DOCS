@@ -74,7 +74,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       async carpeta(id) {
         const [p, d] = await Promise.all([elProyecto(), getFolderDetails(servidor, token, id)]);
         if (d.projectId && d.projectId !== projectId) throw new FlujoError("Esa carpeta no es de este proyecto.", 404);
-        return elementoDe(p, d.id, d.name, d.path);
+        return { ...elementoDe(p, d.id, d.name, d.path), permiso: d.permission };
       },
       async archivo(id) {
         const [p, f] = await Promise.all([elProyecto(), getFileDetails(servidor, token, id)]);

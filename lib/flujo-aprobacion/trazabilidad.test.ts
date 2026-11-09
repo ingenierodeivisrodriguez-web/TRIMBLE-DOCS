@@ -109,7 +109,7 @@ test("el resumen dice estado, última subida, última decisión y traslado; el f
   assert.equal(r["Estado"], "Aprobado · versión 2 · aprobada: 2");
   assert.equal(r["Última subida"], "Juan, 02-11-2026 10:00 (versión 2)");
   assert.equal(r["Última decisión"], "Aprobó: Pepe, 03-11-2026 18:00 (versión 2)");
-  assert.equal(r["Traslado"], "En destino: versión 1 (03-11-2026 18:30, Pepe) · Pepe, 03-11-2026 18:30 (versión 2)");
+  assert.equal(r["Traslado"], "En «Obra / Aprobados»: versión 1 (03-11-2026 18:30, Pepe) · Pepe, 03-11-2026 18:30 (versión 2)");
   assert.equal(describirFiltro({ flujoId: "f1", estado: "aprobado", desde: "2026-11-01", hasta: "2026-11-04", texto: " torre " }, HITOS), "Flujo: Aprobar Torre 1 · Estado: Aprobado · Del 01-11-2026 al 04-11-2026 · Texto: «torre»");
   assert.equal(describirFiltro({}, HITOS), "Todos los flujos");
 });

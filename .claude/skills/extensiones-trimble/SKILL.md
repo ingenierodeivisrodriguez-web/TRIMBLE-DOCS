@@ -145,8 +145,9 @@ Herramientas incluidas:
   trazabilidad y PDF; desde el 06-11-2026 en una sola pantalla (lista de
   flujos + panel de detalles) con vencimiento, notas y comentarios; desde el
   09-11-2026 (fase A del ajuste) cualquier miembro crea el flujo marcando sus
-  archivos y un responsable por paso, sin carpeta destino; falta la fase B (el
-  responsable elige la carpeta al aprobar). El dueño debe ejecutar otra vez
+  archivos y un responsable por paso, sin carpeta destino, y (fase B) al
+  aprobar el último paso el responsable decide si pone la versión en una
+  carpeta donde tenga permiso. El dueño debe ejecutar otra vez
   `supabase/flujo-aprobacion.sql` y hacer la prueba en Trimble real (protocolo
   en el README). Ver `references/flujo-aprobacion.md`.
 

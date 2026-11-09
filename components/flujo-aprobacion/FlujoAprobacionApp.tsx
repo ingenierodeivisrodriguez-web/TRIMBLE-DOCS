@@ -166,6 +166,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
       <PanelFlujo
         key={seleccionada.flujo.id}
         api={api}
+        projectId={projectId}
         projectName={projectName}
         fila={seleccionada}
         datos={datos}

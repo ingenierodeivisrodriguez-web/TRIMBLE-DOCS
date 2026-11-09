@@ -13,12 +13,13 @@ const persona = (id: string, firstName: string, role = "USER"): ProjectUser => (
 const PERSONAS = [persona("ana", "Ana", "ADMIN"), persona("juan", "Juan"), persona("pepe", "Pepe"), persona("luz", "Luz")];
 
 /**
- * A fake Trimble project: "Arquitectura" (review, with "Torre 1" inside) and
- * "Aprobados" (destination). A one-step flow ("Aprueba", Pepe) made before
- * 09-11-2026: it kept its review folder and destination, and approved
- * versions are still copied there (new flows have no destination).
+ * A fake Trimble project: "Arquitectura" (with "Torre 1" inside) and
+ * "Aprobados". A one-step flow ("Aprueba", Pepe) with modelo.rvt and
+ * detalle.dwg. By default it is a flow made before 09-11-2026 (review folder
+ * Arquitectura, destination Aprobados: approved versions are copied there);
+ * with `nuevo`, a flow without destination where Pepe chooses the folder.
  */
-async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boolean } = {}) {
+async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boolean; nuevo?: boolean } = {}) {
   const nube = nubeFalsa();
   const p = nube.proyecto("P");
   const arq = nube.sembrarCarpeta(p.raiz, "Arquitectura");
@@ -36,7 +37,7 @@ async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boo
     return { id, ruta: nombres.join(" / "), ancestros: arriba };
   };
   const tc: TrimbleFlujo = {
-    carpeta: async (id) => elemento(id),
+    carpeta: async (id) => ({ ...elemento(id), permiso: nube.carpetas.get(id)!.permiso }),
     archivo: async (id) => {
       const a = nube.archivos.get(id)!;
       const c = elemento(a.parent);
@@ -70,15 +71,15 @@ async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boo
   const como = (id: string, isAdmin = false): Ctx => ({ ...ctx(id, isAdmin), store });
   const admin = como("ana", true);
   const creado = (await guardarFlujo(admin, { hito: "Aprobar Torre 1", archivos: [modelo, detalle], pasos: [{ nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe" } }] })).flujos[0];
-  const f = (await store.actualizarFlujo(creado.id, creado.version, { carpetas: [await tc.carpeta(arq)], destino: await tc.carpeta(apr) }))!;
+  const f = o.nuevo ? creado : (await store.actualizarFlujo(creado.id, creado.version, { carpetas: [elemento(arq)], destino: elemento(apr) }))!;
   const registro = async (fileId: string) => (await listarArchivos(admin)).archivos.find((a) => a.fileId === fileId)!;
   const enDestino = (carpeta = apr) => [...nube.archivos.values()].filter((x) => x.parent === carpeta);
   const texto = (b: Uint8Array) => new TextDecoder().decode(b);
-  const aprobar = async (fileId: string, por = "pepe") => {
+  const aprobar = async (fileId: string, por = "pepe", destino?: string) => {
     const a = await registro(fileId);
-    return decidir(como(por), { archivoId: a.id, versionId: a.versionId }, "aprobar");
+    return decidir(como(por), { archivoId: a.id, versionId: a.versionId, ...(destino ? { destino } : {}) }, "aprobar");
   };
-  return { nube, arq, t1, apr, modelo, detalle, como, admin, f, registro, enDestino, texto, aprobar };
+  return { nube, p, arq, t1, apr, modelo, detalle, como, admin, f, registro, enDestino, texto, aprobar };
 }
 
 test("al aprobar el último paso la versión aprobada pasa sola a la carpeta destino como versión 1, y queda quién y cuándo", async () => {
@@ -167,8 +168,72 @@ test("trasladar otra vez lo que ya está en el destino no hace una copia nueva",
   await e.aprobar(e.modelo);
   const a = await e.registro(e.modelo);
   const r = await pasoTraslado(e.como("pepe"), { archivoId: a.id, paso: "trasladar" });
-  assert.equal(r.mensaje, "La versión aprobada ya está en la carpeta destino.");
+  assert.equal(r.mensaje, "La versión aprobada ya está en «P / Aprobados».");
   assert.equal(e.enDestino()[0].versiones.length, 1);
+});
+
+test("flujo nuevo: el responsable aprueba y pone la versión en la carpeta que elige (versión 1 ahí, sin recrear subcarpetas), y queda quién la eligió y cuándo", async () => {
+  const e = await escenario({ nuevo: true });
+  const r = await e.aprobar(e.modelo, "pepe", e.apr);
+  assert.equal(r.mensaje, "«modelo.rvt» queda aprobado (versión 1). Copiado a «P / Aprobados» (versión 1 ahí).");
+  assert.equal(r.traslado?.estado, "hecho");
+  assert.equal(r.traslado?.carpetaRuta, "P / Aprobados");
+  assert.equal(e.texto(e.enDestino()[0].versiones[0].contenido), "modelo versión 1");
+  const a = await e.registro(e.modelo);
+  const h = (await historial(e.admin, null, a.id)).entradas;
+  assert.match(h.find((x) => x.accion === "aprobado")!.detalle, /el archivo queda aprobado. Eligió ponerla en «P \/ Aprobados».$/);
+  const puso = h.find((x) => x.accion === "trasladado")!;
+  assert.equal(puso.usuario, "Pepe");
+  assert.equal(puso.detalle, "Puso la versión 1 aprobada en «P / Aprobados», la carpeta que eligió: versión 1 ahí (copia dentro de Trimble).");
+  // A file from a subfolder goes straight into the chosen folder.
+  await e.aprobar(e.detalle, "pepe", e.apr);
+  assert.deepEqual(
+    e.enDestino().map((x) => x.name).sort(),
+    ["detalle.dwg", "modelo.rvt"]
+  );
+});
+
+test("flujo nuevo: sin elegir carpeta el archivo queda aprobado donde está, y después se pone en una carpeta", async () => {
+  const e = await escenario({ nuevo: true });
+  const r = await e.aprobar(e.modelo);
+  assert.equal(r.mensaje, "«modelo.rvt» queda aprobado (versión 1).");
+  assert.equal(r.traslado, null);
+  const a = await e.registro(e.modelo);
+  await assert.rejects(() => pasoTraslado(e.como("pepe"), { archivoId: a.id, paso: "trasladar" }), /Elige la carpeta donde poner la versión aprobada/);
+  await assert.rejects(() => pasoTraslado(e.como("luz"), { archivoId: a.id, paso: "trasladar", carpetaId: e.apr }), /Solo quien lo aprobó \(Pepe\) o un administrador puede ponerlo en una carpeta/);
+  const despues = await pasoTraslado(e.como("pepe"), { archivoId: a.id, paso: "trasladar", carpetaId: e.apr });
+  assert.equal(despues.traslado?.estado, "hecho");
+  assert.equal(e.enDestino().length, 1);
+});
+
+test("flujo nuevo: no se elige la carpeta del archivo, una de solo lectura ni una donde ese nombre va por un flujo; y entonces no se decide nada", async () => {
+  const e = await escenario({ nuevo: true, destinoSoloLectura: true });
+  await assert.rejects(() => e.aprobar(e.modelo, "pepe", e.arq), /«P \/ Arquitectura» es la carpeta donde está el archivo/);
+  await assert.rejects(() => e.aprobar(e.modelo, "pepe", e.apr), /Solo tienes lectura en «P \/ Aprobados»/);
+  const otro = e.nube.sembrarArchivo(e.t1, "modelo.rvt", "otro modelo en Torre 1");
+  await guardarFlujo(e.admin, { hito: "Aprobar modelo de Torre 1", archivos: [otro], pasos: [{ nombre: "Aprueba", responsable: { tipo: "persona", id: "luz" } }] });
+  await assert.rejects(() => e.aprobar(e.modelo, "pepe", e.t1), /En «P \/ Arquitectura \/ Torre 1» está «modelo.rvt», que va por el flujo «Aprobar modelo de Torre 1»/);
+  const a = await e.registro(e.modelo);
+  assert.equal(a.estado, "pendiente", "nothing was decided");
+  assert.deepEqual(a.firmas, []);
+});
+
+test("flujo nuevo: la versión nueva aprobada en la misma carpeta queda como versión 2 del mismo archivo; en una carpeta con otro archivo de ese nombre se pregunta", async () => {
+  const e = await escenario({ nuevo: true });
+  await e.aprobar(e.modelo, "pepe", e.apr);
+  e.nube.sembrarArchivo(e.arq, "modelo.rvt", "modelo versión 2", "trb 2");
+  await revisarFlujo(e.admin, { flujoId: e.f.id });
+  const r = await e.aprobar(e.modelo, "pepe", e.apr);
+  assert.equal(r.traslado?.estado, "en-curso");
+  const c = await pasoTraslado(e.como("pepe"), { archivoId: (await e.registro(e.modelo)).id, paso: "confirmar" });
+  assert.equal(c.traslado?.destinoRevision, 2);
+  assert.equal(e.enDestino().length, 1, "same file, not a second one");
+  // Another folder that already has a "detalle.dwg" the flow didn't put there.
+  const otra = e.nube.sembrarCarpeta(e.p.raiz, "Entregas");
+  e.nube.sembrarArchivo(otra, "detalle.dwg", "subido a mano");
+  const d = await e.aprobar(e.detalle, "pepe", otra);
+  assert.equal(d.traslado?.estado, "diferencia");
+  assert.match(d.traslado!.diferenciaTexto, /En «P \/ Entregas» ya hay un «detalle.dwg» que no llegó por este flujo/);
 });
 
 test("la trazabilidad de un archivo cuenta quién subió, quién aprobó y quién trasladó, y rechaza filtros malos", async () => {

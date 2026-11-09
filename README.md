@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; desde el 06-11-2026 todo en una sola pantalla con panel de detalles, fecha de vencimiento, notas y comentarios; desde el 09-11-2026 quien crea el flujo marca sus archivos y elige el responsable de cada paso, sin carpeta destino; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; desde el 06-11-2026 todo en una sola pantalla con panel de detalles, fecha de vencimiento, notas y comentarios; desde el 09-11-2026 quien crea el flujo marca sus archivos y elige el responsable de cada paso, sin carpeta destino, y al aprobar el último paso el responsable decide si pone la versión en una carpeta donde tenga permiso; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4468,9 +4468,10 @@ Pedido por el dueño: (1) solo quien crea el flujo define qué archivos lleva,
 con selección múltiple; (2) quien crea el flujo **no** pone carpeta destino:
 pone los pasos y un **responsable** en cada uno; (3) el responsable decide qué
 hacer con lo aprobado, por ejemplo ponerlo en una carpeta donde tenga permiso.
-Aceptó las recomendaciones del plan; esta es la **fase A** (crear el flujo). La
-**fase B** (al aprobar, el responsable elige la carpeta) está pendiente. Hay
-que volver a ejecutar **`supabase/flujo-aprobacion.sql`**.
+Aceptó las recomendaciones del plan, en dos fases hechas el 09-11-2026: **fase
+A** (crear el flujo, abajo) y **fase B** (el responsable decide dónde poner lo
+aprobado, en la sección siguiente). Hay que volver a ejecutar
+**`supabase/flujo-aprobacion.sql`** (la fase B no cambia la base de datos).
 
 - **Cualquier miembro del proyecto** crea un flujo con **Nuevo**. Lo cambian
   (archivos, pasos, responsables, activar o desactivar, revisar permisos)
@@ -4501,8 +4502,6 @@ que volver a ejecutar **`supabase/flujo-aprobacion.sql`**.
   en sus archivos elegidos; sus pasos quedan **sin responsable** hasta que un
   administrador los edite y lo elija; si tenían carpeta destino, lo aprobado se
   sigue copiando ahí. Lo que tenían en «Quién hace qué» queda en el historial.
-- Mientras llega la fase B, al aprobar el último paso de un flujo nuevo el
-  archivo queda **Aprobado** donde está (no se copia a ninguna carpeta).
 
 Código: [`lib/flujo-aprobacion/flujos.ts`](lib/flujo-aprobacion/flujos.ts)
 (reglas: archivos, responsables, `conflictosArchivos`, `puedeCambiar`),
@@ -4515,6 +4514,56 @@ Columnas `aprobacion_flujos.archivos` (jsonb) y `creado_por_id`; `destino` ya
 puede quedar vacío; *trigger* `aprobacion_revisar_archivos`
 (`archivo-en-otro-flujo`). Se borraron las rutas `/api/flujo-aprobacion/asignaciones`
 (la tabla `aprobacion_asignaciones` se conserva).
+
+### Fase B: el responsable decide dónde poner lo aprobado (09-11-2026)
+
+Al aprobar el **último paso** de un flujo sin carpeta destino, el panel
+**Decidir** pregunta **«¿Qué hacer con la versión aprobada?»**:
+
+- **Dejarla donde está**: el archivo queda **Aprobado** y no se copia.
+- **Ponerla también en una carpeta**: se abre el explorador; la persona abre
+  la carpeta y pulsa «Usar esta carpeta», y el botón pasa a **«Aprobar y poner
+  en «carpeta»»**. Se copia la versión aprobada con el mismo nombre (el
+  original sigue donde está).
+
+Reglas (las revisa el servidor **antes** de aprobar; si una falla, no se
+decide nada):
+
+- La carpeta debe ser del proyecto y **no de solo lectura** para quien aprueba
+  en Trimble («previamente debe tener acceso o autorización del sistema»): el
+  explorador no deja usar una carpeta de solo lectura y el servidor lo vuelve a
+  revisar con lo que dice Trimble; además Trimble rechaza la copia si no hay
+  permiso (queda el error y se puede reintentar).
+- **No** puede ser la carpeta donde está el archivo, ni una carpeta donde un
+  archivo con el mismo nombre va por un flujo activo: la copia sería una
+  versión nueva de ese archivo y volvería a revisión.
+- Si en la carpeta ya está la copia que el flujo puso antes, la versión nueva
+  queda **encima como versión 2, 3…** (mismo archivo). Si hay un archivo con ese
+  nombre que no llegó por el flujo, se muestra y se pregunta antes de
+  reemplazarlo («Reemplazar ahí», regla 2).
+- Para la siguiente versión aprobada se **propone la misma carpeta** de la vez
+  anterior (se puede cambiar o dejar donde está).
+- Quien decide es el **responsable del último paso** (o un administrador, que
+  queda anotado como tal).
+
+Después: un archivo aprobado sin copiar (o cuya copia falló) muestra **«Poner
+en una carpeta…»** (o «Poner en otra carpeta…») para quien lo aprobó o un
+administrador; si la copia falló, también **«Copiar otra vez»** en la misma
+carpeta. El estado dice dónde quedó: «En «Laboratorio / via salado»: versión 1
+(fecha, quién)».
+
+Trazabilidad: la línea «Aprobó» del historial dice **«Eligió ponerla en
+«carpeta»»** y la línea del traslado dice quién la puso, cuándo, en qué carpeta
+y qué versión quedó ahí; las dos salen en el PDF. Los flujos de antes del
+09-11-2026 con carpeta destino siguen copiando ahí, como siempre.
+
+Código: [`lib/flujo-aprobacion/traslado.ts`](lib/flujo-aprobacion/traslado.ts)
+(`chocaConRevision`, `textoTraslado` con la carpeta),
+[`trasladar.ts`](lib/flujo-aprobacion/trasladar.ts) (`carpetaElegida`: proyecto,
+permiso de Trimble y regla de revisión; `trasladar(…, { carpetaId })`),
+`decisiones.ts` (`decidir` con `destino`); pantalla `Archivos` (`Decision`,
+`ElegirCarpeta`, `PonerEnCarpeta`). Rutas: `POST /api/flujo-aprobacion/aprobar`
+acepta `destino` y `POST /api/flujo-aprobacion/trasladar` acepta `carpetaId`.
 
 ### Guía rápida
 
@@ -4535,10 +4584,13 @@ puede quedar vacío; *trigger* `aprobacion_revisar_archivos`
 5. Cada responsable pulsa **«Tienes N archivos por revisar»**, abre el flujo y
    en **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
    comentario si quiere) o rechaza con el motivo.
-6. Al aprobar el último paso el archivo queda aprobado. (En los flujos de antes
-   con carpeta destino, la versión aprobada pasa sola a esa carpeta; si algo
-   queda en espera o falla, el archivo lo dice y quien aprobó o un
-   administrador lo resuelve.)
+6. Al aprobar el último paso, el responsable elige **Dejarla donde está** o
+   **Ponerla también en una carpeta** (una donde Trimble le deje subir
+   archivos). Si después la quiere poner en una carpeta, usa **«Poner en una
+   carpeta…»** en el archivo. Si algo queda en espera (otro archivo con ese
+   nombre) o falla, el archivo lo dice y quien aprobó o un administrador lo
+   resuelve. (En los flujos de antes con carpeta destino, la versión aprobada
+   pasa sola a esa carpeta.)
 7. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
    mí**, corrige y sube la versión nueva con el mismo nombre en la misma
    carpeta.
@@ -4548,8 +4600,7 @@ puede quedar vacío; *trigger* `aprobacion_revisar_archivos`
 ### Protocolo de prueba en Trimble real
 
 En un proyecto de pruebas, con dos usuarios (A administra, B modela) y un grupo
-de Trimble con al menos un miembro (actualizado el 09-11-2026 para la fase A;
-las pruebas de copia a una carpeta vuelven con la fase B):
+de Trimble con al menos un miembro (actualizado el 09-11-2026, fases A y B):
 
 1. B (que no es administrador) sube un `.rvt` y un `.pdf`, y crea un flujo
    «Prueba flujo» marcando los dos archivos, con dos pasos: Revisa = el
@@ -4560,16 +4611,27 @@ las pruebas de copia a una carpeta vuelven con la fase B):
    B revisa los permisos de Trimble desde el ⋮.
 3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; tarea para A) y
    rechaza el `.pdf` con motivo (tarea para B con el motivo).
-4. A aprueba el `.rvt`: queda **Aprobado** donde está.
+4. A aprueba el `.rvt` eligiendo **Ponerla también en una carpeta**:
+   primero prueba la carpeta del propio archivo y una de solo lectura (deben
+   rechazarse sin aprobar nada); luego una carpeta vacía donde tenga acceso
+   completo: el `.rvt` debe aparecer ahí como **versión 1** y abrirse en el
+   visor sin «Conversión en curso».
 5. B sube la versión corregida del `.pdf` con el mismo nombre: al abrir la
    extensión debe quedar como **nueva versión pendiente** desde el primer paso.
    B mueve el `.rvt` a otra carpeta: el flujo lo sigue (solo cambia la ruta).
-6. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
-   «Prueba flujo». B quita el `.pdf` del flujo: queda **Retirado**, sin
+6. B sube una versión nueva del `.rvt`; se aprueba otra vez con la carpeta
+   que se propone (la misma): ahí debe quedar **el mismo archivo en versión 2**
+   (no un archivo nuevo).
+7. A aprueba el `.pdf` corregido con **Dejarla donde está** y luego usa
+   **«Poner en una carpeta…»** con una carpeta donde A subió a mano un archivo
+   con el mismo nombre: debe quedar «En «carpeta» hay otro archivo con ese
+   nombre» hasta que A pulse «Reemplazar ahí».
+8. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
+   «Prueba flujo». B quita un archivo del flujo: queda **Retirado**, sin
    borrarse en Trimble.
-7. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
-   estén quién subió, quién revisó, decisiones con fecha, motivos y quién
-   trasladó.
+9. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
+   estén quién subió, quién revisó, decisiones con fecha, motivos, qué carpeta
+   eligió el responsable y quién copió la versión ahí.
 
 ## Cómo funciona (común a ambas extensiones)
 

@@ -58,6 +58,7 @@ function Dato({ etiqueta, children }: { etiqueta: string; children: ReactNode })
  */
 export default function PanelFlujo({
   api,
+  projectId,
   projectName,
   fila,
   datos,
@@ -71,6 +72,7 @@ export default function PanelFlujo({
   onCerrar,
 }: {
   api: FlujoApi;
+  projectId: string;
   projectName: string;
   fila: FilaFlujo;
   datos: EstadoFlujos;
@@ -209,7 +211,7 @@ export default function PanelFlujo({
       </Bloque>
 
       <Bloque titulo="Archivos" abierto={abiertas.has("archivos")} onAlternar={() => alternar("archivos")} extra={fila.porRevisar ? <span style={{ color: "#8a5a00", fontWeight: 600 }}>{fila.porRevisar} te tocan</span> : `${fila.archivos}`}>
-        <Archivos key={f.id} api={api} flujoId={f.id} datos={archivos} error={errorArchivos} onCambio={onCambioArchivos} />
+        <Archivos key={f.id} api={api} projectId={projectId} flujoId={f.id} datos={archivos} error={errorArchivos} onCambio={onCambioArchivos} />
       </Bloque>
 
       {puede && (
