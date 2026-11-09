@@ -7,11 +7,9 @@ export interface DatosFlujoEnvio {
   id?: string;
   version?: number;
   hito: string;
-  carpetas: string[];
-  destino: string;
-  pasos: { id?: string; nombre: string }[];
-  /** Deactivate the assignments the change leaves without sense. */
-  confirmar?: boolean;
+  /** Trimble ids of the chosen files. */
+  archivos: string[];
+  pasos: { id?: string; nombre: string; responsable: { tipo: "persona" | "grupo"; id: string } | null }[];
   /** "AAAA-MM-DD" or empty. */
   vence?: string;
   notas?: string;
@@ -26,11 +24,9 @@ export interface FlujoApi {
   guardarFlujo(datos: DatosFlujoEnvio): Promise<EstadoFlujos>;
   cambiarEstado(id: string, version: number, activo: boolean): Promise<EstadoFlujos>;
   equipo(): Promise<Equipo>;
-  asignar(datos: { flujoId: string; objetivos: { tipo: "carpeta" | "archivo"; id: string }[]; quien: { tipo: "persona" | "grupo"; id: string }; papel: string }): Promise<EstadoFlujos & { mensaje: string }>;
-  quitarAsignacion(id: string): Promise<EstadoFlujos>;
   permisos(flujoId: string): Promise<{ avisos: AvisoPermisos[]; carpetas: PermisosCarpeta[] }>;
   historial(flujoId?: string, archivoId?: string): Promise<{ entradas: EntradaHistorial[] }>;
-  /** Walks one flow's review folders and registers what changed (phase 2). */
+  /** Reads one flow's files in Trimble and registers what changed (phase 2). */
   revisar(flujoId: string): Promise<ResumenRevision>;
   archivos(): Promise<{ yo: string; esAdmin: boolean; archivos: ArchivoInfo[] }>;
   /** Approves or rejects the step a file waits for, on the version seen (phase 3). */
@@ -58,8 +54,6 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     guardarFlujo: (datos) => post("/flujos", datos),
     cambiarEstado: (id, version, activo) => post("/flujos/estado", { id, version, activo }),
     equipo: () => request("/equipo"),
-    asignar: (datos) => post("/asignaciones", datos),
-    quitarAsignacion: (id) => post("/asignaciones/quitar", { id }),
     permisos: (flujoId) => request(`/permisos?flujoId=${encodeURIComponent(flujoId)}`),
     historial: (flujoId, archivoId) => {
       const q = new URLSearchParams();

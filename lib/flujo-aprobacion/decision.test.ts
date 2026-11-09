@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { Respuesta } from "../compras/cde";
 import { avisoRechazo, avisosRevision, enviarAviso, MAX_EN_AVISO } from "./avisos";
 import { Decisor, planDecision, puedeDecidir, revisarTexto } from "./decision";
-import type { ArchivoRegistro, Asignacion } from "./types";
+import type { ArchivoRegistro, PasoFlujo } from "./types";
 
 const AHORA = "2026-11-04T21:00:00.000Z";
 const archivo = (extra: Partial<ArchivoRegistro> = {}): ArchivoRegistro => ({
@@ -35,33 +35,25 @@ const archivo = (extra: Partial<ArchivoRegistro> = {}): ArchivoRegistro => ({
   actualizado: AHORA,
   ...extra,
 });
-const asig = (papel: string, quienTipo: "persona" | "grupo", quienId: string, quienNombre: string, objetivoId = "arq"): Asignacion => ({
-  id: `${papel}-${quienId}`,
-  flujoId: "f1",
-  proyecto: "P",
-  objetivoTipo: "carpeta",
-  objetivoId,
-  objetivoRuta: "",
-  objetivoAncestros: ["raiz"],
-  papel,
-  quienTipo,
-  quienId,
-  quienNombre,
-  activa: true,
-  creado: AHORA,
-  creadoPor: null,
-});
-const ASIG = [asig("p1", "grupo", "g-arq", "Arquitectura"), asig("p2", "persona", "pepe", "Pepe Gómez")];
+/** The flow as it is now: Revisa = group Arquitectura, Aprueba = Pepe. */
+const PASOS: PasoFlujo[] = [
+  { id: "p1", nombre: "Revisa", responsable: { tipo: "grupo", id: "g-arq", nombre: "Arquitectura" } },
+  { id: "p2", nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe", nombre: "Pepe Gómez" } },
+];
+const FLUJO = { hito: "Aprobar Torre 1", pasos: PASOS };
 const quien = (id: string, extra: Partial<Decisor> = {}): Decisor => ({ id, nombre: id, esAdmin: false, grupos: new Set(), ...extra });
 
-test("decide quien tiene el paso (o cualquiera de su grupo) o un administrador; nunca quien subió esa versión", () => {
+test("decide el responsable del paso (o cualquiera de su grupo) o un administrador; nunca quien subió esa versión", () => {
   const a = archivo();
-  assert.deepEqual(puedeDecidir(a, ASIG, quien("luz", { grupos: new Set(["g-arq"]) })), { error: null, comoAdmin: false });
-  assert.deepEqual(puedeDecidir(a, ASIG, quien("ana", { esAdmin: true })), { error: null, comoAdmin: true });
-  assert.match(puedeDecidir(a, ASIG, quien("pepe")).error!, /El paso «Revisa» de este archivo no es tuyo: lo tiene Arquitectura \(grupo\)/);
-  assert.match(puedeDecidir(a, ASIG, quien("juan", { esAdmin: true, grupos: new Set(["g-arq"]) })).error!, /Tú subiste esta versión/);
-  assert.match(puedeDecidir(archivo({ estado: "aprobado" }), ASIG, quien("ana", { esAdmin: true })).error!, /no espera revisión: está «Aprobado»/);
-  assert.match(puedeDecidir(a, [], quien("luz")).error!, /no tiene a nadie asignado y solo un administrador puede decidirlo/);
+  assert.deepEqual(puedeDecidir(a, FLUJO, quien("luz", { grupos: new Set(["g-arq"]) })), { error: null, comoAdmin: false });
+  assert.deepEqual(puedeDecidir(a, FLUJO, quien("ana", { esAdmin: true })), { error: null, comoAdmin: true });
+  assert.match(puedeDecidir(a, FLUJO, quien("pepe")).error!, /El paso «Revisa» de este archivo no es tuyo: lo tiene Arquitectura \(grupo\)/);
+  assert.match(puedeDecidir(a, FLUJO, quien("juan", { esAdmin: true, grupos: new Set(["g-arq"]) })).error!, /Tú subiste esta versión/);
+  assert.match(puedeDecidir(archivo({ estado: "aprobado" }), FLUJO, quien("ana", { esAdmin: true })).error!, /no espera revisión: está «Aprobado»/);
+  assert.match(puedeDecidir(a, { pasos: [{ id: "p1", nombre: "Revisa" }] }, quien("luz")).error!, /no tiene responsable y solo un administrador puede decidirlo/);
+  // A responsible changed in the flow reaches files already in process.
+  const otro = { pasos: [{ ...PASOS[0], responsable: { tipo: "persona" as const, id: "luz", nombre: "Luz" } }, PASOS[1]] };
+  assert.deepEqual(puedeDecidir(a, otro, quien("luz")), { error: null, comoAdmin: false });
 });
 
 test("aprobar un paso pasa al siguiente y aprobar el último deja aprobada esa versión, con su firma", () => {
@@ -94,16 +86,16 @@ test("los avisos juntan los archivos que esperan a las mismas personas en el mis
     archivo(),
     archivo({ id: "a2", fileId: "plano", nombre: "A-101.pdf", estado: "nueva-version", revision: 3 }),
     archivo({ id: "a3", fileId: "otro", nombre: "Memoria.docx", pasoActual: 1 }),
-    archivo({ id: "a4", fileId: "sin", nombre: "Suelto.pdf", flujoId: "f2" }),
   ];
-  const avisos = avisosRevision(archivos, ASIG, new Map([["f1", "Aprobar Torre 1"]]), (a) => `https://tc/${a.fileId}`);
-  assert.equal(avisos.length, 2, "f2 has nobody assigned: no notice");
+  const avisos = avisosRevision(archivos, FLUJO, (a) => `https://tc/${a.fileId}`);
+  assert.equal(avisos.length, 2);
   assert.equal(avisos[0].titulo, "Revisar 2 archivos (Revisa) — Aprobar Torre 1");
   assert.deepEqual(avisos[0].para, [{ tipo: "grupo", id: "g-arq", nombre: "Arquitectura" }]);
   assert.match(avisos[0].descripcion, /• A-101.pdf — versión 3 \(versión nueva\): https:\/\/tc\/plano/);
   assert.equal(avisos[1].titulo, "Revisar: Memoria.docx (Aprueba) — Aprobar Torre 1");
-  const muchos = avisosRevision(Array.from({ length: MAX_EN_AVISO + 3 }, (_, i) => archivo({ id: `x${i}`, fileId: `x${i}`, nombre: `x${i}.pdf` })), ASIG, new Map(), () => "u");
-  assert.match(muchos[0].descripcion, /… y 3 más: ábrelos en Flujo de aprobación → Por revisar\./);
+  const muchos = avisosRevision(Array.from({ length: MAX_EN_AVISO + 3 }, (_, i) => archivo({ id: `x${i}`, fileId: `x${i}`, nombre: `x${i}.pdf` })), FLUJO, () => "u");
+  assert.match(muchos[0].descripcion, /… y 3 más: ábrelos en Flujo de aprobación, flujo «Aprobar Torre 1» → Archivos → Me toca\./);
+  assert.deepEqual(avisosRevision([archivo()], { hito: "x", pasos: [{ id: "p1", nombre: "Revisa" }] }, () => "u"), [], "a step without responsible: no notice");
 });
 
 test("el aviso de rechazo va a quien subió la versión, con el motivo y dónde subir la corrección", () => {

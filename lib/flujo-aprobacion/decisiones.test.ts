@@ -5,18 +5,13 @@ import type { ProjectUser, RawFolderItem } from "../trimbleApi";
 import { decidir } from "./decisiones";
 import { FlujoError } from "./errores";
 import { listarArchivos, revisarFlujo } from "./revision";
-import { agregarAsignaciones, Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
+import { Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
 import { memoryStore } from "./store";
-import type { CarpetaFlujo } from "./types";
 
-const CARPETAS: Record<string, CarpetaFlujo> = {
-  arq: { id: "arq", ruta: "Obra / Arquitectura", ancestros: ["raiz"] },
-  apr: { id: "apr", ruta: "Obra / Aprobados", ancestros: ["raiz"] },
-};
 const persona = (id: string, firstName: string, role = "USER"): ProjectUser => ({ id, firstName, lastName: "", email: `${id}@obra.co`, role, status: "ACTIVE" });
 const PERSONAS = [persona("ana", "Ana", "ADMIN"), persona("juan", "Juan"), persona("luz", "Luz"), persona("pepe", "Pepe"), persona("eva", "Eva")];
 
-/** Arquitectura with a model uploaded by Juan; Revisa = group Arquitectura (Luz, Eva), Aprueba = Pepe. */
+/** A model uploaded by Juan; Revisa = group Arquitectura (Luz, Eva), Aprueba = Pepe. */
 async function escenario() {
   const store = memoryStore();
   const arbol: Record<string, RawFolderItem[]> = {};
@@ -33,7 +28,9 @@ async function escenario() {
   arbol.arq = [archivo("modelo", "modelo.rvt", 1)];
   const tareas: Record<string, unknown>[] = [];
   const tc: TrimbleFlujo = {
-    carpeta: async (id) => CARPETAS[id],
+    carpeta: async () => {
+      throw new FlujoError("No se usa.", 500);
+    },
     archivo: async (id) => ({ id, ruta: `Obra / Arquitectura / ${id}`, ancestros: ["raiz", "arq"] }),
     personas: async () => PERSONAS,
     grupos: async () => [{ id: "g-arq", name: "Arquitectura" }],
@@ -55,10 +52,16 @@ async function escenario() {
     ahora: () => new Date("2026-11-04T22:00:00Z"),
   });
   const admin = ctx("ana", true);
-  const f = (await guardarFlujo(admin, { hito: "Aprobar Torre 1", carpetas: ["arq"], destino: "apr", pasos: [{ nombre: "Revisa" }, { nombre: "Aprueba" }] })).flujos[0];
-  await agregarAsignaciones(admin, { flujoId: f.id, objetivos: [{ tipo: "carpeta", id: "arq" }], quien: { tipo: "grupo", id: "g-arq" }, papel: "p1" });
-  await agregarAsignaciones(admin, { flujoId: f.id, objetivos: [{ tipo: "carpeta", id: "arq" }], quien: { tipo: "persona", id: "pepe" }, papel: "p2" });
-  const registro = await revisarFlujo(admin, { flujoId: f.id });
+  const guardado = await guardarFlujo(admin, {
+    hito: "Aprobar Torre 1",
+    archivos: ["modelo"],
+    pasos: [
+      { nombre: "Revisa", responsable: { tipo: "grupo", id: "g-arq" } },
+      { nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe" } },
+    ],
+  });
+  const f = guardado.flujos[0];
+  const registro = { mensaje: guardado.mensaje ?? "" };
   const modelo = async () => (await listarArchivos(admin)).archivos.find((a) => a.fileId === "modelo")!;
   return { store, arbol, archivo, tareas, ctx, admin, f, registro, modelo };
 }
@@ -86,8 +89,8 @@ test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa ve
   // Eva (same group) can't approve a step that is no longer hers.
   await assert.rejects(() => decidir(e.ctx("eva"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /El paso «Aprueba» de este archivo no es tuyo: lo tiene Pepe/);
   const r2 = await decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId, texto: "Cumple" }, "aprobar");
-  assert.match(r2.mensaje, /^«modelo.rvt» queda aprobado \(versión 1\)\. No se pudo leer el archivo en la carpeta de revisión/);
-  assert.equal(r2.traslado?.estado, "error", "this fake Trimble has no files: the copy fails and can be retried");
+  assert.equal(r2.mensaje, "«modelo.rvt» queda aprobado (versión 1).");
+  assert.equal(r2.traslado, null, "a flow without destination: the approved version stays where it is");
   a = await e.modelo();
   assert.equal(a.estado, "aprobado");
   assert.equal(a.revisionAprobada, 1);

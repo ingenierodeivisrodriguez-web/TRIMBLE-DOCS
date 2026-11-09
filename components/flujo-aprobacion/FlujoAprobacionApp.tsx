@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
+import { puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
 import { filasFlujos, filtrarFilas, FiltroLista, opcionesFiltro } from "../../lib/flujo-aprobacion/lista";
 import { diaColombia } from "../../lib/flujo-aprobacion/trazabilidad";
 import type { ArchivoInfo, Equipo, EstadoFlujos, Flujo } from "../../lib/flujo-aprobacion/types";
@@ -31,10 +32,10 @@ function useAncho() {
 
 /**
  * "Flujo de aprobación" in one screen, like Trimble's own lists: on opening,
- * the review folders of every active flow are walked and new files and
- * versions registered; below, the flows as a table with filters, and a click
- * on a row opens its details on the right (files and decisions, who does what,
- * history, comments). "Nuevo" opens the flow form in that same panel.
+ * the chosen files of every active flow are read and new versions registered;
+ * below, the flows as a table with filters, and a click on a row opens its
+ * details on the right (steps and responsibles, files and decisions, history,
+ * comments). "Nuevo" (any member) opens the flow form in that same panel.
  */
 export default function FlujoAprobacionApp({ api, projectId, projectName }: { api: FlujoApi; projectId: string; projectName: string }) {
   const [datos, setDatos] = useState<EstadoFlujos | null>(null);
@@ -76,13 +77,15 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
     cargarArchivos();
   }, [cargar, cargarArchivos]);
 
+  // Trimble's people and groups, for choosing each step's responsible: read when the form opens.
+  const editando = panel?.tipo === "nuevo" || panel?.tipo === "editar";
   useEffect(() => {
-    if (!datos?.esAdmin || equipo) return;
+    if (!editando || equipo) return;
     api
       .equipo()
       .then(setEquipo)
       .catch((err) => setAviso({ kind: "error", texto: `No se pudo leer el equipo de Trimble: ${message(err)}` }));
-  }, [api, datos?.esAdmin, equipo]);
+  }, [api, editando, equipo]);
 
   // Copies to the destination that went through an upload: ask Trimble every few seconds
   // until it confirms them (only the person who started one, or an administrator).
@@ -147,9 +150,13 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
           api={api}
           projectId={projectId}
           flujo={panel.tipo === "editar" ? (seleccionada?.flujo ?? null) : null}
+          equipo={equipo}
           enPanel
           onGuardado={(e, id) => {
             cambio(e);
+            // Its files were registered while saving.
+            cargarArchivos();
+            setAviso(e.mensaje ? { kind: "info", texto: e.mensaje } : null);
             setPanel(id ? { tipo: "detalle", id } : null);
           }}
           onCancelar={() => setPanel(panel.tipo === "editar" ? { tipo: "detalle", id: panel.id } : null)}
@@ -159,13 +166,11 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
       <PanelFlujo
         key={seleccionada.flujo.id}
         api={api}
-        projectId={projectId}
         projectName={projectName}
         fila={seleccionada}
         datos={datos}
         archivos={archivos}
         errorArchivos={errorArchivos}
-        equipo={equipo}
         recarga={recarga}
         pedirDesactivar={!!panel.desactivar}
         onCambio={cambio}
@@ -201,7 +206,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               )}
             </div>
             <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
-              {datos?.esAdmin && (
+              {datos && (
                 <button
                   type="button"
                   onClick={() => setPanel({ tipo: "nuevo" })}
@@ -219,7 +224,6 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               />
             </div>
           </header>
-          {datos && !datos.esAdmin && <p style={{ margin: 0, fontSize: 13, color: "var(--tc-gray-500)" }}>Solo los administradores del proyecto en Trimble crean y cambian los flujos; aquí puedes verlos, revisar tus archivos y comentar.</p>}
           {datos && <RevisionCarpetas api={api} flujos={datos.flujos} onTermino={cargarArchivos} />}
           {error && <Notice kind="error">{error}</Notice>}
           {aviso && <Notice kind={aviso.kind}>{aviso.texto}</Notice>}
@@ -233,7 +237,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               opciones={opciones}
               seleccionado={seleccionada?.flujo.id ?? null}
               onSeleccionar={(id) => setPanel({ tipo: "detalle", id })}
-              esAdmin={datos.esAdmin}
+              puedeEditar={(f) => puedeCambiar(f, { id: datos.yo, esAdmin: datos.esAdmin })}
               onEditar={(f) => setPanel({ tipo: "editar", id: f.id })}
               onActivar={(f) => void activar(f)}
               onDesactivar={(f) => setPanel({ tipo: "detalle", id: f.id, desactivar: true })}

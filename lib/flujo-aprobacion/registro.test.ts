@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { claveHito } from "./flujos";
 import { detalleCambio, extension, meToca, planRegistro, responsablesArchivo, textoEstado } from "./registro";
-import type { ArchivoRegistro, ArchivoVisto, Asignacion, Flujo } from "./types";
+import type { ArchivoRegistro, ArchivoVisto, Flujo } from "./types";
 
 const AHORA = "2026-11-04T20:00:00.000Z";
 const flujo = (id = "f1", pasos = [{ id: "p1", nombre: "Revisa" }, { id: "p2", nombre: "Aprueba" }]): Flujo => ({
@@ -11,8 +11,9 @@ const flujo = (id = "f1", pasos = [{ id: "p1", nombre: "Revisa" }, { id: "p2", n
   hito: id === "f1" ? "Aprobar diseño Torre 1" : "Aprobar estructura",
   hitoClave: claveHito(id),
   pasos,
-  carpetas: [{ id: "arq", ruta: "Obra / Arq", ancestros: ["raiz"] }],
-  destino: { id: "apr", ruta: "Obra / Aprobados", ancestros: ["raiz"] },
+  archivos: [],
+  carpetas: [],
+  destino: null,
   activo: true,
   version: 1,
   creado: AHORA,
@@ -141,36 +142,23 @@ test("renombrar o mover dentro del flujo solo actualiza la ruta, sin historial; 
   assert.equal(p.sinCambios, 1);
 });
 
-const asig = (objetivoId: string, ancestros: string[], papel: string, quienTipo: "persona" | "grupo", quienId: string): Asignacion => ({
-  id: `${objetivoId}-${papel}-${quienId}`,
-  flujoId: "f1",
-  proyecto: "P",
-  objetivoTipo: "carpeta",
-  objetivoId,
-  objetivoRuta: "",
-  objetivoAncestros: ancestros,
-  papel,
-  quienTipo,
-  quienId,
-  quienNombre: quienId,
-  activa: true,
-  creado: AHORA,
-  creadoPor: null,
-});
-
-test("le toca a quien tiene el paso actual (persona o su grupo), nunca a quien subió esa versión", () => {
+test("le toca al responsable del paso actual (persona o su grupo), nunca a quien subió esa versión", () => {
   const a = registrado("modelo", 1, { subidoPorId: "juan" });
-  const asignaciones = [asig("arq", ["raiz"], "p1", "persona", "juan"), asig("arq", ["raiz"], "p1", "grupo", "g-arq"), asig("arq", ["raiz"], "p2", "persona", "pepe")];
-  const r = responsablesArchivo(a, asignaciones);
-  assert.deepEqual(
-    r.map((x) => x.quienId),
-    ["juan", "g-arq"]
-  );
-  assert.equal(meToca(a, r, "juan", new Set()), false, "Juan uploaded it");
+  const f = flujo("f1", [
+    { id: "p1", nombre: "Revisa", responsable: { tipo: "grupo", id: "g-arq", nombre: "Arquitectura" } },
+    { id: "p2", nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe", nombre: "Pepe" } },
+  ] as Flujo["pasos"]);
+  const r = responsablesArchivo(a, f);
+  assert.deepEqual(r, [{ tipo: "grupo", id: "g-arq", nombre: "Arquitectura" }]);
+  assert.equal(meToca(a, r, "juan", new Set(["g-arq"])), false, "Juan uploaded it");
   assert.equal(meToca(a, r, "luz", new Set(["g-arq"])), true);
   assert.equal(meToca(a, r, "pepe", new Set()), false, "not his step yet");
-  assert.deepEqual(responsablesArchivo({ ...a, pasoActual: 1 }, asignaciones).map((x) => x.quienId), ["pepe"]);
-  assert.deepEqual(responsablesArchivo({ ...a, estado: "aprobado" }, asignaciones), []);
+  assert.deepEqual(responsablesArchivo({ ...a, pasoActual: 1 }, f).map((x) => x.id), ["pepe"]);
+  assert.deepEqual(responsablesArchivo({ ...a, estado: "aprobado" }, f), []);
+  // A step the flow no longer has: the responsible of the file's own copy.
+  const copia = { ...a, pasos: [{ id: "p7", nombre: "Viejo", responsable: { tipo: "persona" as const, id: "eva", nombre: "Eva" } }] };
+  assert.deepEqual(responsablesArchivo(copia, f).map((x) => x.id), ["eva"]);
+  assert.deepEqual(responsablesArchivo(copia, null).map((x) => x.id), ["eva"]);
 });
 
 test("los estados se dicen en palabras", () => {

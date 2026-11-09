@@ -12,7 +12,8 @@ import { planDecision, puedeDecidir, revisarTexto } from "./decision";
 import { FlujoError } from "./errores";
 import type { Ctx } from "./service";
 import { ResultadoTraslado, trasladar } from "./trasladar";
-import type { ArchivoRegistro, Asignacion, Aviso, EntradaHistorial, Traslado } from "./types";
+import { responsablesArchivo } from "./registro";
+import type { ArchivoRegistro, Aviso, EntradaHistorial, Flujo, Traslado } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 /** ToDos sent per review or decision. */
@@ -47,11 +48,11 @@ export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], mome
   return { lineas, enviados, fallidos, textos };
 }
 
-/** The ToDos for files that now wait for someone (new, new version, next step). */
-export async function avisarRevision(ctx: Ctx, flujoId: string, archivos: ArchivoRegistro[], asignaciones: Asignacion[], hito: string, momento: string) {
+/** The ToDos for a flow's files that now wait for someone (new, new version, next step). */
+export async function avisarRevision(ctx: Ctx, flujo: Pick<Flujo, "id" | "hito" | "pasos">, archivos: ArchivoRegistro[], momento: string) {
   if (!archivos.length) return { lineas: [], enviados: 0, fallidos: 0, textos: [] };
-  const avisos = avisosRevision(archivos, asignaciones.filter((a) => a.activa), new Map([[flujoId, hito]]), (a) => enlaceDe(ctx.projectId, a));
-  return notificar(ctx, flujoId, avisos, momento);
+  const avisos = avisosRevision(archivos, flujo, (a) => enlaceDe(ctx.projectId, a));
+  return notificar(ctx, flujo.id, avisos, momento);
 }
 
 /** { archivoId, versionId (the one seen), texto }: approves or rejects the step the file waits for. */
@@ -67,11 +68,10 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
   }
   const flujo = await ctx.store.flujo(a.flujoId);
   if (!flujo) throw new FlujoError("El flujo de este archivo ya no existe.", 404);
-  const asignaciones = (await ctx.store.asignaciones(ctx.projectId)).filter((x) => x.activa && x.flujoId === a.flujoId);
-  const grupos = [...new Set(asignaciones.filter((x) => x.quienTipo === "grupo").map((x) => x.quienId))];
+  const grupos = responsablesArchivo(a, flujo).filter((r) => r.tipo === "grupo").map((r) => r.id);
   const mios = grupos.length && ctx.caller.memberOfGroups ? await ctx.caller.memberOfGroups(grupos) : new Set<string>();
   const decisor = { id: ctx.caller.id, nombre: ctx.caller.name, esAdmin: ctx.caller.isAdmin, grupos: mios };
-  const puede = puedeDecidir(a, asignaciones, decisor);
+  const puede = puedeDecidir(a, flujo, decisor);
   if (puede.error) throw new FlujoError(puede.error, 403, "sin-permiso");
 
   // The version must still be the latest one in Trimble.
@@ -90,9 +90,9 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
   ];
   let aviso: string | null = null;
   if (plan.siguiente) {
-    const r = await avisarRevision(ctx, a.flujoId, [hecho], asignaciones, flujo.hito, momento);
+    const r = await avisarRevision(ctx, flujo, [hecho], momento);
     lineas.push(...r.lineas);
-    aviso = r.textos[0] ?? `Nadie tiene asignado «${plan.siguiente.nombre}» en este archivo: no se avisó a nadie (solo un administrador puede decidirlo).`;
+    aviso = r.textos[0] ?? `«${plan.siguiente.nombre}» no tiene responsable en este flujo: no se avisó a nadie (solo un administrador puede decidirlo).`;
   } else if (plan.accion === "rechazado") {
     const av = avisoRechazo(hecho, plan.firma, flujo.hito, enlaceDe(ctx.projectId, hecho));
     if (av) {
@@ -105,9 +105,9 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
   }
   await ctx.store.registrarVarios(lineas);
 
-  // The last step: the approved version goes to the destination folder now, with the approver's session.
+  // The last step of a flow that has a destination (made before 09-11-2026): the approved version goes there now, with the approver's session.
   let traslado: ResultadoTraslado | null = null;
-  if (plan.accion === "aprobado") {
+  if (plan.accion === "aprobado" && flujo.destino) {
     traslado = await trasladar(ctx, a.id).catch((err: unknown) => ({ traslado: null, mensaje: `No se pudo copiar a la carpeta destino: ${err instanceof Error ? err.message : String(err)}` }));
   }
 

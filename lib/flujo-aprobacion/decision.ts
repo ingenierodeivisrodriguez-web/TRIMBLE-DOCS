@@ -10,29 +10,28 @@
  */
 import { limpiarTexto } from "./flujos";
 import { ESPERANDO, meToca, responsablesArchivo, textoEstado } from "./registro";
-import type { ArchivoRegistro, Asignacion, Firma, PasoFlujo } from "./types";
+import { nombreResponsable } from "./flujos";
+import type { ArchivoRegistro, Firma, Flujo, PasoFlujo } from "./types";
 
 export interface Decisor {
   id: string;
   nombre: string;
   esAdmin: boolean;
-  /** The groups (of those assigned) the caller belongs to. */
+  /** The groups (of the responsibles) the caller belongs to. */
   grupos: Set<string>;
 }
 
-const nombres = (as: Asignacion[]) => as.map((r) => (r.quienTipo === "grupo" ? `${r.quienNombre} (grupo)` : r.quienNombre)).join(", ");
-
 /** Why the caller can't decide on this file now (null: they can), and whether they would act as administrator. */
-export function puedeDecidir(a: ArchivoRegistro, asignaciones: Asignacion[], quien: Decisor): { error: string | null; comoAdmin: boolean } {
+export function puedeDecidir(a: ArchivoRegistro, flujo: Pick<Flujo, "pasos"> | null, quien: Decisor): { error: string | null; comoAdmin: boolean } {
   if (!ESPERANDO.includes(a.estado)) return { error: `Este archivo no espera revisión: está «${textoEstado(a)}».`, comoAdmin: false };
   const paso = a.pasos[a.pasoActual];
   if (!paso) return { error: "Este archivo no tiene un paso de revisión pendiente.", comoAdmin: false };
   if (a.subidoPorId && a.subidoPorId === quien.id) return { error: "Tú subiste esta versión: la debe revisar otra persona.", comoAdmin: false };
-  const resp = responsablesArchivo(a, asignaciones);
+  const resp = responsablesArchivo(a, flujo);
   if (meToca(a, resp, quien.id, quien.grupos)) return { error: null, comoAdmin: false };
   if (quien.esAdmin) return { error: null, comoAdmin: true };
   return {
-    error: `El paso «${paso.nombre}» de este archivo no es tuyo${resp.length ? `: lo tiene ${nombres(resp)}` : ": no tiene a nadie asignado y solo un administrador puede decidirlo"}.`,
+    error: `El paso «${paso.nombre}» de este archivo no es tuyo${resp.length ? `: lo tiene ${resp.map(nombreResponsable).join(", ")}` : ": no tiene responsable y solo un administrador puede decidirlo"}.`,
     comoAdmin: false,
   };
 }

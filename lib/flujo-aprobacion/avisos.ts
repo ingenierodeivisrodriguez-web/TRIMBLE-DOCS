@@ -2,27 +2,27 @@
  * Notices through Trimble's own ToDos (phase 3; the format was confirmed in
  * the phase 0 test: `label` + `assignees: [{ id, type }]`, and Trimble e-mails
  * the person). One ToDo per group of files that wait for the same people on
- * the same step, so a first review of a full folder doesn't flood anyone; the
+ * the same step, so registering many files at once doesn't flood anyone; the
  * links go in the description (attaching the file was refused by Trimble).
  * A ToDo for a group that Trimble refuses is sent again to its members.
  */
 import type { Respuesta } from "../compras/cde";
 import { corto } from "./prueba";
 import { responsablesArchivo } from "./registro";
-import type { ArchivoRegistro, Asignacion, Aviso, Firma } from "./types";
+import type { ArchivoRegistro, Aviso, Firma, Flujo } from "./types";
 
 /** Files listed with their link in one ToDo; the rest are counted. */
 export const MAX_EN_AVISO = 15;
 
 const recorte = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-/** One ToDo per (flow, step, same people) for the files that now wait for someone. */
-export function avisosRevision(archivos: ArchivoRegistro[], asignaciones: Asignacion[], hitos: Map<string, string>, enlace: (a: ArchivoRegistro) => string): Aviso[] {
+/** One ToDo per (step, same people) for the files of a flow that now wait for someone. */
+export function avisosRevision(archivos: ArchivoRegistro[], flujo: Pick<Flujo, "hito" | "pasos">, enlace: (a: ArchivoRegistro) => string): Aviso[] {
   const grupos = new Map<string, { archivos: ArchivoRegistro[]; para: Aviso["para"] }>();
   for (const a of archivos) {
-    const resp = responsablesArchivo(a, asignaciones);
+    const resp = responsablesArchivo(a, flujo);
     if (!resp.length) continue;
-    const para = [...new Map(resp.map((r) => [`${r.quienTipo}:${r.quienId}`, { tipo: r.quienTipo, id: r.quienId, nombre: r.quienNombre }])).values()];
+    const para = [...new Map(resp.map((r) => [`${r.tipo}:${r.id}`, { tipo: r.tipo, id: r.id, nombre: r.nombre }])).values()];
     const clave = `${a.flujoId}|${a.pasos[a.pasoActual]?.id}|${para.map((p) => `${p.tipo}:${p.id}`).sort().join(",")}`;
     const g = grupos.get(clave) ?? { archivos: [], para };
     g.archivos.push(a);
@@ -30,14 +30,14 @@ export function avisosRevision(archivos: ArchivoRegistro[], asignaciones: Asigna
   }
   return [...grupos.values()].map(({ archivos: as, para }) => {
     const a = as[0];
-    const hito = hitos.get(a.flujoId) ?? "";
+    const hito = flujo.hito;
     const paso = a.pasos[a.pasoActual]?.nombre ?? "";
     const lineas = as.slice(0, MAX_EN_AVISO).map((x) => `• ${x.nombre} — versión ${x.revision ?? "?"}${x.estado === "nueva-version" ? " (versión nueva)" : ""}: ${enlace(x)}`);
-    const mas = as.length > MAX_EN_AVISO ? [`… y ${as.length - MAX_EN_AVISO} más: ábrelos en Flujo de aprobación → Por revisar.`] : [];
+    const mas = as.length > MAX_EN_AVISO ? [`… y ${as.length - MAX_EN_AVISO} más: ábrelos en Flujo de aprobación, flujo «${hito}» → Archivos → Me toca.`] : [];
     return {
       titulo: recorte(as.length === 1 ? `Revisar: ${a.nombre} (${paso}) — ${hito}` : `Revisar ${as.length} archivos (${paso}) — ${hito}`, 120),
       descripcion: recorte(
-        [`Flujo de aprobación «${hito}»: te toca el paso «${paso}».`, ...lineas, ...mas, "Apruébalos o recházalos en la extensión Flujo de aprobación, pestaña «Por revisar»."].join("\n"),
+        [`Flujo de aprobación «${hito}»: te toca el paso «${paso}».`, ...lineas, ...mas, `Apruébalos o recházalos en la extensión Flujo de aprobación: abre el flujo «${hito}» → Archivos → Me toca.`].join("\n"),
         3000
       ),
       para,

@@ -50,7 +50,7 @@ export default function ListaFlujos({
   opciones,
   seleccionado,
   onSeleccionar,
-  esAdmin,
+  puedeEditar,
   onEditar,
   onActivar,
   onDesactivar,
@@ -64,7 +64,8 @@ export default function ListaFlujos({
   opciones: { propietarios: string[]; personas: { id: string; nombre: string }[]; grupos: { id: string; nombre: string }[] };
   seleccionado: string | null;
   onSeleccionar: (id: string) => void;
-  esAdmin: boolean;
+  /** Whoever created the flow, or a project administrator. */
+  puedeEditar: (f: Flujo) => boolean;
   onEditar: (f: Flujo) => void;
   onActivar: (f: Flujo) => void;
   onDesactivar: (f: Flujo) => void;
@@ -138,7 +139,7 @@ export default function ListaFlujos({
             {filas.length === 0 && (
               <tr>
                 <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={7}>
-                  {total === 0 ? (esAdmin ? "Todavía no hay flujos en este proyecto. Crea el primero con «Nuevo»." : "Todavía no hay flujos en este proyecto.") : "Ningún flujo cumple estos filtros."}
+                  {total === 0 ? "Todavía no hay flujos en este proyecto. Crea el primero con «Nuevo»." : "Ningún flujo cumple estos filtros."}
                 </td>
               </tr>
             )}
@@ -178,9 +179,9 @@ export default function ListaFlujos({
                       opciones={[
                         { texto: "Ver detalles", onClick: () => onSeleccionar(f.flujo.id) },
                         { texto: "PDF de trazabilidad", onClick: () => onPdf(f.flujo) },
-                        { texto: "Editar", onClick: () => onEditar(f.flujo), oculto: !esAdmin },
-                        { texto: "Activar", onClick: () => onActivar(f.flujo), oculto: !esAdmin || f.flujo.activo },
-                        { texto: "Desactivar…", onClick: () => onDesactivar(f.flujo), oculto: !esAdmin || !f.flujo.activo, peligro: true },
+                        { texto: "Editar", onClick: () => onEditar(f.flujo), oculto: !puedeEditar(f.flujo) },
+                        { texto: "Activar", onClick: () => onActivar(f.flujo), oculto: !puedeEditar(f.flujo) || f.flujo.activo },
+                        { texto: "Desactivar…", onClick: () => onDesactivar(f.flujo), oculto: !puedeEditar(f.flujo) || !f.flujo.activo, peligro: true },
                       ]}
                     />
                   </td>

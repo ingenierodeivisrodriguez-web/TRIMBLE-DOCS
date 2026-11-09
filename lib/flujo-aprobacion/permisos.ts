@@ -1,13 +1,13 @@
 /**
- * Reading a flow's folders' Trimble permissions to warn, never to change them
- * (the owner's decision): who could upload straight to the destination folder
- * without going through the flow, approvers whose own session couldn't copy
- * there, and people assigned in a review folder who can't open or upload in it.
+ * Reading the Trimble permissions of a flow's folders to warn, never to change
+ * them (the owner's decision): step responsibles who couldn't open the files,
+ * and, for older flows with a destination folder, who could upload straight
+ * to it and approvers whose own session couldn't copy there.
  * Pure: the service passes the ACLs Trimble gave and the team.
  */
 import type { AccessLevel, FolderPermissions } from "../trimbleApi";
-import { dentroDe, PAPEL_REALIZA } from "./flujos";
-import type { Asignacion, AvisoPermisos, CarpetaFlujo, Flujo, PermisosCarpeta } from "./types";
+import { nombreResponsable } from "./flujos";
+import type { AvisoPermisos, CarpetaFlujo, Flujo, PermisosCarpeta, Responsable } from "./types";
 
 export type Acl = Partial<Record<AccessLevel, string[]>>;
 
@@ -66,54 +66,60 @@ export function nombrePrincipal(principal: string, equipo: Equipo): string {
   return `${equipo.grupos.get(id) ?? "Grupo ya no disponible"} (grupo)`;
 }
 
-const quienDe = (a: Asignacion) => ({ tipo: a.quienTipo, id: a.quienId, nombre: a.quienTipo === "grupo" ? `${a.quienNombre} (grupo)` : a.quienNombre });
 const unicos = <T extends { tipo: string; id: string }>(xs: T[]) => [...new Map(xs.map((x) => [`${x.tipo}:${x.id}`, x])).values()];
 const lista = (xs: string[]) => (xs.length <= 1 ? xs.join("") : `${xs.slice(0, -1).join(", ")} y ${xs[xs.length - 1]}`);
+const vacia = (acl: Acl) => !acl.FULL_ACCESS?.length && !acl.READ?.length && !acl.NO_ACCESS?.length;
 
-/** The warnings about a flow's folders, and who has what on each, in words. */
+/**
+ * The warnings about a flow, and who has what on each folder, in words:
+ * - a step without responsible (only an administrator could decide it);
+ * - in each folder with files of the flow, a responsible who doesn't appear
+ *   with access (they couldn't open the files);
+ * - for an older flow with a destination folder: who could upload straight to
+ *   it, and an approver whose own session couldn't copy there.
+ */
 export function revisarPermisos(
-  flujo: Pick<Flujo, "pasos" | "carpetas" | "destino">,
-  asignaciones: Asignacion[],
-  acls: { destino: Acl; carpetas: Map<string, Acl> },
+  flujo: Pick<Flujo, "pasos" | "destino">,
+  carpetas: { carpeta: CarpetaFlujo; acl: Acl }[],
+  destinoAcl: Acl | null,
   equipo: Equipo
 ): { avisos: AvisoPermisos[]; carpetas: PermisosCarpeta[] } {
   const avisos: AvisoPermisos[] = [];
-  const activas = asignaciones.filter((a) => a.activa);
-  const ultimo = flujo.pasos[flujo.pasos.length - 1];
-  const aprobadores = unicos(activas.filter((a) => a.papel === ultimo?.id).map(quienDe));
-  const d = acls.destino;
-  const vacia = (acl: Acl) => !acl.FULL_ACCESS?.length && !acl.READ?.length && !acl.NO_ACCESS?.length;
+  for (const p of flujo.pasos) if (!p.responsable) avisos.push({ tipo: "falla", texto: `«${p.nombre}» no tiene responsable: solo un administrador podrá decidirlo. Edita el flujo y elígelo.` });
+  const responsables = unicos(flujo.pasos.filter((p) => p.responsable).map((p) => p.responsable!)).map((r) => ({
+    ...r,
+    texto: `${nombreResponsable(r)} («${flujo.pasos.filter((p) => p.responsable?.tipo === r.tipo && p.responsable.id === r.id).map((p) => p.nombre).join("», «")}»)`,
+  }));
 
-  // Destination: who could upload without the flow, and approvers who couldn't copy.
-  if (vacia(d)) {
-    avisos.push({ tipo: "info", texto: `Trimble no lista permisos para la carpeta destino «${flujo.destino.ruta}»: revisa en Trimble quién puede subir archivos ahí.` });
-  } else {
-    if (d.FULL_ACCESS?.includes(TODOS)) {
-      avisos.push({ tipo: "riesgo", texto: `En la carpeta destino «${flujo.destino.ruta}» todos los miembros del proyecto tienen acceso completo: cualquiera puede subir archivos sin pasar por el flujo.` });
-    }
-    const esAprobador = (p: string) => aprobadores.some((q) => p === (q.tipo === "persona" ? `users:${q.id}` : `tc-groups:${q.id}`));
-    const otros = (d.FULL_ACCESS ?? []).filter((p) => p !== TODOS && !esAprobador(p) && !(p.startsWith("users:") && equipo.personas.get(p.slice(6))?.admin));
-    if (otros.length) {
-      const uno = otros.length === 1;
-      avisos.push({ tipo: "riesgo", texto: `En la carpeta destino también ${uno ? "tiene" : "tienen"} acceso completo ${lista(otros.map((p) => nombrePrincipal(p, equipo)))}: ${uno ? "puede" : "pueden"} subir archivos sin pasar por el flujo.` });
-    }
-  }
-  for (const q of aprobadores) {
-    if (accesoDe(d, q, equipo) !== "FULL_ACCESS" && !vacia(d)) {
-      avisos.push({ tipo: "falla", texto: `${q.nombre} aprueba («${ultimo.nombre}») pero no aparece con acceso completo a la carpeta destino: la copia con su usuario fallaría y la tendría que hacer un administrador.` });
-    }
-  }
-
-  // Review folders: people assigned there who can't open, or can't upload when they "Realiza".
-  for (const c of flujo.carpetas) {
-    const acl = acls.carpetas.get(c.id) ?? {};
+  // Folders with files of the flow: responsibles who can't open them.
+  for (const { carpeta, acl } of carpetas) {
     if (vacia(acl)) continue;
-    const aqui = activas.filter((a) => dentroDe({ id: a.objetivoId, ancestros: a.objetivoAncestros }, c.id));
-    for (const q of unicos(aqui.map(quienDe))) {
-      const nivel = accesoDe(acl, q, equipo);
-      const realiza = aqui.some((a) => a.papel === PAPEL_REALIZA && a.quienId === q.id);
-      if (nivel === null || nivel === "NO_ACCESS") avisos.push({ tipo: "falla", texto: `En «${c.ruta}», ${q.nombre} no aparece con acceso: no podrá abrir los archivos.` });
-      else if (realiza && nivel === "READ") avisos.push({ tipo: "falla", texto: `En «${c.ruta}», ${q.nombre} realiza pero solo tiene lectura: no podrá subir archivos.` });
+    for (const r of responsables) {
+      const nivel = accesoDe(acl, r, equipo);
+      if (nivel === null || nivel === "NO_ACCESS") avisos.push({ tipo: "falla", texto: `En «${carpeta.ruta}», ${r.texto} no aparece con acceso: no podrá abrir los archivos del flujo.` });
+    }
+  }
+
+  // Destination of an older flow: who could upload without the flow, and approvers who couldn't copy.
+  const d = destinoAcl ?? {};
+  if (flujo.destino && destinoAcl) {
+    const ultimo = flujo.pasos[flujo.pasos.length - 1];
+    const aprobador = ultimo?.responsable ?? null;
+    if (vacia(d)) {
+      avisos.push({ tipo: "info", texto: `Trimble no lista permisos para la carpeta destino «${flujo.destino.ruta}»: revisa en Trimble quién puede subir archivos ahí.` });
+    } else {
+      if (d.FULL_ACCESS?.includes(TODOS)) {
+        avisos.push({ tipo: "riesgo", texto: `En la carpeta destino «${flujo.destino.ruta}» todos los miembros del proyecto tienen acceso completo: cualquiera puede subir archivos sin pasar por el flujo.` });
+      }
+      const esAprobador = (p: string) => !!aprobador && p === (aprobador.tipo === "persona" ? `users:${aprobador.id}` : `tc-groups:${aprobador.id}`);
+      const otros = (d.FULL_ACCESS ?? []).filter((p) => p !== TODOS && !esAprobador(p) && !(p.startsWith("users:") && equipo.personas.get(p.slice(6))?.admin));
+      if (otros.length) {
+        const uno = otros.length === 1;
+        avisos.push({ tipo: "riesgo", texto: `En la carpeta destino también ${uno ? "tiene" : "tienen"} acceso completo ${lista(otros.map((p) => nombrePrincipal(p, equipo)))}: ${uno ? "puede" : "pueden"} subir archivos sin pasar por el flujo.` });
+      }
+      if (aprobador && accesoDe(d, aprobador, equipo) !== "FULL_ACCESS") {
+        avisos.push({ tipo: "falla", texto: `${nombreResponsable(aprobador)} aprueba («${ultimo.nombre}») pero no aparece con acceso completo a la carpeta destino: la copia con su usuario fallaría y la tendría que hacer un administrador.` });
+      }
     }
   }
 
@@ -126,14 +132,14 @@ export function revisarPermisos(
   });
   return {
     avisos,
-    carpetas: [tabla(flujo.destino, d, "destino"), ...flujo.carpetas.map((c) => tabla(c, acls.carpetas.get(c.id) ?? {}, "revision"))],
+    carpetas: [...(flujo.destino && destinoAcl ? [tabla(flujo.destino, d, "destino")] : []), ...carpetas.map((c) => tabla(c.carpeta, c.acl, "revision"))],
   };
 }
 
-/** The groups whose members matter for these ACLs and assignments. */
-export function gruposQueImportan(acls: Acl[], asignaciones: Asignacion[]): string[] {
+/** The groups whose members matter for these ACLs and responsibles. */
+export function gruposQueImportan(acls: Acl[], responsables: Pick<Responsable, "tipo" | "id">[]): string[] {
   const ids = new Set<string>();
   for (const acl of acls) for (const p of Object.values(acl).flat()) if (p && p.startsWith("tc-groups:") && p !== TODOS) ids.add(p.slice("tc-groups:".length));
-  for (const a of asignaciones) if (a.activa && a.quienTipo === "grupo") ids.add(a.quienId);
+  for (const r of responsables) if (r.tipo === "grupo") ids.add(r.id);
   return [...ids];
 }

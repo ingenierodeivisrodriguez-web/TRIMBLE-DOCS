@@ -78,6 +78,8 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       },
       async archivo(id) {
         const [p, f] = await Promise.all([elProyecto(), getFileDetails(servidor, token, id)]);
+        // Its path goes up to this project's root folder; otherwise it is of another project.
+        if (f.path.length && !f.path.some((x) => x.id === p.rootId)) throw new FlujoError("Ese archivo no es de este proyecto.", 404);
         return elementoDe(p, f.id, f.name, f.path);
       },
       personas: () => listProjectUsers(servidor, token, projectId),

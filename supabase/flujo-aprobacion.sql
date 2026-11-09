@@ -217,3 +217,56 @@ alter table public.aprobacion_comentarios enable row level security;
 revoke all on public.aprobacion_comentarios from anon, authenticated;
 revoke update, delete, truncate on table public.aprobacion_comentarios from public, anon, authenticated, service_role;
 grant select, insert on public.aprobacion_comentarios to service_role;
+
+-- ------------------------------- archivos elegidos y responsables (09-11-2026)
+-- Quien crea el flujo marca sus archivos (ya no hay carpetas de revisión ni
+-- "quién hace qué" por carpeta) y elige el responsable de cada paso, que se
+-- guarda dentro de "pasos": [{ "id", "nombre", "responsable": { "tipo":
+-- persona | grupo, "id", "nombre" } }]. Ya no se elige carpeta destino al
+-- crear: queda solo en los flujos de antes.
+
+-- Archivos del flujo: [{ "id", "ruta", "ancestros": [ids de la raíz hacia abajo] }].
+alter table public.aprobacion_flujos add column if not exists archivos jsonb not null default '[]'::jsonb;
+-- Quién lo creó (id de Trimble): esa persona y los administradores lo cambian.
+alter table public.aprobacion_flujos add column if not exists creado_por_id text;
+alter table public.aprobacion_flujos alter column destino drop not null;
+
+-- Un archivo solo puede estar en un flujo activo del proyecto.
+create or replace function public.aprobacion_revisar_archivos() returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  perform pg_advisory_xact_lock(hashtext('aprobacion:' || new.proyecto));
+  if new.activo and exists (
+    select 1
+    from public.aprobacion_flujos f,
+         jsonb_array_elements(f.archivos) c,
+         jsonb_array_elements(new.archivos) n
+    where f.proyecto = new.proyecto
+      and f.id <> new.id
+      and f.activo
+      and c ->> 'id' = n ->> 'id'
+  ) then
+    raise exception 'archivo-en-otro-flujo' using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists aprobacion_flujos_archivos on public.aprobacion_flujos;
+create trigger aprobacion_flujos_archivos
+  before insert or update on public.aprobacion_flujos
+  for each row execute function public.aprobacion_revisar_archivos();
+revoke all on function public.aprobacion_revisar_archivos() from public, anon, authenticated;
+
+-- Flujos de antes: los archivos que ya tenían registrados (no retirados) pasan
+-- a ser sus archivos elegidos. Solo se hace una vez (cuando todavía no tienen).
+update public.aprobacion_flujos f
+   set archivos = coalesce((
+         select jsonb_agg(jsonb_build_object('id', a.file_id, 'ruta', a.ruta, 'ancestros', to_jsonb(a.ancestros)) order by a.ruta)
+         from public.aprobacion_archivos a
+         where a.flujo_id = f.id and a.estado <> 'retirado'
+       ), '[]'::jsonb)
+ where f.archivos = '[]'::jsonb
+   and f.carpetas <> '[]'::jsonb;

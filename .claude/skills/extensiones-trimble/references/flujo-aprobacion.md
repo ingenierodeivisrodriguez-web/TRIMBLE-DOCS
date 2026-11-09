@@ -395,7 +395,92 @@ fila del flujo aparezcan sus detalles. Propuse el diseño con tres campos nuevos
 - `EditorFlujo` acepta `enPanel`; tras crear, abre el flujo nuevo buscándolo por
   `hitoClave`. Se borró `Flujos.tsx` (lo reemplazan `ListaFlujos` + `PanelFlujo`).
 
+## Archivos elegidos y responsable por paso (09-11-2026)
+
+El dueño pidió (con capturas del formulario): "1. solo el usuario que va a
+crear nuevo flujo puede definir que archivo o archivos seleccionar, y requiero
+que salga multiple seleccion"; "2. el usuario que crea el flujo NO coloca
+carpeta destino. puede colocar los pasos y seleccionar un responsable"; "3. el
+usuario responsable es quien decide que hacer con el flujo [...] poner la
+version del archivo en una carpeta la cual previamente debe tener acceso o
+autorizacion del sistema". Le presenté el plan en dos fases con 4 preguntas y
+respondió "Sí, fase A" (= mis recomendaciones):
+
+1. **Cualquier miembro crea**; cambian el flujo (archivos, pasos,
+   responsables, activar/desactivar, permisos) **quien lo creó**
+   (`creadoPorId`) **y los administradores** (`puedeCambiar`). Flujos viejos sin
+   `creado_por_id`: solo administradores.
+2. **Solo archivos**, sin carpetas: un archivo nuevo no entra solo.
+3. (Fase B) "autorización del sistema" = **acceso completo en Trimble** a la
+   carpeta (la extensión lo revisa y Trimble lo exige).
+4. (Fase B) Decide el **responsable del último paso**.
+
+Contradicción señalada y resuelta: la especificación inicial decía papeles
+"por carpeta o por archivo"; ahora hay **un responsable por paso para todo el
+flujo**. Se quitaron «Quién hace qué», Realiza/Consulta como asignaciones,
+`agregarAsignaciones`/`quitarAsignacion`, sus rutas y `Asignaciones.tsx` (la
+tabla `aprobacion_asignaciones` se conserva, sin uso). Otra: el aprobador no
+podrá elegir la carpeta donde ya está el archivo (Trimble lo tomaría como
+versión nueva del mismo archivo; para la fase B).
+
+Fase A (hecha el 09-11-2026):
+
+- `Flujo.archivos` (jsonb `{ id, ruta, ancestros }`, 1 a `MAX_ARCHIVOS` = 100),
+  `creadoPorId`, `destino: CarpetaFlujo | null` (solo flujos viejos);
+  `carpetas` queda solo en flujos viejos (sin uso para detectar). `PasoFlujo`
+  ganó `responsable?: { tipo, id, nombre }` (dentro de `pasos`, sin columna
+  nueva). El servidor toma el nombre del equipo de Trimble (`conResponsables`):
+  una persona retirada o un grupo borrado se rechaza.
+- `responsablesArchivo(a, flujo)`: el responsable del paso en el flujo **como
+  está ahora** (cambiarlo alcanza a los archivos en trámite) y, si el flujo ya
+  no tiene ese paso, el de la copia de pasos del archivo. `meToca` recibe
+  `Responsable[]`; `puedeDecidir(a, flujo, quien)`; `avisosRevision(archivos,
+  flujo, enlace)`; `avisarRevision(ctx, flujo, archivos, momento)`.
+- `recorrido.ts` ahora es `leerArchivos`: agrupa por la carpeta donde se vio
+  cada archivo (la del registro si ya está registrado), **una consulta por
+  carpeta**; lo que no está ahí se busca con `tc.archivo` (`getFileDetails`,
+  ruta y padre) y se lista su carpeta nueva; 404 → `borrados`, otro error →
+  `fallidos` (lectura incompleta); tope de 50 s.
+- `revisarFlujo`: `planRegistro` igual que antes; faltantes: **quitado del
+  flujo → retirado al momento** (cualquiera, es configuración); 404 → retirado
+  solo en la revisión de un administrador; el resto "no apareció".
+- `guardarFlujo`: valida, lee de Trimble solo los archivos nuevos, revisa
+  `conflictosArchivos` (un archivo en un solo flujo activo), guarda y **llama a
+  `revisarFlujo` en la misma petición** (registra y avisa); devuelve `mensaje`.
+  Ruta `POST /flujos` con `maxDuration = 120`. `tc.archivo` rechaza un archivo
+  cuya ruta no pasa por la raíz del proyecto.
+- `cambiosFlujo` anota responsables ("Responsable de «Revisa»: Luz (antes
+  …)"), archivos agregados y quitados. `permisosFlujo`: ACL de las carpetas
+  donde están los archivos (hasta 20) + destino viejo; avisos: paso sin
+  responsable, responsable sin acceso; los de destino solo en flujos viejos.
+- `trasladar` exige `flujo.destino` (`sin-destino`); `decidir` solo copia si el
+  flujo tiene destino. Un flujo nuevo aprobado queda donde está hasta la fase B.
+- SQL (reejecutable, probado en PGlite desde el SQL anterior con datos):
+  columnas `archivos`, `creado_por_id`, `destino` sin `not null`, *trigger*
+  `aprobacion_revisar_archivos` (`archivo-en-otro-flujo`, mismo candado por
+  proyecto) y un `update` que da a los flujos viejos sus archivos registrados
+  no retirados (solo si `archivos = []` y tenían carpetas).
+- Pantallas: `EditorFlujo` (explorador en modo archivo con casillas y
+  «Marcar todos» — prop nueva `onElegirVarios` del `Explorador` de Publicar —,
+  chips con ✕, pasos con selector Responsable; el equipo se lee al abrir el
+  formulario), `PanelFlujo` (Pasos y responsables; bloque «Permisos de
+  Trimble» para quien puede cambiar), `ListaFlujos(puedeEditar)`, **Nuevo para
+  todos**.
+- Pruebas: `flujos`, `registro`, `decision`, `lista`, `permisos`, `recorrido`
+  (leerArchivos), `service`, `revision`, `decisiones`, `trasladar` (este crea
+  el flujo y le pone carpeta y destino con `store.actualizarFlujo`, como uno
+  viejo).
+
+Fase B (pendiente, el dueño debe aprobarla): al aprobar el último paso,
+«Aprobar» o «Aprobar y poner en una carpeta…» (explorador de carpetas), con
+revisión de acceso completo del responsable (`accesoDe`) y prohibida la
+carpeta del propio archivo; «Poner en una carpeta…» para lo ya aprobado;
+proponer la última carpeta usada (v2, v3 por nombre igual); trazabilidad con
+quién eligió la carpeta. Reusar `copiarUltimaVersion` y la lógica de
+`trasladar` (diferencia, subida con `If-Match`), sin `carpetaDeRevision`.
+
 Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
 decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
-restringir lo que ve el papel «Consulta», avance del hito, avisar por tarea
-cuando un flujo vence.
+avance del hito, avisar por tarea cuando un flujo vence, avisar cuando el
+responsable de un paso es quien subió el archivo (no puede decidir su propia
+versión).

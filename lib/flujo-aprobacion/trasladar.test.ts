@@ -5,7 +5,7 @@ import { nubeFalsa } from "../publicar/pruebas/trimbleFalso";
 import type { ProjectUser, RawFolderItem } from "../trimbleApi";
 import { decidir } from "./decisiones";
 import { listarArchivos, revisarFlujo } from "./revision";
-import { agregarAsignaciones, Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
+import { Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
 import { memoryStore } from "./store";
 import { pasoTraslado } from "./trasladar";
 
@@ -14,7 +14,9 @@ const PERSONAS = [persona("ana", "Ana", "ADMIN"), persona("juan", "Juan"), perso
 
 /**
  * A fake Trimble project: "Arquitectura" (review, with "Torre 1" inside) and
- * "Aprobados" (destination). A one-step flow ("Aprueba", Pepe).
+ * "Aprobados" (destination). A one-step flow ("Aprueba", Pepe) made before
+ * 09-11-2026: it kept its review folder and destination, and approved
+ * versions are still copied there (new flows have no destination).
  */
 async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boolean } = {}) {
   const nube = nubeFalsa();
@@ -67,9 +69,8 @@ async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boo
   const store = memoryStore();
   const como = (id: string, isAdmin = false): Ctx => ({ ...ctx(id, isAdmin), store });
   const admin = como("ana", true);
-  const f = (await guardarFlujo(admin, { hito: "Aprobar Torre 1", carpetas: [arq], destino: apr, pasos: [{ nombre: "Aprueba" }] })).flujos[0];
-  await agregarAsignaciones(admin, { flujoId: f.id, objetivos: [{ tipo: "carpeta", id: arq }], quien: { tipo: "persona", id: "pepe" }, papel: "p1" });
-  await revisarFlujo(admin, { flujoId: f.id });
+  const creado = (await guardarFlujo(admin, { hito: "Aprobar Torre 1", archivos: [modelo, detalle], pasos: [{ nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe" } }] })).flujos[0];
+  const f = (await store.actualizarFlujo(creado.id, creado.version, { carpetas: [await tc.carpeta(arq)], destino: await tc.carpeta(apr) }))!;
   const registro = async (fileId: string) => (await listarArchivos(admin)).archivos.find((a) => a.fileId === fileId)!;
   const enDestino = (carpeta = apr) => [...nube.archivos.values()].filter((x) => x.parent === carpeta);
   const texto = (b: Uint8Array) => new TextDecoder().decode(b);

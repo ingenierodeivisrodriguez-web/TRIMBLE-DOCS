@@ -1,25 +1,23 @@
 /**
- * "Flujo de aprobación", phase 2: finding and registering the files of each
- * flow's review folders. Trimble has no notices of new uploads, so the screen
- * asks for a review of every active flow when it opens and with "Revisar
- * ahora", with the session of whoever opens it (they see what Trimble lets
- * them see). One review per flow at a time. A registered file that isn't seen
- * any more is retired only after a complete walk by an administrator (who sees
- * every folder) and after Trimble confirms it is gone or out of the flow.
+ * "Flujo de aprobación", phase 2: registering a flow's chosen files and their
+ * new versions. Trimble has no notices of new uploads, so the screen asks for
+ * a review of every active flow when it opens and with "Revisar ahora" (and
+ * saving a flow does it at once), with the session of whoever asks (they see
+ * what Trimble lets them see). One review per flow at a time. A file taken out
+ * of the flow is retired at once; one Trimble says no longer exists, only in
+ * an administrator's review (who sees every folder). Nothing is deleted.
  */
 import { fechaHora } from "../compras/formato";
 import { avisarRevision, enlaceDe } from "./decisiones";
 import { FlujoError } from "./errores";
-import { flujoDe } from "./flujos";
-import { LIMITES, recorrer } from "./recorrido";
+import { nombreResponsable } from "./flujos";
+import { LIMITES, leerArchivos } from "./recorrido";
 import { Cambio, detalleCambio, ESPERANDO, meToca, planRegistro, responsablesArchivo } from "./registro";
 import type { Ctx } from "./service";
 import type { ArchivoInfo, ArchivoRegistro, EntradaHistorial, ResumenRevision } from "./types";
 
 /** How long one review holds its flow (a stuck one frees itself). */
 const TOMA_MS = 3 * 60_000;
-/** Missing files checked one by one in Trimble per review. */
-const MAX_COMPROBAR = 50;
 /** Changes written at the same time. */
 const TANDA = 10;
 
@@ -33,7 +31,7 @@ async function enTandas<T>(xs: T[], f: (x: T) => Promise<void>) {
   for (let i = 0; i < xs.length; i += TANDA) await Promise.all(xs.slice(i, i + TANDA).map(f));
 }
 
-/** { flujoId }: walks a flow's review folders and registers what changed. */
+/** { flujoId }: reads a flow's chosen files in Trimble and registers what changed. */
 export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevision> {
   const o = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   if (typeof o.flujoId !== "string" || !UUID.test(o.flujoId)) throw new FlujoError("El flujo no es válido.");
@@ -48,10 +46,15 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     return { ...base, ocupado: true, mensaje: `Otra persona está revisando «${flujo.hito}» en este momento; lo que encuentre aparecerá al recargar.` };
   }
   try {
-    const todos = await ctx.store.flujos(ctx.projectId);
-    const excluir = new Set(todos.filter((f) => f.activo).flatMap((f) => f.carpetas.map((c) => c.id)));
-    const r = await recorrer(flujo.carpetas, excluir, { items: (id) => ctx.tc.items(id), reloj: ctx.reloj ?? Date.now }, ctx.limites ?? LIMITES);
-    const plan = planRegistro(flujo, await ctx.store.archivos(ctx.projectId), r.vistos, momento);
+    // Each chosen file where it was last seen (registered files keep their latest location).
+    const registrados = await ctx.store.archivos(ctx.projectId);
+    const suyos = new Map(registrados.filter((x) => x.flujoId === flujo.id && x.carpetaId).map((x) => [x.fileId, x]));
+    const elegidos = flujo.archivos.map((a) => {
+      const x = suyos.get(a.id);
+      return x ? { id: a.id, ruta: x.ruta, ancestros: x.ancestros } : a;
+    });
+    const r = await leerArchivos(elegidos, { items: (id) => ctx.tc.items(id), archivo: (id) => ctx.tc.archivo(id), reloj: ctx.reloj ?? Date.now }, ctx.limites ?? LIMITES);
+    const plan = planRegistro(flujo, registrados, r.vistos, momento);
     const lineas: Linea[] = [];
     const linea = (a: Pick<ArchivoRegistro, "id" | "fileId" | "revision">, accion: string, detalle: string, quien: { usuario: string | null; usuarioId: string | null }, ocurrido: string | null): Linea => ({
       proyecto: ctx.projectId,
@@ -72,14 +75,14 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
         linea(
           a,
           "archivo-detectado",
-          `Subió la versión ${a.revision ?? "?"}${a.subido ? ` el ${fechaHora(a.subido)}` : ""} en ${a.ruta}. Pendiente de revisión: ${a.pasos[0]?.nombre ?? "—"}. Lo registró ${ctx.caller.name} al revisar el flujo.`,
+          `Subió la versión ${a.revision ?? "?"}${a.subido ? ` el ${fechaHora(a.subido)}` : ""} en ${a.ruta}. Pendiente de revisión: ${a.pasos[0]?.nombre ?? "—"}. Lo registró ${ctx.caller.name} en el flujo.`,
           { usuario: a.subidoPor || null, usuarioId: a.subidoPorId },
           a.subido
         )
       );
     }
 
-    // New versions, files that reappear or come from another flow, renames.
+    // New versions, files that reappear or come from another flow, renames and moves.
     const aAvisar: ArchivoRegistro[] = [...creados];
     await enTandas(plan.actualizar, async (c: Cambio) => {
       const a = await ctx.store.actualizarArchivo(c.id, c.cambios);
@@ -91,27 +94,28 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
       );
     });
 
-    // Missing files: only after a complete walk by an administrator, and only what Trimble confirms.
+    // Missing files: taken out of the flow (retired at once), or gone from Trimble (only an administrator's review retires them).
+    const elegidosIds = new Set(flujo.archivos.map((a) => a.id));
+    const borrados = new Set(r.borrados);
     let retirados = 0;
-    if (r.completo && ctx.caller.isAdmin) {
-      for (const a of plan.faltantes.slice(0, MAX_COMPROBAR)) {
-        let motivo: string | null = null;
-        try {
-          const e = await ctx.tc.archivo(a.fileId);
-          if (flujoDe(e, todos)?.flujo.id !== flujo.id) motivo = `Se movió fuera de las carpetas de revisión del flujo (ahora en ${e.ruta}).`;
-        } catch (err) {
-          if ((err as { status?: number }).status === 404) motivo = "Ya no está en Trimble (se borró, o se movió a una carpeta que no se ve).";
-        }
-        if (!motivo) continue;
-        const hecho = await ctx.store.actualizarArchivo(a.id, { estado: "retirado", actualizado: momento });
-        lineas.push(linea(hecho, "archivo-retirado", `${motivo} Queda como retirado; no se borra nada.`, { usuario: ctx.caller.name, usuarioId: ctx.caller.id }, momento));
-        retirados++;
+    let noVistos = 0;
+    for (const a of plan.faltantes) {
+      const motivo = !elegidosIds.has(a.fileId)
+        ? `Se quitó del flujo «${flujo.hito}».`
+        : borrados.has(a.fileId) && ctx.caller.isAdmin
+          ? "Ya no está en Trimble (se borró, o se movió a una carpeta que no se ve)."
+          : null;
+      if (!motivo) {
+        if (borrados.has(a.fileId)) noVistos++;
+        continue;
       }
+      const hecho = await ctx.store.actualizarArchivo(a.id, { estado: "retirado", actualizado: momento });
+      lineas.push(linea(hecho, "archivo-retirado", `${motivo} Queda como retirado; no se borra nada.`, { usuario: ctx.caller.name, usuarioId: ctx.caller.id }, momento));
+      retirados++;
     }
 
-    // A Trimble ToDo to whoever has the first step of what now waits (phase 3).
-    const asignaciones = (await ctx.store.asignaciones(ctx.projectId)).filter((x) => x.activa && x.flujoId === flujo.id);
-    const avisados = await avisarRevision(ctx, flujo.id, aAvisar, asignaciones, flujo.hito, momento);
+    // A Trimble ToDo to the responsible of the first step of what now waits (phase 3).
+    const avisados = await avisarRevision(ctx, flujo, aAvisar, momento);
     lineas.push(...avisados.lineas);
     await ctx.store.registrarVarios(lineas);
 
@@ -123,10 +127,9 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
       reaparecidos ? contar(reaparecidos, "archivo que vuelve", "archivos que vuelven") : "",
       retirados ? contar(retirados, "retirado", "retirados") : "",
     ].filter(Boolean);
-    const faltan = plan.faltantes.length - retirados;
     const avisos = [
       r.completo ? "" : ` Revisión incompleta (${r.motivo}): lo que no se vio no se marcó como retirado.`,
-      r.completo && faltan > 0 && !ctx.caller.isAdmin ? ` ${contar(faltan, "archivo registrado no apareció", "archivos registrados no aparecieron")} en tu revisión; solo la de un administrador los confirma como retirados.` : "",
+      noVistos > 0 ? ` ${contar(noVistos, "archivo registrado no apareció", "archivos registrados no aparecieron")} en tu revisión; solo la de un administrador los confirma como retirados.` : "",
       avisados.enviados ? ` Se avisó a los revisores con ${contar(avisados.enviados, "tarea", "tareas")} de Trimble.` : "",
       avisados.fallidos ? ` ${contar(avisados.fallidos, "aviso no se pudo enviar", "avisos no se pudieron enviar")} (ver Historial).` : "",
     ].join("");
@@ -148,23 +151,25 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
 
 /** Every registered file with its flow, the step it waits for, who has it and whether it is the caller's turn. */
 export async function listarArchivos(ctx: Ctx): Promise<{ yo: string; esAdmin: boolean; archivos: ArchivoInfo[] }> {
-  const [flujos, asignaciones, archivos] = await Promise.all([ctx.store.flujos(ctx.projectId), ctx.store.asignaciones(ctx.projectId), ctx.store.archivos(ctx.projectId)]);
-  const activas = asignaciones.filter((a) => a.activa);
-  const grupos = [...new Set(activas.filter((a) => a.quienTipo === "grupo").map((a) => a.quienId))];
+  const [flujos, archivos] = await Promise.all([ctx.store.flujos(ctx.projectId), ctx.store.archivos(ctx.projectId)]);
+  const porId = new Map(flujos.map((f) => [f.id, f]));
+  const resp = new Map(archivos.map((a) => [a.id, responsablesArchivo(a, porId.get(a.flujoId))]));
+  const grupos = [...new Set([...resp.values()].flat().filter((r) => r.tipo === "grupo").map((r) => r.id))];
   const mios = grupos.length && ctx.caller.memberOfGroups ? await ctx.caller.memberOfGroups(grupos) : new Set<string>();
-  const hitos = new Map(flujos.map((f) => [f.id, f.hito]));
   return {
     yo: ctx.caller.id,
     esAdmin: ctx.caller.isAdmin,
     archivos: archivos.map((a) => {
-      const resp = responsablesArchivo(a, activas);
+      const r = resp.get(a.id) ?? [];
+      const flujo = porId.get(a.flujoId);
       return {
         ...a,
-        hito: hitos.get(a.flujoId) ?? "",
+        hito: flujo?.hito ?? "",
         pasoNombre: ESPERANDO.includes(a.estado) ? (a.pasos[a.pasoActual]?.nombre ?? "") : "",
-        responsables: resp.map((r) => (r.quienTipo === "grupo" ? `${r.quienNombre} (grupo)` : r.quienNombre)),
-        meToca: meToca(a, resp, ctx.caller.id, mios),
+        responsables: r.map(nombreResponsable),
+        meToca: meToca(a, r, ctx.caller.id, mios),
         enlace: enlaceDe(ctx.projectId, a),
+        destino: flujo?.destino?.ruta ?? null,
       };
     }),
   };

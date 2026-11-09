@@ -356,7 +356,7 @@ function Decision({ api, a, onDecidido }: { api: FlujoApi; a: ArchivoInfo; onDec
           Ábrela en Trimble
         </a>{" "}
         antes de decidir.
-        {ultimo ? " Es el último paso: al aprobar, el archivo queda aprobado y se copia a la carpeta destino." : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
+        {ultimo ? (a.destino ? " Es el último paso: al aprobar, el archivo queda aprobado y se copia a la carpeta destino." : " Es el último paso: al aprobar, el archivo queda aprobado.") : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
       </div>
       <label>
         <span style={labelStyle}>Comentario (opcional al aprobar) o motivo del rechazo (obligatorio)</span>

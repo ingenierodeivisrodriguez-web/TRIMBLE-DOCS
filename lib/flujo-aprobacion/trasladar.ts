@@ -83,6 +83,9 @@ export async function trasladar(ctx: Ctx, archivoId: unknown, opciones: { reempl
   if (a.traslado?.estado === "en-curso" && a.traslado.versionId === a.versionAprobadaId) return confirmarTraslado(ctx, a.id);
   const flujo = await ctx.store.flujo(a.flujoId);
   if (!flujo) throw new FlujoError("El flujo de este archivo ya no existe.", 404);
+  // Flows made since 09-11-2026 have no destination chosen in advance.
+  const destino = flujo.destino;
+  if (!destino) throw new FlujoError("Este flujo no tiene carpeta destino: la versión aprobada queda donde está.", 409, "sin-destino");
 
   const inicio = ctx.ahora?.() ?? new Date();
   const momento = inicio.toISOString();
@@ -95,8 +98,8 @@ export async function trasladar(ctx: Ctx, archivoId: unknown, opciones: { reempl
     const { lado } = ctx.tc;
     const carpeta = carpetaDeRevision(a, flujo);
     const subs = carpeta ? subcarpetas(a, carpeta) : [];
-    const carpetaRuta = [flujo.destino.ruta, ...subs].join(" / ");
-    const carpetaId = await asegurarRuta(lado.cliente, flujo.destino.id, subs);
+    const carpetaRuta = [destino.ruta, ...subs].join(" / ");
+    const carpetaId = await asegurarRuta(lado.cliente, destino.id, subs);
     if (!carpetaId) {
       const mensaje = `No se pudo abrir o crear «${carpetaRuta}» en la carpeta destino: revisa que quien aprueba pueda escribir ahí.`;
       await anotar(ctx, a, "traslado-error", mensaje, momento);

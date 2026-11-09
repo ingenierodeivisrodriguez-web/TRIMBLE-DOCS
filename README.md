@@ -17,7 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
-| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; desde el 06-11-2026 todo en una sola pantalla con panel de detalles, fecha de vencimiento, notas y comentarios; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
+| **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; desde el 06-11-2026 todo en una sola pantalla con panel de detalles, fecha de vencimiento, notas y comentarios; desde el 09-11-2026 quien crea el flujo marca sus archivos y elige el responsable de cada paso, sin carpeta destino; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
 Trimble Connect"): presenta Manuales y sus planes (leídos de la venta en
@@ -4068,7 +4068,8 @@ controlado a una carpeta destino, para que en esa carpeta solo haya archivos
 aprobados. Pedido el 04-11-2026; el dueño aprobó el plan y las recomendaciones
 el mismo día.
 
-Cómo será:
+Cómo será (lo que sigue es el diseño del 04-11-2026; el 09-11-2026 cambió cómo
+se crea un flujo: ver «Archivos elegidos y responsable por paso» más abajo):
 
 - Los **administradores del proyecto en Trimble** definen **flujos**. Cada flujo
   tiene un **título o hito** que los archivos soportan (por ejemplo «Aprobar
@@ -4415,7 +4416,7 @@ y la tabla de comentarios; no se pierde nada).
 
 **Arriba**: el título, **Buscar flujo**, el aviso **«Tienes N archivos por
 revisar»** (un clic deja solo los flujos donde la persona tiene algo por
-revisar), **Nuevo** (administradores) y **⋮** con **Exportar trazabilidad
+revisar), **Nuevo** (desde el 09-11-2026, cualquier miembro) y **⋮** con **Exportar trazabilidad
 (todos los flujos)…** y **Prueba de conexión con Trimble…** (se abren en una
 ventana encima). Debajo sigue la revisión de carpetas (**Revisar ahora**).
 
@@ -4434,15 +4435,15 @@ flujo), la **papelera** (desactivar, con confirmación; nada se borra) y **⋮**
 (Editar, Revisar permisos de Trimble, Activar, Desactivar…). Bloques que se
 abren y cierran:
 
-- **Detalles**: estado, vencimiento, pasos y quién tiene cada uno (Realiza,
-  cada paso, Consulta), carpetas de revisión y destino, cuántos archivos hay
-  en cada estado, notas, quién lo creó y modificó, y la última revisión de
-  carpetas.
+- **Detalles**: estado, vencimiento, pasos y su responsable, cuántos archivos
+  tiene y cuántos esperan, notas, quién lo creó y modificó, y la última
+  revisión de los archivos (la carpeta destino solo en los flujos de antes del
+  09-11-2026).
 - **Archivos** del flujo, con **Me toca (N)**, **Todos** y **Subidos por mí**,
   filtro por estado y buscador. Desde aquí se **decide** (aprobar o rechazar)
   y se ve el historial y el traslado de cada archivo, como antes.
-- **Quién hace qué** (asignaciones) y, para administradores, los **permisos de
-  Trimble**.
+- **Permisos de Trimble** (para quien creó el flujo y los administradores).
+  El bloque «Quién hace qué» se quitó el 09-11-2026.
 - **Historial** del flujo (las últimas 15 entradas y «Ver las N entradas»).
 - **Comentarios** del flujo: cualquier miembro del proyecto escribe (Enter
   envía, Mayús+Enter salta de línea); salen con nombre y fecha y **no se
@@ -4461,31 +4462,84 @@ vencido, responsables y filtros, con pruebas en `lista.test.ts`); pantallas
 (solo inserción). Ruta: `GET|POST /api/flujo-aprobacion/comentarios`
 (`?flujoId=` / `{ flujoId, texto }`).
 
+### Archivos elegidos y responsable por paso (ajuste del 09-11-2026)
+
+Pedido por el dueño: (1) solo quien crea el flujo define qué archivos lleva,
+con selección múltiple; (2) quien crea el flujo **no** pone carpeta destino:
+pone los pasos y un **responsable** en cada uno; (3) el responsable decide qué
+hacer con lo aprobado, por ejemplo ponerlo en una carpeta donde tenga permiso.
+Aceptó las recomendaciones del plan; esta es la **fase A** (crear el flujo). La
+**fase B** (al aprobar, el responsable elige la carpeta) está pendiente. Hay
+que volver a ejecutar **`supabase/flujo-aprobacion.sql`**.
+
+- **Cualquier miembro del proyecto** crea un flujo con **Nuevo**. Lo cambian
+  (archivos, pasos, responsables, activar o desactivar, revisar permisos)
+  **quien lo creó y los administradores** del proyecto en Trimble.
+- **Archivos del flujo**: en el explorador del formulario cada archivo tiene su
+  casilla; se marcan varios, de distintas carpetas, y «Marcar todos» marca los
+  de la carpeta abierta (hasta 100 por flujo). Los marcados salen arriba con ✕
+  para quitarlos. Ya no hay carpetas de revisión: **un archivo nuevo que se
+  suba no entra solo** (se agrega editando el flujo); las **versiones nuevas**
+  de los archivos elegidos sí, aunque el archivo se mueva de carpeta.
+- **Pasos y responsables**: cada paso lleva un **Responsable** (persona o grupo
+  de Trimble; en un grupo basta con que decida una persona). No se guarda un
+  paso sin responsable. Cambiar el responsable alcanza también a los archivos
+  que ya esperan ese paso. El responsable del último paso aprueba.
+- **Al guardar**, los archivos marcados quedan registrados en el momento
+  (Pendiente) y el responsable del primer paso recibe la tarea de Trimble. Un
+  archivo que se quita del flujo queda **Retirado** (no se borra nada, queda en
+  el historial).
+- **Un archivo solo puede estar en un flujo activo** (la base de datos también
+  lo impide). Al desactivar un flujo sus archivos quedan libres para otro.
+- Se quitaron el bloque **«Quién hace qué»** y los papeles **Realiza** y
+  **Consulta** como asignaciones: quien sube cada versión es quien la corrige
+  si la rechazan, y todos en el proyecto ven los flujos.
+- **Revisar permisos de Trimble** lee las carpetas donde están los archivos del
+  flujo y avisa si un responsable no aparece con acceso (no podría abrirlos) o
+  si un paso no tiene responsable.
+- **Flujos de antes del 09-11-2026**: el SQL convierte sus archivos registrados
+  en sus archivos elegidos; sus pasos quedan **sin responsable** hasta que un
+  administrador los edite y lo elija; si tenían carpeta destino, lo aprobado se
+  sigue copiando ahí. Lo que tenían en «Quién hace qué» queda en el historial.
+- Mientras llega la fase B, al aprobar el último paso de un flujo nuevo el
+  archivo queda **Aprobado** donde está (no se copia a ninguna carpeta).
+
+Código: [`lib/flujo-aprobacion/flujos.ts`](lib/flujo-aprobacion/flujos.ts)
+(reglas: archivos, responsables, `conflictosArchivos`, `puedeCambiar`),
+[`recorrido.ts`](lib/flujo-aprobacion/recorrido.ts) (`leerArchivos`: una consulta
+por carpeta donde se vio cada archivo; el que se movió se busca solo; 404 =
+borrado), `registro.ts` (`responsablesArchivo` desde el paso), `revision.ts`,
+`service.ts` (`guardarFlujo` registra al guardar), `permisos.ts`; pantallas
+`EditorFlujo` y `PanelFlujo`; el explorador de Publicar ganó «Marcar todos».
+Columnas `aprobacion_flujos.archivos` (jsonb) y `creado_por_id`; `destino` ya
+puede quedar vacío; *trigger* `aprobacion_revisar_archivos`
+(`archivo-en-otro-flujo`). Se borraron las rutas `/api/flujo-aprobacion/asignaciones`
+(la tabla `aprobacion_asignaciones` se conserva).
+
 ### Guía rápida
 
 1. Instale la extensión con
    `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` y ejecute
    `supabase/flujo-aprobacion.sql` en Supabase (una vez; se puede repetir).
-2. **Nuevo** (administrador del proyecto): título o hito, carpetas de
-   revisión, carpeta destino, pasos (por ejemplo Revisa → Aprueba) y, si se
-   quiere, fecha de vencimiento y notas. **Guardar**: el flujo queda abierto
-   en el panel de la derecha.
-3. En el panel, **Quién hace qué → + Asignar**: marque carpetas o archivos,
-   elija persona o grupo de Trimble y el papel (Realiza, cada paso, Consulta).
-   Revise los avisos de pasos sin nadie.
-4. **⋮ → Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
-   ejemplo, quién puede subir directo a la carpeta destino, o un aprobador sin
-   acceso completo a ella).
-5. Los modeladores suben sus archivos a las carpetas de revisión, como siempre.
-   Al abrir la extensión (o con **Revisar ahora**) se registran y los
-   revisores reciben la tarea de Trimble.
-6. Cada revisor pulsa **«Tienes N archivos por revisar»**, abre el flujo y en
-   **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
+2. **Nuevo** (cualquier miembro del proyecto): título o hito, **marque los
+   archivos** en el explorador (varios a la vez, de distintas carpetas), los
+   pasos (por ejemplo Revisa → Aprueba) con **su responsable** y, si quiere,
+   fecha de vencimiento y notas. **Guardar**: los archivos quedan pendientes,
+   el responsable del primer paso recibe la tarea de Trimble y el flujo queda
+   abierto en el panel de la derecha.
+3. **⋮ → Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
+   ejemplo, un responsable sin acceso a la carpeta de los archivos).
+4. Los modeladores suben las versiones nuevas con el mismo nombre, como
+   siempre. Al abrir la extensión (o con **Revisar ahora**) se registran y el
+   responsable recibe la tarea. Un archivo nuevo se agrega editando el flujo.
+5. Cada responsable pulsa **«Tienes N archivos por revisar»**, abre el flujo y
+   en **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
    comentario si quiere) o rechaza con el motivo.
-7. Al aprobar el último paso la versión aprobada pasa sola a la carpeta
-   destino. Si algo queda en espera (otro archivo con ese nombre) o falla, el
-   archivo lo dice y quien aprobó (o un administrador) lo resuelve.
-8. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
+6. Al aprobar el último paso el archivo queda aprobado. (En los flujos de antes
+   con carpeta destino, la versión aprobada pasa sola a esa carpeta; si algo
+   queda en espera o falla, el archivo lo dice y quien aprobó o un
+   administrador lo resuelve.)
+7. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
    mí**, corrige y sube la versión nueva con el mismo nombre en la misma
    carpeta.
 9. **Trazabilidad**: ⬇ en el panel (un flujo) o **⋮ → Exportar trazabilidad**
@@ -4494,25 +4548,25 @@ vencido, responsables y filtros, con pruebas en `lista.test.ts`); pantallas
 ### Protocolo de prueba en Trimble real
 
 En un proyecto de pruebas, con dos usuarios (A administra, B modela) y un grupo
-de Trimble con al menos un miembro:
+de Trimble con al menos un miembro (actualizado el 09-11-2026 para la fase A;
+las pruebas de copia a una carpeta vuelven con la fase B):
 
-1. A crea un flujo «Prueba flujo» con una carpeta de revisión (con una
-   subcarpeta), una carpeta destino vacía y dos pasos (Revisa → Aprueba);
-   asigna Revisa al **grupo** y Aprueba a A. Revisa los permisos.
-2. B sube un `.rvt` a la subcarpeta y un `.pdf` a la carpeta de revisión.
-   Alguien abre la extensión: deben quedar 2 archivos pendientes y **una tarea
-   de Trimble para el grupo** (si Trimble no acepta grupos, una por miembro).
-   Comprobar que llegó el correo.
+1. B (que no es administrador) sube un `.rvt` y un `.pdf`, y crea un flujo
+   «Prueba flujo» marcando los dos archivos, con dos pasos: Revisa = el
+   **grupo**, Aprueba = A. Al guardar deben quedar 2 archivos pendientes y
+   **una tarea de Trimble para el grupo** (si Trimble no acepta grupos, una por
+   miembro). Comprobar que llegó el correo.
+2. Otro miembro que no creó el flujo no ve «Editar»; A (administrador) sí.
+   B revisa los permisos de Trimble desde el ⋮.
 3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; tarea para A) y
    rechaza el `.pdf` con motivo (tarea para B con el motivo).
-4. A aprueba el `.rvt`: debe aparecer en la carpeta destino, **dentro de la
-   misma subcarpeta**, como **versión 1**, y abrirse en el visor sin
-   «Conversión en curso».
-5. B sube una versión nueva del `.rvt`; se aprueba otra vez: en el destino
-   debe quedar **el mismo archivo en versión 2** (no un archivo nuevo).
-6. A sube a mano a la carpeta destino un archivo con el mismo nombre del
-   `.pdf`; B lo corrige y se aprueba: debe quedar «En destino hay otro archivo
-   con ese nombre» hasta que A pulse «Reemplazar en el destino».
+4. A aprueba el `.rvt`: queda **Aprobado** donde está.
+5. B sube la versión corregida del `.pdf` con el mismo nombre: al abrir la
+   extensión debe quedar como **nueva versión pendiente** desde el primer paso.
+   B mueve el `.rvt` a otra carpeta: el flujo lo sigue (solo cambia la ruta).
+6. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
+   «Prueba flujo». B quita el `.pdf` del flujo: queda **Retirado**, sin
+   borrarse en Trimble.
 7. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
    estén quién subió, quién revisó, decisiones con fecha, motivos y quién
    trasladó.

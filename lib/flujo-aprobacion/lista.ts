@@ -5,14 +5,14 @@
  * waiting is "vencido"), and the filters (owner, user, group, state, due date,
  * "tengo por revisar").
  */
-import { PAPEL_CONSULTA, PAPEL_REALIZA } from "./flujos";
+import { nombreResponsable } from "./flujos";
 import { ESPERANDO } from "./registro";
-import type { ArchivoInfo, Asignacion, Flujo } from "./types";
+import type { ArchivoInfo, Flujo, Responsable } from "./types";
 
 export type EstadoFila = "activo" | "desactivado" | "vencido";
 
 export interface FilaFlujo {
-  flujo: Flujo & { asignaciones: Asignacion[] };
+  flujo: Flujo;
   archivos: number;
   /** Files waiting for anyone's review. */
   pendientes: number;
@@ -35,26 +35,20 @@ export function sumarDias(dia: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-const nombre = (a: Pick<Asignacion, "quienTipo" | "quienNombre">) => (a.quienTipo === "grupo" ? `${a.quienNombre} (grupo)` : a.quienNombre);
+/** The responsibles of the flow's steps, without repeats, in step order. */
+function responsablesDe(f: Pick<Flujo, "pasos">): Responsable[] {
+  const vistos = new Map<string, Responsable>();
+  for (const p of f.pasos) if (p.responsable) vistos.set(`${p.responsable.tipo}:${p.responsable.id}`, vistos.get(`${p.responsable.tipo}:${p.responsable.id}`) ?? p.responsable);
+  return [...vistos.values()];
+}
 
 /** Who has the flow's review steps, without repeats, in step order. */
-export function responsablesFlujo(f: Pick<Flujo, "pasos"> & { asignaciones: Asignacion[] }): string[] {
-  const vistos = new Set<string>();
-  const out: string[] = [];
-  for (const p of f.pasos) {
-    for (const a of f.asignaciones) {
-      if (!a.activa || a.papel !== p.id || a.papel === PAPEL_REALIZA || a.papel === PAPEL_CONSULTA) continue;
-      const clave = `${a.quienTipo}:${a.quienId}`;
-      if (vistos.has(clave)) continue;
-      vistos.add(clave);
-      out.push(nombre(a));
-    }
-  }
-  return out;
+export function responsablesFlujo(f: Pick<Flujo, "pasos">): string[] {
+  return responsablesDe(f).map(nombreResponsable);
 }
 
 /** The rows: active flows first, then by milestone. */
-export function filasFlujos(flujos: (Flujo & { asignaciones: Asignacion[] })[], archivos: Pick<ArchivoInfo, "flujoId" | "estado" | "meToca">[], hoy: string): FilaFlujo[] {
+export function filasFlujos(flujos: Flujo[], archivos: Pick<ArchivoInfo, "flujoId" | "estado" | "meToca">[], hoy: string): FilaFlujo[] {
   const porNombre = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
   return flujos
     .map((f) => {
@@ -69,7 +63,7 @@ export function filasFlujos(flujos: (Flujo & { asignaciones: Asignacion[] })[], 
 
 export interface FiltroLista {
   propietario?: string;
-  /** "persona:id" or "grupo:id": flows where they have any role. */
+  /** "persona:id" or "grupo:id": flows where they are responsible for a step. */
   quien?: string;
   estado?: EstadoFila | "";
   vence?: "vencidos" | "7dias" | "sin-fecha" | "";
@@ -83,7 +77,7 @@ export function opcionesFiltro(filas: FilaFlujo[]): { propietarios: string[]; pe
   const propietarios = [...new Set(filas.map((f) => f.flujo.creadoPor).filter((x): x is string => !!x))].sort(porNombre.compare);
   const personas = new Map<string, string>();
   const grupos = new Map<string, string>();
-  for (const f of filas) for (const a of f.flujo.asignaciones) if (a.activa) (a.quienTipo === "grupo" ? grupos : personas).set(a.quienId, a.quienNombre);
+  for (const f of filas) for (const r of responsablesDe(f.flujo)) (r.tipo === "grupo" ? grupos : personas).set(r.id, r.nombre);
   const lista = (m: Map<string, string>) => [...m].map(([id, n]) => ({ id, nombre: n })).sort((a, b) => porNombre.compare(a.nombre, b.nombre));
   return { propietarios, personas: lista(personas), grupos: lista(grupos) };
 }
@@ -94,7 +88,7 @@ export function filtrarFilas(filas: FilaFlujo[], filtro: FiltroLista, hoy: strin
   return filas.filter((f) => {
     const v = f.flujo.vence ?? null;
     if (filtro.propietario && f.flujo.creadoPor !== filtro.propietario) return false;
-    if (id && !f.flujo.asignaciones.some((a) => a.activa && a.quienTipo === tipo && a.quienId === id)) return false;
+    if (id && !f.flujo.pasos.some((p) => p.responsable?.tipo === tipo && p.responsable.id === id)) return false;
     if (filtro.estado && f.estado !== filtro.estado) return false;
     if (filtro.vence === "vencidos" && f.estado !== "vencido") return false;
     if (filtro.vence === "7dias" && !(v && v >= hoy && v <= sumarDias(hoy, 7))) return false;

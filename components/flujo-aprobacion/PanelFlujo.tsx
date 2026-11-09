@@ -3,13 +3,12 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
-import { describirPasos, diaVisible, PAPEL_CONSULTA, PAPEL_REALIZA } from "../../lib/flujo-aprobacion/flujos";
+import { diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
 import type { FilaFlujo } from "../../lib/flujo-aprobacion/lista";
-import type { ArchivoInfo, Equipo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
+import type { ArchivoInfo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
 import { botonPeligro, botonSecundario } from "../compras/estilos";
 import { C, message, Notice } from "../presupuesto/ui";
 import Archivos from "./Archivos";
-import Asignaciones from "./Asignaciones";
 import Comentarios from "./Comentarios";
 import { descargarTrazabilidad } from "./descargas";
 import Historial from "./Historial";
@@ -17,7 +16,7 @@ import { EtiquetaEstado } from "./ListaFlujos";
 import MenuPuntos from "./MenuPuntos";
 import Permisos from "./Permisos";
 
-type Seccion = "detalles" | "archivos" | "quien" | "historial" | "comentarios";
+type Seccion = "detalles" | "archivos" | "permisos" | "historial" | "comentarios";
 
 const icono = { border: "none", background: "transparent", borderRadius: 4, width: 32, height: 32, cursor: "pointer", fontSize: 17, color: "var(--tc-gray-700)" } as const;
 
@@ -52,19 +51,18 @@ function Dato({ etiqueta, children }: { etiqueta: string; children: ReactNode })
 
 /**
  * A flow's details on the right of the single screen, like Trimble's own side
- * panels: its state and data, its files (decide there), who does what (and the
- * Trimble permissions), its history and its comments. "⬇" saves its
- * traceability as PDF; the bin deactivates it (it is never deleted).
+ * panels: its state and data (steps and their responsibles), its files
+ * (decide there), the Trimble permissions (for whoever can change it), its
+ * history and its comments. "⬇" saves its traceability as PDF; the bin
+ * deactivates it (it is never deleted).
  */
 export default function PanelFlujo({
   api,
-  projectId,
   projectName,
   fila,
   datos,
   archivos,
   errorArchivos,
-  equipo,
   recarga,
   pedirDesactivar,
   onCambio,
@@ -73,13 +71,11 @@ export default function PanelFlujo({
   onCerrar,
 }: {
   api: FlujoApi;
-  projectId: string;
   projectName: string;
   fila: FilaFlujo;
   datos: EstadoFlujos;
   archivos: { yo: string; esAdmin: boolean; archivos: ArchivoInfo[] } | null;
   errorArchivos: string;
-  equipo: Equipo | null;
   recarga: number;
   /** The list's "Desactivar…" asked for the confirmation. */
   pedirDesactivar: boolean;
@@ -93,7 +89,9 @@ export default function PanelFlujo({
   const [desactivar, setDesactivar] = useState(pedirDesactivar);
   const [aviso, setAviso] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
   const [generando, setGenerando] = useState(false);
-  const quienRef = useRef<HTMLDivElement>(null);
+  const permisosRef = useRef<HTMLDivElement>(null);
+  // Whoever created the flow, or a project administrator.
+  const puede = puedeCambiar(f, { id: datos.yo, esAdmin: datos.esAdmin });
 
   useEffect(() => setDesactivar(pedirDesactivar), [pedirDesactivar, f.id]);
   useEffect(() => setAviso(null), [f.id]);
@@ -128,16 +126,9 @@ export default function PanelFlujo({
   }
 
   const verPermisos = () => {
-    setAbiertas((x) => new Set([...x, "quien"]));
-    setTimeout(() => quienRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
+    setAbiertas((x) => new Set([...x, "permisos"]));
+    setTimeout(() => permisosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
-
-  const porPaso = f.pasos.map((p) => ({
-    paso: p.nombre,
-    quienes: f.asignaciones.filter((a) => a.activa && a.papel === p.id).map((a) => (a.quienTipo === "grupo" ? `${a.quienNombre} (grupo)` : a.quienNombre)),
-  }));
-  const realizan = [...new Set(f.asignaciones.filter((a) => a.activa && a.papel === PAPEL_REALIZA).map((a) => (a.quienTipo === "grupo" ? `${a.quienNombre} (grupo)` : a.quienNombre)))];
-  const consultan = [...new Set(f.asignaciones.filter((a) => a.activa && a.papel === PAPEL_CONSULTA).map((a) => (a.quienTipo === "grupo" ? `${a.quienNombre} (grupo)` : a.quienNombre)))];
 
   return (
     <div style={{ background: "#fff", minHeight: "100%" }}>
@@ -157,7 +148,7 @@ export default function PanelFlujo({
             </svg>
           )}
         </button>
-        {datos.esAdmin && f.activo && (
+        {puede && f.activo && (
           <button type="button" onClick={() => setDesactivar(true)} style={icono} title="Desactivar el flujo (no se borra)" aria-label="Desactivar">
             <svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true">
               <path d="M5 6h10l-.8 10.2a1 1 0 0 1-1 .8H6.8a1 1 0 0 1-1-.8zM3.5 6h13M8 6V4h4v2" stroke="#4b5563" strokeWidth="1.7" fill="#6b7280" fillOpacity=".25" strokeLinejoin="round" />
@@ -166,16 +157,16 @@ export default function PanelFlujo({
         )}
         <MenuPuntos
           opciones={[
-            { texto: "Editar", onClick: onEditar, oculto: !datos.esAdmin },
-            { texto: "Revisar permisos de Trimble", onClick: verPermisos, oculto: !datos.esAdmin },
-            { texto: "Activar", onClick: () => void cambiarEstado(true), oculto: !datos.esAdmin || f.activo },
-            { texto: "Desactivar…", onClick: () => setDesactivar(true), oculto: !datos.esAdmin || !f.activo, peligro: true },
+            { texto: "Editar", onClick: onEditar, oculto: !puede },
+            { texto: "Revisar permisos de Trimble", onClick: verPermisos, oculto: !puede },
+            { texto: "Activar", onClick: () => void cambiarEstado(true), oculto: !puede || f.activo },
+            { texto: "Desactivar…", onClick: () => setDesactivar(true), oculto: !puede || !f.activo, peligro: true },
           ]}
         />
       </div>
       {desactivar && (
         <Notice kind="warning" style={{ margin: "0 16px 10px" }}>
-          Al desactivar «{f.hito}» deja de revisar archivos nuevos. No se borra: su configuración, sus archivos y su historial se conservan y se puede volver a activar.
+          Al desactivar «{f.hito}» deja de revisar versiones nuevas de sus archivos. No se borra: su configuración, sus archivos y su historial se conservan y se puede volver a activar.
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button type="button" style={{ ...botonPeligro, padding: "5px 12px", fontSize: 13.5 }} onClick={() => void cambiarEstado(false)}>
               Desactivar
@@ -197,53 +188,37 @@ export default function PanelFlujo({
           <EtiquetaEstado estado={fila.estado} />
         </div>
         <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.estado === "vencido" ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.estado === "vencido" ? " (vencido, con archivos por revisar)" : ""}</span> : "Sin fecha"}</Dato>
-        <Dato etiqueta="Pasos">{describirPasos(f.pasos)}</Dato>
-        <Dato etiqueta="Responsables">
-          {porPaso.map((p) => (
-            <div key={p.paso}>
-              <strong>{p.paso}:</strong> {p.quienes.length ? p.quienes.join(", ") : <span style={{ color: "var(--tc-gray-500)" }}>sin asignar (solo administradores)</span>}
+        <Dato etiqueta="Pasos y responsables">
+          <div>
+            <strong>Realiza:</strong> quien sube cada versión (y la corrige si la rechazan)
+          </div>
+          {f.pasos.map((p) => (
+            <div key={p.id}>
+              <strong>{p.nombre}:</strong> {p.responsable ? nombreResponsable(p.responsable) : <span style={{ color: "#a1261b" }}>sin responsable{puede ? " (edita el flujo para elegirlo)" : ""}</span>}
             </div>
           ))}
-          {realizan.length > 0 && (
-            <div>
-              <strong>Realiza:</strong> {realizan.join(", ")}
-            </div>
-          )}
-          {consultan.length > 0 && (
-            <div>
-              <strong>Consulta:</strong> {consultan.join(", ")}
-            </div>
-          )}
         </Dato>
-        <Dato etiqueta="Carpetas de revisión">
-          {f.carpetas.map((c) => (
-            <div key={c.id}>{c.ruta}</div>
-          ))}
-        </Dato>
-        <Dato etiqueta="Carpeta destino">{f.destino.ruta}</Dato>
         <Dato etiqueta="Archivos">
-          {fila.archivos} registrados · {fila.pendientes} por revisar{fila.porRevisar ? ` (${fila.porRevisar} te tocan)` : ""}
+          {f.archivos.length} {f.archivos.length === 1 ? "elegido" : "elegidos"} · {fila.pendientes} por revisar{fila.porRevisar ? ` (${fila.porRevisar} te tocan)` : ""}
         </Dato>
+        {f.destino && <Dato etiqueta="Carpeta destino (flujo anterior)">{f.destino.ruta}</Dato>}
         {f.notas && <Dato etiqueta="Notas"><span style={{ whiteSpace: "pre-wrap" }}>{f.notas}</span></Dato>}
         <Dato etiqueta="Creado/a">{`${fechaHora(f.creado).slice(0, 10)} por ${f.creadoPor ?? "—"}`}</Dato>
         <Dato etiqueta="Modificado">{`${fechaHora(f.actualizado).slice(0, 10)} por ${f.actualizadoPor ?? "—"}`}</Dato>
-        {f.revisado && <Dato etiqueta="Última revisión de las carpetas">{`${fechaHora(f.revisado)} por ${f.revisadoPor ?? "—"}`}</Dato>}
+        {f.revisado && <Dato etiqueta="Última revisión de los archivos">{`${fechaHora(f.revisado)} por ${f.revisadoPor ?? "—"}`}</Dato>}
       </Bloque>
 
       <Bloque titulo="Archivos" abierto={abiertas.has("archivos")} onAlternar={() => alternar("archivos")} extra={fila.porRevisar ? <span style={{ color: "#8a5a00", fontWeight: 600 }}>{fila.porRevisar} te tocan</span> : `${fila.archivos}`}>
         <Archivos key={f.id} api={api} flujoId={f.id} datos={archivos} error={errorArchivos} onCambio={onCambioArchivos} />
       </Bloque>
 
-      <div ref={quienRef}>
-        <Bloque titulo="Quién hace qué" abierto={abiertas.has("quien")} onAlternar={() => alternar("quien")} extra={`${f.asignaciones.length}`}>
-          <Asignaciones api={api} projectId={projectId} flujo={f} esAdmin={datos.esAdmin} equipo={equipo} onCambio={onCambio} />
-          {datos.esAdmin && (
-            <div style={{ marginTop: 12 }}>
-              <Permisos api={api} flujoId={f.id} />
-            </div>
-          )}
-        </Bloque>
-      </div>
+      {puede && (
+        <div ref={permisosRef}>
+          <Bloque titulo="Permisos de Trimble" abierto={abiertas.has("permisos")} onAlternar={() => alternar("permisos")}>
+            <Permisos api={api} flujoId={f.id} />
+          </Bloque>
+        </div>
+      )}
 
       <Bloque titulo="Historial" abierto={abiertas.has("historial")} onAlternar={() => alternar("historial")}>
         <Historial api={api} flujoId={f.id} recarga={recarga} />

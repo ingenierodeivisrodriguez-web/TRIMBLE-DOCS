@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { RawFolderItem } from "../trimbleApi";
-import { recorrer } from "./recorrido";
+import { leerArchivos } from "./recorrido";
+import type { CarpetaFlujo } from "./types";
 
-const carpeta = (id: string, name: string): RawFolderItem => ({ id, name, type: "FOLDER", createdOn: "", modifiedOn: "" });
 const archivo = (id: string, name: string, revision: number, quien = { id: "juan", firstName: "Juan ", lastName: " Pérez" }): RawFolderItem => ({
   id,
   name,
@@ -16,45 +16,85 @@ const archivo = (id: string, name: string, revision: number, quien = { id: "juan
   revision,
 });
 
-// arq > {modelo.rvt, Torre 1 > {detalle.dwg}, Otra revisión (another flow) > {ajeno.pdf}}
+// Obra > Arquitectura > {modelo.rvt, fachada.pdf}, Obra > Estructura > {E-101.pdf}, Obra > Otra > {movido.dwg}
 const ARBOL: Record<string, RawFolderItem[]> = {
-  arq: [archivo("modelo", "modelo.rvt", 3), carpeta("t1", "Torre 1"), carpeta("otra", "Otra revisión")],
-  t1: [archivo("detalle", "detalle.dwg", 1)],
-  otra: [archivo("ajeno", "ajeno.pdf", 1)],
+  arq: [archivo("modelo", "modelo.rvt", 3), archivo("fachada", "fachada.pdf", 1), archivo("ajeno", "ajeno.pdf", 1)],
+  est: [archivo("e101", "E-101.pdf", 2)],
+  otra: [archivo("movido", "movido.dwg", 4)],
 };
-const INICIO = [{ id: "arq", ruta: "Obra / Arquitectura", ancestros: ["raiz"] }];
-const deps = (arbol = ARBOL, reloj = () => 0) => ({ items: async (id: string) => (arbol[id] ? arbol[id] : Promise.reject(new Error("403"))), reloj });
+const el = (id: string, carpeta: string, nombre: string): CarpetaFlujo => ({ id, ruta: `Obra / ${carpeta === "arq" ? "Arquitectura" : carpeta === "est" ? "Estructura" : "Otra"} / ${nombre}`, ancestros: ["raiz", carpeta] });
+const ELEGIDOS = [el("modelo", "arq", "modelo.rvt"), el("fachada", "arq", "fachada.pdf"), el("e101", "est", "E-101.pdf")];
 
-test("recorre las subcarpetas, con quién subió la última versión, y deja las carpetas de otro flujo", async () => {
-  const r = await recorrer(INICIO, new Set(["arq", "otra"]), deps());
+function deps(o: { arbol?: Record<string, RawFolderItem[]>; donde?: Record<string, CarpetaFlujo>; reloj?: () => number } = {}) {
+  const arbol = o.arbol ?? ARBOL;
+  const leidas: string[] = [];
+  return {
+    leidas,
+    items: async (id: string) => {
+      leidas.push(id);
+      return arbol[id] ? arbol[id] : Promise.reject(new Error("403"));
+    },
+    archivo: async (id: string) => {
+      const e = o.donde?.[id];
+      if (!e) throw Object.assign(new Error("No existe"), { status: 404 });
+      return e;
+    },
+    reloj: o.reloj ?? (() => 0),
+  };
+}
+
+test("lee los archivos elegidos con una sola consulta por carpeta, con quién subió la última versión", async () => {
+  const d = deps();
+  const r = await leerArchivos(ELEGIDOS, d);
   assert.equal(r.completo, true);
   assert.equal(r.carpetas, 2);
+  assert.deepEqual(d.leidas.sort(), ["arq", "est"]);
   assert.deepEqual(
     r.vistos.map((v) => [v.ruta, v.revision, v.subidoPor, v.ancestros.join(">")]),
     [
       ["Obra / Arquitectura / modelo.rvt", 3, "Juan Pérez", "raiz>arq"],
-      ["Obra / Arquitectura / Torre 1 / detalle.dwg", 1, "Juan Pérez", "raiz>arq>t1"],
+      ["Obra / Arquitectura / fachada.pdf", 1, "Juan Pérez", "raiz>arq"],
+      ["Obra / Estructura / E-101.pdf", 2, "Juan Pérez", "raiz>est"],
     ]
   );
   assert.equal(r.vistos[0].subido, "2026-11-03T19:20:00Z");
+  assert.equal(r.vistos.some((v) => v.fileId === "ajeno"), false, "only the chosen ones");
 });
 
-test("una carpeta que no se puede leer deja la revisión incompleta, sin perder lo demás", async () => {
-  const r = await recorrer(INICIO, new Set(["arq"]), deps({ arq: ARBOL.arq, otra: ARBOL.otra }));
-  assert.equal(r.completo, false);
-  assert.match(r.motivo, /no se pudo leer «Obra \/ Arquitectura \/ Torre 1»/);
+test("un archivo que se movió se busca por sí solo y sale en su carpeta nueva", async () => {
+  const d = deps({ donde: { movido: el("movido", "otra", "movido.dwg") } });
+  const r = await leerArchivos([el("movido", "arq", "movido.dwg")], d);
+  assert.equal(r.completo, true);
   assert.deepEqual(
-    r.vistos.map((v) => v.fileId),
-    ["modelo", "ajeno"]
+    r.vistos.map((v) => [v.ruta, v.carpetaId, v.revision]),
+    [["Obra / Otra / movido.dwg", "otra", 4]]
   );
 });
 
-test("se detiene al acabarse el tiempo o al pasar el límite de archivos", async () => {
+test("Trimble dice que no existe: borrado; una carpeta que no se lee deja la lectura incompleta", async () => {
+  const borrado = await leerArchivos([el("viejo", "arq", "viejo.rvt")], deps());
+  assert.deepEqual(borrado.borrados, ["viejo"]);
+  assert.equal(borrado.completo, true);
+  // "est" can't be read and Trimble's own answer for the file isn't a 404.
+  const sinPermiso = await leerArchivos(ELEGIDOS, {
+    ...deps({ arbol: { arq: ARBOL.arq } }),
+    archivo: async () => {
+      throw Object.assign(new Error("403"), { status: 403 });
+    },
+  });
+  assert.equal(sinPermiso.completo, false);
+  assert.deepEqual(sinPermiso.fallidos, ["e101"]);
+  assert.match(sinPermiso.motivo, /no se pudo leer «Obra \/ Estructura \/ E-101.pdf»/);
+  assert.deepEqual(
+    sinPermiso.vistos.map((v) => v.fileId),
+    ["modelo", "fachada"]
+  );
+});
+
+test("se detiene al acabarse el tiempo y lo que falta queda sin leer", async () => {
   let t = 0;
-  const lento = await recorrer(INICIO, new Set(["arq"]), deps(ARBOL, () => (t += 30_000)), { tiempoMs: 50_000, maxCarpetas: 100, maxArchivos: 100, paralelo: 1 });
-  assert.equal(lento.completo, false);
-  assert.match(lento.motivo, /se acabó el tiempo/);
-  const muchos = await recorrer(INICIO, new Set(["arq"]), deps(), { tiempoMs: 50_000, maxCarpetas: 100, maxArchivos: 1, paralelo: 1 });
-  assert.equal(muchos.completo, false);
-  assert.match(muchos.motivo, /más de 1 archivos/);
+  const r = await leerArchivos(ELEGIDOS, deps({ reloj: () => (t += 30_000) }), { tiempoMs: 50_000, paralelo: 1 });
+  assert.equal(r.completo, false);
+  assert.match(r.motivo, /se acabó el tiempo/);
+  assert.ok(r.fallidos.length > 0);
 });

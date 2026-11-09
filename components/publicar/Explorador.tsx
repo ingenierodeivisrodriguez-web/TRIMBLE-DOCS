@@ -36,7 +36,8 @@ function Icono({ tipo }: { tipo: ItemCarpeta["tipo"] }) {
  * `elegir: "archivo"` checks and unchecks files, from any folder (folders
  * open on click; with `conCarpetas` their box checks the whole folder); `"carpeta"` picks the open folder with "Usar esta
  * carpeta" (files are listed, not pickable). `recarga` reloads the open
- * folder when it changes.
+ * folder when it changes. With `onElegirVarios`, "Marcar todos" checks (or
+ * unchecks) every file of the open folder at once.
  */
 export default function Explorador({
   api,
@@ -46,6 +47,7 @@ export default function Explorador({
   onElegir,
   recarga = 0,
   conCarpetas = false,
+  onElegirVarios,
 }: {
   /** Only the folder listing is used (Flujo de aprobación passes its own). */
   api: Pick<PublicarApi, "carpeta">;
@@ -55,6 +57,8 @@ export default function Explorador({
   onElegir: (e: Elegido) => void;
   recarga?: number;
   conCarpetas?: boolean;
+  /** Every file of the open folder: `marcar` true checks them, false unchecks them. */
+  onElegirVarios?: (es: Elegido[], marcar: boolean) => void;
 }) {
   const [folderId, setFolderId] = useState<string | null>(null);
   const [info, setInfo] = useState<CarpetaInfo | null>(null);
@@ -77,6 +81,8 @@ export default function Explorador({
 
   const ruta = info ? info.carpeta.ruta.map((r) => r.nombre).join(" / ") : "";
   const soloLectura = info?.carpeta.permiso === "READ";
+  const archivosAqui = elegir === "archivo" && onElegirVarios && info ? info.items.filter((it) => it.tipo === "archivo") : [];
+  const todosMarcados = archivosAqui.length > 0 && archivosAqui.every((it) => seleccionados.includes(it.id));
 
   return (
     <div style={{ border: `1px solid ${C.border}`, borderRadius: 4 }}>
@@ -94,6 +100,16 @@ export default function Explorador({
           </span>
         ))}
         {cargando && <span style={{ color: "var(--tc-gray-500)", marginLeft: 8 }}>Cargando…</span>}
+        {!cargando && archivosAqui.length > 1 && (
+          <button
+            type="button"
+            style={{ ...linkBtn, marginLeft: "auto" }}
+            onClick={() => onElegirVarios!(archivosAqui.map((it) => ({ id: it.id, tipo: it.tipo, nombre: it.nombre, ruta: `${ruta} / ${it.nombre}`, tamano: it.tamano, revision: it.revision })), !todosMarcados)}
+            title={todosMarcados ? "Quitar todos los archivos de esta carpeta" : "Marcar todos los archivos de esta carpeta"}
+          >
+            {todosMarcados ? "Quitar todos" : `Marcar todos (${archivosAqui.length})`}
+          </button>
+        )}
       </div>
       {error ? (
         <Notice kind="error" style={{ margin: 10 }}>

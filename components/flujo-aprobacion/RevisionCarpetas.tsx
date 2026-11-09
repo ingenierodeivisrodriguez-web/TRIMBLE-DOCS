@@ -8,8 +8,8 @@ import { botonSecundario } from "../compras/estilos";
 import { message, Notice } from "../presupuesto/ui";
 
 /**
- * Trimble doesn't announce uploads: on opening, the review folders of every
- * active flow are walked (one flow after the other) and what changed is
+ * Trimble doesn't announce uploads: on opening, the chosen files of every
+ * active flow are read (one flow after the other) and new versions are
  * registered; "Revisar ahora" does it again.
  */
 export default function RevisionCarpetas({ api, flujos, onTermino }: { api: FlujoApi; flujos: Flujo[]; onTermino: () => void }) {
@@ -55,16 +55,16 @@ export default function RevisionCarpetas({ api, flujos, onTermino }: { api: Fluj
         <div style={{ display: "grid", gap: 3 }}>
           {corriendo && (
             <span>
-              Revisando las carpetas de «{corriendo.hito}»… ({corriendo.n} de {corriendo.de})
+              Revisando los archivos de «{corriendo.hito}»… ({corriendo.n} de {corriendo.de})
             </span>
           )}
-          {!corriendo && resultados && conCambios.length === 0 && errores.length === 0 && <span>Carpetas revisadas: no hay archivos ni versiones nuevas.</span>}
+          {!corriendo && resultados && conCambios.length === 0 && errores.length === 0 && <span>Archivos revisados: no hay versiones nuevas.</span>}
           {!corriendo && conCambios.map((r) => <span key={r.flujoId}>{r.mensaje}</span>)}
           {!corriendo && errores.map((t) => <span key={t}>No se pudo revisar {t}</span>)}
         </div>
         <span style={{ display: "inline-flex", gap: 10, alignItems: "center" }}>
           {cuando && !corriendo && <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)" }}>Revisado a las {fechaHora(cuando).slice(11)}</span>}
-          <button type="button" onClick={() => void revisar()} disabled={!!corriendo} style={{ ...botonSecundario, padding: "4px 12px", fontSize: 13.5 }} title="Busca archivos y versiones nuevas en las carpetas de revisión">
+          <button type="button" onClick={() => void revisar()} disabled={!!corriendo} style={{ ...botonSecundario, padding: "4px 12px", fontSize: 13.5 }} title="Busca versiones nuevas de los archivos de cada flujo">
             {corriendo ? "Revisando…" : "Revisar ahora"}
           </button>
         </span>

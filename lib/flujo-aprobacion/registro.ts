@@ -1,6 +1,6 @@
 /**
- * Registering the files of a flow's review folders (phase 2), as pure
- * functions: what a folder walk found against what was registered.
+ * Registering the files of a flow (phase 2), as pure functions: what was
+ * read in Trimble against what was registered.
  * - A file seen for the first time: "pendiente", with a copy of the flow's
  *   steps (a later change of the flow doesn't touch files already in process).
  * - A new version while it waits: the review restarts on the latest version
@@ -10,8 +10,7 @@
  *   complete walk; nothing is ever deleted.
  * Who uploaded a version and when come from Trimble, not from when it was seen.
  */
-import { responsablesDe } from "./flujos";
-import type { ArchivoRegistro, ArchivoVisto, Asignacion, EstadoArchivo, Flujo } from "./types";
+import type { ArchivoRegistro, ArchivoVisto, EstadoArchivo, Flujo, Responsable } from "./types";
 
 /** States that wait for someone's review. */
 export const ESPERANDO: EstadoArchivo[] = ["pendiente", "nueva-version"];
@@ -60,7 +59,7 @@ function estadoAlReaparecer(r: ArchivoRegistro): EstadoArchivo {
 }
 
 /**
- * What to create and change after walking a flow's review folders.
+ * What to create and change after reading a flow's files.
  * `registrados`: every registered file of the project (a file may come from another flow).
  */
 export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], vistos: ArchivoVisto[], momento: string): PlanRegistro {
@@ -100,7 +99,7 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
       continue;
     }
     if (r.flujoId !== flujo.id) {
-      // Moved into this flow's folders: a new review with this flow.
+      // It was in another (inactive) flow: a new review with this one.
       plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-cambio-flujo", cambios: { ...deTrimble(v), ...nuevoTramite, flujoId: flujo.id, estado: "pendiente", versionAprobadaId: null, revisionAprobada: null, traslado: null } });
       continue;
     }
@@ -147,18 +146,23 @@ export function detalleCambio(c: Cambio, hito: string, fecha: (iso: string) => s
   }
 }
 
-/** Who has the step a file waits for (none when it waits for nobody). */
-export function responsablesArchivo(a: ArchivoRegistro, asignaciones: Asignacion[]): Asignacion[] {
+/**
+ * Who has the step a file waits for (none when it waits for nobody): the
+ * step's responsible in the flow as it is now (changing it reaches files in
+ * process), else the one in the file's own copy of the steps.
+ */
+export function responsablesArchivo(a: Pick<ArchivoRegistro, "estado" | "pasos" | "pasoActual">, flujo: Pick<Flujo, "pasos"> | null | undefined): Responsable[] {
   if (!ESPERANDO.includes(a.estado)) return [];
   const paso = a.pasos[a.pasoActual];
   if (!paso) return [];
-  return responsablesDe({ id: a.fileId, ancestros: a.ancestros }, paso.id, asignaciones.filter((x) => x.flujoId === a.flujoId));
+  const r = flujo?.pasos.find((p) => p.id === paso.id)?.responsable ?? paso.responsable;
+  return r ? [r] : [];
 }
 
 /** Whether it is the caller's turn: they (or one of their groups) have the step, and they didn't upload that version. */
-export function meToca(a: ArchivoRegistro, responsables: Asignacion[], yo: string, misGrupos: Set<string>): boolean {
+export function meToca(a: Pick<ArchivoRegistro, "subidoPorId">, responsables: Responsable[], yo: string, misGrupos: Set<string>): boolean {
   if (a.subidoPorId && a.subidoPorId === yo) return false;
-  return responsables.some((r) => (r.quienTipo === "persona" ? r.quienId === yo : misGrupos.has(r.quienId)));
+  return responsables.some((r) => (r.tipo === "persona" ? r.id === yo : misGrupos.has(r.id)));
 }
 
 /** "Pendiente de revisión", "Nueva versión pendiente de revisión (aprobada: v5)"… */

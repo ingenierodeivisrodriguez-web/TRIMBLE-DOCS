@@ -62,23 +62,39 @@ export interface IntentoTrimble {
 /** Steps after "Realiza" (who uploads): at least one, at most this many. */
 export const MIN_PASOS = 1;
 export const MAX_PASOS = 5;
-/** Review folders of one flow. */
-export const MAX_CARPETAS = 20;
+/** Files chosen in one flow. */
+export const MAX_ARCHIVOS = 100;
 
-/** A review step of a flow ("Revisa", "Aprueba"…). The id stays when it is renamed. */
-export interface PasoFlujo {
+/** A person or group of the project's Trimble team, with the name Trimble gave. */
+export interface Responsable {
+  tipo: "persona" | "grupo";
   id: string;
   nombre: string;
 }
 
-/** A Trimble folder as the flow keeps it: its path, and the ids above it (root first). */
+/** A review step of a flow ("Revisa", "Aprueba"…) and who is responsible for it. The id stays when it is renamed. */
+export interface PasoFlujo {
+  id: string;
+  nombre: string;
+  /** Who reviews or approves this step (09-11-2026 on; older flows may have none). */
+  responsable?: Responsable | null;
+}
+
+/** A Trimble folder or file as the flow keeps it: its path, and the folder ids above it (root first). */
 export interface CarpetaFlujo {
   id: string;
   ruta: string;
   ancestros: string[];
 }
 
-/** An approval flow: its title or milestone, review folders, destination and steps. Never deleted: deactivated. */
+/** A file chosen for a flow: same shape as a folder (the last ancestor is its folder). */
+export type ArchivoFlujo = CarpetaFlujo;
+
+/**
+ * An approval flow: its title or milestone, the files chosen by whoever
+ * created it and its steps, each with its responsible. Never deleted:
+ * deactivated.
+ */
 export interface Flujo {
   id: string;
   proyecto: string;
@@ -86,12 +102,18 @@ export interface Flujo {
   /** The title normalized, so it doesn't repeat in the project. */
   hitoClave: string;
   pasos: PasoFlujo[];
+  /** The files that go through the flow (their new versions are detected; a new file is added by editing the flow). */
+  archivos: ArchivoFlujo[];
+  /** Review folders of flows made before 09-11-2026 (kept, no longer used to find files). */
   carpetas: CarpetaFlujo[];
-  destino: CarpetaFlujo;
+  /** Destination of flows made before 09-11-2026; new flows have none (the approver will choose). */
+  destino: CarpetaFlujo | null;
   activo: boolean;
   version: number;
   creado: string;
   creadoPor: string | null;
+  /** Who created it (Trimble id): they and the project administrators change it. */
+  creadoPorId?: string | null;
   actualizado: string;
   actualizadoPor: string | null;
   /** When its folders were last reviewed, and by whom (phase 2). */
@@ -111,28 +133,6 @@ export interface Comentario {
   texto: string;
   usuario: string | null;
   usuarioId: string | null;
-}
-
-/** "realiza" (uploads and corrects), "consulta" (only sees), or the id of a review step. */
-export type Papel = string;
-
-/** Who does what on a folder or file of a flow. Never deleted: deactivated. */
-export interface Asignacion {
-  id: string;
-  flujoId: string;
-  proyecto: string;
-  objetivoTipo: "carpeta" | "archivo";
-  objetivoId: string;
-  objetivoRuta: string;
-  /** Folder ids above the target, root first. */
-  objetivoAncestros: string[];
-  papel: Papel;
-  quienTipo: "persona" | "grupo";
-  quienId: string;
-  quienNombre: string;
-  activa: boolean;
-  creado: string;
-  creadoPor: string | null;
 }
 
 /** One line of the history (only added, never changed). */
@@ -156,11 +156,13 @@ export interface EntradaHistorial {
   ocurrido?: string | null;
 }
 
-/** What the screen gets: flows with their assignments, and whether the caller administers them. */
+/** What the screen gets: the flows, who is asking and whether they administer the project. */
 export interface EstadoFlujos {
   esAdmin: boolean;
   yo: string;
-  flujos: (Flujo & { asignaciones: Asignacion[] })[];
+  flujos: Flujo[];
+  /** After saving: what registering its files did (or why it waits for the next review). */
+  mensaje?: string;
 }
 
 /** The project's team as Trimble lists it, for picking who does what. */
@@ -177,6 +179,7 @@ export interface AvisoPermisos {
 /** Who Trimble lists with access to one folder, in words. */
 export interface PermisosCarpeta {
   ruta: string;
+  /** "revision": a folder with files of the flow; "destino": the destination of an older flow. */
   papel: "destino" | "revision";
   completo: string[];
   lectura: string[];
@@ -332,4 +335,6 @@ export interface ArchivoInfo extends ArchivoRegistro {
   meToca: boolean;
   /** Trimble's viewer at the version under review. */
   enlace: string;
+  /** The flow's destination folder (older flows only), or null. */
+  destino: string | null;
 }

@@ -1,15 +1,14 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
-import type { ArchivoRegistro, Asignacion, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado } from "./types";
+import type { ArchivoFlujo, ArchivoRegistro, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado } from "./types";
 
 /**
  * Persistence of "Flujo de aprobación". Two implementations with the same
  * rules: Supabase (tables of supabase/flujo-aprobacion.sql through its REST
  * API, with the server-only key) and memory (for `next dev` without a
- * database and for tests). Nothing is ever deleted: flows and assignments are
- * deactivated and the history only grows. The database itself refuses a
- * repeated title in a project, a folder in two active flows, and a save over
- * a newer version.
+ * database and for tests). Nothing is ever deleted: flows are deactivated
+ * and the history only grows. The database itself refuses a repeated title
+ * in a project, a file in two active flows, and a save over a newer version.
  */
 export interface FlujoStore {
   /** Every flow of the project, active or not. */
@@ -18,10 +17,6 @@ export interface FlujoStore {
   crearFlujo(f: Omit<Flujo, "id" | "version">): Promise<Flujo>;
   /** Saves only while `version` is the stored one: null when someone saved before. */
   actualizarFlujo(id: string, version: number, cambios: Partial<Omit<Flujo, "id" | "version" | "proyecto" | "creado" | "creadoPor">>): Promise<Flujo | null>;
-  /** Every assignment of the project (active or not). */
-  asignaciones(proyecto: string): Promise<Asignacion[]>;
-  crearAsignaciones(a: Omit<Asignacion, "id">[]): Promise<Asignacion[]>;
-  desactivarAsignaciones(ids: string[]): Promise<void>;
   registrar(e: Omit<EntradaHistorial, "id" | "creado">): Promise<void>;
   /** Several lines at once (a first review may find hundreds of files). */
   registrarVarios(es: Omit<EntradaHistorial, "id" | "creado">[]): Promise<void>;
@@ -54,6 +49,7 @@ export interface FlujoStore {
 const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
 export const HITO_REPETIDO = "Ya hay un flujo con ese título o hito en el proyecto (activo o desactivado): usa otro, o activa ese.";
 export const CARPETA_OCUPADA = "Una de las carpetas de revisión ya está en otro flujo activo: una carpeta solo puede estar en un flujo activo.";
+export const ARCHIVO_OCUPADO = "Uno de los archivos ya está en otro flujo activo: un archivo solo puede estar en un flujo activo.";
 
 type Fila = Record<string, unknown>;
 const t = (v: unknown) => (typeof v === "string" ? v : null);
@@ -65,12 +61,14 @@ const deFlujo = (f: Fila): Flujo => ({
   hito: String(f.hito),
   hitoClave: String(f.hito_clave),
   pasos: arr<PasoFlujo>(f.pasos),
+  archivos: arr<ArchivoFlujo>(f.archivos),
   carpetas: arr<CarpetaFlujo>(f.carpetas),
-  destino: f.destino as CarpetaFlujo,
+  destino: f.destino && typeof f.destino === "object" ? (f.destino as CarpetaFlujo) : null,
   activo: f.activo !== false,
   version: Number(f.version),
   creado: String(f.creado),
   creadoPor: t(f.creado_por),
+  creadoPorId: t(f.creado_por_id),
   actualizado: String(f.actualizado),
   actualizadoPor: t(f.actualizado_por),
   revisado: t(f.revisado),
@@ -93,48 +91,18 @@ const aFlujo = (f: Partial<Flujo>): Fila =>
     hito: f.hito,
     hito_clave: f.hitoClave,
     pasos: f.pasos,
+    archivos: f.archivos,
     carpetas: f.carpetas,
     destino: f.destino,
     activo: f.activo,
     creado: f.creado,
     creado_por: f.creadoPor,
+    creado_por_id: f.creadoPorId,
     actualizado: f.actualizado,
     actualizado_por: f.actualizadoPor,
     vence: f.vence,
     notas: f.notas,
   });
-
-const deAsignacion = (f: Fila): Asignacion => ({
-  id: String(f.id),
-  flujoId: String(f.flujo_id),
-  proyecto: String(f.proyecto),
-  objetivoTipo: f.objetivo_tipo === "archivo" ? "archivo" : "carpeta",
-  objetivoId: String(f.objetivo_id),
-  objetivoRuta: t(f.objetivo_ruta) ?? "",
-  objetivoAncestros: arr<string>(f.objetivo_ancestros),
-  papel: String(f.papel),
-  quienTipo: f.quien_tipo === "grupo" ? "grupo" : "persona",
-  quienId: String(f.quien_id),
-  quienNombre: t(f.quien_nombre) ?? "",
-  activa: f.activa !== false,
-  creado: String(f.creado),
-  creadoPor: t(f.creado_por),
-});
-const aAsignacion = (a: Omit<Asignacion, "id">): Fila => ({
-  flujo_id: a.flujoId,
-  proyecto: a.proyecto,
-  objetivo_tipo: a.objetivoTipo,
-  objetivo_id: a.objetivoId,
-  objetivo_ruta: a.objetivoRuta,
-  objetivo_ancestros: a.objetivoAncestros,
-  papel: a.papel,
-  quien_tipo: a.quienTipo,
-  quien_id: a.quienId,
-  quien_nombre: a.quienNombre,
-  activa: a.activa,
-  creado: a.creado,
-  creado_por: a.creadoPor,
-});
 
 const deEntrada = (f: Fila): EntradaHistorial => ({
   id: Number(f.id),
@@ -222,12 +190,10 @@ function sinIndefinidos(f: Fila): Fila {
   return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined));
 }
 
-/** "a","b" -> "(a,b)" for PostgREST's in.(…) (ids are uuids: no commas or quotes). */
-const lista = (ids: string[]) => `(${ids.map((x) => encodeURIComponent(x)).join(",")})`;
-
 function supabaseStore(): FlujoStore | null {
   const db = clienteSupabase((status, body) => {
     if (/carpeta-en-otro-flujo/.test(body)) return new StoreError(CARPETA_OCUPADA, 409);
+    if (/archivo-en-otro-flujo/.test(body)) return new StoreError(ARCHIVO_OCUPADO, 409);
     if (/aprobacion_flujos_hito/.test(body)) return new StoreError(HITO_REPETIDO, 409);
     if (faltaTabla(body) || /PGRST204|42703/.test(body)) return new StoreError(SETUP_HINT);
     if (status === 409 || /23505/.test(body)) return new StoreError("Ya existe.", 409);
@@ -256,17 +222,6 @@ function supabaseStore(): FlujoStore | null {
         body: JSON.stringify({ ...aFlujo(cambios), version: version + 1 }),
       });
       return filas[0] ? deFlujo(filas[0]) : null;
-    },
-    async asignaciones(proyecto) {
-      return (await all<Fila>(`/aprobacion_asignaciones?proyecto=${eq(proyecto)}&select=*&order=creado.asc`)).map(deAsignacion);
-    },
-    async crearAsignaciones(a) {
-      if (!a.length) return [];
-      return (await json<Fila[]>(`/aprobacion_asignaciones`, { method: "POST", headers: representar, body: JSON.stringify(a.map(aAsignacion)) })).map(deAsignacion);
-    },
-    async desactivarAsignaciones(ids) {
-      if (!ids.length) return;
-      await call(`/aprobacion_asignaciones?id=in.${lista(ids)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ activa: false }) });
     },
     async registrar(e) {
       await call(`/aprobacion_historial`, { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(aEntrada(e)) });
@@ -352,7 +307,6 @@ function supabaseStore(): FlujoStore | null {
 
 export function memoryStore(): FlujoStore {
   const flujos = new Map<string, Flujo>();
-  const asignaciones = new Map<string, Asignacion>();
   const historial: EntradaHistorial[] = [];
   const comentarios: Comentario[] = [];
   const archivos = new Map<string, ArchivoRegistro>();
@@ -363,11 +317,12 @@ export function memoryStore(): FlujoStore {
   const copia = <T>(x: T): T => structuredClone(x);
   const ahora = () => new Date(Date.now() + contador).toISOString();
 
-  /** What the database refuses: a repeated title, a folder in two active flows. */
+  /** What the database refuses: a repeated title, a folder or a file in two active flows. */
   function revisar(f: Flujo) {
     const otros = [...flujos.values()].filter((x) => x.proyecto === f.proyecto && x.id !== f.id);
     if (otros.some((x) => x.hitoClave === f.hitoClave)) throw new StoreError(HITO_REPETIDO, 409);
     if (f.activo && otros.some((x) => x.activo && x.carpetas.some((c) => f.carpetas.some((n) => n.id === c.id)))) throw new StoreError(CARPETA_OCUPADA, 409);
+    if (f.activo && otros.some((x) => x.activo && x.archivos.some((c) => f.archivos.some((n) => n.id === c.id)))) throw new StoreError(ARCHIVO_OCUPADO, 409);
   }
 
   return {
@@ -391,25 +346,6 @@ export function memoryStore(): FlujoStore {
       revisar(nuevo);
       flujos.set(fid, nuevo);
       return copia(nuevo);
-    },
-    async asignaciones(proyecto) {
-      return [...asignaciones.values()].filter((a) => a.proyecto === proyecto).map(copia);
-    },
-    async crearAsignaciones(lista) {
-      const repetida = (a: Omit<Asignacion, "id">) =>
-        a.activa && [...asignaciones.values()].some((x) => x.activa && x.flujoId === a.flujoId && x.objetivoId === a.objetivoId && x.papel === a.papel && x.quienTipo === a.quienTipo && x.quienId === a.quienId);
-      if (lista.some(repetida)) throw new StoreError("Ya existe.", 409);
-      return lista.map((a) => {
-        const nueva = { ...copia(a), id: id() };
-        asignaciones.set(nueva.id, nueva);
-        return copia(nueva);
-      });
-    },
-    async desactivarAsignaciones(ids) {
-      for (const aid of ids) {
-        const a = asignaciones.get(aid);
-        if (a) asignaciones.set(aid, { ...a, activa: false });
-      }
     },
     async registrar(e) {
       historial.push({ ...copia(e), id: historial.length + 1, creado: ahora() });
