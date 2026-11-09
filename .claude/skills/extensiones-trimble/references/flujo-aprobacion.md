@@ -45,7 +45,15 @@ lista de Trimble, estados, avisos, traslado y trazabilidad exportable a PDF.
    Publicar). Revisión diaria con cuenta conectada solo si la pide.
 7. Permisos nativos de Trimble: la extensión **revisa y avisa**, no los cambia.
 8. Administradores = **administradores del proyecto en Trimble**.
-9. **Quien sube no aprueba** su propio archivo.
+9. **Quien sube no aprueba** su propio archivo. *Ajuste del 09-11-2026*: el
+   dueño reportó "el usuario responsable no le sale el botón decidir" (en
+   Supabase: «aprobar torre 2», responsable de «Aprueba» = Jaiden Rincon, que
+   subió «CIRCUITOS TR1.rvt») y pidió que le salga. Ahora la **persona nombrada
+   responsable** del paso decide aunque haya subido la versión (`meToca` true;
+   `Firma.propia = true`; detalle «(su propia versión, como responsable del
+   paso)»; la pantalla muestra «(su propia versión)» y lo advierte en
+   Decidir). Sigue igual: en un **grupo** decide otro miembro (no quien subió) y
+   un **administrador** que subió y no es el responsable no decide.
 10. Paso asignado a un grupo: **basta con una persona** del grupo.
 11. (Agregado por el dueño) Cada flujo tiene un **título o hito**, por ejemplo
     «Aprobar diseño arquitectónico Torre 1»: el nombre que los archivos del flujo

@@ -4090,8 +4090,9 @@ se crea un flujo: ver «Archivos elegidos y responsable por paso» más abajo):
   carpeta destino, con el mismo nombre y con la sesión de quien aprobó: la
   primera vez sale versión 1 y después versión 2, 3… Un archivo del destino que
   no llegó por el flujo se muestra y se pregunta antes de reemplazarlo. Quien
-  sube un archivo no lo aprueba; en un paso asignado a un grupo basta con que
-  apruebe una persona del grupo.
+  sube un archivo no lo aprueba (desde el 09-11-2026, salvo que sea la persona
+  responsable del paso: ver «Fase B»); en un paso asignado a un grupo basta con
+  que apruebe una persona del grupo.
 - La extensión **revisa y avisa** sobre los permisos de Trimble de las carpetas
   (por ejemplo, quién puede subir directo a la carpeta destino); no los cambia.
 - Trazabilidad por archivo (quién subió, revisó, decidió, comentó y trasladó, y
@@ -4545,6 +4546,20 @@ decide nada):
   anterior (se puede cambiar o dejar donde está).
 - Quien decide es el **responsable del último paso** (o un administrador, que
   queda anotado como tal).
+
+**El responsable decide aunque haya subido esa versión** (ajuste del
+09-11-2026: en «aprobar torre 2» el responsable de «Aprueba» había subido el
+archivo y no le salía «Decidir», por la regla «quien sube no aprueba su
+propio archivo»; el dueño pidió que le salga). Ahora:
+
+- La **persona nombrada como responsable** de un paso ve el archivo en «Me
+  toca» y el botón **Decidir** aunque ella haya subido esa versión. El panel se
+  lo advierte, y la firma y el historial quedan anotados como **«su propia
+  versión»** (también en el PDF).
+- Si el responsable es un **grupo**, decide otra persona del grupo, no la que
+  subió la versión.
+- Un **administrador** que subió la versión y no es el responsable sigue sin
+  poder decidirla.
 
 Después: un archivo aprobado sin copiar (o cuya copia falló) muestra **«Poner
 en una carpeta…»** (o «Poner en otra carpeta…») para quien lo aprobó o un

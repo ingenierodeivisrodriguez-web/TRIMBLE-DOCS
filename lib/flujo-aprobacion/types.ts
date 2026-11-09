@@ -242,6 +242,8 @@ export interface Firma {
   quienId: string;
   /** Approved as a project administrator, without having the step assigned. */
   comoAdmin: boolean;
+  /** The responsible decided on a version they uploaded themself (allowed since 09-11-2026). */
+  propia?: boolean;
   fecha: string;
   /** The version decided on. */
   revision: number | null;

@@ -2,7 +2,9 @@
  * Approving and rejecting a file's step (phase 3), as pure functions:
  * - only who has the step (the person, or any member of the group: one is
  *   enough) or a project administrator decides;
- * - whoever uploaded that version never decides on it, administrators included;
+ * - whoever uploaded that version doesn't decide on it (nor as administrator),
+ *   unless they are the person named responsible for the step (since
+ *   09-11-2026, at the owner's request): then the signature says so;
  * - approving a step passes the file to the next one; approving the last one
  *   leaves it "aprobado" with that version as the approved one;
  * - rejecting needs a reason and leaves it "rechazado": its uploader corrects
@@ -26,9 +28,11 @@ export function puedeDecidir(a: ArchivoRegistro, flujo: Pick<Flujo, "pasos"> | n
   if (!ESPERANDO.includes(a.estado)) return { error: `Este archivo no espera revisión: está «${textoEstado(a)}».`, comoAdmin: false };
   const paso = a.pasos[a.pasoActual];
   if (!paso) return { error: "Este archivo no tiene un paso de revisión pendiente.", comoAdmin: false };
-  if (a.subidoPorId && a.subidoPorId === quien.id) return { error: "Tú subiste esta versión: la debe revisar otra persona.", comoAdmin: false };
   const resp = responsablesArchivo(a, flujo);
   if (meToca(a, resp, quien.id, quien.grupos)) return { error: null, comoAdmin: false };
+  if (a.subidoPorId && a.subidoPorId === quien.id) {
+    return { error: `Tú subiste esta versión: la decide ${resp.length ? resp.map(nombreResponsable).join(", ") : "otra persona"}${resp.some((r) => r.tipo === "grupo") ? " (otra persona del grupo)" : ""}.`, comoAdmin: false };
+  }
   if (quien.esAdmin) return { error: null, comoAdmin: true };
   return {
     error: `El paso «${paso.nombre}» de este archivo no es tuyo${resp.length ? `: lo tiene ${resp.map(nombreResponsable).join(", ")}` : ": no tiene responsable y solo un administrador puede decidirlo"}.`,
@@ -63,13 +67,14 @@ export function planDecision(a: ArchivoRegistro, decision: "aprobar" | "rechazar
     quien: quien.nombre,
     quienId: quien.id,
     comoAdmin,
+    ...(a.subidoPorId && a.subidoPorId === quien.id ? { propia: true } : {}),
     fecha: momento,
     revision: a.revision,
     versionId: a.versionId,
     comentario: texto,
   };
   const firmas = [...a.firmas, firma];
-  const admin = comoAdmin ? " (como administrador)" : "";
+  const admin = `${comoAdmin ? " (como administrador)" : ""}${firma.propia ? " (su propia versión, como responsable del paso)" : ""}`;
   const v = `la versión ${a.revision ?? "?"}`;
   if (decision === "rechazar") {
     return {

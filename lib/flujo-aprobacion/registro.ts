@@ -159,10 +159,16 @@ export function responsablesArchivo(a: Pick<ArchivoRegistro, "estado" | "pasos" 
   return r ? [r] : [];
 }
 
-/** Whether it is the caller's turn: they (or one of their groups) have the step, and they didn't upload that version. */
+/**
+ * Whether it is the caller's turn: they are the step's responsible, or a
+ * member of the responsible group. Since 09-11-2026 (the owner: "que el botón
+ * decidir le salga al usuario responsable") the person named as responsible
+ * decides even on a version they uploaded (it is noted in the signature); in a
+ * group, another member decides on what one of them uploaded.
+ */
 export function meToca(a: Pick<ArchivoRegistro, "subidoPorId">, responsables: Responsable[], yo: string, misGrupos: Set<string>): boolean {
-  if (a.subidoPorId && a.subidoPorId === yo) return false;
-  return responsables.some((r) => (r.tipo === "persona" ? r.id === yo : misGrupos.has(r.id)));
+  const subio = !!a.subidoPorId && a.subidoPorId === yo;
+  return responsables.some((r) => (r.tipo === "persona" ? r.id === yo : misGrupos.has(r.id) && !subio));
 }
 
 /** "Pendiente de revisión", "Nueva versión pendiente de revisión (aprobada: v5)"… */

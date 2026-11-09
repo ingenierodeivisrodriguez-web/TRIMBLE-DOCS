@@ -140,6 +140,28 @@ test("no se decide sobre una versión vieja: ni la del registro ni la que ya est
   assert.equal((await e.modelo()).pasoActual, 0, "nothing changed");
 });
 
+test("el responsable que subió la versión ve que le toca y la decide; la firma y el historial lo anotan", async () => {
+  const e = await escenario();
+  // Juan uploaded modelo.rvt and becomes the responsible of «Revisa» (as in the owner's project on 09-11-2026).
+  await guardarFlujo(e.admin, {
+    id: e.f.id,
+    version: e.f.version,
+    hito: e.f.hito,
+    archivos: ["modelo"],
+    pasos: [
+      { id: "p1", nombre: "Revisa", responsable: { tipo: "persona", id: "juan" } },
+      { id: "p2", nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe" } },
+    ],
+  });
+  const deJuan = (await listarArchivos(e.ctx("juan"))).archivos.find((x) => x.fileId === "modelo")!;
+  assert.equal(deJuan.meToca, true);
+  const r = await decidir(e.ctx("juan"), { archivoId: deJuan.id, versionId: deJuan.versionId }, "aprobar");
+  assert.equal(r.mensaje, "Aprobaste «Revisa» de «modelo.rvt»: pasa a «Aprueba».");
+  const a = await e.modelo();
+  assert.equal(a.firmas[0].propia, true);
+  assert.match((await historial(e.admin, null, a.id)).entradas.find((x) => x.accion === "aprobado-paso")!.detalle, /de la versión 1 \(su propia versión, como responsable del paso\): pasa a «Aprueba»/);
+});
+
 test("quien subió la versión no decide, aunque sea administrador; un administrador sin el paso sí, y queda anotado", async () => {
   const e = await escenario();
   e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2, "ana")];

@@ -142,7 +142,7 @@ test("renombrar o mover dentro del flujo solo actualiza la ruta, sin historial; 
   assert.equal(p.sinCambios, 1);
 });
 
-test("le toca al responsable del paso actual (persona o su grupo), nunca a quien subió esa versión", () => {
+test("le toca al responsable del paso actual (persona o su grupo); en un grupo, no a quien subió esa versión", () => {
   const a = registrado("modelo", 1, { subidoPorId: "juan" });
   const f = flujo("f1", [
     { id: "p1", nombre: "Revisa", responsable: { tipo: "grupo", id: "g-arq", nombre: "Arquitectura" } },
@@ -153,6 +153,8 @@ test("le toca al responsable del paso actual (persona o su grupo), nunca a quien
   assert.equal(meToca(a, r, "juan", new Set(["g-arq"])), false, "Juan uploaded it");
   assert.equal(meToca(a, r, "luz", new Set(["g-arq"])), true);
   assert.equal(meToca(a, r, "pepe", new Set()), false, "not his step yet");
+  // The person named responsible decides even on a version they uploaded (since 09-11-2026).
+  assert.equal(meToca(a, [{ tipo: "persona", id: "juan", nombre: "Juan" }], "juan", new Set()), true);
   assert.deepEqual(responsablesArchivo({ ...a, pasoActual: 1 }, f).map((x) => x.id), ["pepe"]);
   assert.deepEqual(responsablesArchivo({ ...a, estado: "aprobado" }, f), []);
   // A step the flow no longer has: the responsible of the file's own copy.

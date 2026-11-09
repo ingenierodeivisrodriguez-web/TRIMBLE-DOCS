@@ -56,6 +56,21 @@ test("decide el responsable del paso (o cualquiera de su grupo) o un administrad
   assert.deepEqual(puedeDecidir(a, otro, quien("luz")), { error: null, comoAdmin: false });
 });
 
+test("el responsable nombrado decide aunque haya subido esa versión, y la firma lo dice; en un grupo decide otro miembro", () => {
+  // Juan uploaded version 5 and is the step's responsible (the owner's case on 09-11-2026).
+  const suyo = { pasos: [{ id: "p1", nombre: "Aprueba", responsable: { tipo: "persona" as const, id: "juan", nombre: "Juan Pérez" } }] };
+  const a = archivo({ pasos: suyo.pasos });
+  assert.deepEqual(puedeDecidir(a, suyo, quien("juan")), { error: null, comoAdmin: false });
+  const plan = planDecision(a, "aprobar", quien("juan", { nombre: "Juan Pérez" }), false, "", AHORA);
+  assert.equal(plan.firma.propia, true);
+  assert.equal(plan.detalle, "Aprobó «Aprueba» de la versión 5 (su propia versión, como responsable del paso): el archivo queda aprobado.");
+  assert.equal(planDecision(archivo(), "aprobar", quien("luz"), false, "", AHORA).firma.propia, undefined, "someone else's version");
+  // Group responsible: the member who uploaded doesn't decide; another member does.
+  assert.equal(puedeDecidir(archivo(), FLUJO, quien("juan", { grupos: new Set(["g-arq"]) })).error, "Tú subiste esta versión: la decide Arquitectura (grupo) (otra persona del grupo).");
+  // An administrator who uploaded it and isn't the responsible doesn't either.
+  assert.match(puedeDecidir(a, { pasos: [{ ...suyo.pasos[0], responsable: { tipo: "persona", id: "pepe", nombre: "Pepe" } }] }, quien("juan", { esAdmin: true })).error!, /Tú subiste esta versión: la decide Pepe\./);
+});
+
 test("aprobar un paso pasa al siguiente y aprobar el último deja aprobada esa versión, con su firma", () => {
   const primero = planDecision(archivo(), "aprobar", quien("luz"), false, "", AHORA);
   assert.equal(primero.accion, "aprobado-paso");

@@ -25,8 +25,8 @@ const pequeno = { padding: "4px 12px", fontSize: 13.5 } as const;
 
 type Datos = { yo: string; esAdmin: boolean; archivos: ArchivoInfo[] };
 
-/** Whether the caller can approve or reject this file now (the server checks it again). */
-const puedeDecidir = (a: ArchivoInfo, d: Datos) => ESPERANDO.includes(a.estado) && a.subidoPorId !== d.yo && (a.meToca || d.esAdmin);
+/** Whether the caller can approve or reject this file now: it is their turn, or they administer the project and didn't upload it (the server checks it again). */
+const puedeDecidir = (a: ArchivoInfo, d: Datos) => ESPERANDO.includes(a.estado) && (a.meToca || (d.esAdmin && a.subidoPorId !== d.yo));
 
 /** An approved version of a flow without destination that isn't in a folder yet (or whose copy failed): it can be put in one. */
 const sinCarpeta = (a: ArchivoInfo) =>
@@ -149,6 +149,7 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
                   projectId={projectId}
                   a={a}
                   puede={puedeDecidir(a, datos)}
+                  propia={a.subidoPorId === datos.yo}
                   abierto={abierto?.id === a.id ? abierto.que : null}
                   historial={historial?.id === a.id ? historial : null}
                   onHistorial={() => verHistorial(a)}
@@ -180,6 +181,7 @@ function FilaArchivo({
   projectId,
   a,
   puede,
+  propia,
   abierto,
   historial,
   onHistorial,
@@ -193,6 +195,8 @@ function FilaArchivo({
   projectId: string;
   a: ArchivoInfo;
   puede: boolean;
+  /** The caller uploaded the version under review. */
+  propia: boolean;
   abierto: "historial" | "decidir" | "carpeta" | null;
   historial: { entradas: EntradaHistorial[] | null; error: string } | null;
   onHistorial: () => void;
@@ -224,7 +228,8 @@ function FilaArchivo({
           {a.firmas.map((f, i) => (
             <div key={i} style={{ fontSize: 12, color: f.decision === "aprobado" ? "#1e6b2c" : "#a1261b" }} title={f.comentario || undefined}>
               {f.decision === "aprobado" ? "✓" : "✗"} {f.paso}: {f.quien}
-              {f.comoAdmin ? " (admin.)" : ""}, {fechaHora(f.fecha).slice(0, 10)}
+              {f.comoAdmin ? " (admin.)" : ""}
+              {f.propia ? " (su propia versión)" : ""}, {fechaHora(f.fecha).slice(0, 10)}
             </div>
           ))}
           {a.traslado && <EstadoTraslado api={api} a={a} trasladable={trasladable} onTraslado={onTraslado} />}
@@ -269,7 +274,7 @@ function FilaArchivo({
       {abierto === "decidir" && (
         <tr>
           <td style={{ ...td, background: "#f6f8fb" }} colSpan={4}>
-            <Decision api={api} projectId={projectId} a={a} onDecidido={onDecidido} />
+            <Decision api={api} projectId={projectId} a={a} propia={propia} onDecidido={onDecidido} />
           </td>
         </tr>
       )}
@@ -403,7 +408,7 @@ function PonerEnCarpeta({ api, projectId, a, onTraslado }: { api: FlujoApi; proj
  * version: leave it where it is, or put it in a folder too (the one used
  * before is proposed).
  */
-function Decision({ api, projectId, a, onDecidido }: { api: FlujoApi; projectId: string; a: ArchivoInfo; onDecidido: (r: { mensaje: string; aviso: string | null }) => void }) {
+function Decision({ api, projectId, a, propia, onDecidido }: { api: FlujoApi; projectId: string; a: ArchivoInfo; propia: boolean; onDecidido: (r: { mensaje: string; aviso: string | null }) => void }) {
   const [comentario, setComentario] = useState("");
   const [ocupado, setOcupado] = useState<"aprobar" | "rechazar" | null>(null);
   const [error, setError] = useState("");
@@ -449,6 +454,7 @@ function Decision({ api, projectId, a, onDecidido }: { api: FlujoApi; projectId:
             ? " Es el último paso: al aprobar, el archivo queda aprobado y se copia a la carpeta destino."
             : " Es el último paso: al aprobar, el archivo queda aprobado y tú decides si lo pones también en una carpeta."
           : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
+        {propia && " Tú subiste esta versión: como responsable del paso puedes decidirla, y la firma queda anotada como «su propia versión»."}
       </div>
       {eligeCarpeta && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "8px 10px", background: "#fff", display: "grid", gap: 6 }}>
