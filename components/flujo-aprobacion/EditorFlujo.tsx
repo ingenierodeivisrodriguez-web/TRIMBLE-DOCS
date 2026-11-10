@@ -169,7 +169,7 @@ export default function EditorFlujo({
 
       <h3 style={subtitulo}>Archivos del flujo {archivos.length > 0 && <span style={{ fontWeight: 400, fontSize: 13.5, color: "var(--tc-gray-500)" }}>({archivos.length} marcados)</span>}</h3>
       <p style={{ ...texto, margin: "0 0 6px", fontSize: 13.5 }}>
-        Marca los archivos que pasan por este flujo: puedes marcar varios, de distintas carpetas. Sus versiones nuevas entran solas a revisión; un archivo nuevo se agrega editando el flujo.
+        Marca los archivos que pasan por este flujo: puedes marcar varios, de distintas carpetas. Queda fija la versión que cada archivo tiene al guardar: si después suben una versión nueva, el flujo la avisa pero sigue con la suya. Un archivo nuevo se agrega editando el flujo.
       </p>
       <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6, maxHeight: 132, overflowY: "auto" }}>
         {archivos.length === 0 && <span style={{ fontSize: 13.5, color: "var(--tc-gray-500)" }}>Ninguno todavía.</span>}

@@ -22,6 +22,7 @@ export const ACCIONES: Record<string, string> = {
   "archivo-detectado": "Subió un archivo",
   "version-reemplazada": "Subió otra versión",
   "nueva-version": "Subió una versión nueva",
+  "version-nueva-vista": "Subió una versión nueva (el flujo sigue con la suya)",
   "archivo-retirado": "Archivo retirado",
   "archivo-reaparecido": "Archivo que vuelve",
   "archivo-cambio-flujo": "Archivo que cambió de flujo",
@@ -100,7 +101,7 @@ export function armarTrazas(archivos: ArchivoRegistro[], entradas: EntradaHistor
 /** The lines that sum a file up at the top of its section. */
 export function resumenTraza(t: Traza): { etiqueta: string; valor: string }[] {
   const a = t.archivo;
-  const subidas = t.eventos.filter((e) => ["archivo-detectado", "version-reemplazada", "nueva-version"].includes(e.accion));
+  const subidas = t.eventos.filter((e) => ["archivo-detectado", "version-reemplazada", "nueva-version", "version-nueva-vista"].includes(e.accion));
   const decisiones = t.eventos.filter((e) => ["aprobado-paso", "aprobado", "rechazado"].includes(e.accion));
   const traslados = t.eventos.filter((e) => e.accion === "trasladado");
   const ultima = <T extends EventoTraza>(xs: T[]) => xs[xs.length - 1];

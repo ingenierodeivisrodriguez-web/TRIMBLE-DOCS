@@ -1,6 +1,6 @@
 /**
- * "Flujo de aprobación", phase 2: registering a flow's chosen files and their
- * new versions. Trimble has no notices of new uploads, so the screen asks for
+ * "Flujo de aprobación", phase 2: registering a flow's chosen files and noting
+ * their new versions (since 10-11-2026 a flow keeps the version it was given). Trimble has no notices of new uploads, so the screen asks for
  * a review of every active flow when it opens and with "Revisar ahora" (and
  * saving a flow does it at once), with the session of whoever asks (they see
  * what Trimble lets them see). One review per flow at a time. A file taken out
@@ -82,12 +82,18 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
       );
     }
 
-    // New versions, files that reappear or come from another flow, renames and moves.
+    // Newer versions (only noted), files that reappear or come from another flow, renames and moves.
     const aAvisar: ArchivoRegistro[] = [...creados];
     await enTandas(plan.actualizar, async (c: Cambio) => {
       const a = await ctx.store.actualizarArchivo(c.id, c.cambios);
       if (!c.accion) return;
-      if (ESPERANDO.includes(a.estado) && c.accion !== "archivo-reaparecido") aAvisar.push(a);
+      // A newer version waits for nobody: no ToDo.
+      if (ESPERANDO.includes(a.estado) && (c.accion === "version-reemplazada" || c.accion === "nueva-version" || c.accion === "archivo-cambio-flujo")) aAvisar.push(a);
+      const vn = c.accion === "version-nueva-vista" ? a.versionNueva : null;
+      if (vn) {
+        lineas.push({ ...linea(a, c.accion, detalleCambio(c, flujo.hito, fechaHora), { usuario: vn.subidoPor || null, usuarioId: vn.subidoPorId }, vn.subido), version: vn.revision });
+        return;
+      }
       const subio = c.accion === "version-reemplazada" || c.accion === "nueva-version";
       lineas.push(
         linea(a, c.accion, detalleCambio(c, flujo.hito, fechaHora), subio ? { usuario: a.subidoPor || null, usuarioId: a.subidoPorId } : { usuario: ctx.caller.name, usuarioId: ctx.caller.id }, subio ? a.subido : momento)
@@ -119,11 +125,12 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     lineas.push(...avisados.lineas);
     await ctx.store.registrarVarios(lineas);
 
-    const nuevasVersiones = plan.actualizar.filter((c) => c.accion === "nueva-version" || c.accion === "version-reemplazada").length;
+    const nuevasVersiones = plan.actualizar.filter((c) => c.accion === "nueva-version" || c.accion === "version-reemplazada" || c.accion === "version-nueva-vista").length;
+    const soloVistas = nuevasVersiones > 0 && plan.actualizar.every((c) => c.accion !== "nueva-version" && c.accion !== "version-reemplazada");
     const reaparecidos = plan.actualizar.filter((c) => c.accion === "archivo-reaparecido" || c.accion === "archivo-cambio-flujo").length;
     const partes = [
       creados.length ? contar(creados.length, "archivo nuevo", "archivos nuevos") : "",
-      nuevasVersiones ? contar(nuevasVersiones, "versión nueva", "versiones nuevas") : "",
+      nuevasVersiones ? `${contar(nuevasVersiones, "versión nueva", "versiones nuevas")} en Trimble${soloVistas ? " (el flujo sigue con la versión que tiene: ver el aviso en el archivo)" : ""}` : "",
       reaparecidos ? contar(reaparecidos, "archivo que vuelve", "archivos que vuelven") : "",
       retirados ? contar(retirados, "retirado", "retirados") : "",
     ].filter(Boolean);
@@ -169,6 +176,7 @@ export async function listarArchivos(ctx: Ctx): Promise<{ yo: string; esAdmin: b
         responsables: r.map(nombreResponsable),
         meToca: meToca(a, r, ctx.caller.id, mios),
         enlace: enlaceDe(ctx.projectId, a),
+        enlaceNueva: a.versionNueva?.versionId ? enlaceDe(ctx.projectId, { fileId: a.fileId, tipo: a.tipo, versionId: a.versionNueva.versionId }) : null,
         destino: flujo?.destino?.ruta ?? null,
       };
     }),

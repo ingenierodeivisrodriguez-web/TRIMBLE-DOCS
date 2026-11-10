@@ -149,8 +149,10 @@ Herramientas incluidas:
   aprobar el último paso el responsable decide si pone la versión en una
   carpeta donde tenga permiso; la columna Estado muestra el estado del
   documento (por revisar, por aprobar, aprobado, rechazado) y desde la primera
-  decisión el flujo queda cerrado (no se edita, activa ni desactiva). El dueño
-  debe ejecutar otra vez
+  decisión el flujo queda cerrado (no se edita, activa ni desactiva); desde el
+  10-11-2026 (fase 1) el flujo conserva la versión de cada archivo y una versión
+  nueva solo se avisa (fase 2, revisarla en un flujo nuevo, sin aprobar). El
+  dueño debe ejecutar otra vez
   `supabase/flujo-aprobacion.sql` y hacer la prueba en Trimble real (protocolo
   en el README). Ver `references/flujo-aprobacion.md`.
 

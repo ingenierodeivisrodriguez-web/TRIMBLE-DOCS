@@ -170,7 +170,7 @@ export default function PanelFlujo({
       </div>
       {desactivar && editable && (
         <Notice kind="warning" style={{ margin: "0 16px 10px" }}>
-          Al desactivar «{f.hito}» deja de revisar versiones nuevas de sus archivos. No se borra: su configuración, sus archivos y su historial se conservan y se puede volver a activar.
+          Al desactivar «{f.hito}» deja de buscar versiones nuevas de sus archivos. No se borra: su configuración, sus archivos y su historial se conservan y se puede volver a activar.
           <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
             <button type="button" style={{ ...botonPeligro, padding: "5px 12px", fontSize: 13.5 }} onClick={() => void cambiarEstado(false)}>
               Desactivar
@@ -192,9 +192,14 @@ export default function PanelFlujo({
           <EtiquetaEstado estado={fila.estado} ayuda={ayudaEstado(fila)} desactivado={!f.activo} />
           <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>{fila.detalleEstado}</span>
         </div>
+        {fila.conVersionNueva > 0 && (
+          <p style={{ margin: "0 0 10px", fontSize: 13, color: "#7a4b00", background: "#fff7e6", border: "1px solid #f3d9a4", borderRadius: 4, padding: "7px 10px" }}>
+            {fila.conVersionNueva === 1 ? "1 archivo tiene" : `${fila.conVersionNueva} archivos tienen`} una <strong>versión más nueva en Trimble</strong>. Este flujo sigue con la versión que se le dio: el aviso está en cada archivo, abajo.
+          </p>
+        )}
         {fila.cierre && (
           <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--tc-gray-700)", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 4, padding: "7px 10px" }}>
-            <strong>Flujo cerrado</strong> desde la primera decisión ({describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Sigue revisando las versiones nuevas de sus archivos.
+            <strong>Flujo cerrado</strong> desde la primera decisión ({describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF.
           </p>
         )}
         <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.vencido ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.vencido ? " (vencido, con archivos esperando decisión)" : ""}</span> : "Sin fecha"}</Dato>

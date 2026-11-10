@@ -134,3 +134,10 @@ test("el flujo queda cerrado desde su primera decisión: cuándo y de quién, en
     ]
   );
 });
+
+test("la fila cuenta los archivos con una versión más nueva en Trimble (sin los retirados)", () => {
+  const vn = { versionId: "m-v5", revision: 5, nombre: "m.rvt", subido: null, subidoPor: "Pepe", subidoPorId: "pepe", visto: HOY };
+  const filas = filasFlujos([TORRE], [{ ...archivo("f1", "aprobado"), versionNueva: vn }, { ...archivo("f1", "retirado"), versionNueva: vn }, archivo("f1", "pendiente")], HOY);
+  assert.equal(filas[0].conVersionNueva, 1);
+  assert.equal(filas[0].estado, "por-revisar", "the state is about the flow's own versions");
+});

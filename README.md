@@ -4620,10 +4620,10 @@ que sigue.
   Desactivar…, ni sale la papelera; el panel dice **«Flujo cerrado desde la
   primera decisión (DD-MM-AAAA, de quién)»**. El servidor también lo rechaza
   (409 `flujo-cerrado`) aunque alguien lo intente por fuera de la pantalla.
-- El flujo **sigue trabajando**: revisa las versiones nuevas de sus archivos
-  (un rechazado se corrige y vuelve a pasar por los mismos pasos), se sigue
-  decidiendo, se pone lo aprobado en una carpeta, se comenta y se saca el PDF.
-  «Revisar permisos de Trimble» sigue disponible.
+- El flujo **sigue trabajando**: se sigue decidiendo, se pone lo aprobado en
+  una carpeta, se comenta y se saca el PDF, y avisa las versiones nuevas de
+  sus archivos (desde el 10-11-2026 no entran solas: ver «Versión fija del
+  flujo»). «Revisar permisos de Trimble» sigue disponible.
 - Un flujo que ya estaba **desactivado** cuando tuvo su primera decisión
   queda así: no se vuelve a activar.
 - La fecha y la persona salen del **historial** (la primera línea «Aprobó un
@@ -4643,6 +4643,68 @@ historial), `service.ts` (`estado` devuelve `cierres`; `guardarFlujo` y
 `PanelFlujo` y `FlujoAprobacionApp` (después de decidir vuelve a leer los
 flujos).
 
+### Versión fija del flujo (fase 1 del ajuste del 10-11-2026)
+
+Pedido por el dueño: «cuando se hace el flujo nuevo, la versión del archivo
+debe ser estática: si Pepe en el flujo nuevo comparte la versión 4 y ese
+documento se actualiza a versión 5, el flujo debe conservar que el documento
+del flujo es versión 4, pero sí debería aparecer un mensaje diciendo que existe
+una nueva versión, para ayudar al usuario a tomar una decisión». Mostró el
+caso real: «CIRCUITOS TR2.rvt» estaba aprobado en versión 1 en «aprobar torre
+2», subieron la versión 2 y el flujo la volvió a poner en revisión. Aceptó un
+plan en dos fases; esta es la **fase 1**. Hay que volver a ejecutar
+**`supabase/flujo-aprobacion.sql`**.
+
+- Al guardar el flujo queda **fija la versión que cada archivo tiene en ese
+  momento** (el formulario lo dice). El flujo revisa, firma, aprueba y copia
+  **esa** versión.
+- Si después suben una versión nueva, **no entra al flujo**: no reemplaza la
+  versión en revisión, no reinicia los pasos, no abre otra revisión después de
+  aprobar o rechazar y no manda tarea de Trimble. Solo queda anotada:
+  - en el archivo, un aviso: **«Hay una versión más nueva en Trimble: versión
+    5, subida por Pepe Gómez el 10-11-2026 11:36. Este flujo revisa la versión
+    4.»** con **«Ver la versión 5»** (la abre en el visor para comparar); si la
+    nueva tiene otro nombre, se dice;
+  - en **Decidir**, el mismo aviso y «Tu decisión es sobre la versión 4, la de
+    este flujo; la versión 5 no entra a este flujo. Si la que vale es la nueva,
+    puedes rechazar esta diciendo el motivo». Antes, con una versión más nueva
+    en Trimble no se dejaba decidir;
+  - al decidir, el mensaje y el historial dicen **«Ojo: en Trimble ya existe la
+    versión 5»** (o «una versión más nueva» si todavía nadie pulsó «Revisar
+    ahora»);
+  - en la lista, debajo del estado, **«Versión nueva en Trimble»**, y en el
+    panel del flujo cuántos archivos la tienen;
+  - en el historial, una línea por cada versión nueva vista, con quién la
+    subió y cuándo: «Subió la versión 5 …: el flujo «…» sigue con la versión 4
+    (la nueva no entra sola)». También sale en el PDF.
+- **«Poner en una carpeta…»** copia exactamente la versión aprobada, aunque en
+  Trimble ya haya una más nueva (ya funcionaba así).
+- El estado del flujo (columna Estado) es el de las versiones del flujo: una
+  versión nueva no lo cambia.
+- Un archivo que se quitó del flujo y se vuelve a marcar, o que llega desde
+  otro flujo, entra con la versión que tenga en ese momento.
+- **Mientras no esté la fase 2**, la versión nueva solo se ve: el archivo sigue
+  en su flujo (que, si ya tiene decisiones, está cerrado) y no puede entrar a
+  otro. La fase 2 agrega «Crear flujo con la versión N» y deja que un mismo
+  archivo esté en varios flujos, uno por versión, cuando el anterior ya se
+  decidió.
+- **Datos que ya estaban**: el SQL devuelve a **«Aprobado»** los archivos que
+  estaban aprobados y volvieron a «Nueva versión pendiente» por una versión
+  nueva (como «CIRCUITOS TR2.rvt»): quedan con su versión aprobada (y quién la
+  subió, sacado del historial) y la nueva pasa al aviso. Los que ya estaban en
+  revisión con una versión nueva sin una aprobación anterior (por ejemplo, la
+  imagen del flujo «revisar», versión 8) siguen así hasta que se decidan.
+
+Código: [`lib/flujo-aprobacion/registro.ts`](lib/flujo-aprobacion/registro.ts)
+(`planRegistro`: `version-nueva-vista`, `versionNueva`, una sola vez por
+versión; se quita si la nueva desaparece), `revision.ts` (línea del historial
+con quien subió la nueva, sin tarea; `enlaceNueva`), `decisiones.ts` (ya no
+rechaza por una versión más nueva: la anota, `textoOtraVersion`), `lista.ts`
+(`conVersionNueva`), `trazabilidad.ts`; pantallas `Archivos`
+(`AvisoVersionNueva`, también en `Decision`), `ListaFlujos`, `PanelFlujo` y
+`EditorFlujo`. Columna `aprobacion_archivos.version_nueva` (jsonb) y la
+corrección de una sola vez en el SQL.
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -4656,9 +4718,11 @@ flujos).
    abierto en el panel de la derecha.
 3. **⋮ → Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
    ejemplo, un responsable sin acceso a la carpeta de los archivos).
-4. Los modeladores suben las versiones nuevas con el mismo nombre, como
-   siempre. Al abrir la extensión (o con **Revisar ahora**) se registran y el
-   responsable recibe la tarea. Un archivo nuevo se agrega editando el flujo.
+4. Cada flujo revisa la versión que tenía cada archivo al guardarlo. Si los
+   modeladores suben una versión nueva, al abrir la extensión (o con **Revisar
+   ahora**) el archivo muestra el aviso «Hay una versión más nueva en
+   Trimble», pero el flujo sigue con la suya. Un archivo nuevo se agrega
+   editando el flujo (antes de la primera decisión).
 5. Cada responsable pulsa **«Tienes N archivos por revisar»**, abre el flujo y
    en **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
    comentario si quiere) o rechaza con el motivo.
@@ -4671,7 +4735,8 @@ flujos).
    pasa sola a esa carpeta.)
 7. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
    mí**, corrige y sube la versión nueva con el mismo nombre en la misma
-   carpeta.
+   carpeta. Esa versión aparece como aviso en el archivo; no entra sola al
+   flujo (la fase 2 la llevará a un flujo nuevo).
 8. La columna **Estado** dice en qué va cada flujo (Por revisar, Por aprobar,
    Aprobado en verde, Rechazado en rojo). Desde la **primera decisión** el flujo
    queda **cerrado**: ya no se edita, activa ni desactiva (revise archivos,
@@ -4682,7 +4747,8 @@ flujos).
 ### Protocolo de prueba en Trimble real
 
 En un proyecto de pruebas, con dos usuarios (A administra, B modela) y un grupo
-de Trimble con al menos un miembro (actualizado el 09-11-2026, fases A y B):
+de Trimble con al menos un miembro (actualizado el 10-11-2026: fases A y B,
+flujo cerrado y versión fija):
 
 1. B (que no es administrador) sube un `.rvt` y un `.pdf`, y crea un flujo
    «Prueba flujo» marcando los dos archivos, con dos pasos: Revisa = el
@@ -4701,21 +4767,25 @@ de Trimble con al menos un miembro (actualizado el 09-11-2026, fases A y B):
    completo: el `.rvt` debe aparecer ahí como **versión 1** y abrirse en el
    visor sin «Conversión en curso».
 5. B sube la versión corregida del `.pdf` con el mismo nombre: al abrir la
-   extensión debe quedar como **nueva versión pendiente** desde el primer paso.
-   B mueve el `.rvt` a otra carpeta: el flujo lo sigue (solo cambia la ruta).
-6. B sube una versión nueva del `.rvt`; se aprueba otra vez con la carpeta
-   que se propone (la misma): ahí debe quedar **el mismo archivo en versión 2**
-   (no un archivo nuevo).
-7. A aprueba el `.pdf` corregido con **Dejarla donde está** y luego usa
-   **«Poner en una carpeta…»** con una carpeta donde A subió a mano un archivo
-   con el mismo nombre: debe quedar «En «carpeta» hay otro archivo con ese
-   nombre» hasta que A pulse «Reemplazar ahí».
+   extensión el `.pdf` sigue **Rechazado, versión 1**, con el aviso «Hay una
+   versión más nueva en Trimble: versión 2…», y no llega tarea. B mueve el
+   `.rvt` a otra carpeta: el flujo lo sigue (solo cambia la ruta).
+6. B sube una versión nueva del `.rvt` (ya aprobado): sigue **Aprobado,
+   versión 1**, con el aviso; «Ver la versión 2» abre la 2 en el visor; la
+   lista dice «Versión nueva en Trimble» y el Estado no cambia. La copia que
+   quedó en la carpeta del paso 4 sigue siendo la versión 1.
+7. Otro flujo con un archivo pendiente: B sube una versión nueva antes de que
+   A decida. En **Decidir** sale el aviso; A aprueba y el mensaje dice «Ojo:
+   en Trimble ya existe la versión N». Luego A usa **«Poner en una
+   carpeta…»** con una carpeta donde subió a mano un archivo con el mismo
+   nombre: debe quedar «En «carpeta» hay otro archivo con ese nombre» hasta
+   que pulse «Reemplazar ahí», y lo copiado debe ser la versión aprobada, no
+   la nueva.
 8. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
    «Prueba flujo». Desde la decisión del paso 3, ni B ni A ven Editar,
    Activar ni Desactivar en «Prueba flujo», y el panel dice «Flujo cerrado
-   desde la primera decisión (fecha, quién)». Después del paso 3 (el `.pdf`
-   rechazado) el Estado decía **Rechazado** (rojo); ahora, con los dos
-   aprobados, **Aprobado** (verde).
+   desde la primera decisión (fecha, quién)». El Estado dice **Rechazado**
+   (rojo), porque el `.pdf` sigue rechazado en este flujo.
 9. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
    estén quién subió, quién revisó, decisiones con fecha, motivos, qué carpeta
    eligió el responsable y quién copió la versión ahí.

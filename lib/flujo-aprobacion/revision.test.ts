@@ -119,19 +119,27 @@ test("solo entran los archivos elegidos: uno nuevo en la misma carpeta no entra 
   );
 });
 
-test("una versión nueva mientras espera queda anotada con quien la subió y se revisa desde el primer paso", async () => {
+test("el flujo conserva su versión: una nueva queda anotada con quien la subió, sin tarea, y el archivo sigue con la del flujo", async () => {
   const e = escenario();
   const { f } = await conFlujo(e);
+  const tareas = e.tareas.length;
   e.arbol.arq[0] = e.archivo("modelo", "modelo.rvt", 2, PERSONAS[2]);
   const r = await revisarFlujo(e.como("juan"), { flujoId: f.id });
-  assert.match(r.mensaje, /^«Aprobar arquitectura Torre 1»: 1 versión nueva\./);
-  const a = (await e.store.archivos("P")).find((x) => x.fileId === "modelo")!;
-  assert.equal(a.revision, 2);
+  assert.match(r.mensaje, /^«Aprobar arquitectura Torre 1»: 1 versión nueva en Trimble \(el flujo sigue con la versión que tiene: ver el aviso en el archivo\)\./);
+  const a = (await listarArchivos(e.admin)).archivos.find((x) => x.fileId === "modelo")!;
+  assert.equal(a.revision, 1);
+  assert.equal(a.versionId, "modelo-v1");
   assert.equal(a.estado, "pendiente");
-  assert.equal(a.subidoPor, "Pepe Gómez");
-  const linea = (await historial(e.admin, null, a.id)).entradas.find((x) => x.accion === "version-reemplazada")!;
+  assert.equal(a.subidoPor, "Juan Pérez", "who uploaded the flow's version");
+  assert.equal(a.versionNueva?.revision, 2);
+  assert.equal(a.versionNueva?.subidoPor, "Pepe Gómez");
+  assert.match(a.enlace, /versionId=modelo-v1/);
+  assert.match(a.enlaceNueva!, /versionId=modelo-v2/);
+  assert.equal(e.tareas.length, tareas, "nothing new to review in this flow: no ToDo");
+  const linea = (await historial(e.admin, null, a.id)).entradas.find((x) => x.accion === "version-nueva-vista")!;
   assert.equal(linea.usuario, "Pepe Gómez");
   assert.equal(linea.version, 2);
+  assert.equal((await revisarFlujo(e.admin, { flujoId: f.id })).mensaje, "«Aprobar arquitectura Torre 1»: sin cambios.", "noted once");
 });
 
 test("un archivo que se mueve de carpeta se sigue: solo cambia su ruta", async () => {

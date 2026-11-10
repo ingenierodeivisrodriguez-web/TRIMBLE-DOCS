@@ -1,8 +1,8 @@
 /**
  * "Flujo de aprobación", phase 3: approving and rejecting, and the notices.
- * A decision is about the version the person saw: if another one arrived (in
- * the register or already in Trimble) it is refused and they review the new
- * one. Two people deciding at once: the second gets "someone decided first".
+ * A decision is about the version the person saw (the flow's own version:
+ * since 10-11-2026 a newer one in Trimble doesn't stop it, it is noted in the
+ * decision). Two people deciding at once: the second gets "someone decided first".
  * Notices go as Trimble ToDos (they never block a decision: a failure is noted
  * in the history).
  */
@@ -87,14 +87,15 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
     elegida = await carpetaElegida(ctx, a, o.destino);
   }
 
-  // The version must still be the latest one in Trimble.
-  const enTrimble = await ctx.tc.version(a.fileId);
-  if (enTrimble && enTrimble !== a.versionId) {
-    throw new FlujoError("En Trimble ya hay una versión más nueva de este archivo: pulsa «Revisar ahora» y revisa la nueva.", 409, "version-cambio");
-  }
+  // The flow keeps its version: a newer one in Trimble is noted, so it is clear what was decided.
+  const enTrimble = await ctx.tc.version(a.fileId).catch(() => null);
+  const hayOtra = enTrimble ? enTrimble !== a.versionId : !!a.versionNueva;
+  const conocida = a.versionNueva && (!enTrimble || a.versionNueva.versionId === enTrimble) ? a.versionNueva.revision : null;
+  const nota = hayOtra ? textoOtraVersion(conocida) : "";
 
   const momento = (ctx.ahora?.() ?? new Date()).toISOString();
-  const plan = planDecision(a, decision, decisor, puede.comoAdmin, texto.texto, momento);
+  const base = planDecision(a, decision, decisor, puede.comoAdmin, texto.texto, momento);
+  const plan = nota ? { ...base, detalle: `${base.detalle.replace(/\.?$/, ".")} Ojo: ${nota}.` } : base;
   const hecho = await ctx.store.decidirArchivo(a.id, { versionId: a.versionId, pasoActual: a.pasoActual, estado: a.estado }, plan.cambios);
   if (!hecho) throw new FlujoError("Otra persona decidió sobre este archivo, o llegó una versión nueva, hace un momento: recarga para verlo.", 409, "ya-decidido");
 
@@ -142,5 +143,10 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
       : plan.accion === "aprobado"
         ? `«${a.nombre}» queda aprobado (versión ${a.revision ?? "?"}). ${traslado?.mensaje ?? ""}`.trim()
         : `Aprobaste «${plan.firma.paso}» de «${a.nombre}»: pasa a «${plan.siguiente?.nombre}».`;
-  return { mensaje, aviso, traslado: traslado?.traslado ?? null };
+  return { mensaje: nota ? `${mensaje} Ojo: ${nota}; este flujo no la revisa.` : mensaje, aviso, traslado: traslado?.traslado ?? null };
+}
+
+/** "en Trimble ya existe la versión 5" (or "una versión más nueva" when its number isn't known yet). */
+export function textoOtraVersion(revision: number | null): string {
+  return revision ? `en Trimble ya existe la versión ${revision}` : "en Trimble ya existe una versión más nueva";
 }

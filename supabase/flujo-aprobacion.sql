@@ -270,3 +270,40 @@ update public.aprobacion_flujos f
        ), '[]'::jsonb)
  where f.archivos = '[]'::jsonb
    and f.carpetas <> '[]'::jsonb;
+
+-- ---------------------------------------- versión fija del flujo (10-11-2026)
+-- Un flujo conserva la versión que se le dio (la que tenía Trimble al elegir el
+-- archivo): si sube una más nueva, no la reemplaza ni empieza otra revisión;
+-- solo se anota aquí para avisarla en la pantalla:
+-- { "versionId", "revision", "nombre", "subido", "subidoPor", "subidoPorId", "visto" }.
+alter table public.aprobacion_archivos add column if not exists version_nueva jsonb;
+
+-- Una sola vez: los archivos que ya estaban aprobados y volvieron a revisión
+-- porque llegó una versión nueva («Nueva versión pendiente», como
+-- CIRCUITOS TR2.rvt) vuelven a «Aprobado» con su versión aprobada, y la nueva
+-- queda como aviso. Quién subió la versión aprobada y cuándo salen del
+-- historial (las firmas de esa aprobación siguen en el historial y en el PDF).
+update public.aprobacion_archivos a
+   set estado = 'aprobado',
+       version_nueva = jsonb_build_object(
+         'versionId', a.version_id, 'revision', a.revision, 'nombre', a.nombre,
+         'subido', a.subido, 'subidoPor', a.subido_por, 'subidoPorId', a.subido_por_id, 'visto', now()),
+       version_id = a.version_aprobada_id,
+       revision = a.revision_aprobada,
+       subido = (select h.ocurrido from public.aprobacion_historial h
+                  where h.archivo_id = a.id and h.version = a.revision_aprobada
+                    and h.accion in ('archivo-detectado', 'version-reemplazada', 'nueva-version')
+                  order by h.id desc limit 1),
+       subido_por = coalesce((select h.usuario from public.aprobacion_historial h
+                  where h.archivo_id = a.id and h.version = a.revision_aprobada
+                    and h.accion in ('archivo-detectado', 'version-reemplazada', 'nueva-version')
+                  order by h.id desc limit 1), ''),
+       subido_por_id = (select h.usuario_id from public.aprobacion_historial h
+                  where h.archivo_id = a.id and h.version = a.revision_aprobada
+                    and h.accion in ('archivo-detectado', 'version-reemplazada', 'nueva-version')
+                  order by h.id desc limit 1),
+       firmas = '[]'::jsonb,
+       actualizado = now()
+ where a.estado = 'nueva-version'
+   and a.version_aprobada_id is not null
+   and a.version_id is distinct from a.version_aprobada_id;

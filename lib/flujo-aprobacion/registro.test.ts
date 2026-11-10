@@ -79,32 +79,45 @@ test("un archivo nuevo queda pendiente de revisión, con quién lo subió y cuá
   assert.equal(a.pasoActual, 0);
 });
 
-test("una versión nueva mientras espera revisión reemplaza a la anterior y vuelve al primer paso, sin cambiar sus pasos", () => {
-  const antes = registrado("modelo", 2, { pasoActual: 1, pasos: [{ id: "p1", nombre: "Revisión vieja" }, { id: "p2", nombre: "Aprueba" }] });
-  const p = planRegistro(flujo(), [antes], [visto("modelo", 3)], AHORA);
+test("una versión nueva mientras espera no reemplaza la del flujo: queda anotada, sin volver al primer paso ni cambiar quién subió la del flujo", () => {
+  const antes = registrado("modelo", 4, { pasoActual: 1 });
+  const p = planRegistro(flujo(), [antes], [visto("modelo", 5, { subidoPor: "Pepe Gómez", subidoPorId: "pepe", ruta: "Obra / Arq / Torre 1 / modelo.rvt", carpetaId: "t1", ancestros: ["raiz", "arq", "t1"] })], AHORA);
   assert.equal(p.actualizar.length, 1);
   const c = p.actualizar[0];
-  assert.equal(c.accion, "version-reemplazada");
-  assert.equal(c.cambios.revision, 3);
-  assert.equal(c.cambios.pasoActual, 0);
-  assert.equal(c.cambios.estado, undefined, "keeps its state");
-  assert.equal(c.cambios.pasos, undefined, "keeps the steps it started with");
-  assert.equal(
-    detalleCambio(c, "x", (iso) => iso.slice(0, 10)),
-    "Subió la versión 3 el 2026-11-03 mientras la versión 2 esperaba revisión: se revisa la nueva desde el primer paso."
-  );
+  assert.equal(c.accion, "version-nueva-vista");
+  assert.deepEqual(c.cambios.versionNueva, { versionId: "modelo-v5", revision: 5, nombre: "modelo.rvt", subido: "2026-11-03T19:20:00.000Z", subidoPor: "Pepe Gómez", subidoPorId: "pepe", visto: AHORA });
+  for (const campo of ["versionId", "revision", "pasoActual", "firmas", "estado", "subidoPor", "subidoPorId", "nombre"] as const) assert.equal(c.cambios[campo], undefined, `keeps ${campo}`);
+  assert.equal(c.cambios.ruta, "Obra / Arq / Torre 1 / modelo.rvt", "it may have moved");
+  assert.equal(detalleCambio(c, "Aprobar Torre 1", (iso) => iso.slice(0, 10)), "Subió la versión 5 el 2026-11-03: el flujo «Aprobar Torre 1» sigue con la versión 4 (la nueva no entra sola).");
 });
 
-test("una versión nueva después de aprobado o rechazado queda como nueva versión pendiente, con los pasos actuales del flujo", () => {
-  const actual = flujo("f1", [{ id: "p2", nombre: "Aprueba" }]);
+test("una versión nueva después de aprobado o rechazado no abre otra revisión: sigue aprobado o rechazado con su versión", () => {
   for (const estado of ["aprobado", "rechazado"] as const) {
-    const antes = registrado("modelo", 5, { estado, versionAprobadaId: estado === "aprobado" ? "modelo-v5" : null, revisionAprobada: estado === "aprobado" ? 5 : null });
-    const c = planRegistro(actual, [antes], [visto("modelo", 6)], AHORA).actualizar[0];
-    assert.equal(c.accion, "nueva-version");
-    assert.equal(c.cambios.estado, "nueva-version");
-    assert.deepEqual(c.cambios.pasos, [{ id: "p2", nombre: "Aprueba" }]);
-    if (estado === "aprobado") assert.match(detalleCambio(c, "x", (s) => s), /nueva versión pendiente de revisión \(la aprobada es la 5\)/);
+    const antes = registrado("modelo", 4, { estado, versionAprobadaId: estado === "aprobado" ? "modelo-v4" : null, revisionAprobada: estado === "aprobado" ? 4 : null });
+    const c = planRegistro(flujo(), [antes], [visto("modelo", 5, { nombre: "modelo TR2.rvt" })], AHORA).actualizar[0];
+    assert.equal(c.accion, "version-nueva-vista");
+    assert.equal(c.cambios.estado, undefined);
+    assert.equal(c.cambios.versionNueva?.revision, 5);
+    assert.match(detalleCambio(c, "x", (s) => s), /Subió la versión 5 el .* \(«modelo TR2.rvt»\): el flujo «x» sigue con la versión 4/, "a newer version with another name says it");
   }
+});
+
+test("la misma versión nueva no se anota dos veces; una más nueva sí; si ya no está, se quita el aviso", () => {
+  const vista = { versionId: "modelo-v5", revision: 5, nombre: "modelo.rvt", subido: null, subidoPor: "Pepe", subidoPorId: "pepe", visto: AHORA };
+  const antes = registrado("modelo", 4, { versionNueva: vista });
+  assert.equal(planRegistro(flujo(), [antes], [visto("modelo", 5)], AHORA).sinCambios, 1);
+  assert.equal(planRegistro(flujo(), [antes], [visto("modelo", 6)], AHORA).actualizar[0].cambios.versionNueva?.revision, 6);
+  const c = planRegistro(flujo(), [antes], [visto("modelo", 4)], AHORA).actualizar[0];
+  assert.equal(c.accion, "");
+  assert.equal(c.cambios.versionNueva, null);
+});
+
+test("un archivo que se quitó del flujo y se vuelve a elegir empieza otra revisión con la versión que tiene ahora", () => {
+  const antes = registrado("modelo", 4, { estado: "retirado" });
+  const c = planRegistro(flujo(), [antes], [visto("modelo", 6)], AHORA).actualizar[0];
+  assert.equal(c.accion, "archivo-reaparecido");
+  assert.equal(c.cambios.revision, 6);
+  assert.equal(c.cambios.estado, "pendiente");
 });
 
 test("lo que no se vio queda para comprobarlo en Trimble; lo retirado que reaparece vuelve a su estado", () => {

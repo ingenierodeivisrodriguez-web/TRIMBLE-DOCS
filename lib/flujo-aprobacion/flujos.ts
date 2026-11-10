@@ -171,5 +171,5 @@ export function describirCierre(c: Cierre): string {
 
 /** Why a closed flow can't be edited, activated or deactivated. */
 export function textoCerrado(hito: string, c: Cierre): string {
-  return `«${hito}» ya tiene decisiones (la primera el ${describirCierre(c)}): el flujo quedó cerrado y no se puede editar, activar ni desactivar. Sigue revisando las versiones nuevas de sus archivos.`;
+  return `«${hito}» ya tiene decisiones (la primera el ${describirCierre(c)}): el flujo quedó cerrado y no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF.`;
 }

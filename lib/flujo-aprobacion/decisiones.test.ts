@@ -105,7 +105,7 @@ test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa ve
   assert.ok(h.includes("aprobado-paso") && h.includes("aprobado"));
 });
 
-test("rechazar exige motivo, avisa a quien subió y la corrección llega como nueva versión pendiente desde el primer paso", async () => {
+test("rechazar exige motivo y avisa a quien subió; la versión corregida queda como aviso, sin entrar sola al flujo", async () => {
   const e = await escenario();
   let a = await e.modelo();
   await assert.rejects(() => decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "" }, "rechazar"), /Escribe el motivo del rechazo/);
@@ -118,26 +118,39 @@ test("rechazar exige motivo, avisa a quien subió y la corrección llega como nu
   assert.equal(a.estado, "rechazado");
   assert.equal(a.firmas[0].comentario, "Faltan los ejes");
 
+  // The corrected version doesn't enter this flow by itself (10-11-2026): it is only noted.
   e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2)];
   const otra = await revisarFlujo(e.ctx("juan"), { flujoId: e.f.id });
-  assert.match(otra.mensaje, /1 versión nueva/);
+  assert.match(otra.mensaje, /1 versión nueva en Trimble/);
   a = await e.modelo();
-  assert.equal(a.estado, "nueva-version");
-  assert.equal(a.pasoNombre, "Revisa");
-  assert.deepEqual(a.firmas, [], "a new review starts without signatures");
-  assert.equal(e.tareas.length, 3, "the reviewers get a ToDo for the corrected version");
+  assert.equal(a.estado, "rechazado");
+  assert.equal(a.revision, 1);
+  assert.equal(a.versionNueva?.revision, 2);
+  assert.equal(a.firmas.length, 1, "the rejection stays");
+  assert.equal(e.tareas.length, 2, "no ToDo: nothing new to review in this flow");
 });
 
-test("no se decide sobre una versión vieja: ni la del registro ni la que ya está en Trimble", async () => {
+test("se decide solo la versión del flujo; si en Trimble hay una más nueva, se decide igual y queda anotado", async () => {
   const e = await escenario();
   const a = await e.modelo();
   await assert.rejects(
     () => decidir(e.ctx("luz"), { archivoId: a.id, versionId: "modelo-v0" }, "aprobar"),
     (err: unknown) => err instanceof FlujoError && err.code === "version-cambio"
   );
+  // Version 2 is already in Trimble, before anyone pressed «Revisar ahora».
   e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2)];
-  await assert.rejects(() => decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /En Trimble ya hay una versión más nueva de este archivo: pulsa «Revisar ahora»/);
-  assert.equal((await e.modelo()).pasoActual, 0, "nothing changed");
+  const r1 = await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId }, "aprobar");
+  assert.equal(r1.mensaje, "Aprobaste «Revisa» de «modelo.rvt»: pasa a «Aprueba». Ojo: en Trimble ya existe una versión más nueva; este flujo no la revisa.");
+  // After a review the notice knows its number.
+  await revisarFlujo(e.admin, { flujoId: e.f.id });
+  const b = await e.modelo();
+  assert.equal(b.versionId, "modelo-v1");
+  const r2 = await decidir(e.ctx("pepe"), { archivoId: b.id, versionId: b.versionId, texto: "Cumple" }, "aprobar");
+  assert.equal(r2.mensaje, "«modelo.rvt» queda aprobado (versión 1). Ojo: en Trimble ya existe la versión 2; este flujo no la revisa.");
+  assert.match((await historial(e.admin, null, b.id)).entradas.find((x) => x.accion === "aprobado")!.detalle, /el archivo queda aprobado\. Comentario: Cumple\. Ojo: en Trimble ya existe la versión 2\.$/);
+  const c = await e.modelo();
+  assert.equal(c.revisionAprobada, 1);
+  assert.equal(c.estado, "aprobado");
 });
 
 test("el responsable que subió la versión ve que le toca y la decide; la firma y el historial lo anotan", async () => {
@@ -164,12 +177,12 @@ test("el responsable que subió la versión ve que le toca y la decide; la firma
 
 test("quien subió la versión no decide, aunque sea administrador; un administrador sin el paso sí, y queda anotado", async () => {
   const e = await escenario();
-  e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2, "ana")];
-  await revisarFlujo(e.admin, { flujoId: e.f.id });
   let a = await e.modelo();
+  // The flow's version as uploaded by Ana, an administrator without the step.
+  await e.store.actualizarArchivo(a.id, { subidoPor: "Ana", subidoPorId: "ana" });
+  a = await e.modelo();
   await assert.rejects(() => decidir(e.admin, { archivoId: a.id, versionId: a.versionId }, "aprobar"), /Tú subiste esta versión/);
-  e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 3, "juan")];
-  await revisarFlujo(e.admin, { flujoId: e.f.id });
+  await e.store.actualizarArchivo(a.id, { subidoPor: "Juan", subidoPorId: "juan" });
   a = await e.modelo();
   await assert.rejects(() => decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /no es tuyo/);
   await decidir(e.admin, { archivoId: a.id, versionId: a.versionId }, "aprobar");

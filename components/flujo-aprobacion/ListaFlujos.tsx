@@ -190,6 +190,11 @@ export default function ListaFlujos({
                   </td>
                   <td style={td}>
                     <EtiquetaEstado estado={f.estado} ayuda={ayudaEstado(f)} desactivado={!f.flujo.activo} />
+                    {f.conVersionNueva > 0 && (
+                      <div style={{ fontSize: 12, color: "#8a5a00", marginTop: 3 }} title="En Trimble hay versiones más nuevas que las que revisa este flujo; el flujo sigue con las suyas">
+                        Versión nueva en Trimble{f.conVersionNueva > 1 ? ` (${f.conVersionNueva})` : ""}
+                      </div>
+                    )}
                   </td>
                   <td style={{ ...td, textAlign: "right" }}>
                     <MenuPuntos

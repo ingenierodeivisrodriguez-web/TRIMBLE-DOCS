@@ -34,6 +34,8 @@ export interface FilaFlujo {
   vencido: boolean;
   /** Its first decision: from then on it can't be edited, activated or deactivated. */
   cierre: Cierre | null;
+  /** Files with a newer version in Trimble than the one the flow reviews (the flow keeps its own). */
+  conVersionNueva: number;
 }
 
 /** Past its due date with files still waiting (only active flows). */
@@ -48,7 +50,7 @@ export function sumarDias(dia: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-type ArchivoLista = Pick<ArchivoInfo, "flujoId" | "estado" | "meToca" | "pasos" | "pasoActual">;
+type ArchivoLista = Pick<ArchivoInfo, "flujoId" | "estado" | "meToca" | "pasos" | "pasoActual" | "versionNueva">;
 
 /** Where one registered file stands (null when it was retired from the flow). */
 export function estadoDocumento(a: Pick<ArchivoInfo, "estado" | "pasos" | "pasoActual">): Exclude<EstadoDocumento, "sin-archivos"> | null {
@@ -112,6 +114,7 @@ export function filasFlujos(flujos: Flujo[], archivos: ArchivoLista[], hoy: stri
         detalleEstado: detalle,
         vencido: estaVencido(f, pendientes, hoy),
         cierre: cierres[f.id] ?? null,
+        conVersionNueva: suyos.filter((a) => a.estado !== "retirado" && !!a.versionNueva).length,
       };
     })
     .sort((a, b) => Number(b.flujo.activo) - Number(a.flujo.activo) || porNombre.compare(a.flujo.hito, b.flujo.hito));

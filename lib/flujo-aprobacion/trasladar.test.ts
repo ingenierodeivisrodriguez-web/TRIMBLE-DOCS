@@ -79,7 +79,13 @@ async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boo
     const a = await registro(fileId);
     return decidir(como(por), { archivoId: a.id, versionId: a.versionId, ...(destino ? { destino } : {}) }, "aprobar");
   };
-  return { nube, p, arq, t1, apr, modelo, detalle, como, admin, f, registro, enDestino, texto, aprobar };
+  // A review of the newest version as it started before 10-11-2026 (now a newer version is only noted).
+  const revisionAnterior = async (fileId: string) => {
+    const a = await registro(fileId);
+    const x = nube.archivos.get(fileId)!;
+    await store.actualizarArchivo(a.id, { estado: "nueva-version", versionId: x.versiones[x.versiones.length - 1].versionId, revision: x.versiones.length, pasoActual: 0, firmas: [], versionNueva: null });
+  };
+  return { nube, p, arq, t1, apr, modelo, detalle, como, admin, f, registro, enDestino, texto, aprobar, revisionAnterior };
 }
 
 test("al aprobar el último paso la versión aprobada pasa sola a la carpeta destino como versión 1, y queda quién y cuándo", async () => {
@@ -110,11 +116,13 @@ test("las subcarpetas entre la carpeta de revisión y el archivo se recrean en e
   assert.equal((await e.registro(e.detalle)).traslado?.carpetaRuta, "P / Aprobados / Torre 1");
 });
 
-test("una versión nueva aprobada llega al destino como versión 2 encima de la copia del flujo, por una subida", async () => {
+test("una versión nueva aprobada (revisión empezada antes del 10-11-2026) llega al destino como versión 2 encima de la copia del flujo, por una subida", async () => {
   const e = await escenario();
   await e.aprobar(e.modelo);
   e.nube.sembrarArchivo(e.arq, "modelo.rvt", "modelo versión 2", "trb 2");
   await revisarFlujo(e.admin, { flujoId: e.f.id });
+  assert.equal((await e.registro(e.modelo)).estado, "aprobado", "since 10-11-2026 the flow keeps its version");
+  await e.revisionAnterior(e.modelo);
   const r = await e.aprobar(e.modelo);
   assert.equal(r.traslado?.estado, "en-curso", "an upload through the server, then Trimble confirms it");
   const c = await pasoTraslado(e.como("pepe"), { archivoId: (await e.registro(e.modelo)).id, paso: "confirmar" });
@@ -147,17 +155,18 @@ test("un archivo con ese nombre que no llegó por el flujo no se reemplaza sin c
   );
 });
 
-test("si no se pudo copiar queda el error, y un administrador lo reintenta con la versión aprobada aunque ya haya otra en revisión", async () => {
+test("si no se pudo copiar queda el error, y quien aprobó lo reintenta con la versión aprobada aunque en Trimble ya haya una más nueva", async () => {
   const e = await escenario({ destinoSoloLectura: true });
   const r = await e.aprobar(e.modelo);
   assert.equal(r.traslado?.estado, "error");
   e.nube.sembrarArchivo(e.arq, "modelo.rvt", "modelo versión 2 sin revisar", "trb 2");
   await revisarFlujo(e.admin, { flujoId: e.f.id });
   const a = await e.registro(e.modelo);
-  assert.equal(a.estado, "nueva-version");
-  await assert.rejects(() => pasoTraslado(e.como("pepe"), { archivoId: a.id, paso: "trasladar" }), /Solo quien lo aprobó o un administrador/);
+  assert.equal(a.estado, "aprobado", "the flow keeps its version");
+  assert.equal(a.versionNueva?.revision, 2);
+  await assert.rejects(() => pasoTraslado(e.como("luz"), { archivoId: a.id, paso: "trasladar" }), /Solo quien lo aprobó \(Pepe\) o un administrador/);
   e.nube.carpetas.get(e.apr)!.permiso = "FULL_ACCESS";
-  const otra = await pasoTraslado(e.admin, { archivoId: a.id, paso: "trasladar" });
+  const otra = await pasoTraslado(e.como("pepe"), { archivoId: a.id, paso: "trasladar" });
   assert.equal(otra.traslado?.estado, "hecho");
   assert.equal(e.texto(e.enDestino()[0].versiones[0].contenido), "modelo versión 1", "the approved version, not the newer one");
   assert.ok((await historial(e.admin, null, a.id)).entradas.some((x) => x.accion === "traslado-error"));
@@ -222,7 +231,7 @@ test("flujo nuevo: la versión nueva aprobada en la misma carpeta queda como ver
   const e = await escenario({ nuevo: true });
   await e.aprobar(e.modelo, "pepe", e.apr);
   e.nube.sembrarArchivo(e.arq, "modelo.rvt", "modelo versión 2", "trb 2");
-  await revisarFlujo(e.admin, { flujoId: e.f.id });
+  await e.revisionAnterior(e.modelo);
   const r = await e.aprobar(e.modelo, "pepe", e.apr);
   assert.equal(r.traslado?.estado, "en-curso");
   const c = await pasoTraslado(e.como("pepe"), { archivoId: (await e.registro(e.modelo)).id, paso: "confirmar" });

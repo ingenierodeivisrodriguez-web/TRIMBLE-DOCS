@@ -572,6 +572,76 @@ cambios de SQL.
   primera decisión nadie edita ni desactiva y sigue revisando versiones nuevas;
   un desactivado con decisión no se reactiva).
 
+## Versión fija del flujo (10-11-2026)
+
+Pedido del dueño: "cuando se hace el flujo nuevo, la versión del archivo debe
+ser estática ejemplo si pepe en el flujo nuevo comparte la versión 4 y ese
+documento se actualiza a versión 5, entonces el flujo debe conservar que el
+documento del flujo es versión 4, pero sí debería aparecer un mensaje diciendo
+que existe una nueva versión. para ayudar al usuario a tomar una decisión", con
+captura de «CIRCUITOS TR2.rvt» (aprobado v1 en «aprobar torre 2», volvió a
+«Nueva versión pendiente» con la v2). Propuse dos fases y 4 supuestos
+(la versión nueva no entra sola, se revisa en un flujo nuevo; se decide la fija
+aunque exista otra; se fija la que Trimble tiene al guardar; un archivo va a un
+flujo nuevo solo cuando ya se decidió en el anterior). Dijo "Sí, fase 1".
+
+Fase 1 (hecha; SQL: columna `version_nueva` + corrección única):
+
+- `planRegistro`: con el mismo flujo y otra versión en Trimble, si el archivo
+  no está retirado → acción `version-nueva-vista` con `cambios = { ruta,
+  carpetaId, ancestros, versionNueva, actualizado }` (no toca versionId,
+  revision, subido*, nombre, estado, pasoActual, firmas). Una sola vez por
+  versión (`versionNueva.versionId`); otra más nueva la reemplaza; si Trimble
+  vuelve a dar la versión del flujo, `versionNueva: null`. Retirado (vuelto a
+  marcar) o desde otro flujo: nueva revisión con la versión de ahora (igual que
+  antes). Ya no se producen `version-reemplazada` ni `nueva-version` (las filas
+  viejas conservan esos estados; el resto del código los sigue manejando).
+- `revisarFlujo`: la línea del historial va con quien subió la nueva
+  (`versionNueva.subidoPor`), `ocurrido` = cuándo la subió y `version` = la
+  nueva; no se manda tarea (`aAvisar` solo para version-reemplazada,
+  nueva-version y archivo-cambio-flujo). Mensaje: «N versión nueva en Trimble
+  (el flujo sigue con la versión que tiene: ver el aviso en el archivo)».
+  `listarArchivos` agrega `enlaceNueva`.
+- `decidir`: ya no lanza «En Trimble ya hay una versión más nueva» (409
+  version-cambio); sigue rechazando si el `versionId` enviado no es el del
+  registro. `tc.version` (con `catch` → null) solo sirve para anotar:
+  detalle + «Ojo: en Trimble ya existe la versión N.» (N de `versionNueva` si
+  coincide; si no se conoce, «una versión más nueva») y el mensaje termina en
+  «Ojo: …; este flujo no la revisa.». La copia (`trasladar`) ya usaba
+  `fromFileVersionId = versionAprobadaId` y `versionFija`: copia la aprobada.
+- Pantalla: `AvisoVersionNueva` (ámbar: versión, nombre si cambió, quién y
+  cuándo, «Ver la versión N») en la fila del archivo y en `Decision` (con
+  «Tu decisión es sobre la versión 4…»); la carpeta de la fila sale de la ruta
+  sin su última parte (el nombre puede ser el de la versión nueva);
+  `ListaFlujos` «Versión nueva en Trimble» bajo el estado
+  (`FilaFlujo.conVersionNueva`, sin retirados); `PanelFlujo` nota ámbar con la
+  cuenta; `EditorFlujo` explica que queda fija la versión al guardar; textos
+  de flujo cerrado y desactivar ya no dicen «revisa versiones nuevas».
+- SQL de una sola vez: filas `nueva-version` con `version_aprobada_id` y
+  versión distinta → `aprobado`, `version_nueva` = la versión que tenían,
+  `version_id/revision` = la aprobada, `subido/subido_por/subido_por_id` desde
+  la línea `archivo-detectado | version-reemplazada | nueva-version` del
+  historial con esa versión (`firmas` queda vacío: las firmas de esa
+  aprobación están en el historial). Probado en PGlite (dos veces + caso
+  CIRCUITOS + una `nueva-version` sin aprobada que no se toca).
+- Pruebas: registro (no reemplaza, aprobado/rechazado siguen, una vez por
+  versión, se quita, retirado vuelve con la de ahora), revisión (aviso sin
+  tarea, enlaces), decisiones (rechazo con corrección como aviso; decidir con
+  versión más nueva sin y con número; admin que subió vía `actualizarArchivo`),
+  trasladar (`revisionAnterior` simula una revisión de v2 empezada antes del
+  10-11-2026; reintento de copia por quien aprobó con versión nueva), lista
+  (`conVersionNueva`).
+
+Fase 2 (pendiente del OK): «Crear flujo con la versión N» (Nuevo con ese
+archivo y los mismos pasos y responsables); un archivo en varios flujos, uno
+por versión (registro único por `flujo_id, file_id` en vez de `proyecto,
+file_id`; quitar `archivo-cambio-flujo`); regla: entra a un flujo nuevo solo si
+en los otros ya está decidido (cambiar `conflictosArchivos`, el trigger
+`aprobacion_revisar_archivos` y el `revisar` del memoryStore); trazabilidad
+por flujo y versión; proponer la carpeta de la copia anterior aunque sea otra
+fila. Sin la fase 2, una versión nueva no se puede revisar (el archivo queda
+en su flujo cerrado).
+
 Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
 decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma

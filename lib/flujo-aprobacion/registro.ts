@@ -3,14 +3,19 @@
  * read in Trimble against what was registered.
  * - A file seen for the first time: "pendiente", with a copy of the flow's
  *   steps (a later change of the flow doesn't touch files already in process).
- * - A new version while it waits: the review restarts on the latest version
- *   ("version-reemplazada"); after a decision (approved or rejected) it is
- *   "nueva-version" and starts with the flow's current steps.
+ * - Since 10-11-2026 a flow keeps the version it was given (the one Trimble
+ *   had when the file was chosen): a newer version doesn't replace it nor start
+ *   a new review; it is only noted ("version-nueva-vista", `versionNueva`) so
+ *   whoever decides knows it exists. Before, a new version restarted the review
+ *   ("version-reemplazada") or opened a new one ("nueva-version"); rows from
+ *   then keep those states.
+ * - A file taken out and chosen again, or coming from another flow, starts a
+ *   new review with the version it has now.
  * - A registered file not seen any more is only checked (and retired) after a
  *   complete walk; nothing is ever deleted.
  * Who uploaded a version and when come from Trimble, not from when it was seen.
  */
-import type { ArchivoRegistro, ArchivoVisto, EstadoArchivo, Flujo, Responsable } from "./types";
+import type { ArchivoRegistro, ArchivoVisto, EstadoArchivo, Flujo, Responsable, VersionNueva } from "./types";
 
 /** States that wait for someone's review. */
 export const ESPERANDO: EstadoArchivo[] = ["pendiente", "nueva-version"];
@@ -36,12 +41,22 @@ function deTrimble(v: ArchivoVisto): Partial<ArchivoRegistro> {
   };
 }
 
+/** Where the file is now (it may move while the flow keeps its version). */
+function ubicacion(v: ArchivoVisto): Partial<ArchivoRegistro> {
+  return { ruta: v.ruta, carpetaId: v.carpetaId, ancestros: v.ancestros };
+}
+
+/** A version Trimble has that isn't the flow's one. */
+function versionNuevaDe(v: ArchivoVisto, momento: string): VersionNueva {
+  return { versionId: v.versionId, revision: v.revision, nombre: v.nombre, subido: v.subido, subidoPor: v.subidoPor, subidoPorId: v.subidoPorId, visto: momento };
+}
+
 export interface Cambio {
   id: string;
   antes: ArchivoRegistro;
   cambios: Partial<ArchivoRegistro>;
   /** What goes to the history ("" when nothing does: a rename or a move inside the flow). */
-  accion: "" | "version-reemplazada" | "nueva-version" | "archivo-reaparecido" | "archivo-cambio-flujo";
+  accion: "" | "version-reemplazada" | "nueva-version" | "version-nueva-vista" | "archivo-reaparecido" | "archivo-cambio-flujo";
 }
 
 export interface PlanRegistro {
@@ -104,21 +119,26 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
       continue;
     }
     if (r.versionId !== v.versionId) {
-      if (r.estado === "pendiente" || r.estado === "nueva-version") {
-        plan.actualizar.push({ id: r.id, antes: r, accion: "version-reemplazada", cambios: { ...deTrimble(v), pasoActual: 0, firmas: [], actualizado: momento } });
-      } else if (r.estado === "retirado") {
-        plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-reaparecido", cambios: { ...deTrimble(v), ...nuevoTramite, estado: r.versionAprobadaId ? "nueva-version" : "pendiente" } });
+      if (r.estado === "retirado") {
+        // Chosen again (or back in Trimble): a new review of the version it has now.
+        plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-reaparecido", cambios: { ...deTrimble(v), ...nuevoTramite, estado: r.versionAprobadaId ? "nueva-version" : "pendiente", versionNueva: null } });
+      } else if ((r.versionNueva?.versionId ?? null) !== v.versionId) {
+        // The flow keeps its version: the newer one is only noted (once per version).
+        plan.actualizar.push({ id: r.id, antes: r, accion: "version-nueva-vista", cambios: { ...ubicacion(v), versionNueva: versionNuevaDe(v, momento), actualizado: momento } });
+      } else if (r.ruta !== v.ruta) {
+        plan.actualizar.push({ id: r.id, antes: r, accion: "", cambios: { ...ubicacion(v), actualizado: momento } });
       } else {
-        plan.actualizar.push({ id: r.id, antes: r, accion: "nueva-version", cambios: { ...deTrimble(v), ...nuevoTramite, estado: "nueva-version" } });
+        plan.sinCambios++;
       }
       continue;
     }
     if (r.estado === "retirado") {
-      plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-reaparecido", cambios: { ...deTrimble(v), estado: estadoAlReaparecer(r), actualizado: momento } });
+      plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-reaparecido", cambios: { ...deTrimble(v), estado: estadoAlReaparecer(r), versionNueva: null, actualizado: momento } });
       continue;
     }
-    if (r.ruta !== v.ruta || r.nombre !== v.nombre) {
-      plan.actualizar.push({ id: r.id, antes: r, accion: "", cambios: { nombre: v.nombre, ruta: v.ruta, carpetaId: v.carpetaId, ancestros: v.ancestros, tipo: extension(v.nombre), actualizado: momento } });
+    if (r.ruta !== v.ruta || r.nombre !== v.nombre || r.versionNueva) {
+      // A rename or a move; or the newer version is gone and Trimble's latest is the flow's one again.
+      plan.actualizar.push({ id: r.id, antes: r, accion: "", cambios: { nombre: v.nombre, ruta: v.ruta, carpetaId: v.carpetaId, ancestros: v.ancestros, tipo: extension(v.nombre), ...(r.versionNueva ? { versionNueva: null } : {}), actualizado: momento } });
       continue;
     }
     plan.sinCambios++;
@@ -137,6 +157,11 @@ export function detalleCambio(c: Cambio, hito: string, fecha: (iso: string) => s
       return `Subió la versión ${n ?? "?"}${cuando} mientras la versión ${c.antes.revision ?? "?"} esperaba revisión: se revisa la nueva desde el primer paso.`;
     case "nueva-version":
       return `Subió la versión ${n ?? "?"}${cuando}: nueva versión pendiente de revisión${c.antes.revisionAprobada ? ` (la aprobada es la ${c.antes.revisionAprobada})` : ""}.`;
+    case "version-nueva-vista": {
+      const vn = c.cambios.versionNueva;
+      const otroNombre = vn && vn.nombre && vn.nombre !== c.antes.nombre ? ` («${vn.nombre}»)` : "";
+      return `Subió la versión ${vn?.revision ?? "?"}${vn?.subido ? ` el ${fecha(vn.subido)}` : ""}${otroNombre}: el flujo «${hito}» sigue con la versión ${c.antes.revision ?? "?"} (la nueva no entra sola).`;
+    }
     case "archivo-reaparecido":
       return `Volvió a aparecer en ${c.cambios.ruta ?? c.antes.ruta} (versión ${n ?? "?"}).`;
     case "archivo-cambio-flujo":

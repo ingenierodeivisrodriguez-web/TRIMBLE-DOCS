@@ -207,7 +207,8 @@ function FilaArchivo({
   onTraslado: (texto: string, error: boolean) => void;
 }) {
   const [color, fondo] = COLOR[a.estado];
-  const carpeta = a.ruta.slice(0, Math.max(0, a.ruta.length - a.nombre.length - 3));
+  // The folder: the path without its last part (the name there may be a newer version's).
+  const carpeta = a.ruta.lastIndexOf(" / ") > 0 ? a.ruta.slice(0, a.ruta.lastIndexOf(" / ")) : "";
   const rechazo = a.estado === "rechazado" ? [...a.firmas].reverse().find((f) => f.decision === "rechazado") : undefined;
   return (
     <>
@@ -225,6 +226,7 @@ function FilaArchivo({
         <td style={td}>
           <span style={etiqueta(color, fondo)}>{textoEstado(a)}</span>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)", marginTop: 2 }}>Versión {a.revision ?? "?"}</div>
+          {a.versionNueva && a.estado !== "retirado" && <AvisoVersionNueva a={a} />}
           {a.firmas.map((f, i) => (
             <div key={i} style={{ fontSize: 12, color: f.decision === "aprobado" ? "#1e6b2c" : "#a1261b" }} title={f.comentario || undefined}>
               {f.decision === "aprobado" ? "✓" : "✗"} {f.paso}: {f.quien}
@@ -250,6 +252,7 @@ function FilaArchivo({
             <>
               <strong>Corregir y subir una versión nueva</strong>
               <div style={{ fontSize: 12.5, color: "#a1261b" }}>Motivo: {rechazo.comentario}</div>
+              <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>La versión corregida no entra sola a este flujo: aparece como aviso en el archivo.</div>
             </>
           ) : (
             "—"
@@ -305,6 +308,26 @@ function FilaArchivo({
         </tr>
       )}
     </>
+  );
+}
+
+/**
+ * The notice of a newer version in Trimble (the flow keeps its own, 10-11-2026):
+ * which one, who uploaded it and when, and a link to open it and compare.
+ */
+function AvisoVersionNueva({ a }: { a: ArchivoInfo }) {
+  const v = a.versionNueva!;
+  return (
+    <div style={{ marginTop: 4, fontSize: 12, lineHeight: 1.4, color: "#7a4b00", background: "#fff7e6", border: "1px solid #f3d9a4", borderRadius: 4, padding: "4px 8px", maxWidth: 360 }}>
+      <strong>Hay una versión más nueva en Trimble:</strong> versión {v.revision ?? "?"}
+      {v.nombre && v.nombre !== a.nombre ? ` («${v.nombre}»)` : ""}, subida por {v.subidoPor || "—"}
+      {v.subido ? ` el ${fechaHora(v.subido)}` : ""}. Este flujo revisa la versión {a.revision ?? "?"}.{" "}
+      {a.enlaceNueva && (
+        <a href={a.enlaceNueva} target="_blank" rel="noopener noreferrer" style={{ ...linkBtn, fontSize: 12 }} title="Abrir en Trimble la versión más nueva, para comparar">
+          Ver la versión {v.revision ?? "nueva"}
+        </a>
+      )}
+    </div>
   );
 }
 
@@ -456,6 +479,14 @@ function Decision({ api, projectId, a, propia, onDecidido }: { api: FlujoApi; pr
           : ` Al aprobar pasa a «${a.pasos[a.pasoActual + 1]?.nombre}».`}
         {propia && " Tú subiste esta versión: como responsable del paso puedes decidirla, y la firma queda anotada como «su propia versión»."}
       </div>
+      {a.versionNueva && (
+        <div style={{ fontSize: 13 }}>
+          <AvisoVersionNueva a={a} />
+          <div style={{ marginTop: 4, color: "var(--tc-gray-700)" }}>
+            Tu decisión es sobre la versión {a.revision ?? "?"}, la de este flujo; la versión {a.versionNueva.revision ?? "nueva"} no entra a este flujo. Si la que vale es la nueva, puedes rechazar esta diciendo el motivo.
+          </div>
+        </div>
+      )}
       {eligeCarpeta && (
         <div style={{ border: `1px solid ${C.border}`, borderRadius: 4, padding: "8px 10px", background: "#fff", display: "grid", gap: 6 }}>
           <div style={{ fontSize: 13.5, fontWeight: 600, color: "var(--tc-gray-700)" }}>¿Qué hacer con la versión aprobada?</div>

@@ -242,8 +242,27 @@ export interface ArchivoRegistro {
   firmas: Firma[];
   /** The copy of the approved version to the destination folder (phase 4); null until the first approval. */
   traslado: Traslado | null;
+  /**
+   * The newest version Trimble has, when it isn't the one this flow reviews:
+   * since 10-11-2026 a flow keeps the version it was given and only shows this
+   * (owner: "el flujo debe conservar que el documento del flujo es versión 4,
+   * pero sí debería aparecer un mensaje diciendo que existe una nueva versión").
+   */
+  versionNueva?: VersionNueva | null;
   detectado: string;
   actualizado: string;
+}
+
+/** A version in Trimble newer than the flow's one: who uploaded it and when, and when it was seen. */
+export interface VersionNueva {
+  versionId: string | null;
+  revision: number | null;
+  /** The file's name in that version (Trimble may show another one). */
+  nombre: string;
+  subido: string | null;
+  subidoPor: string;
+  subidoPorId: string | null;
+  visto: string;
 }
 
 /** A decision on one step of a file's review. */
@@ -350,6 +369,8 @@ export interface ArchivoInfo extends ArchivoRegistro {
   meToca: boolean;
   /** Trimble's viewer at the version under review. */
   enlace: string;
+  /** Trimble's viewer at the newer version, when there is one. */
+  enlaceNueva: string | null;
   /** The flow's destination folder (older flows only), or null. */
   destino: string | null;
 }
