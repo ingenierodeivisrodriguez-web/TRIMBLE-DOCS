@@ -56,7 +56,7 @@ export interface Cambio {
   antes: ArchivoRegistro;
   cambios: Partial<ArchivoRegistro>;
   /** What goes to the history ("" when nothing does: a rename or a move inside the flow). */
-  accion: "" | "version-reemplazada" | "nueva-version" | "version-nueva-vista" | "archivo-reaparecido" | "archivo-cambio-flujo";
+  accion: "" | "version-reemplazada" | "nueva-version" | "version-nueva-vista" | "version-reactivada" | "archivo-reaparecido" | "archivo-cambio-flujo";
 }
 
 export interface PlanRegistro {
@@ -147,6 +147,41 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
   return plan;
 }
 
+/**
+ * Reactivating a flow (owner, 10-11-2026: only when Trimble has newer versions
+ * of its files): each file with a newer version takes it as the flow's version
+ * and is reviewed again from the first step, with the flow's steps. The earlier
+ * approval stays (`versionAprobadaId`) and every decision stays in the history.
+ */
+export function planReactivar(flujo: Flujo, registrados: ArchivoRegistro[], momento: string): Cambio[] {
+  return registrados
+    .filter((r) => r.flujoId === flujo.id && r.estado !== "retirado" && !!r.versionNueva?.versionId && r.versionNueva.versionId !== r.versionId)
+    .map((r) => {
+      const v = r.versionNueva!;
+      const nombre = v.nombre || r.nombre;
+      return {
+        id: r.id,
+        antes: r,
+        accion: "version-reactivada" as const,
+        cambios: {
+          estado: "nueva-version" as const,
+          versionId: v.versionId,
+          revision: v.revision,
+          subido: v.subido,
+          subidoPor: v.subidoPor,
+          subidoPorId: v.subidoPorId,
+          nombre,
+          tipo: extension(nombre),
+          pasos: flujo.pasos.map((p) => ({ ...p })),
+          pasoActual: 0,
+          firmas: [],
+          versionNueva: null,
+          actualizado: momento,
+        },
+      };
+    });
+}
+
 /** "Ana Ruiz subió la versión 3 el 03-11-2026 14:20." and the like, for the history. */
 export function detalleCambio(c: Cambio, hito: string, fecha: (iso: string) => string): string {
   // Who uploaded goes in the line's own "who" column.
@@ -161,6 +196,11 @@ export function detalleCambio(c: Cambio, hito: string, fecha: (iso: string) => s
       const vn = c.cambios.versionNueva;
       const otroNombre = vn && vn.nombre && vn.nombre !== c.antes.nombre ? ` («${vn.nombre}»)` : "";
       return `Subió la versión ${vn?.revision ?? "?"}${vn?.subido ? ` el ${fecha(vn.subido)}` : ""}${otroNombre}: el flujo «${hito}» sigue con la versión ${c.antes.revision ?? "?"} (la nueva no entra sola).`;
+    }
+    case "version-reactivada": {
+      const m = c.antes.revision ?? "?";
+      const antes = c.antes.estado === "aprobado" ? `la versión ${m} quedó aprobada` : c.antes.estado === "rechazado" ? `la versión ${m} quedó rechazada` : `la versión ${m} no se decidió`;
+      return `Entra la versión ${n ?? "?"} (subida por ${c.cambios.subidoPor || "—"}${cuando}) al reactivar el flujo «${hito}»: se revisa desde el primer paso; ${antes}.`;
     }
     case "archivo-reaparecido":
       return `Volvió a aparecer en ${c.cambios.ruta ?? c.antes.ruta} (versión ${n ?? "?"}).`;

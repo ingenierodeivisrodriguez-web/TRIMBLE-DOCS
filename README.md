@@ -4622,8 +4622,9 @@ que sigue.
   (409 `flujo-cerrado`) aunque alguien lo intente por fuera de la pantalla.
 - El flujo **sigue trabajando**: se sigue decidiendo, se pone lo aprobado en
   una carpeta, se comenta y se saca el PDF, y avisa las versiones nuevas de
-  sus archivos (desde el 10-11-2026 no entran solas: ver «Versión fija del
-  flujo»). «Revisar permisos de Trimble» sigue disponible.
+  sus archivos (desde el 10-11-2026 no entran solas: entran con «Reactivar el
+  flujo», lo único que se puede hacer con un flujo cerrado además de decidir).
+  «Revisar permisos de Trimble» sigue disponible.
 - Un flujo que ya estaba **desactivado** cuando tuvo su primera decisión
   queda así: no se vuelve a activar.
 - La fecha y la persona salen del **historial** (la primera línea «Aprobó un
@@ -4683,11 +4684,10 @@ plan en dos fases; esta es la **fase 1**. Hay que volver a ejecutar
   versión nueva no lo cambia.
 - Un archivo que se quitó del flujo y se vuelve a marcar, o que llega desde
   otro flujo, entra con la versión que tenga en ese momento.
-- **Mientras no esté la fase 2**, la versión nueva solo se ve: el archivo sigue
-  en su flujo (que, si ya tiene decisiones, está cerrado) y no puede entrar a
-  otro. La fase 2 agrega «Crear flujo con la versión N» y deja que un mismo
-  archivo esté en varios flujos, uno por versión, cuando el anterior ya se
-  decidió.
+- Para revisar la versión nueva, quien creó el flujo (o un administrador) usa
+  **«Reactivar el flujo»** (sección siguiente). La fase 2 que se había
+  propuesto (un flujo nuevo por cada versión) quedó sin hacer: el dueño
+  prefirió reactivar el mismo flujo.
 - **Datos que ya estaban**: el SQL devuelve a **«Aprobado»** los archivos que
   estaban aprobados y volvieron a «Nueva versión pendiente» por una versión
   nueva (como «CIRCUITOS TR2.rvt»): quedan con su versión aprobada (y quién la
@@ -4705,6 +4705,73 @@ rechaza por una versión más nueva: la anota, `textoOtraVersion`), `lista.ts`
 `EditorFlujo`. Columna `aprobacion_archivos.version_nueva` (jsonb) y la
 corrección de una sola vez en el SQL.
 
+### Reactivar el flujo y cerrar las tareas de Trimble (10-11-2026)
+
+Pedido por el dueño, con una captura del aviso «1 archivo tiene una versión
+más nueva en Trimble…»: (1) solo cuando sale ese aviso, quien creó el flujo
+tiene un botón para **reactivarlo**, y se guarda toda la trazabilidad; (2) la
+**tarea de Trimble** que crea el flujo pasa a **cerrada** cuando se aprueba o
+se rechaza. Aceptó el plan con sus supuestos. Hay que volver a ejecutar
+**`supabase/flujo-aprobacion.sql`** (columna para las tareas).
+
+**Reactivar el flujo**
+
+- Sale **solo** cuando algún archivo del flujo tiene una versión más nueva en
+  Trimble: en el aviso ámbar del panel (**«Reactivar el flujo…»**) y en el ⋮
+  de la lista. Lo pueden usar **quien creó el flujo y los administradores**; el
+  servidor lo vuelve a revisar (409 `sin-version-nueva` si no hay nada que
+  reactivar).
+- Primero pide confirmación con lo que entra: «CIRCUITOS TR2.rvt: entra la
+  versión 2 (la versión 1 quedó aprobada)», o «quedó rechazada», o «todavía no
+  se decidió: ya no se decidirá».
+- Al confirmar: vuelve a leer Trimble (entra la versión más reciente); cada
+  archivo con versión nueva la toma como la del flujo y queda **«Nueva versión
+  pendiente de revisión»** desde el **primer paso** (con los pasos del flujo);
+  el responsable recibe la **tarea de Trimble**. Los archivos sin versión nueva
+  no cambian. La aprobación anterior sigue anotada («aprobada: v1»).
+- Si el flujo estaba **desactivado**, queda activo (si esos archivos no están
+  en otro flujo activo).
+- El flujo sigue **cerrado para editar**: pasos, responsables y archivos no
+  cambian; reactivar solo hace entrar la versión nueva.
+- **Trazabilidad**: no se borra nada. El historial anota «Reactivó «…»: entra
+  «archivo» versión 2…» y, por archivo, «Entra la versión 2 (subida por …) al
+  reactivar el flujo…; la versión 1 quedó aprobada». Las firmas y decisiones
+  de la versión anterior siguen en el historial y en el PDF.
+- Así también se revisa la **corrección de un plano rechazado**: B sube la
+  versión corregida (sale el aviso) y quien creó el flujo lo reactiva.
+
+**Cerrar las tareas de Trimble**
+
+- Desde ahora se guarda en cada archivo el número de cada tarea que crea el
+  flujo (columna `tareas`).
+- Al **aprobar o rechazar un paso** se cierra la tarea de ese paso; si la tarea
+  agrupaba varios archivos, se cierra cuando ya ninguno espera ese paso. Con la
+  decisión final se cierra la última.
+- La tarea **«Corregir»** (a quien subió un plano rechazado) se cierra cuando
+  su versión corregida entra con «Reactivar el flujo». Al reactivar, también se
+  cierran las tareas de la versión que se reemplaza.
+- Trimble no documenta cómo se cierra una tarea por su API: se manda `PATCH
+  /todos/{id}` con estado **`CLOSED`** y, si no lo acepta, **`DONE`**; una
+  respuesta que dice otro estado no cuenta. El historial dice «Cerró la tarea
+  de Trimble «…»: Trimble la dejó en estado CLOSED» o «No se pudo cerrar…».
+  **Nunca bloquea una decisión.**
+- **«Prueba de conexión con Trimble» → tarea** ahora también intenta cerrar la
+  tarea de prueba y la vuelve a leer: así se sabe en el proyecto real si
+  Trimble acepta `CLOSED` o `DONE`.
+- Las tareas creadas **antes** de este cambio no se cierran solas (no se guardó
+  su número).
+
+Código: [`lib/flujo-aprobacion/reactivar.ts`](lib/flujo-aprobacion/reactivar.ts)
+(`reactivarFlujo`), `registro.ts` (`planReactivar`, línea
+`version-reactivada`), [`tareas.ts`](lib/flujo-aprobacion/tareas.ts)
+(`sigueEsperando`, `tareasPorCerrar`, `guardarTareas`, `cerrarTareas`),
+`avisos.ts` (`cerrarTarea`, `ESTADOS_CIERRE`; los avisos dicen qué piden),
+`decisiones.ts` (`notificar` guarda las tareas; `decidir` cierra la del paso),
+`routes.ts` (`actualizarTarea` = PATCH), `prueba.ts`; pantallas `PanelFlujo`,
+`ListaFlujos`, `FlujoAprobacionApp`, `PruebaFase0`. Ruta `POST
+/api/flujo-aprobacion/flujos/reactivar` (`{ id, version }`). Columna
+`aprobacion_archivos.tareas` (jsonb).
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -4721,8 +4788,9 @@ corrección de una sola vez en el SQL.
 4. Cada flujo revisa la versión que tenía cada archivo al guardarlo. Si los
    modeladores suben una versión nueva, al abrir la extensión (o con **Revisar
    ahora**) el archivo muestra el aviso «Hay una versión más nueva en
-   Trimble», pero el flujo sigue con la suya. Un archivo nuevo se agrega
-   editando el flujo (antes de la primera decisión).
+   Trimble», pero el flujo sigue con la suya. Para revisarla, quien creó el
+   flujo pulsa **«Reactivar el flujo…»**. Un archivo nuevo se agrega editando
+   el flujo (antes de la primera decisión).
 5. Cada responsable pulsa **«Tienes N archivos por revisar»**, abre el flujo y
    en **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
    comentario si quiere) o rechaza con el motivo.
@@ -4735,8 +4803,9 @@ corrección de una sola vez en el SQL.
    pasa sola a esa carpeta.)
 7. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
    mí**, corrige y sube la versión nueva con el mismo nombre en la misma
-   carpeta. Esa versión aparece como aviso en el archivo; no entra sola al
-   flujo (la fase 2 la llevará a un flujo nuevo).
+   carpeta. Esa versión aparece como aviso en el archivo; entra al flujo
+   cuando quien lo creó pulsa «Reactivar el flujo…» (y se cierra la tarea
+   «Corregir»). Las tareas de Trimble de cada paso se cierran solas al decidir.
 8. La columna **Estado** dice en qué va cada flujo (Por revisar, Por aprobar,
    Aprobado en verde, Rechazado en rojo). Desde la **primera decisión** el flujo
    queda **cerrado**: ya no se edita, activa ni desactiva (revise archivos,
@@ -4748,8 +4817,13 @@ corrección de una sola vez en el SQL.
 
 En un proyecto de pruebas, con dos usuarios (A administra, B modela) y un grupo
 de Trimble con al menos un miembro (actualizado el 10-11-2026: fases A y B,
-flujo cerrado y versión fija):
+flujo cerrado, versión fija, reactivar y cierre de tareas):
 
+0. A abre **⋮ → Prueba de conexión con Trimble → tarea** y crea una tarea de
+   prueba: el resultado debe decir «Cerrar la tarea: Trimble la dejó en estado
+   CLOSED» (o DONE) y en ToDo de Trimble debe verse cerrada. Si dice «No se
+   pudo cerrar», los flujos no podrán cerrar sus tareas en este proyecto:
+   pegar ese resultado.
 1. B (que no es administrador) sube un `.rvt` y un `.pdf`, y crea un flujo
    «Prueba flujo» marcando los dos archivos, con dos pasos: Revisa = el
    **grupo**, Aprueba = A. Al guardar deben quedar 2 archivos pendientes y
@@ -4760,7 +4834,9 @@ flujo cerrado y versión fija):
    quita un archivo del flujo (queda **Retirado**, sin borrarse en Trimble) y
    lo vuelve a marcar. La columna Estado dice **Por revisar**.
 3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; tarea para A) y
-   rechaza el `.pdf` con motivo (tarea para B con el motivo).
+   rechaza el `.pdf` con motivo (tarea para B con el motivo). La tarea del
+   grupo debe quedar **cerrada** en ToDo de Trimble (ya no espera ningún
+   archivo) y el historial dice «Cerró la tarea de Trimble…».
 4. A aprueba el `.rvt` eligiendo **Ponerla también en una carpeta**:
    primero prueba la carpeta del propio archivo y una de solo lectura (deben
    rechazarse sin aprobar nada); luego una carpeta vacía donde tenga acceso
@@ -4768,8 +4844,12 @@ flujo cerrado y versión fija):
    visor sin «Conversión en curso».
 5. B sube la versión corregida del `.pdf` con el mismo nombre: al abrir la
    extensión el `.pdf` sigue **Rechazado, versión 1**, con el aviso «Hay una
-   versión más nueva en Trimble: versión 2…», y no llega tarea. B mueve el
-   `.rvt` a otra carpeta: el flujo lo sigue (solo cambia la ruta).
+   versión más nueva en Trimble: versión 2…», y no llega tarea. Un miembro que
+   no creó el flujo no ve «Reactivar el flujo…»; B (que lo creó) sí: lo pulsa,
+   confirma y el `.pdf` queda **Nueva versión pendiente, versión 2** desde
+   Revisa, con tarea para el grupo; la tarea «Corregir» de B queda cerrada y
+   el historial dice «Reactivó…». B mueve el `.rvt` a otra carpeta: el flujo
+   lo sigue (solo cambia la ruta).
 6. B sube una versión nueva del `.rvt` (ya aprobado): sigue **Aprobado,
    versión 1**, con el aviso; «Ver la versión 2» abre la 2 en el visor; la
    lista dice «Versión nueva en Trimble» y el Estado no cambia. La copia que
@@ -4784,8 +4864,8 @@ flujo cerrado y versión fija):
 8. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
    «Prueba flujo». Desde la decisión del paso 3, ni B ni A ven Editar,
    Activar ni Desactivar en «Prueba flujo», y el panel dice «Flujo cerrado
-   desde la primera decisión (fecha, quién)». El Estado dice **Rechazado**
-   (rojo), porque el `.pdf` sigue rechazado en este flujo.
+   desde la primera decisión (fecha, quién)», aunque se haya reactivado. El
+   Estado dice **Por revisar** (el `.pdf` corregido volvió a revisión).
 9. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
    estén quién subió, quién revisó, decisiones con fecha, motivos, qué carpeta
    eligió el responsable y quién copió la versión ahí.

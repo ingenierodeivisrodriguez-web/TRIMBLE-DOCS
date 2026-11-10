@@ -307,3 +307,10 @@ update public.aprobacion_archivos a
  where a.estado = 'nueva-version'
    and a.version_aprobada_id is not null
    and a.version_id is distinct from a.version_aprobada_id;
+
+-- ------------------------------ tareas de Trimble que se cierran (10-11-2026)
+-- Las tareas (ToDos) de Trimble que el flujo creó sobre el archivo, para
+-- cerrarlas cuando ya no hacen falta (paso decidido, corrección que entró):
+-- [{ "id", "tipo": revision | correccion, "pasoId", "versionId", "titulo",
+--    "creada", "cerrada", "cierre" }].
+alter table public.aprobacion_archivos add column if not exists tareas jsonb not null default '[]'::jsonb;

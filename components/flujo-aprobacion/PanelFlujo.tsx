@@ -7,7 +7,7 @@ import { describirCierre, diaVisible, nombreResponsable, puedeCambiar } from "..
 import type { FilaFlujo } from "../../lib/flujo-aprobacion/lista";
 import type { ArchivoInfo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
 import { botonPeligro, botonSecundario } from "../compras/estilos";
-import { C, message, Notice } from "../presupuesto/ui";
+import { acceptButton, C, message, Notice } from "../presupuesto/ui";
 import Archivos from "./Archivos";
 import Comentarios from "./Comentarios";
 import { descargarTrazabilidad } from "./descargas";
@@ -66,6 +66,7 @@ export default function PanelFlujo({
   errorArchivos,
   recarga,
   pedirDesactivar,
+  pedirReactivar = false,
   onCambio,
   onCambioArchivos,
   onEditar,
@@ -81,6 +82,8 @@ export default function PanelFlujo({
   recarga: number;
   /** The list's "Desactivar…" asked for the confirmation. */
   pedirDesactivar: boolean;
+  /** The list's "Reactivar el flujo…" asked for the confirmation. */
+  pedirReactivar?: boolean;
   onCambio: (e: EstadoFlujos) => void;
   onCambioArchivos: () => void;
   onEditar: () => void;
@@ -89,6 +92,8 @@ export default function PanelFlujo({
   const f = fila.flujo;
   const [abiertas, setAbiertas] = useState<Set<Seccion>>(new Set(["detalles", "archivos", "comentarios"]));
   const [desactivar, setDesactivar] = useState(pedirDesactivar);
+  const [reactivar, setReactivar] = useState(pedirReactivar);
+  const [reactivando, setReactivando] = useState(false);
   const [aviso, setAviso] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
   const [generando, setGenerando] = useState(false);
   const permisosRef = useRef<HTMLDivElement>(null);
@@ -98,6 +103,26 @@ export default function PanelFlujo({
   const editable = puede && !fila.cierre;
 
   useEffect(() => setDesactivar(pedirDesactivar && !fila.cierre), [pedirDesactivar, f.id, fila.cierre]);
+  useEffect(() => setReactivar(pedirReactivar), [pedirReactivar, f.id]);
+  // The files whose newer version would enter, for the confirmation.
+  const entran = (archivos?.archivos ?? []).filter((a) => a.flujoId === f.id && a.estado !== "retirado" && !!a.versionNueva);
+  const puedeReactivar = puede && fila.conVersionNueva > 0;
+
+  async function reactivarFlujo() {
+    setReactivando(true);
+    setAviso(null);
+    try {
+      const e = await api.reactivar(f.id, f.version);
+      onCambio(e);
+      onCambioArchivos();
+      setReactivar(false);
+      setAviso({ kind: "info", texto: e.mensaje ?? "Se reactivó el flujo." });
+    } catch (err) {
+      setAviso({ kind: "error", texto: message(err) });
+    } finally {
+      setReactivando(false);
+    }
+  }
   useEffect(() => setAviso(null), [f.id]);
 
   const alternar = (s: Seccion) =>
@@ -162,6 +187,7 @@ export default function PanelFlujo({
         <MenuPuntos
           opciones={[
             { texto: "Editar", onClick: onEditar, oculto: !editable },
+            { texto: "Reactivar el flujo…", onClick: () => setReactivar(true), oculto: !puedeReactivar },
             { texto: "Revisar permisos de Trimble", onClick: verPermisos, oculto: !puede },
             { texto: "Activar", onClick: () => void cambiarEstado(true), oculto: !editable || f.activo },
             { texto: "Desactivar…", onClick: () => setDesactivar(true), oculto: !editable || !f.activo, peligro: true },
@@ -193,13 +219,42 @@ export default function PanelFlujo({
           <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>{fila.detalleEstado}</span>
         </div>
         {fila.conVersionNueva > 0 && (
-          <p style={{ margin: "0 0 10px", fontSize: 13, color: "#7a4b00", background: "#fff7e6", border: "1px solid #f3d9a4", borderRadius: 4, padding: "7px 10px" }}>
+          <div style={{ margin: "0 0 10px", fontSize: 13, color: "#7a4b00", background: "#fff7e6", border: "1px solid #f3d9a4", borderRadius: 4, padding: "7px 10px" }}>
             {fila.conVersionNueva === 1 ? "1 archivo tiene" : `${fila.conVersionNueva} archivos tienen`} una <strong>versión más nueva en Trimble</strong>. Este flujo sigue con la versión que se le dio: el aviso está en cada archivo, abajo.
-          </p>
+            {puedeReactivar && !reactivar && (
+              <div style={{ marginTop: 6 }}>
+                <button type="button" style={{ ...acceptButton, padding: "5px 12px", fontSize: 13.5 }} onClick={() => setReactivar(true)} title="Las versiones nuevas entran a este flujo y se revisan desde el primer paso">
+                  Reactivar el flujo…
+                </button>
+              </div>
+            )}
+            {puedeReactivar && reactivar && (
+              <div style={{ marginTop: 8, color: "var(--tc-gray-700)" }}>
+                <strong>¿Reactivar «{f.hito}»?</strong> Entran a este flujo y se revisan desde el primer paso:
+                <ul style={{ margin: "4px 0", paddingLeft: 18 }}>
+                  {entran.map((a) => (
+                    <li key={a.id}>
+                      «{a.versionNueva?.nombre || a.nombre}»: entra la versión {a.versionNueva?.revision ?? "nueva"}
+                      {a.estado === "aprobado" ? ` (la versión ${a.revision ?? "?"} quedó aprobada)` : a.estado === "rechazado" ? ` (la versión ${a.revision ?? "?"} quedó rechazada)` : ` (la versión ${a.revision ?? "?"} todavía no se decidió: ya no se decidirá)`}
+                    </li>
+                  ))}
+                </ul>
+                El responsable del primer paso recibe la tarea de Trimble{!f.activo ? " y el flujo queda activo" : ""}. No se borra nada: lo decidido antes queda en el historial y en el PDF. Los pasos y los responsables siguen iguales.
+                <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
+                  <button type="button" style={{ ...acceptButton, padding: "5px 12px", fontSize: 13.5 }} disabled={reactivando} onClick={() => void reactivarFlujo()}>
+                    {reactivando ? "Reactivando…" : "Reactivar"}
+                  </button>
+                  <button type="button" style={{ ...botonSecundario, padding: "5px 12px", fontSize: 13.5 }} disabled={reactivando} onClick={() => setReactivar(false)}>
+                    No
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
         )}
         {fila.cierre && (
           <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--tc-gray-700)", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 4, padding: "7px 10px" }}>
-            <strong>Flujo cerrado</strong> desde la primera decisión ({describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF.
+            <strong>Flujo cerrado</strong> desde la primera decisión ({describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF, y reactivarlo cuando haya una versión nueva.
           </p>
         )}
         <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.vencido ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.vencido ? " (vencido, con archivos esperando decisión)" : ""}</span> : "Sin fecha"}</Dato>

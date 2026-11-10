@@ -55,6 +55,8 @@ export interface TrimbleFlujo {
   version(fileId: string): Promise<string | null>;
   /** POST /todos with that body (phase 3). Answers never throw: the status says what happened. */
   crearTarea(cuerpo: Record<string, unknown>): Promise<Respuesta>;
+  /** PATCH /todos/{id} with that body, to close a ToDo (10-11-2026). Answers never throw. Missing: ToDos are not closed. */
+  actualizarTarea?(todoId: string, cuerpo: Record<string, unknown>): Promise<Respuesta>;
   /** This project through the caller's token, for copying to the destination (phase 4). */
   lado: Lado;
   /** For the content of a copy that goes through the server (tests). */

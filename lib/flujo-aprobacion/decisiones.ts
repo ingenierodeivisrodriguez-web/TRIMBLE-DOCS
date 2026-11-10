@@ -13,6 +13,7 @@ import { FlujoError } from "./errores";
 import type { Ctx } from "./service";
 import { carpetaElegida, ResultadoTraslado, trasladar } from "./trasladar";
 import { responsablesArchivo } from "./registro";
+import { cerrarTareas, guardarTareas } from "./tareas";
 import type { ArchivoRegistro, Aviso, CarpetaFlujo, EntradaHistorial, Flujo, Traslado } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -23,14 +24,19 @@ export const enlaceDe = (projectId: string, a: Pick<ArchivoRegistro, "fileId" | 
 
 type Linea = Omit<EntradaHistorial, "id" | "creado">;
 
-/** Sends the ToDos and returns the history lines and what to tell the person. */
-export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], momento: string): Promise<{ lineas: Linea[]; enviados: number; fallidos: number; textos: string[] }> {
+/**
+ * Sends the ToDos and returns the history lines and what to tell the person.
+ * Each ToDo created is noted on its files (`filas`), so it can be closed later.
+ */
+export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], momento: string, filas: ArchivoRegistro[] = []): Promise<{ lineas: Linea[]; enviados: number; fallidos: number; textos: string[] }> {
   const lineas: Linea[] = [];
   const textos: string[] = [];
+  const creadas: { aviso: Aviso; todoId: string }[] = [];
   let enviados = 0;
   let fallidos = 0;
   for (const aviso of avisos.slice(0, MAX_AVISOS)) {
     const r = await enviarAviso((cuerpo) => ctx.tc.crearTarea(cuerpo), ctx.projectId, aviso, (g) => ctx.tc.miembros(g).catch(() => []));
+    if (r.ok && r.todoId) creadas.push({ aviso, todoId: r.todoId });
     if (r.ok) enviados++;
     else fallidos++;
     textos.push(r.mensaje);
@@ -45,6 +51,7 @@ export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], mome
       ocurrido: momento,
     });
   }
+  await guardarTareas(ctx, creadas, filas, momento);
   return { lineas, enviados, fallidos, textos };
 }
 
@@ -52,7 +59,7 @@ export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], mome
 export async function avisarRevision(ctx: Ctx, flujo: Pick<Flujo, "id" | "hito" | "pasos">, archivos: ArchivoRegistro[], momento: string) {
   if (!archivos.length) return { lineas: [], enviados: 0, fallidos: 0, textos: [] };
   const avisos = avisosRevision(archivos, flujo, (a) => enlaceDe(ctx.projectId, a));
-  return notificar(ctx, flujo.id, avisos, momento);
+  return notificar(ctx, flujo.id, avisos, momento, archivos);
 }
 
 /**
@@ -121,13 +128,15 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
   } else if (plan.accion === "rechazado") {
     const av = avisoRechazo(hecho, plan.firma, flujo.hito, enlaceDe(ctx.projectId, hecho));
     if (av) {
-      const r = await notificar(ctx, a.flujoId, [av], momento);
+      const r = await notificar(ctx, a.flujoId, [av], momento, [hecho]);
       lineas.push(...r.lineas);
       aviso = r.textos[0] ?? null;
     } else {
       aviso = "Trimble no dice quién subió esta versión: no se pudo avisar a nadie.";
     }
   }
+  // The ToDo of the step just decided is done (when no other file of it still waits).
+  lineas.push(...(await cerrarTareas(ctx, [hecho], momento)));
   await ctx.store.registrarVarios(lineas);
 
   // The last step: the approved version goes now, with the approver's session, to the

@@ -16,7 +16,7 @@ import PruebaFase0 from "./PruebaFase0";
 import RevisionCarpetas from "./RevisionCarpetas";
 import Trazabilidad from "./Trazabilidad";
 
-type Panel = { tipo: "detalle"; id: string; desactivar?: boolean } | { tipo: "nuevo" } | { tipo: "editar"; id: string } | null;
+type Panel = { tipo: "detalle"; id: string; desactivar?: boolean; reactivar?: boolean } | { tipo: "nuevo" } | { tipo: "editar"; id: string } | null;
 
 /** The window's width, to lay the side panel over the list on narrow screens. */
 function useAncho() {
@@ -175,6 +175,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
         errorArchivos={errorArchivos}
         recarga={recarga}
         pedirDesactivar={panel.tipo === "detalle" && !!panel.desactivar}
+        pedirReactivar={panel.tipo === "detalle" && !!panel.reactivar}
         onCambio={cambio}
         onCambioArchivos={() => {
           cargarArchivos();
@@ -247,6 +248,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               onEditar={(f) => setPanel({ tipo: "editar", id: f.id })}
               onActivar={(f) => void activar(f)}
               onDesactivar={(f) => setPanel({ tipo: "detalle", id: f.id, desactivar: true })}
+              onReactivar={(f) => setPanel({ tipo: "detalle", id: f.id, reactivar: true })}
               onPdf={(f) => void pdf(f)}
             />
           )}

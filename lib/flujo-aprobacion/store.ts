@@ -1,7 +1,7 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
 import { ACCIONES_DECISION } from "./flujos";
-import type { ArchivoFlujo, ArchivoRegistro, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, Traslado, VersionNueva } from "./types";
+import type { ArchivoFlujo, ArchivoRegistro, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, TareaTrimble, Traslado, VersionNueva } from "./types";
 
 /**
  * Persistence of "Flujo de aprobación". Two implementations with the same
@@ -159,6 +159,7 @@ const deArchivo = (f: Fila): ArchivoRegistro => ({
   firmas: arr<Firma>(f.firmas),
   traslado: f.traslado && typeof f.traslado === "object" ? (f.traslado as Traslado) : null,
   versionNueva: f.version_nueva && typeof f.version_nueva === "object" ? (f.version_nueva as VersionNueva) : null,
+  tareas: arr<TareaTrimble>(f.tareas),
   versionAprobadaId: t(f.version_aprobada_id),
   revisionAprobada: n(f.revision_aprobada),
   detectado: String(f.detectado),
@@ -185,6 +186,7 @@ const aArchivo = (a: Partial<ArchivoRegistro>): Fila =>
     firmas: a.firmas,
     traslado: a.traslado,
     version_nueva: a.versionNueva,
+    tareas: a.tareas,
     version_aprobada_id: a.versionAprobadaId,
     revision_aprobada: a.revisionAprobada,
     detectado: a.detectado,

@@ -23,6 +23,8 @@ export interface FlujoApi {
   flujos(): Promise<EstadoFlujos>;
   guardarFlujo(datos: DatosFlujoEnvio): Promise<EstadoFlujos>;
   cambiarEstado(id: string, version: number, activo: boolean): Promise<EstadoFlujos>;
+  /** Brings the newer versions of a flow's files in, from the first step (its creator or an administrator). */
+  reactivar(id: string, version: number): Promise<EstadoFlujos>;
   equipo(): Promise<Equipo>;
   permisos(flujoId: string): Promise<{ avisos: AvisoPermisos[]; carpetas: PermisosCarpeta[] }>;
   historial(flujoId?: string, archivoId?: string): Promise<{ entradas: EntradaHistorial[] }>;
@@ -54,6 +56,7 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     flujos: () => request("/flujos"),
     guardarFlujo: (datos) => post("/flujos", datos),
     cambiarEstado: (id, version, activo) => post("/flujos/estado", { id, version, activo }),
+    reactivar: (id, version) => post("/flujos/reactivar", { id, version }),
     equipo: () => request("/equipo"),
     permisos: (flujoId) => request(`/permisos?flujoId=${encodeURIComponent(flujoId)}`),
     historial: (flujoId, archivoId) => {

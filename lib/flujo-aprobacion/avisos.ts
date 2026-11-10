@@ -42,6 +42,8 @@ export function avisosRevision(archivos: ArchivoRegistro[], flujo: Pick<Flujo, "
       ),
       para,
       archivos: as.map((x) => x.id),
+      tipo: "revision" as const,
+      pasoId: a.pasos[a.pasoActual]?.id ?? null,
     };
   });
 }
@@ -63,10 +65,40 @@ export function avisoRechazo(a: ArchivoRegistro, firma: Firma, hito: string, enl
     ),
     para: [{ tipo: "persona", id: a.subidoPorId, nombre: a.subidoPor }],
     archivos: [a.id],
+    tipo: "correccion",
+    pasoId: null,
   };
 }
 
 const ok = (r: Respuesta) => r.estado >= 200 && r.estado < 300;
+
+/**
+ * States tried to close a ToDo, in order: Trimble doesn't document the values
+ * for its API (10-11-2026), so "CLOSED" (what the owner asked) and then "DONE".
+ * The "Prueba de conexión con Trimble" shows which one a project takes.
+ */
+export const ESTADOS_CIERRE = ["CLOSED", "DONE"] as const;
+
+/**
+ * Closes a ToDo with PATCH /todos/{id} { status }, trying each state; an answer
+ * that says another status is taken as refused. Never throws.
+ */
+export async function cerrarTarea(actualizar: (cuerpo: Record<string, unknown>) => Promise<Respuesta>): Promise<{ ok: boolean; estado: string | null; mensaje: string }> {
+  let ultima: Respuesta | null = null;
+  try {
+    for (const status of ESTADOS_CIERRE) {
+      const r = await actualizar({ status });
+      const dice = (r.cuerpo as { status?: unknown } | null)?.status;
+      if (ok(r) && (typeof dice !== "string" || dice.toUpperCase() === status)) return { ok: true, estado: status, mensaje: `Trimble la dejó en estado ${status}.` };
+      ultima = r;
+      // Without permission, or the ToDo is gone: another state won't help.
+      if (r.estado === 401 || r.estado === 403 || r.estado === 404) break;
+    }
+  } catch (err) {
+    return { ok: false, estado: null, mensaje: `No se pudo cerrar: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  return { ok: false, estado: null, mensaje: ultima ? `Trimble no la cerró (${ultima.estado}): ${corto(ultima)}` : "Trimble no la cerró." };
+}
 
 /** Creates the ToDo in Trimble; a group Trimble refuses is replaced by its members. Never throws. */
 export async function enviarAviso(

@@ -249,8 +249,32 @@ export interface ArchivoRegistro {
    * pero sí debería aparecer un mensaje diciendo que existe una nueva versión").
    */
   versionNueva?: VersionNueva | null;
+  /** The Trimble ToDos the flow created about this file (since 10-11-2026), to close them when they are done. */
+  tareas?: TareaTrimble[];
   detectado: string;
   actualizado: string;
+}
+
+/**
+ * A Trimble ToDo the flow created: "revision" asks a step's responsible to
+ * decide a version; "correccion" asks the uploader to fix a rejected one. It is
+ * closed when none of its files still waits for what it asked (owner,
+ * 10-11-2026: "que la tarea creada en Trimble cambie a estado cerrado cuando
+ * el flujo sea aprobado o rechazado").
+ */
+export interface TareaTrimble {
+  id: string;
+  tipo: "revision" | "correccion";
+  /** The step it asks for (revision). */
+  pasoId: string | null;
+  /** The version it is about. */
+  versionId: string | null;
+  titulo: string;
+  creada: string;
+  /** When it was closed; null or missing while it is open. */
+  cerrada?: string | null;
+  /** The state Trimble took ("CLOSED", "DONE"), or why it couldn't be closed. */
+  cierre?: string;
 }
 
 /** A version in Trimble newer than the flow's one: who uploaded it and when, and when it was seen. */
@@ -325,6 +349,9 @@ export interface Aviso {
   para: { tipo: "persona" | "grupo"; id: string; nombre: string }[];
   /** The registered files it is about. */
   archivos: string[];
+  /** What it asks for, to close it later: deciding a step, or correcting a rejected version. */
+  tipo?: "revision" | "correccion";
+  pasoId?: string | null;
 }
 
 /** What a folder walk found: a file with its latest version. */

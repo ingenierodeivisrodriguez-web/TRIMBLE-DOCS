@@ -67,6 +67,7 @@ export default function ListaFlujos({
   onEditar,
   onActivar,
   onDesactivar,
+  onReactivar,
   onPdf,
 }: {
   filas: FilaFlujo[];
@@ -82,6 +83,8 @@ export default function ListaFlujos({
   onEditar: (f: Flujo) => void;
   onActivar: (f: Flujo) => void;
   onDesactivar: (f: Flujo) => void;
+  /** Opens its details asking to confirm "Reactivar el flujo". */
+  onReactivar: (f: Flujo) => void;
   onPdf: (f: Flujo) => void;
 }) {
   const cambiar = (c: Partial<FiltroLista>) => onFiltro({ ...filtro, ...c });
@@ -204,6 +207,7 @@ export default function ListaFlujos({
                         { texto: "Editar", onClick: () => onEditar(f.flujo), oculto: !editable },
                         { texto: "Activar", onClick: () => onActivar(f.flujo), oculto: !editable || f.flujo.activo },
                         { texto: "Desactivar…", onClick: () => onDesactivar(f.flujo), oculto: !editable || !f.flujo.activo, peligro: true },
+                        { texto: "Reactivar el flujo…", onClick: () => onReactivar(f.flujo), oculto: !puedeEditar(f.flujo) || f.conVersionNueva === 0 },
                       ]}
                     />
                   </td>

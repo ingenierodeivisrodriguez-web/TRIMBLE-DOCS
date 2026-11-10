@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getBearerToken, isValidProjectId } from "../access";
-import { clienteTrimble } from "../compras/cde";
+import { clienteTrimble, Respuesta } from "../compras/cde";
 import { resolveCaller } from "../propiedades/caller";
 import type { Caller } from "../propiedades/service";
 import { StoreError } from "../propiedades/store";
@@ -41,6 +41,25 @@ export function elementoDe(proyecto: Pick<ProjectDetails, "rootId" | "name">, id
   const arriba = path.filter((p) => p.id !== id);
   const nombreDe = (p: PathEntry) => (p.id === proyecto.rootId ? proyecto.name : p.name);
   return { id, ruta: [...arriba.map(nombreDe), nombre].join(" / "), ancestros: arriba.map((p) => p.id) };
+}
+
+/** PATCH to Trimble's Core API (the shared client only sends GET and POST); never throws for an HTTP error. */
+async function patchTrimble(servidor: string, token: string, ruta: string, cuerpo: unknown): Promise<Respuesta> {
+  const res = await fetch(`${servidor}${ruta}`, {
+    method: "PATCH",
+    headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+    body: JSON.stringify(cuerpo),
+    cache: "no-store",
+    signal: AbortSignal.timeout(25_000),
+  });
+  const texto = await res.text().catch(() => "");
+  let datos: unknown = texto;
+  try {
+    datos = texto ? JSON.parse(texto) : null;
+  } catch {
+    // not JSON
+  }
+  return { estado: res.status, cuerpo: datos };
 }
 
 /**
@@ -89,6 +108,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       items: (folderId) => listFolderItems(servidor, token, folderId),
       version: async (fileId) => (await getFileDetails(servidor, token, fileId)).versionId || null,
       crearTarea: (cuerpo) => clienteTrimble(servidor, token).pedir("POST", "/todos", { cuerpo }),
+      actualizarTarea: (todoId, cuerpo) => patchTrimble(servidor, token, `/todos/${encodeURIComponent(todoId)}`, cuerpo),
       lado: { projectId, servidor, cliente: clienteTrimble(servidor, token) },
     };
     return await run({
@@ -110,6 +130,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
         yo: caller.id,
         personas: (groupId) => listProjectUsers(servidor, token, projectId, groupId ? { groupId } : {}),
         grupos: () => listProjectGroups(servidor, token, projectId),
+        actualizarTarea: (todoId, cuerpo) => patchTrimble(servidor, token, `/todos/${encodeURIComponent(todoId)}`, cuerpo),
       },
     });
   } catch (err) {

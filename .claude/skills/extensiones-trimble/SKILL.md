@@ -150,9 +150,10 @@ Herramientas incluidas:
   carpeta donde tenga permiso; la columna Estado muestra el estado del
   documento (por revisar, por aprobar, aprobado, rechazado) y desde la primera
   decisión el flujo queda cerrado (no se edita, activa ni desactiva); desde el
-  10-11-2026 (fase 1) el flujo conserva la versión de cada archivo y una versión
-  nueva solo se avisa (fase 2, revisarla en un flujo nuevo, sin aprobar). El
-  dueño debe ejecutar otra vez
+  10-11-2026 el flujo conserva la versión de cada archivo y una versión nueva
+  solo se avisa; quien lo creó la hace entrar con «Reactivar el flujo», y las
+  tareas de Trimble se cierran al decidir (estado CLOSED/DONE sin confirmar en
+  Trimble real). El dueño debe ejecutar otra vez
   `supabase/flujo-aprobacion.sql` y hacer la prueba en Trimble real (protocolo
   en el README). Ver `references/flujo-aprobacion.md`.
 

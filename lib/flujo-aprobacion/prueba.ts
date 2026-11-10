@@ -16,6 +16,7 @@ import { fechaHora } from "../compras/formato";
 import { buildFileViewerUrl } from "../format";
 import { copiarUltimaVersion, leerArchivo, leerEstadoVisor, Lado } from "../publicar/copiar";
 import type { ProjectGroup, ProjectUser } from "../trimbleApi";
+import { cerrarTarea } from "./avisos";
 import { esIdTrimble, FlujoError } from "./errores";
 import { GrupoEquipo, IntentoTrimble, PASOS_PRUEBA, PasoPrueba, PersonaEquipo, PruebaResponse, TAREA_PRUEBA, VersionTrimble } from "./types";
 
@@ -28,6 +29,8 @@ export interface DepsPrueba {
   /** The project's people; with a group id, only that group's. */
   personas(groupId?: string): Promise<ProjectUser[]>;
   grupos(): Promise<ProjectGroup[]>;
+  /** PATCH /todos/{id}, to try closing the test ToDo. */
+  actualizarTarea?(todoId: string, cuerpo: Record<string, unknown>): Promise<Respuesta>;
   fetch?: typeof fetch;
   reloj?: () => number;
 }
@@ -233,10 +236,21 @@ export async function pasoPrueba(deps: DepsPrueba, body: unknown): Promise<Prueb
   const asignados = ok(leida) ? JSON.stringify((leida.cuerpo as Record<string, unknown> | null)?.assignees ?? null) : null;
   const confirmado = asignados === null ? null : asignados.includes(asignadoId);
 
+  // Closing it, as the flow does when a step is decided (10-11-2026); then what Trimble says when read again.
+  const estadoAntes = ok(leida) ? texto((leida.cuerpo as Record<string, unknown> | null)?.status) : null;
+  const cierre = deps.actualizarTarea ? await cerrarTarea((cuerpo) => deps.actualizarTarea!(todoId, cuerpo)) : null;
+  const releida = cierre?.ok ? await c.pedir("GET", `/todos/${encodeURIComponent(todoId)}`) : null;
+  const estadoDespues = releida && ok(releida) ? texto((releida.cuerpo as Record<string, unknown> | null)?.status) : null;
+
   const partes = [
     `Trimble creó la tarea «${titulo}» para ${nombre} (${tipo === "USER" ? "persona" : "grupo"}) con el formato «${creada.aceptado}».`,
     adjunto.aceptado ? "El archivo quedó adjunto a la tarea." : "No se pudo adjuntar el archivo: el enlace va en la descripción.",
     confirmado === false ? `Ojo: al leer la tarea, Trimble no muestra a ${nombre} como asignado.` : "",
+    cierre
+      ? cierre.ok
+        ? `Cerrar la tarea: ${cierre.mensaje}${estadoDespues ? ` Al leerla otra vez, su estado es ${estadoDespues}${estadoAntes ? ` (antes ${estadoAntes})` : ""}.` : ""} Revisa en ToDo de Trimble que aparezca cerrada.`
+        : `No se pudo cerrar la tarea: ${cierre.mensaje} Los flujos no podrán cerrar sus tareas solas en este proyecto.`
+      : "",
     `Revisa en ToDo de Trimble que aparezca y pregunta si a ${tipo === "USER" ? "la persona" : "los miembros del grupo"} les llegó el correo.`,
   ];
   return responder(confirmado !== false, partes.filter(Boolean).join(" "), {
@@ -247,6 +261,9 @@ export async function pasoPrueba(deps: DepsPrueba, body: unknown): Promise<Prueb
     intentosAdjunto: adjunto.intentos,
     asignados: asignados && asignados.length > 300 ? `${asignados.slice(0, 300)}…` : asignados,
     confirmado,
+    estadoTarea: estadoAntes,
+    cierre: cierre ? (cierre.ok ? cierre.estado : `no: ${cierre.mensaje}`) : null,
+    estadoCerrada: estadoDespues,
   });
 }
 

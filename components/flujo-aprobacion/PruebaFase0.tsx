@@ -189,7 +189,7 @@ export default function PruebaFase0({ api, projectId, projectName }: { api: Fluj
       : []),
     ...(tarea
       ? [
-          `Tarea: tipos ${Array.isArray(tarea.tipos) ? (tarea.tipos as string[]).join(", ") || "ninguno" : `sin lista (${String(tarea.tiposHttp)})`}; formato aceptado: ${cadena(tarea.formato) || "ninguno"}; adjunto: ${cadena(tarea.adjunto) || "no"}; asignados leídos: ${cadena(tarea.asignados) || "sin dato"}`,
+          `Tarea: tipos ${Array.isArray(tarea.tipos) ? (tarea.tipos as string[]).join(", ") || "ninguno" : `sin lista (${String(tarea.tiposHttp)})`}; formato aceptado: ${cadena(tarea.formato) || "ninguno"}; adjunto: ${cadena(tarea.adjunto) || "no"}; asignados leídos: ${cadena(tarea.asignados) || "sin dato"}; cerrar: ${cadena(tarea.cierre) || "no se probó"}${tarea.estadoCerrada ? ` (estado leído después: ${cadena(tarea.estadoCerrada)})` : ""}`,
           ...[...((tarea.intentos as IntentoTrimble[]) ?? []), ...((tarea.intentosAdjunto as IntentoTrimble[]) ?? [])].map((i) => `  ${i.formato}: ${i.http}${i.detalle ? ` ${i.detalle}` : ""}`),
         ]
       : []),

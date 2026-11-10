@@ -632,7 +632,60 @@ Fase 1 (hecha; SQL: columna `version_nueva` + corrección única):
   10-11-2026; reintento de copia por quien aprobó con versión nueva), lista
   (`conVersionNueva`).
 
-Fase 2 (pendiente del OK): «Crear flujo con la versión N» (Nuevo con ese
+## Reactivar el flujo y cerrar las tareas de Trimble (10-11-2026)
+
+Pedido del dueño (captura del aviso ámbar): "quiero que coloques la condición
+donde si solo si el flujo arroja el mensaje «1 archivo tiene una versión más
+nueva en Trimble…» el usuario creador tenga un botón de reactivar el flujo,
+entonces de nuevo se active el flujo, se debe guardar toda la trazabilidad.
+también que la tarea creada en trimble cambie a estado cerrado cuando el flujo
+sea aprobado o rechazado". Propuse el plan con 4 supuestos (reactivan creador
+y administradores; el flujo sigue cerrado para editar; un desactivado queda
+activo; también entra la nueva de un archivo que esperaba decisión) y dijo
+"Sí, las dos". Esto **reemplaza la fase 2** (no hay flujo nuevo por versión).
+SQL: columna `tareas`.
+
+- `reactivarFlujo` (`reactivar.ts`, ruta `POST /flujos/reactivar`):
+  `puedeCambiar` (403), versión del flujo (409), exige filas no retiradas con
+  `versionNueva` (409 `sin-version-nueva`); si estaba desactivado, revisa
+  `conflictosArchivos` y lo activa; corre `revisarFlujo` (con `catch`) para
+  tomar la versión más reciente; `planReactivar` (registro.ts): por fila con
+  `versionNueva` distinta → `estado: nueva-version`, versión/subido* de la
+  nueva, nombre y tipo de la nueva, `pasos` del flujo, `pasoActual 0`,
+  `firmas []`, `versionNueva null` (conserva `versionAprobadaId` y
+  `traslado`); se aplica con `decidirArchivo` (optimista). Historial:
+  `flujo-reactivado` + `version-reactivada` por archivo (detalle con
+  «quedó aprobada / rechazada / no se decidió»). `avisarRevision` (tarea al
+  primer paso) y `cerrarTareas`. NO pasa por `exigirAbierto`: es la única
+  acción permitida en un flujo cerrado además de decidir.
+- Tareas: `Aviso.tipo` (revision | correccion) y `pasoId`; `notificar(…,
+  filas)` → `guardarTareas` añade `TareaTrimble { id, tipo, pasoId,
+  versionId, titulo, creada }` a cada fila (best effort). `cerrarTareas(ctx,
+  cambiadas)`: lee todas las filas, `tareasPorCerrar` = tareas abiertas de las
+  filas cambiadas que ninguna fila con esa tarea `sigueEsperando` (revision:
+  ESPERANDO + mismo paso + misma versión; correccion: `rechazado` + misma
+  versión) → `cerrarTarea` (avisos.ts: `PATCH /todos/{id}` con `{ status:
+  "CLOSED" }` y si no `"DONE"`; 401/403/404 cortan; una respuesta con otro
+  `status` no cuenta) → marca `cerrada`/`cierre` en cada fila e historial
+  `tarea-cerrada` | `tarea-no-cerrada`. Se llama al final de `decidir` y de
+  `reactivarFlujo`. `TrimbleFlujo.actualizarTarea?` (opcional: sin él no se
+  cierra nada); en `routes.ts` es un `fetch` PATCH propio (`ClienteTrimble`
+  de Compras solo tiene GET/POST: no se tocó Compras).
+- Los estados de cierre **no están confirmados en Trimble real**: la prueba de
+  conexión (paso tarea) ahora intenta cerrar la tarea de prueba y la relee
+  (`cierre`, `estadoTarea`, `estadoCerrada` en PruebaFase0).
+- Pantalla: `PanelFlujo` (botón en el aviso ámbar y en ⋮ si `puede` y
+  `conVersionNueva > 0`; confirmación con la lista de lo que entra;
+  `pedirReactivar` desde la lista), `ListaFlujos` (⋮ «Reactivar el flujo…»),
+  `FlujoAprobacionApp` (`Panel.reactivar`).
+- Pruebas: `tareas.test.ts` (sigueEsperando, tareasPorCerrar con tarea de
+  varios archivos, cerrarTarea CLOSED→DONE/403/otro estado/error) y
+  `reactivar.test.ts` (cierre al decidir y rechazo con corrección abierta;
+  403 no bloquea; reactivar aprobado por el creador y no por otro, historial
+  completo, sigue cerrado y v2 avanza; rechazado cierra «Corregir»;
+  desactivado queda activo y la tarea de v1 se cierra).
+
+Fase 2 (descartada: el dueño eligió reactivar el mismo flujo): «Crear flujo con la versión N» (Nuevo con ese
 archivo y los mismos pasos y responsables); un archivo en varios flujos, uno
 por versión (registro único por `flujo_id, file_id` en vez de `proyecto,
 file_id`; quitar `archivo-cambio-flujo`); regla: entra a un flujo nuevo solo si
@@ -642,7 +695,7 @@ por flujo y versión; proponer la carpeta de la copia anterior aunque sea otra
 fila. Sin la fase 2, una versión nueva no se puede revisar (el archivo queda
 en su flujo cerrado).
 
-Pendiente (solo si el dueño lo pide): cerrar solas las tareas de Trimble al
-decidir (`PATCH /todos` sin probar), revisión diaria con cuenta conectada,
+Pendiente: confirmar en Trimble real qué estado acepta `PATCH /todos`
+(prueba de conexión → tarea). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).
