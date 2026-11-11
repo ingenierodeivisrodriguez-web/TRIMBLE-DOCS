@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { cambiosFlujo, claveHito, codigoFlujo, describirCierre, primerasDecisiones, revisarDatos, textoCerrado } from "./flujos";
 import { memoryStore } from "./store";
-import { estadoDocumento, estadoDocumentos, estaVencido, filasFlujos, filtrarFilas, opcionesFiltro, responsablesFlujo, sumarDias } from "./lista";
+import { estadoDocumento, estadoDocumentos, estaVencido, filasFlujos, filtrarFilas, opcionesFiltro, responsablesFlujo, resumenTablero, sumarDias } from "./lista";
 import type { EstadoArchivo, Flujo, PasoFlujo, Responsable } from "./types";
 
 const HOY = "2026-11-06";
@@ -50,6 +50,21 @@ const TORRE = flujo("f1", "Aprobar Torre 1", { codigo: 2, vence: "2026-11-05", p
 const ESTRUCTURA = flujo("f2", "Aprobar estructura", { codigo: 3, vence: "2026-11-10", creadoPor: "Deivis", pasos: pasos(persona("luz", "Luz Mora"), persona("luz", "Luz Mora")) });
 const VIEJO = flujo("f3", "Aprobar anteproyecto", { codigo: 1, activo: false });
 const ARCHIVOS = [archivo("f1", "pendiente", true), archivo("f1", "nueva-version", false, 1), archivo("f1", "aprobado"), archivo("f2", "aprobado")];
+
+test("el tablero cuenta los flujos por su estado y sus archivos en ese estado, de todos los flujos", () => {
+  const filas = filasFlujos([VIEJO, ESTRUCTURA, TORRE], ARCHIVOS, HOY);
+  assert.deepEqual(resumenTablero(filas, ARCHIVOS), {
+    flujos: 3,
+    activos: 2,
+    porRevisar: { flujos: 1, archivos: 1 },
+    porAprobar: { flujos: 0, archivos: 1 },
+    aprobados: { flujos: 1, archivos: 2 },
+    rechazados: { flujos: 0, archivos: 0 },
+  });
+  // Files of another project's flow (or a flow not listed) don't count.
+  assert.equal(resumenTablero(filas, [...ARCHIVOS, archivo("otro", "aprobado")]).aprobados.archivos, 2);
+  assert.deepEqual(resumenTablero([], []).porAprobar, { flujos: 0, archivos: 0 });
+});
 
 test("los flujos salen del más nuevo al más viejo según su código; los que aún no tienen código, al final", () => {
   const sinCodigo = flujo("f9", "Sin número");

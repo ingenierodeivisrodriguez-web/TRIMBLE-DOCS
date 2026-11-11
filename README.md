@@ -4902,6 +4902,20 @@ ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
   volver a probar; para mostrarla, devolver la opción del menú en
   `FlujoAprobacionApp.tsx`. Las menciones a la prueba en este README son de
   antes de esta fecha.
+- **«Revisar permisos de Trimble» oculto** (pedido del mismo día): ya no está en
+  el ⋮ del panel (queda Editar, Reactivar el flujo… y Activar/Desactivar). El
+  código (`Permisos.tsx`, la ruta `permisos`) se conserva para volver a mostrarlo.
+- **Tablero** (pedido del mismo día, con captura): debajo del título hay **4
+  tarjetas**: **Flujos** (total, con cuántos activos y desactivados), **Por
+  revisar**, **Por aprobar** y **Aprobados** (cuántos flujos tienen ese estado
+  en la columna Estado, y debajo cuántos de sus archivos: «4 archivos esperando
+  aprobación»). Cuentan todos los flujos, aunque la lista esté filtrada. Un clic
+  en una tarjeta deja en la lista solo esos flujos (es el mismo filtro Estado);
+  otro clic, o «Flujos», muestra todos. Los rechazados siguen en la columna
+  Estado y en el filtro.
+- La barra azul «Archivos revisados: no hay versiones nuevas · Revisar ahora»
+  quedó como una línea pequeña debajo de las tarjetas; cuando la revisión
+  encuentra versiones nuevas o errores, sale el aviso completo como antes.
 - **Prueba de conexión → tarea**: prueba primero este formato (código
   «PRUEBA-hhmmss», título, vencimiento mañana, tipo «Flujo de aprobación», luego
   «Solicitud»…) y dice qué aceptó Trimble; después de cerrarla espera 4

@@ -96,6 +96,42 @@ export function responsablesFlujo(f: Pick<Flujo, "pasos">): string[] {
 }
 
 /** The rows: active flows first, then by milestone. */
+/** One dashboard figure: flows in that state (as the Estado column says) and their files in that state. */
+export interface CifraTablero {
+  flujos: number;
+  archivos: number;
+}
+
+/** The dashboard cards above the list (11-11-2026). */
+export interface ResumenTablero {
+  flujos: number;
+  activos: number;
+  porRevisar: CifraTablero;
+  porAprobar: CifraTablero;
+  aprobados: CifraTablero;
+  rechazados: CifraTablero;
+}
+
+/**
+ * The figures of the dashboard, from every flow (not only the filtered ones):
+ * how many flows, how many are in each state of the Estado column, and how
+ * many of their files are in that state (a file waiting at a step that isn't
+ * the last is "por revisar"; at the last one, "por aprobar").
+ */
+export function resumenTablero(filas: FilaFlujo[], archivos: Pick<ArchivoInfo, "flujoId" | "estado" | "pasos" | "pasoActual">[]): ResumenTablero {
+  const ids = new Set(filas.map((f) => f.flujo.id));
+  const docs = archivos.filter((a) => ids.has(a.flujoId)).map(estadoDocumento);
+  const cifra = (e: Exclude<EstadoDocumento, "sin-archivos">): CifraTablero => ({ flujos: filas.filter((f) => f.estado === e).length, archivos: docs.filter((d) => d === e).length });
+  return {
+    flujos: filas.length,
+    activos: filas.filter((f) => f.flujo.activo).length,
+    porRevisar: cifra("por-revisar"),
+    porAprobar: cifra("por-aprobar"),
+    aprobados: cifra("aprobado"),
+    rechazados: cifra("rechazado"),
+  };
+}
+
 export function filasFlujos(flujos: Flujo[], archivos: ArchivoLista[], hoy: string, cierres: Record<string, Cierre> = {}): FilaFlujo[] {
   const porNombre = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
   return flujos

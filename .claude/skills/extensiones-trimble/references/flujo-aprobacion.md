@@ -775,6 +775,14 @@ en `Archivos.tsx`, `puedeDecidir` = `meToca || (esAdmin && !responsables.length
 && no subió)`. `meToca` nunca incluyó a los administradores. La «Prueba de
 conexión con Trimble» está **oculta** (11-11-2026, el dueño: ya no es necesaria):
 se quitó del ⋮ de `FlujoAprobacionApp` (opción, `Modal` e import); `PruebaFase0.tsx`,
-`prueba.ts` y la ruta `prueba` siguen en el código para volver a mostrarla. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+`prueba.ts` y la ruta `prueba` siguen en el código para volver a mostrarla.
+También se ocultó «Revisar permisos de Trimble» del ⋮ de `PanelFlujo` (se quitó
+el bloque Permisos, `conPermisos`, `permisosRef`; `Permisos.tsx` sigue).
+Tablero (11-11-2026): `resumenTablero(filas, archivos)` en `lista.ts` (flujos,
+activos y, por estado, `{ flujos, archivos }`, de todas las filas sin filtrar) y
+`Tablero.tsx` con 4 tarjetas (Flujos, Por revisar, Por aprobar, Aprobados) que
+fijan `filtro.estado` al hacer clic (otro clic lo quita). `RevisionCarpetas`
+sin novedades es una línea fina con «Revisar ahora»; con cambios o errores, el
+`Notice` de antes. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

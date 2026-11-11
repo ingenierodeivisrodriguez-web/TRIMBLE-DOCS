@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
 import { puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
-import { filasFlujos, filtrarFilas, FiltroLista, opcionesFiltro } from "../../lib/flujo-aprobacion/lista";
+import { filasFlujos, filtrarFilas, FiltroLista, opcionesFiltro, resumenTablero } from "../../lib/flujo-aprobacion/lista";
 import { diaColombia } from "../../lib/flujo-aprobacion/trazabilidad";
 import type { ArchivoInfo, Equipo, EstadoFlujos, Flujo } from "../../lib/flujo-aprobacion/types";
 import { baseInput, message, Modal, Notice } from "../presupuesto/ui";
@@ -13,6 +13,7 @@ import ListaFlujos from "./ListaFlujos";
 import MenuPuntos from "./MenuPuntos";
 import PanelFlujo from "./PanelFlujo";
 import RevisionCarpetas from "./RevisionCarpetas";
+import Tablero from "./Tablero";
 import Trazabilidad from "./Trazabilidad";
 
 type Panel = { tipo: "detalle"; id: string; desactivar?: boolean; reactivar?: boolean } | { tipo: "nuevo" } | { tipo: "editar"; id: string } | null;
@@ -125,6 +126,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
   const filas = useMemo(() => (datos ? filasFlujos(datos.flujos, archivos?.archivos ?? [], hoy, datos.cierres) : []), [datos, archivos, hoy]);
   const visibles = useMemo(() => filtrarFilas(filas, filtro, hoy), [filas, filtro, hoy]);
   const opciones = useMemo(() => opcionesFiltro(filas), [filas]);
+  const resumen = useMemo(() => resumenTablero(filas, archivos?.archivos ?? []), [filas, archivos]);
   const seleccionada = panel && panel.tipo !== "nuevo" ? filas.find((f) => f.flujo.id === panel.id) : undefined;
   const porRevisarTotal = filas.reduce((n, f) => n + f.porRevisar, 0);
 
@@ -232,6 +234,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               />
             </div>
           </header>
+          {datos && <Tablero resumen={resumen} estado={filtro.estado ?? ""} onEstado={(estado) => setFiltro({ ...filtro, estado })} />}
           {datos && <RevisionCarpetas api={api} flujos={datos.flujos} onTermino={cargarArchivos} />}
           {error && <Notice kind="error">{error}</Notice>}
           {aviso && <Notice kind={aviso.kind}>{aviso.texto}</Notice>}

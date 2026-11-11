@@ -1,6 +1,6 @@
 "use client";
 
-import { ReactNode, useEffect, useRef, useState } from "react";
+import { ReactNode, useEffect, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
 import { codigoFlujo, describirCierre, diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
@@ -14,9 +14,8 @@ import { descargarTrazabilidad } from "./descargas";
 import Historial from "./Historial";
 import { ayudaEstado, EtiquetaEstado } from "./ListaFlujos";
 import MenuPuntos from "./MenuPuntos";
-import Permisos from "./Permisos";
 
-type Seccion = "detalles" | "archivos" | "permisos" | "historial" | "comentarios";
+type Seccion = "detalles" | "archivos" | "historial" | "comentarios";
 
 const icono = { border: "none", background: "transparent", borderRadius: 4, width: 32, height: 32, cursor: "pointer", fontSize: 17, color: "var(--tc-gray-700)" } as const;
 
@@ -96,7 +95,6 @@ export default function PanelFlujo({
   const [reactivando, setReactivando] = useState(false);
   const [aviso, setAviso] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
   const [generando, setGenerando] = useState(false);
-  const permisosRef = useRef<HTMLDivElement>(null);
   // Whoever created the flow, or a project administrator.
   const puede = puedeCambiar(f, { id: datos.yo, esAdmin: datos.esAdmin });
   // Closed by its first decision: nobody edits, activates or deactivates it (09-11-2026).
@@ -154,12 +152,6 @@ export default function PanelFlujo({
     }
   }
 
-  const [conPermisos, setConPermisos] = useState(false);
-  const verPermisos = () => {
-    setConPermisos(true);
-    setAbiertas((x) => new Set([...x, "permisos"]));
-    setTimeout(() => permisosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
-  };
 
   return (
     <div style={{ background: "#fff", minHeight: "100%" }}>
@@ -194,7 +186,6 @@ export default function PanelFlujo({
           opciones={[
             { texto: "Editar", onClick: onEditar, oculto: !editable },
             { texto: "Reactivar el flujo…", onClick: () => setReactivar(true), oculto: !puedeReactivar },
-            { texto: "Revisar permisos de Trimble", onClick: verPermisos, oculto: !puede },
             { texto: "Activar", onClick: () => void cambiarEstado(true), oculto: !editable || f.activo },
             { texto: "Desactivar…", onClick: () => setDesactivar(true), oculto: !editable || !f.activo, peligro: true },
           ]}
@@ -291,14 +282,7 @@ export default function PanelFlujo({
         <Archivos key={f.id} api={api} projectId={projectId} flujoId={f.id} datos={archivos} error={errorArchivos} onCambio={onCambioArchivos} />
       </Bloque>
 
-      {puede && conPermisos && (
-        <div ref={permisosRef}>
-          <Bloque titulo="Permisos de Trimble" abierto={abiertas.has("permisos")} onAlternar={() => alternar("permisos")}>
-            <Permisos api={api} flujoId={f.id} />
-          </Bloque>
-        </div>
-      )}
-
+      {/* «Permisos de Trimble» is hidden since 11-11-2026 (the owner); Permisos.tsx and its route stay, to show it again. */}
       <Bloque titulo="Historial" abierto={abiertas.has("historial")} onAlternar={() => alternar("historial")}>
         <Historial api={api} flujoId={f.id} recarga={recarga} />
       </Bloque>

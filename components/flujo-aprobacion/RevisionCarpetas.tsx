@@ -10,7 +10,8 @@ import { message, Notice } from "../presupuesto/ui";
 /**
  * Trimble doesn't announce uploads: on opening, the chosen files of every
  * active flow are read (one flow after the other) and new versions are
- * registered; "Revisar ahora" does it again.
+ * registered; "Revisar ahora" does it again. With nothing new it is one thin
+ * line under the dashboard cards (11-11-2026); news and errors keep the notice.
  */
 export default function RevisionCarpetas({ api, flujos, onTermino }: { api: FlujoApi; flujos: Flujo[]; onTermino: () => void }) {
   const [corriendo, setCorriendo] = useState<{ hito: string; n: number; de: number } | null>(null);
@@ -49,6 +50,24 @@ export default function RevisionCarpetas({ api, flujos, onTermino }: { api: Fluj
 
   if (!activos.length) return null;
   const conCambios = (resultados ?? []).filter((r) => r.nuevos || r.nuevasVersiones || r.retirados || r.reaparecidos || !r.completo || r.ocupado || /no apareci/.test(r.mensaje));
+  if (!conCambios.length && !errores.length) {
+    return (
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 8, fontSize: 12.5, color: "var(--tc-gray-500)", maxWidth: 1100, minHeight: 20 }}>
+        {corriendo ? (
+          <span>
+            Revisando versiones nuevas: «{corriendo.hito}» ({corriendo.n} de {corriendo.de})…
+          </span>
+        ) : (
+          <>
+            {cuando && <span>Archivos revisados a las {fechaHora(cuando).slice(11)}: no hay versiones nuevas.</span>}
+            <button type="button" onClick={() => void revisar()} style={{ border: "none", background: "transparent", color: "var(--tc-blue-700)", cursor: "pointer", padding: 0, font: "inherit", textDecoration: "underline" }} title="Busca versiones nuevas de los archivos de cada flujo">
+              Revisar ahora
+            </button>
+          </>
+        )}
+      </div>
+    );
+  }
   return (
     <Notice kind={errores.length ? "warning" : "info"} style={{ maxWidth: 1100 }}>
       <div style={{ display: "flex", gap: 12, alignItems: "center", flexWrap: "wrap", justifyContent: "space-between" }}>
