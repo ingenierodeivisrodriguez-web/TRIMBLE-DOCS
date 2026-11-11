@@ -4895,6 +4895,13 @@ ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
   antes) lo decide un administrador, para que el archivo no quede trancado (hoy
   solo FLUJO-01, desactivado y sin archivos esperando). Lo demás sigue igual: el
   responsable decide aunque haya subido esa versión; en un grupo, otro miembro.
+- **«Prueba de conexión con Trimble» oculta** (pedido del mismo día: «ya no es
+  necesaria»): el ⋮ de arriba solo tiene «Exportar trazabilidad (todos los
+  flujos)…». El código de la prueba (`PruebaFase0.tsx`, `prueba.ts` y la ruta
+  `/api/flujo-aprobacion/prueba`) se conserva por si Trimble cambia y hay que
+  volver a probar; para mostrarla, devolver la opción del menú en
+  `FlujoAprobacionApp.tsx`. Las menciones a la prueba en este README son de
+  antes de esta fecha.
 - **Prueba de conexión → tarea**: prueba primero este formato (código
   «PRUEBA-hhmmss», título, vencimiento mañana, tipo «Flujo de aprobación», luego
   «Solicitud»…) y dice qué aceptó Trimble; después de cerrarla espera 4

@@ -12,7 +12,6 @@ import EditorFlujo from "./EditorFlujo";
 import ListaFlujos from "./ListaFlujos";
 import MenuPuntos from "./MenuPuntos";
 import PanelFlujo from "./PanelFlujo";
-import PruebaFase0 from "./PruebaFase0";
 import RevisionCarpetas from "./RevisionCarpetas";
 import Trazabilidad from "./Trazabilidad";
 
@@ -47,7 +46,9 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
   const [recarga, setRecarga] = useState(0);
   const [panel, setPanel] = useState<Panel>(null);
   const [filtro, setFiltro] = useState<FiltroLista>({});
-  const [ventana, setVentana] = useState<"trazabilidad" | "prueba" | null>(null);
+  // «Prueba de conexión con Trimble» is hidden since 11-11-2026 (the owner: no longer needed);
+  // PruebaFase0.tsx and /api/flujo-aprobacion/prueba stay, to show it again if Trimble changes.
+  const [ventana, setVentana] = useState<"trazabilidad" | null>(null);
   const [aviso, setAviso] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
   const ancho = useAncho();
   const angosto = ancho < 1000;
@@ -227,7 +228,6 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
                 titulo="Más opciones"
                 opciones={[
                   { texto: "Exportar trazabilidad (todos los flujos)…", onClick: () => setVentana("trazabilidad") },
-                  { texto: "Prueba de conexión con Trimble…", onClick: () => setVentana("prueba") },
                 ]}
               />
             </div>
@@ -281,13 +281,6 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
       {ventana === "trazabilidad" && (
         <Modal title="Trazabilidad de todos los flujos" onClose={() => setVentana(null)} width={1100}>
           <Trazabilidad api={api} flujos={datos?.flujos ?? []} projectName={projectName} />
-        </Modal>
-      )}
-      {ventana === "prueba" && (
-        <Modal title="Prueba de conexión con Trimble" onClose={() => setVentana(null)} width={1000}>
-          <div style={{ display: "grid", gap: 14 }}>
-            <PruebaFase0 api={api} projectId={projectId} projectName={projectName} />
-          </div>
         </Modal>
       )}
     </div>

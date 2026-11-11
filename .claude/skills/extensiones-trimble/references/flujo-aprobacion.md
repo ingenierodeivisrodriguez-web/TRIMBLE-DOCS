@@ -772,6 +772,9 @@ funcionando por dentro). **Decidir** (11-11-2026, pedido del dueño): solo el
 responsable del paso o su grupo; `puedeDecidir` (decision.ts) ya no deja al
 administrador salvo que el paso no tenga responsable (`comoAdmin` solo ahí);
 en `Archivos.tsx`, `puedeDecidir` = `meToca || (esAdmin && !responsables.length
-&& no subió)`. `meToca` nunca incluyó a los administradores. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+&& no subió)`. `meToca` nunca incluyó a los administradores. La «Prueba de
+conexión con Trimble» está **oculta** (11-11-2026, el dueño: ya no es necesaria):
+se quitó del ⋮ de `FlujoAprobacionApp` (opción, `Modal` e import); `PruebaFase0.tsx`,
+`prueba.ts` y la ruta `prueba` siguen en el código para volver a mostrarla. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).
