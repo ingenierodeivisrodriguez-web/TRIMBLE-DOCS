@@ -272,7 +272,7 @@ export default function PanelFlujo({
           {f.archivos.length} {f.archivos.length === 1 ? "elegido" : "elegidos"} · {fila.pendientes} esperando decisión{fila.porRevisar ? ` (${fila.porRevisar} te tocan)` : ""}
         </Dato>
         {f.destino && <Dato etiqueta="Carpeta destino (flujo anterior)">{f.destino.ruta}</Dato>}
-        {f.notas && <Dato etiqueta="Notas"><span style={{ whiteSpace: "pre-wrap" }}>{f.notas}</span></Dato>}
+        {f.notas && <Dato etiqueta="Descripción"><span style={{ whiteSpace: "pre-wrap" }}>{f.notas}</span></Dato>}
         <Dato etiqueta="Creado/a">{`${fechaHora(f.creado).slice(0, 10)} por ${f.creadoPor ?? "—"}`}</Dato>
         <Dato etiqueta="Modificado">{`${fechaHora(f.actualizado).slice(0, 10)} por ${f.actualizadoPor ?? "—"}`}</Dato>
         {f.revisado && <Dato etiqueta="Última revisión de los archivos">{`${fechaHora(f.revisado)} por ${f.revisadoPor ?? "—"}`}</Dato>}

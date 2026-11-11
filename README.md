@@ -4452,10 +4452,11 @@ abren y cierran:
   envía, Mayús+Enter salta de línea); salen con nombre y fecha y **no se
   editan ni se borran**.
 
-**Nuevo** y **Editar** abren el formulario del flujo en el mismo panel, con dos
-campos nuevos: **Fecha de vencimiento** (opcional; «Quitar la fecha») y
-**Notas** (hasta 2000 caracteres). El historial anota «Vencimiento: … (antes
-…)» y «Cambió las notas».
+**Nuevo** y **Editar** abren el formulario del flujo (desde el 10-11-2026 en un
+cuadro flotante, ver «Cuadro flotante para crear y editar»), con dos campos:
+**Fecha de vencimiento** (opcional) y **Descripción** (antes «Notas», hasta 2000
+caracteres). El historial anota «Vencimiento: … (antes …)» y «Cambió la
+descripción».
 
 Código: [`lib/flujo-aprobacion/lista.ts`](lib/flujo-aprobacion/lista.ts) (filas,
 vencido, responsables y filtros, con pruebas en `lista.test.ts`); pantallas
@@ -4760,6 +4761,13 @@ se rechaza. Aceptó el plan con sus supuestos. Hay que volver a ejecutar
   Trimble acepta `CLOSED` o `DONE`.
 - Las tareas creadas **antes** de este cambio no se cierran solas (no se guardó
   su número).
+- **Resultado de la prueba real (10-11-2026, proyecto Laboratorio)**: Trimble
+  respondió bien al `PATCH` con `CLOSED`, pero al leer la tarea otra vez seguía
+  en **`NEW`**: la tarea **no se cerró** y la extensión lo dio por hecho. Según el
+  Swagger de Trimble (`UpdateToDoRequest`), los estados son `NEW`,
+  `IN_PROGRESS`, `RESOLVED`, `BLOCKED` y `CLOSED` (`DONE` no existe).
+  **Pendiente**, a la espera del OK del dueño: confirmar el cierre releyendo la
+  tarea y que la prueba intente varias formas mostrando la respuesta textual.
 
 Código: [`lib/flujo-aprobacion/reactivar.ts`](lib/flujo-aprobacion/reactivar.ts)
 (`reactivarFlujo`), `registro.ts` (`planReactivar`, línea
@@ -4772,6 +4780,33 @@ Código: [`lib/flujo-aprobacion/reactivar.ts`](lib/flujo-aprobacion/reactivar.ts
 /api/flujo-aprobacion/flujos/reactivar` (`{ id, version }`). Columna
 `aprobacion_archivos.tareas` (jsonb).
 
+### Cuadro flotante para crear y editar (10-11-2026)
+
+Pedido por el dueño con un dibujo (sobre el cuadro de tareas de Trimble): al dar
+clic en **Nuevo**, la pantalla se oscurece con un tono transparente y sale un
+**cuadro flotante** con los datos. Aceptó la propuesta **sin «Usuario asignado»
+general**: el flujo ya tiene un responsable por paso (decisión del 09-11).
+
+- Cuadro blanco al centro, **«Crear flujo»** (o «Editar «hito»») en negrita y
+  **✕** arriba a la derecha; **Cancelar** y **Guardar** abajo, siempre a la
+  vista (lo de adentro se desplaza).
+- Campos en el orden del dibujo: **Título** (si está vacío, línea roja y «Se
+  requiere este campo.»), **Descripción** (antes «Notas»), **Fecha de
+  vencimiento** (opcional, se escribe **DD-MM-AAAA** con calendario, el mismo
+  campo de Compras), **Archivos** (etiquetas + «+ Agregar archivos» abre el
+  explorador dentro del cuadro) y **Agregar pasos** («Realiza» primero; cada
+  paso con su nombre y responsable; «+ Adicionar paso»).
+- **Guardar** se ve pálido mientras falte algo y abajo dice qué falta; al
+  guardar, el cuadro se cierra y el panel de la derecha abre el flujo.
+- **Editar** abre el mismo cuadro; detrás queda el detalle del flujo.
+- **Un clic afuera no lo cierra.** Con algo escrito, ✕, Cancelar o Escape
+  preguntan «¿Cerrar sin guardar? Se pierde lo que escribiste.» (Seguir
+  editando / Cerrar sin guardar).
+
+Código: [`components/flujo-aprobacion/EditorFlujo.tsx`](components/flujo-aprobacion/EditorFlujo.tsx)
+(el cuadro) y `FlujoAprobacionApp.tsx` (`ventanaEditor`: Nuevo y Editar ya no
+van en el panel).
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -4780,7 +4815,7 @@ Código: [`lib/flujo-aprobacion/reactivar.ts`](lib/flujo-aprobacion/reactivar.ts
 2. **Nuevo** (cualquier miembro del proyecto): título o hito, **marque los
    archivos** en el explorador (varios a la vez, de distintas carpetas), los
    pasos (por ejemplo Revisa → Aprueba) con **su responsable** y, si quiere,
-   fecha de vencimiento y notas. **Guardar**: los archivos quedan pendientes,
+   fecha de vencimiento y descripción (todo en un cuadro flotante). **Guardar**: los archivos quedan pendientes,
    el responsable del primer paso recibe la tarea de Trimble y el flujo queda
    abierto en el panel de la derecha.
 3. **⋮ → Revisar permisos de Trimble**: corrija en Trimble lo que avise (por

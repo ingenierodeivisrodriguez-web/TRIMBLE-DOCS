@@ -72,7 +72,7 @@ export function revisarDatos(d: DatosFlujo): string | null {
     if (!p.responsable?.id) return `Paso ${i + 2} («${nombre}»): elige su responsable.`;
   }
   if (d.vence && !esDia(d.vence)) return "La fecha de vencimiento no es válida.";
-  if ((d.notas ?? "").length > 2000) return "Las notas admiten hasta 2000 caracteres.";
+  if ((d.notas ?? "").length > 2000) return "La descripción admite hasta 2000 caracteres.";
   return null;
 }
 
@@ -140,7 +140,7 @@ export function cambiosFlujo(antes: Pick<Flujo, "hito" | "pasos" | "archivos" | 
   if (quitados.length) partes.push(`Archivos quitados: ${quitados.join("; ")}.`);
   const v = (x: string | null | undefined) => (x ? diaVisible(x) : "sin fecha");
   if ((antes.vence ?? null) !== (despues.vence ?? null)) partes.push(`Vencimiento: ${v(despues.vence)} (antes ${v(antes.vence)}).`);
-  if ((antes.notas ?? "") !== (despues.notas ?? "")) partes.push("Cambió las notas.");
+  if ((antes.notas ?? "") !== (despues.notas ?? "")) partes.push("Cambió la descripción.");
   return partes.join(" ") || "Sin cambios.";
 }
 

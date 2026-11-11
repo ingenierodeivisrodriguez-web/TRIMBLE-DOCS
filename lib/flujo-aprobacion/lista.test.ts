@@ -94,7 +94,7 @@ test("vencimiento y notas se validan y quedan en los cambios del flujo", () => {
   assert.match(revisarDatos({ ...base, vence: "2026-02-30" })!, /fecha de vencimiento no es válida/);
   assert.match(revisarDatos({ ...base, notas: "x".repeat(2001) })!, /hasta 2000/);
   const f = { hito: "A", pasos: [], archivos: [] };
-  assert.equal(cambiosFlujo({ ...f, vence: null, notas: "" }, { ...f, vence: "2026-11-25", notas: "Nueva" }), "Vencimiento: 25-11-2026 (antes sin fecha). Cambió las notas.");
+  assert.equal(cambiosFlujo({ ...f, vence: null, notas: "" }, { ...f, vence: "2026-11-25", notas: "Nueva" }), "Vencimiento: 25-11-2026 (antes sin fecha). Cambió la descripción.");
 });
 
 test("estado del documento: espera un paso que no es el último (por revisar), el último (por aprobar), aprobado o rechazado", () => {

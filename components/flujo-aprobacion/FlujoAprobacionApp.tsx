@@ -35,7 +35,8 @@ function useAncho() {
  * the chosen files of every active flow are read and new versions registered;
  * below, the flows as a table with filters, and a click on a row opens its
  * details on the right (steps and responsibles, files and decisions, history,
- * comments). "Nuevo" (any member) opens the flow form in that same panel.
+ * comments). "Nuevo" (any member) and "Editar" open the flow form in a
+ * floating box over the darkened screen.
  */
 export default function FlujoAprobacionApp({ api, projectId, projectName }: { api: FlujoApi; projectId: string; projectName: string }) {
   const [datos, setDatos] = useState<EstadoFlujos | null>(null);
@@ -141,29 +142,29 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
     }
   }
 
-  const abierto = !!panel && (panel.tipo === "nuevo" || !!seleccionada);
-  const contenidoPanel =
-    // A flow closed by its first decision is never edited: its details show instead.
+  // The form floats over the darkened screen; while editing, the flow's details stay behind it.
+  // A flow closed by its first decision is never edited: only its details show.
+  const abierto = !!panel && panel.tipo !== "nuevo" && !!seleccionada;
+  const ventanaEditor =
     panel?.tipo === "nuevo" || (panel?.tipo === "editar" && seleccionada && !seleccionada.cierre) ? (
-      <div style={{ padding: 16 }}>
-        <EditorFlujo
-          key={panel.tipo === "nuevo" ? "nuevo" : panel.id}
-          api={api}
-          projectId={projectId}
-          flujo={panel.tipo === "editar" ? (seleccionada?.flujo ?? null) : null}
-          equipo={equipo}
-          enPanel
-          onGuardado={(e, id) => {
-            cambio(e);
-            // Its files were registered while saving.
-            cargarArchivos();
-            setAviso(e.mensaje ? { kind: "info", texto: e.mensaje } : null);
-            setPanel(id ? { tipo: "detalle", id } : null);
-          }}
-          onCancelar={() => setPanel(panel.tipo === "editar" ? { tipo: "detalle", id: panel.id } : null)}
-        />
-      </div>
-    ) : (panel?.tipo === "detalle" || panel?.tipo === "editar") && seleccionada && datos ? (
+      <EditorFlujo
+        key={panel.tipo === "nuevo" ? "nuevo" : panel.id}
+        api={api}
+        projectId={projectId}
+        flujo={panel.tipo === "editar" ? (seleccionada?.flujo ?? null) : null}
+        equipo={equipo}
+        onGuardado={(e, id) => {
+          cambio(e);
+          // Its files were registered while saving.
+          cargarArchivos();
+          setAviso(e.mensaje ? { kind: "info", texto: e.mensaje } : null);
+          setPanel(id ? { tipo: "detalle", id } : null);
+        }}
+        onCancelar={() => setPanel(panel.tipo === "editar" ? { tipo: "detalle", id: panel.id } : null)}
+      />
+    ) : null;
+  const contenidoPanel =
+    (panel?.tipo === "detalle" || panel?.tipo === "editar") && seleccionada && datos ? (
       <PanelFlujo
         key={seleccionada.flujo.id}
         api={api}
@@ -274,6 +275,8 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
       {abierto && angosto && (
         <aside style={{ position: "fixed", top: 0, right: 0, bottom: 0, width: "min(560px, 100%)", overflowY: "auto", background: "#fff", boxShadow: "-4px 0 18px rgba(20,40,70,.22)", zIndex: 40 }}>{contenidoPanel}</aside>
       )}
+
+      {ventanaEditor}
 
       {ventana === "trazabilidad" && (
         <Modal title="Trazabilidad de todos los flujos" onClose={() => setVentana(null)} width={1100}>

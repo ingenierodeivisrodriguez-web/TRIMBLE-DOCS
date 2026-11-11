@@ -400,7 +400,7 @@ fila del flujo aparezcan sus detalles. Propuse el diseño con tres campos nuevos
   valida la fecha (`esDia`) y hasta 2000 caracteres de notas; el historial
   dice «Vencimiento: X (antes Y).» y «Cambió las notas.». `comentar`: cualquier
   miembro. Ruta `GET|POST /api/flujo-aprobacion/comentarios`.
-- `EditorFlujo` acepta `enPanel`; tras crear, abre el flujo nuevo buscándolo por
+- `EditorFlujo` (desde el 10-11-2026 es un cuadro flotante, ya no `enPanel`); tras crear, abre el flujo nuevo buscándolo por
   `hitoClave`. Se borró `Flujos.tsx` (lo reemplazan `ListaFlujos` + `PanelFlujo`).
 
 ## Archivos elegidos y responsable por paso (09-11-2026)
@@ -695,7 +695,31 @@ por flujo y versión; proponer la carpeta de la copia anterior aunque sea otra
 fila. Sin la fase 2, una versión nueva no se puede revisar (el archivo queda
 en su flujo cerrado).
 
-Pendiente: confirmar en Trimble real qué estado acepta `PATCH /todos`
-(prueba de conexión → tarea). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+Prueba real de cerrar tareas (10-11-2026, Laboratorio): `PATCH /todos/{id}`
+con `{ status: "CLOSED" }` respondió bien, pero al releerla seguía **`NEW`**: no
+se cerró, y `cerrarTarea` lo dio por hecho (solo mira la respuesta del PATCH).
+Swagger de Trimble (`UpdateToDoRequest`): `type, title, label, description,
+dueDate, percentComplete, status, priority, assignees`; estados `NEW,
+IN_PROGRESS, RESOLVED, BLOCKED, CLOSED` (`DONE` no existe). Propuesto al dueño
+y **sin OK todavía**: confirmar releyendo con `GET /todos/{id}` (solo anotar
+«Cerró» si dice CLOSED), quitar DONE, y que la prueba intente variantes
+(CLOSED; RESOLVED→CLOSED; CLOSED + percentComplete 100; con label y
+description) mostrando la respuesta textual y el estado releído. Plan B: que el
+dueño copie con F12 → Red lo que manda Trimble al cerrar una tarea a mano.
+
+## Cuadro flotante para crear y editar (10-11-2026)
+
+Pedido con un dibujo sobre el cuadro de tareas de Trimble: **Nuevo** oscurece la
+pantalla y abre un cuadro blanco flotante. Aceptado **sin «Usuario asignado»
+general** (ya hay responsable por paso). `EditorFlujo` es ahora el cuadro
+(fondo `rgba(20,30,45,.45)`, zIndex 55): «Crear flujo»/«Editar «hito»» + ✕;
+Título (vacío → borde rojo y «Se requiere este campo.»), Descripción (= `notas`;
+textos «La descripción admite…», «Cambió la descripción.»), Fecha de vencimiento
+con `DateField` de propiedades (DD-MM-AAAA → ISO), Archivos (explorador
+cerrado al abrir) y Agregar pasos; pie fijo con Cancelar/Guardar (pálido si hay
+`problema`). Clic afuera no cierra; con cambios (`huella` vs. la inicial), ✕,
+Cancelar y Escape piden «¿Cerrar sin guardar?». `FlujoAprobacionApp`:
+`ventanaEditor` para Nuevo y Editar; el panel ya no muestra el formulario
+(en Editar queda el detalle detrás). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).
