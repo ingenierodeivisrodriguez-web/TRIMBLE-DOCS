@@ -404,7 +404,7 @@ export interface ArchivoInfo extends ArchivoRegistro {
   pasoNombre: string;
   /** Who has that step on this file (names), closest assignment first. */
   responsables: string[];
-  /** Whether the caller is one of them (administrators: always, for pending files). */
+  /** Whether the caller is one of them: only they decide (administrators only on a step without responsible). */
   meToca: boolean;
   /** Trimble's viewer at the version under review. */
   enlace: string;

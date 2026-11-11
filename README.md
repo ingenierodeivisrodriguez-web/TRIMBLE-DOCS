@@ -4549,8 +4549,8 @@ decide nada):
   reemplazarlo («Reemplazar ahí», regla 2).
 - Para la siguiente versión aprobada se **propone la misma carpeta** de la vez
   anterior (se puede cambiar o dejar donde está).
-- Quien decide es el **responsable del último paso** (o un administrador, que
-  queda anotado como tal).
+- Quien decide es el **responsable del último paso** (desde el 11-11-2026, un
+  administrador ya no decide por él; ver «Decidir solo el responsable del paso»).
 
 **El responsable decide aunque haya subido esa versión** (ajuste del
 09-11-2026: en «aprobar torre 2» el responsable de «Aprueba» había subido el
@@ -4886,6 +4886,14 @@ ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
   «Tengo por revisar») y los flujos salen **del más nuevo al más viejo** según su
   código (FLUJO-12, FLUJO-11…), activos o desactivados; los que aún no tienen
   código, al final.
+- **Decidir solo el responsable del paso** (pedido del mismo día, con captura):
+  el botón **Decidir** sale solo al responsable del paso (o a cualquiera de su
+  grupo); **los administradores ya no deciden por el responsable** y el servidor
+  lo rechaza («…lo decide X, su responsable (los administradores no deciden por
+  el responsable)»). Única excepción: un paso **sin responsable** (flujos de
+  antes) lo decide un administrador, para que el archivo no quede trancado (hoy
+  solo FLUJO-01, desactivado y sin archivos esperando). Lo demás sigue igual: el
+  responsable decide aunque haya subido esa versión; en un grupo, otro miembro.
 - **Prueba de conexión → tarea**: prueba primero este formato (código
   «PRUEBA-hhmmss», título, vencimiento mañana, tipo «Flujo de aprobación», luego
   «Solicitud»…) y dice qué aceptó Trimble; después de cerrarla espera 4

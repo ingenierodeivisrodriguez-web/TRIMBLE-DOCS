@@ -768,6 +768,10 @@ real si acepta el tipo propio y etiquetas repetidas (la prueba de conexión lo
 dice). Lista: `filasFlujos` ordena por `codigo` descendente (sin código al
 final, por nombre; ya no pone primero los activos) y `opcionesFiltro` ya no
 devuelve `grupos`: se quitó el filtro Grupos (`filtro.quien` con «grupo:» sigue
-funcionando por dentro). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+funcionando por dentro). **Decidir** (11-11-2026, pedido del dueño): solo el
+responsable del paso o su grupo; `puedeDecidir` (decision.ts) ya no deja al
+administrador salvo que el paso no tenga responsable (`comoAdmin` solo ahí);
+en `Archivos.tsx`, `puedeDecidir` = `meToca || (esAdmin && !responsables.length
+&& no subió)`. `meToca` nunca incluyó a los administradores. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

@@ -26,7 +26,8 @@ const pequeno = { padding: "4px 12px", fontSize: 13.5 } as const;
 type Datos = { yo: string; esAdmin: boolean; archivos: ArchivoInfo[] };
 
 /** Whether the caller can approve or reject this file now: it is their turn, or they administer the project and didn't upload it (the server checks it again). */
-const puedeDecidir = (a: ArchivoInfo, d: Datos) => ESPERANDO.includes(a.estado) && (a.meToca || (d.esAdmin && a.subidoPorId !== d.yo));
+/** «Decidir» only for the step's responsible (11-11-2026); an administrator only on a step without responsible. */
+const puedeDecidir = (a: ArchivoInfo, d: Datos) => ESPERANDO.includes(a.estado) && (a.meToca || (d.esAdmin && !a.responsables.length && a.subidoPorId !== d.yo));
 
 /** An approved version of a flow without destination that isn't in a folder yet (or whose copy failed): it can be put in one. */
 const sinCarpeta = (a: ArchivoInfo) =>

@@ -43,14 +43,17 @@ const PASOS: PasoFlujo[] = [
 const FLUJO = { hito: "Aprobar Torre 1", pasos: PASOS };
 const quien = (id: string, extra: Partial<Decisor> = {}): Decisor => ({ id, nombre: id, esAdmin: false, grupos: new Set(), ...extra });
 
-test("decide el responsable del paso (o cualquiera de su grupo) o un administrador; nunca quien subió esa versión", () => {
+test("decide solo el responsable del paso (o cualquiera de su grupo), no un administrador; nunca quien subió esa versión", () => {
   const a = archivo();
   assert.deepEqual(puedeDecidir(a, FLUJO, quien("luz", { grupos: new Set(["g-arq"]) })), { error: null, comoAdmin: false });
-  assert.deepEqual(puedeDecidir(a, FLUJO, quien("ana", { esAdmin: true })), { error: null, comoAdmin: true });
-  assert.match(puedeDecidir(a, FLUJO, quien("pepe")).error!, /El paso «Revisa» de este archivo no es tuyo: lo tiene Arquitectura \(grupo\)/);
+  // 11-11-2026: an administrator doesn't decide for the responsible.
+  assert.match(puedeDecidir(a, FLUJO, quien("ana", { esAdmin: true })).error!, /^El paso «Revisa» de este archivo no es tuyo: lo decide Arquitectura \(grupo\), su responsable \(los administradores no deciden por el responsable\)\.$/);
+  // …unless the step has no responsible (older flows), so the file isn't stuck.
+  assert.deepEqual(puedeDecidir(a, { pasos: [{ id: "p1", nombre: "Revisa" }] }, quien("ana", { esAdmin: true })), { error: null, comoAdmin: true });
+  assert.match(puedeDecidir(a, FLUJO, quien("pepe")).error!, /El paso «Revisa» de este archivo no es tuyo: lo decide Arquitectura \(grupo\), su responsable\.$/);
   assert.match(puedeDecidir(a, FLUJO, quien("juan", { esAdmin: true, grupos: new Set(["g-arq"]) })).error!, /Tú subiste esta versión/);
   assert.match(puedeDecidir(archivo({ estado: "aprobado" }), FLUJO, quien("ana", { esAdmin: true })).error!, /no espera revisión: está «Aprobado»/);
-  assert.match(puedeDecidir(a, { pasos: [{ id: "p1", nombre: "Revisa" }] }, quien("luz")).error!, /no tiene responsable y solo un administrador puede decidirlo/);
+  assert.match(puedeDecidir(a, { pasos: [{ id: "p1", nombre: "Revisa" }] }, quien("luz")).error!, /no tiene responsable: solo un administrador puede decidirlo/);
   // A responsible changed in the flow reaches files already in process.
   const otro = { pasos: [{ ...PASOS[0], responsable: { tipo: "persona" as const, id: "luz", nombre: "Luz" } }, PASOS[1]] };
   assert.deepEqual(puedeDecidir(a, otro, quien("luz")), { error: null, comoAdmin: false });

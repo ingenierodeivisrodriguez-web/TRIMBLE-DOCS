@@ -86,7 +86,7 @@ test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa ve
   a = await e.modelo();
   assert.equal(a.pasoNombre, "Aprueba");
   // Eva (same group) can't approve a step that is no longer hers.
-  await assert.rejects(() => decidir(e.ctx("eva"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /El paso «Aprueba» de este archivo no es tuyo: lo tiene Pepe/);
+  await assert.rejects(() => decidir(e.ctx("eva"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /El paso «Aprueba» de este archivo no es tuyo: lo decide Pepe, su responsable/);
   const r2 = await decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId, texto: "Cumple" }, "aprobar");
   assert.equal(r2.mensaje, "«modelo.rvt» queda aprobado (versión 1).");
   assert.equal(r2.traslado, null, "a flow without destination: the approved version stays where it is");
@@ -174,7 +174,7 @@ test("el responsable que subió la versión ve que le toca y la decide; la firma
   assert.match((await historial(e.admin, null, a.id)).entradas.find((x) => x.accion === "aprobado-paso")!.detalle, /de la versión 1 \(su propia versión, como responsable del paso\): pasa a «Aprueba»/);
 });
 
-test("quien subió la versión no decide, aunque sea administrador; un administrador sin el paso sí, y queda anotado", async () => {
+test("un administrador no decide por el responsable; solo un paso sin responsable, y queda anotado", async () => {
   const e = await escenario();
   let a = await e.modelo();
   // The flow's version as uploaded by Ana, an administrator without the step.
@@ -184,6 +184,12 @@ test("quien subió la versión no decide, aunque sea administrador; un administr
   await e.store.actualizarArchivo(a.id, { subidoPor: "Juan", subidoPorId: "juan" });
   a = await e.modelo();
   await assert.rejects(() => decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId }, "aprobar"), /no es tuyo/);
+  // 11-11-2026: the step has a responsible (the group Arquitectura), so Ana can't decide it.
+  await assert.rejects(() => decidir(e.admin, { archivoId: a.id, versionId: a.versionId }, "aprobar"), /los administradores no deciden por el responsable/);
+  // A step without responsible (older flows): only an administrator decides it.
+  await e.store.actualizarArchivo(a.id, { pasos: [{ id: "p1", nombre: "Revisa" }, { id: "p2", nombre: "Aprueba" }] });
+  await e.store.actualizarFlujo(e.f.id, (await e.store.flujo(e.f.id))!.version, { pasos: [{ id: "p1", nombre: "Revisa" }, { id: "p2", nombre: "Aprueba" }] });
+  a = await e.modelo();
   await decidir(e.admin, { archivoId: a.id, versionId: a.versionId }, "aprobar");
   a = await e.modelo();
   assert.equal(a.firmas[0].comoAdmin, true);

@@ -33,9 +33,13 @@ export function puedeDecidir(a: ArchivoRegistro, flujo: Pick<Flujo, "pasos"> | n
   if (a.subidoPorId && a.subidoPorId === quien.id) {
     return { error: `Tú subiste esta versión: la decide ${resp.length ? resp.map(nombreResponsable).join(", ") : "otra persona"}${resp.some((r) => r.tipo === "grupo") ? " (otra persona del grupo)" : ""}.`, comoAdmin: false };
   }
-  if (quien.esAdmin) return { error: null, comoAdmin: true };
+  // Since 11-11-2026 only the step's responsible decides, administrators included (the owner's
+  // wish). An administrator decides only a step that has no responsible (older flows), so no file is stuck.
+  if (quien.esAdmin && !resp.length) return { error: null, comoAdmin: true };
   return {
-    error: `El paso «${paso.nombre}» de este archivo no es tuyo${resp.length ? `: lo tiene ${resp.map(nombreResponsable).join(", ")}` : ": no tiene responsable y solo un administrador puede decidirlo"}.`,
+    error: resp.length
+      ? `El paso «${paso.nombre}» de este archivo no es tuyo: lo decide ${resp.map(nombreResponsable).join(", ")}, su responsable${quien.esAdmin ? " (los administradores no deciden por el responsable)" : ""}.`
+      : `El paso «${paso.nombre}» de este archivo no tiene responsable: solo un administrador puede decidirlo.`,
     comoAdmin: false,
   };
 }
