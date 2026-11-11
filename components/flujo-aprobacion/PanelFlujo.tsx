@@ -190,6 +190,7 @@ export default function PanelFlujo({
           </button>
         )}
         <MenuPuntos
+          abre="derecha"
           opciones={[
             { texto: "Editar", onClick: onEditar, oculto: !editable },
             { texto: "Reactivar el flujo…", onClick: () => setReactivar(true), oculto: !puedeReactivar },

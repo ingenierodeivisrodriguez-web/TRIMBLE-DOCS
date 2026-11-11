@@ -4846,7 +4846,8 @@ al pasar el mouse.
     del flujo, más abajo, tiene todo. La última columna solo sale con
     **Decidir** o **Poner en una carpeta…**.
 - **Permisos de Trimble** ya no aparece como bloque fijo: sale cuando se pide
-  con **⋮ → Revisar permisos de Trimble**.
+  con **⋮ → Revisar permisos de Trimble**. El menú ⋮ del panel se abre hacia la
+  derecha (antes el borde del panel cortaba sus textos, captura del 11-11-2026).
 
 Código: `components/flujo-aprobacion/Archivos.tsx` (`conEspera`,
 `conAcciones`, `columnas`, `ayudaArchivo`, `ayudaEstado`) y

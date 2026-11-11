@@ -10,8 +10,13 @@ export interface OpcionMenu {
   oculto?: boolean;
 }
 
-/** The "⋮" button with its list of actions (closes on a click elsewhere or Escape). */
-export default function MenuPuntos({ opciones, titulo = "Más acciones" }: { opciones: OpcionMenu[]; titulo?: string }) {
+/**
+ * The "⋮" button with its list of actions (closes on a click elsewhere or Escape).
+ * `abre`: the list grows to the left of the button (default, for a button at the
+ * right edge) or to the right (for a button at the left of a panel, where the
+ * panel's edge would cut it — 11-11-2026).
+ */
+export default function MenuPuntos({ opciones, titulo = "Más acciones", abre = "izquierda" }: { opciones: OpcionMenu[]; titulo?: string; abre?: "izquierda" | "derecha" }) {
   const [abierto, setAbierto] = useState(false);
   const caja = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -42,7 +47,7 @@ export default function MenuPuntos({ opciones, titulo = "Más acciones" }: { opc
         ⋮
       </button>
       {abierto && (
-        <div role="menu" style={{ position: "absolute", right: 0, top: 32, zIndex: 30, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, boxShadow: "0 6px 18px rgba(20,40,70,.16)", minWidth: 220, padding: "4px 0" }}>
+        <div role="menu" style={{ position: "absolute", ...(abre === "derecha" ? { left: 0 } : { right: 0 }), top: 32, zIndex: 30, background: "#fff", border: `1px solid ${C.border}`, borderRadius: 6, boxShadow: "0 6px 18px rgba(20,40,70,.16)", minWidth: 220, padding: "4px 0" }}>
           {visibles.map((o) => (
             <button
               key={o.texto}
