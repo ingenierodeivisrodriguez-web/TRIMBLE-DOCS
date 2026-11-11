@@ -7,8 +7,8 @@ import { Equipo, EstadoFlujos, Flujo, MAX_ARCHIVOS, MAX_PASOS, MIN_PASOS } from 
 import { isoToDisplay, parseDisplayDate } from "../../lib/propiedades/values";
 import { botonSecundario, linkBtn, select } from "../compras/estilos";
 import DateField from "../propiedades/DateField";
-import Explorador, { Elegido } from "../publicar/Explorador";
 import { baseInput, C, message, Notice } from "../presupuesto/ui";
+import ElegirArchivos, { ArchivoParaFlujo } from "./ElegirArchivos";
 
 interface ArchivoElegido {
   id: string;
@@ -69,7 +69,7 @@ export default function EditorFlujo({
       { nombre: "Aprueba", responsable: "" },
     ]
   );
-  const [explorando, setExplorando] = useState(false);
+  const [eligiendo, setEligiendo] = useState(false);
   const [error, setError] = useState("");
   const [ocupado, setOcupado] = useState(false);
   const [confirmarCierre, setConfirmarCierre] = useState(false);
@@ -98,19 +98,18 @@ export default function EditorFlujo({
   // Escape closes like the ✕ (asking first when something was typed).
   useEffect(() => {
     function tecla(e: KeyboardEvent) {
-      if (e.key !== "Escape" || ocupado) return;
+      // While picking files, Escape closes only that box.
+      if (e.key !== "Escape" || ocupado || eligiendo) return;
       if (cambiado) setConfirmarCierre(true);
       else onCancelar();
     }
     window.addEventListener("keydown", tecla);
     return () => window.removeEventListener("keydown", tecla);
-  }, [cambiado, ocupado, onCancelar]);
+  }, [cambiado, ocupado, eligiendo, onCancelar]);
 
-  function alternar(e: Elegido) {
-    setArchivos((as) => (as.some((x) => x.id === e.id) ? as.filter((x) => x.id !== e.id) : [...as, { id: e.id, nombre: e.nombre, ruta: e.ruta }]));
-  }
-  function varios(es: Elegido[], marcar: boolean) {
-    setArchivos((as) => (marcar ? [...as, ...es.filter((e) => !as.some((x) => x.id === e.id)).map((e) => ({ id: e.id, nombre: e.nombre, ruta: e.ruta }))] : as.filter((x) => !es.some((e) => e.id === x.id))));
+  function anadir(nuevos: ArchivoParaFlujo[]) {
+    setArchivos((as) => [...as, ...nuevos.filter((n) => !as.some((x) => x.id === n.id))]);
+    setEligiendo(false);
   }
   function cambiarPaso(i: number, cambio: Partial<PasoForm>) {
     setPasos((ps) => ps.map((p, j) => (j === i ? { ...p, ...cambio } : p)));
@@ -245,22 +244,21 @@ export default function EditorFlujo({
               </span>
             ))}
           </div>
-          <button type="button" style={{ ...botonSecundario, padding: "5px 12px", fontSize: 13.5 }} onClick={() => setExplorando(!explorando)}>
-            {explorando ? "Cerrar el explorador" : "+ Agregar archivos"}
+          <button
+            type="button"
+            style={{ ...botonSecundario, padding: "5px 12px", fontSize: 13.5 }}
+            onClick={() => setEligiendo(true)}
+            disabled={archivos.length >= MAX_ARCHIVOS}
+            title={archivos.length >= MAX_ARCHIVOS ? `Un flujo admite hasta ${MAX_ARCHIVOS} archivos.` : "Queda fija la versión que cada archivo tiene al guardar: si después suben una versión nueva, el flujo la avisa pero sigue con la suya."}
+          >
+            + Agregar archivos
           </button>
-          {explorando && (
-            <div style={{ marginTop: 8 }}>
-              <Explorador api={api} proyecto={projectId} elegir="archivo" seleccionados={archivos.map((a) => a.id)} onElegir={alternar} onElegirVarios={varios} />
-              <p style={ayuda}>Abre cada carpeta y marca la casilla de cada archivo (otro clic lo quita). Puedes marcar varios, de distintas carpetas; hasta {MAX_ARCHIVOS} por flujo.</p>
-            </div>
-          )}
-          <p style={ayuda}>Queda fija la versión que cada archivo tiene al guardar: si después suben una versión nueva, el flujo la avisa pero sigue con la suya.</p>
           {flujo?.destino && <p style={ayuda}>Este flujo se creó con carpeta destino («{flujo.destino.ruta}»): lo aprobado se sigue copiando ahí.</p>}
 
           <h3 style={seccion}>Agregar pasos</h3>
           <ol style={{ margin: "0 0 8px", paddingLeft: 22, display: "grid", gap: 8, fontSize: 14 }}>
-            <li>
-              <strong>Realiza</strong> <span style={{ color: "var(--tc-gray-500)" }}>— quien sube el archivo y lo corrige si lo rechazan (siempre es el primero).</span>
+            <li title="Quien sube el archivo y lo corrige si lo rechazan (siempre es el primero).">
+              <strong>Realiza</strong>
             </li>
             {pasos.map((p, i) => (
               <li key={p.id ?? `nuevo-${i}`}>
@@ -279,12 +277,12 @@ export default function EditorFlujo({
                     value={p.responsable}
                     onChange={(e) => cambiarPaso(i, { responsable: e.target.value })}
                     aria-label={`Responsable del paso ${i + 2}`}
+                    title={i === pasos.length - 1 ? "El responsable de este paso aprueba el archivo." : undefined}
                     style={{ ...select, flex: "1 1 170px", minWidth: 170, borderColor: p.responsable ? undefined : "#e0a800" }}
                   >
                     {opciones(p)}
                   </select>
                 </span>
-                {i === pasos.length - 1 && <span style={{ display: "block", fontSize: 12.5, color: "var(--tc-gray-500)", marginTop: 3 }}>El responsable de este paso aprueba el archivo.</span>}
               </li>
             ))}
           </ol>
@@ -299,6 +297,7 @@ export default function EditorFlujo({
             </Notice>
           )}
         </div>
+        {eligiendo && <ElegirArchivos api={api} projectId={projectId} yaElegidos={archivos.map((a) => a.id)} maximo={MAX_ARCHIVOS - archivos.length} onAnadir={anadir} onCancelar={() => setEligiendo(false)} />}
 
         <footer style={{ display: "flex", justifyContent: "flex-end", alignItems: "center", gap: 10, flexWrap: "wrap", padding: "12px 24px", borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
           {confirmarCierre ? (

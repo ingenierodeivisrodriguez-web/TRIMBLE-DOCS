@@ -4793,9 +4793,24 @@ general**: el flujo ya tiene un responsable por paso (decisión del 09-11).
 - Campos en el orden del dibujo: **Título** (si está vacío, línea roja y «Se
   requiere este campo.»), **Descripción** (antes «Notas»), **Fecha de
   vencimiento** (opcional, se escribe **DD-MM-AAAA** con calendario, el mismo
-  campo de Compras), **Archivos** (etiquetas + «+ Agregar archivos» abre el
-  explorador dentro del cuadro) y **Agregar pasos** («Realiza» primero; cada
-  paso con su nombre y responsable; «+ Adicionar paso»).
+  campo de Compras), **Archivos** (etiquetas + «+ Agregar archivos») y
+  **Agregar pasos** («Realiza» primero; cada paso con su nombre y responsable;
+  «+ Adicionar paso»).
+- **Formulario limpio** (pedido del dueño con captura, mismo día): sin los
+  textos de ayuda bajo Archivos («Queda fija la versión…»), junto a «Realiza»
+  («quien sube el archivo…») y bajo el último paso («El responsable de este
+  paso aprueba el archivo»). Siguen como texto emergente al pasar el mouse.
+- **«+ Agregar archivos»** abre un segundo cuadro flotante **«Añadir
+  archivos»**, como el «Añadir referencias» de Trimble (pedido con captura):
+  «Puede seleccionar más de un archivo a la vez.», el nombre del proyecto
+  (Laboratorio) y la carpeta abierta con «‹» para volver, carpetas con su icono
+  y «›» (un clic la abre), archivos con casilla, icono y versión; «Marcar todos»
+  de la carpeta abierta. Las marcas se conservan al pasar de una carpeta a
+  otra; abajo dice cuántos van. Los archivos que ya están en el flujo salen
+  marcados y no se pueden volver a elegir (se quitan con la ✕ de su etiqueta).
+  Nada cambia en el formulario hasta **«Añadir archivos»**; **Cancelar**, ✕ o
+  Escape cierran solo ese cuadro. Sin las pestañas de equipo y enlace de
+  Trimble: solo se eligen archivos del proyecto.
 - **Guardar** se ve pálido mientras falte algo y abajo dice qué falta; al
   guardar, el cuadro se cierra y el panel de la derecha abre el flujo.
 - **Editar** abre el mismo cuadro; detrás queda el detalle del flujo.
@@ -4804,7 +4819,9 @@ general**: el flujo ya tiene un responsable por paso (decisión del 09-11).
   editando / Cerrar sin guardar).
 
 Código: [`components/flujo-aprobacion/EditorFlujo.tsx`](components/flujo-aprobacion/EditorFlujo.tsx)
-(el cuadro) y `FlujoAprobacionApp.tsx` (`ventanaEditor`: Nuevo y Editar ya no
+(el cuadro), [`ElegirArchivos.tsx`](components/flujo-aprobacion/ElegirArchivos.tsx)
+(«Añadir archivos»; usa `api.carpeta`, la misma lectura de carpetas del
+`Explorador` de Publicar, y guarda la ruta igual) y `FlujoAprobacionApp.tsx` (`ventanaEditor`: Nuevo y Editar ya no
 van en el panel).
 
 ### Guía rápida

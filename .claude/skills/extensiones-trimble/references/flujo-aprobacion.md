@@ -715,11 +715,18 @@ general** (ya hay responsable por paso). `EditorFlujo` es ahora el cuadro
 (fondo `rgba(20,30,45,.45)`, zIndex 55): «Crear flujo»/«Editar «hito»» + ✕;
 Título (vacío → borde rojo y «Se requiere este campo.»), Descripción (= `notas`;
 textos «La descripción admite…», «Cambió la descripción.»), Fecha de vencimiento
-con `DateField` de propiedades (DD-MM-AAAA → ISO), Archivos (explorador
-cerrado al abrir) y Agregar pasos; pie fijo con Cancelar/Guardar (pálido si hay
+con `DateField` de propiedades (DD-MM-AAAA → ISO), Archivos y Agregar pasos
+(sin textos de ayuda: pasaron a `title` por pedido del dueño); pie fijo con Cancelar/Guardar (pálido si hay
 `problema`). Clic afuera no cierra; con cambios (`huella` vs. la inicial), ✕,
 Cancelar y Escape piden «¿Cerrar sin guardar?». `FlujoAprobacionApp`:
 `ventanaEditor` para Nuevo y Editar; el panel ya no muestra el formulario
-(en Editar queda el detalle detrás). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+(en Editar queda el detalle detrás). «+ Agregar archivos» abre
+`ElegirArchivos` (cuadro «Añadir archivos» al estilo «Añadir referencias» de
+Trimble, zIndex 60): `api.carpeta`, migas con el nombre del proyecto en la raíz
+y «‹», carpetas con «›», archivos con casilla y versión, «Marcar todos»; marcas
+conservadas entre carpetas; los ya elegidos salen marcados y deshabilitados;
+`maximo` = MAX_ARCHIVOS − elegidos; ruta `carpeta.ruta.join(" / ") + nombre`
+(igual que el Explorador). Escape cierra solo ese cuadro (`EditorFlujo` ignora
+Escape mientras `eligiendo`). El `Explorador` de Publicar ya no se usa aquí. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).
