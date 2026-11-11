@@ -6,7 +6,7 @@ import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
 import { nombreDeRuta } from "../../lib/flujo-aprobacion/flujos";
 import { ESPERANDO, textoEstado } from "../../lib/flujo-aprobacion/registro";
 import { puedeTrasladar, textoTraslado } from "../../lib/flujo-aprobacion/traslado";
-import type { ArchivoInfo, EntradaHistorial, EstadoArchivo } from "../../lib/flujo-aprobacion/types";
+import type { ArchivoInfo, EstadoArchivo } from "../../lib/flujo-aprobacion/types";
 import { acceptButton, baseInput, C, labelStyle, message, Notice } from "../presupuesto/ui";
 import { botonPeligro, etiqueta, linkBtn, select, td, texto, th } from "../compras/estilos";
 import Explorador from "../publicar/Explorador";
@@ -53,8 +53,7 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
   const [vista, setVista] = useState<VistaArchivos>(meTocan ? "me-toca" : "todos");
   const [estado, setEstado] = useState("");
   const [buscar, setBuscar] = useState("");
-  const [abierto, setAbierto] = useState<{ id: string; que: "historial" | "decidir" | "carpeta" } | null>(null);
-  const [historial, setHistorial] = useState<{ id: string; entradas: EntradaHistorial[] | null; error: string } | null>(null);
+  const [abierto, setAbierto] = useState<{ id: string; que: "decidir" | "carpeta" } | null>(null);
   const [resultado, setResultado] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
 
   const filas = useMemo(() => {
@@ -66,20 +65,11 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
       .sort((a, b) => porRuta.compare(a.ruta, b.ruta));
   }, [datos, delFlujo, vista, estado, buscar]);
 
-  async function verHistorial(a: ArchivoInfo) {
-    if (abierto?.id === a.id && abierto.que === "historial") {
-      setAbierto(null);
-      return;
-    }
-    setAbierto({ id: a.id, que: "historial" });
-    setHistorial({ id: a.id, entradas: null, error: "" });
-    try {
-      const r = await api.historial(undefined, a.id);
-      setHistorial({ id: a.id, entradas: r.entradas, error: "" });
-    } catch (err) {
-      setHistorial({ id: a.id, entradas: null, error: message(err) });
-    }
-  }
+  // Columns shown only when some row needs them (a cleaner table, 11-11-2026).
+  const trasladableDe = (a: ArchivoInfo) => !!datos && puedeTrasladar(a, { id: datos.yo, esAdmin: datos.esAdmin }) === null;
+  const conEspera = filas.some((a) => !!a.pasoNombre || a.estado === "rechazado");
+  const conAcciones = !!datos && filas.some((a) => puedeDecidir(a, datos) || (trasladableDe(a) && sinCarpeta(a)));
+  const columnas = 2 + (conEspera ? 1 : 0) + (conAcciones ? 1 : 0);
 
   const chip = (v: VistaArchivos, texto: string, n: number) => (
     <button
@@ -137,8 +127,8 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
               <tr>
                 <th style={th}>Archivo</th>
                 <th style={th}>Estado</th>
-                <th style={th}>Espera</th>
-                <th style={th} />
+                {conEspera && <th style={th}>Espera</th>}
+                {conAcciones && <th style={th} />}
               </tr>
             </thead>
             <tbody>
@@ -151,8 +141,9 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
                   puede={puedeDecidir(a, datos)}
                   propia={a.subidoPorId === datos.yo}
                   abierto={abierto?.id === a.id ? abierto.que : null}
-                  historial={historial?.id === a.id ? historial : null}
-                  onHistorial={() => verHistorial(a)}
+                  conEspera={conEspera}
+                  conAcciones={conAcciones}
+                  columnas={columnas}
                   onDecidir={() => setAbierto(abierto?.id === a.id && abierto.que === "decidir" ? null : { id: a.id, que: "decidir" })}
                   onCarpeta={() => setAbierto(abierto?.id === a.id && abierto.que === "carpeta" ? null : { id: a.id, que: "carpeta" })}
                   onDecidido={(r) => {
@@ -160,7 +151,7 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
                     setAbierto(null);
                     onCambio();
                   }}
-                  trasladable={puedeTrasladar(a, { id: datos.yo, esAdmin: datos.esAdmin }) === null}
+                  trasladable={trasladableDe(a)}
                   onTraslado={(texto, err) => {
                     setResultado({ kind: err ? "error" : "info", texto });
                     if (!err) setAbierto(null);
@@ -183,8 +174,9 @@ function FilaArchivo({
   puede,
   propia,
   abierto,
-  historial,
-  onHistorial,
+  conEspera,
+  conAcciones,
+  columnas,
   onDecidir,
   onCarpeta,
   onDecidido,
@@ -197,9 +189,11 @@ function FilaArchivo({
   puede: boolean;
   /** The caller uploaded the version under review. */
   propia: boolean;
-  abierto: "historial" | "decidir" | "carpeta" | null;
-  historial: { entradas: EntradaHistorial[] | null; error: string } | null;
-  onHistorial: () => void;
+  abierto: "decidir" | "carpeta" | null;
+  conEspera: boolean;
+  conAcciones: boolean;
+  /** How many columns the table shows (for the rows that open below). */
+  columnas: number;
   onDecidir: () => void;
   onCarpeta: () => void;
   onDecidido: (r: { mensaje: string; aviso: string | null }) => void;
@@ -210,100 +204,69 @@ function FilaArchivo({
   // The folder: the path without its last part (the name there may be a newer version's).
   const carpeta = a.ruta.lastIndexOf(" / ") > 0 ? a.ruta.slice(0, a.ruta.lastIndexOf(" / ")) : "";
   const rechazo = a.estado === "rechazado" ? [...a.firmas].reverse().find((f) => f.decision === "rechazado") : undefined;
+  // The details stay one hover away: folder and upload on the name; signatures and the copy on the state.
+  const ayudaArchivo = [carpeta, `Subió ${a.subidoPor || "—"}${a.subido ? `, ${fechaHora(a.subido)}` : ""}`, "Clic: abrir en Trimble la versión en revisión"].filter(Boolean).join("\n");
+  const firmas = a.firmas.map((f) => `${f.decision === "aprobado" ? "✓" : "✗"} ${f.paso}: ${f.quien}${f.comoAdmin ? " (admin.)" : ""}${f.propia ? " (su propia versión)" : ""}, ${fechaHora(f.fecha).slice(0, 10)}${f.comentario ? ` — ${f.comentario}` : ""}`);
+  const ayudaEstado = [...firmas, a.traslado?.estado === "hecho" ? `➜ ${textoTraslado(a.traslado, fechaHora)}` : ""].filter(Boolean).join("\n");
+  const trasladoVisible = !!a.traslado && a.traslado.estado !== "hecho";
   return (
     <>
       <tr style={{ background: a.estado === "nueva-version" ? "#fffaf2" : undefined }}>
         <td style={td}>
-          <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={{ ...linkBtn, fontWeight: 600 }} title="Abrir en Trimble la versión en revisión">
+          <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={{ ...linkBtn, fontWeight: 600 }} title={ayudaArchivo}>
             {a.nombre}
           </a>
-          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>{carpeta}</div>
-          <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>
-            Subió {a.subidoPor || "—"}
-            {a.subido ? `, ${fechaHora(a.subido)}` : ""}
-          </div>
         </td>
         <td style={td}>
-          <span style={etiqueta(color, fondo)}>{textoEstado(a)}</span>
+          <span style={{ ...etiqueta(color, fondo), cursor: ayudaEstado ? "help" : undefined }} title={ayudaEstado || undefined}>
+            {textoEstado(a)}
+          </span>
           <div style={{ fontSize: 12, color: "var(--tc-gray-500)", marginTop: 2 }}>Versión {a.revision ?? "?"}</div>
           {a.versionNueva && a.estado !== "retirado" && <AvisoVersionNueva a={a} />}
-          {a.firmas.map((f, i) => (
-            <div key={i} style={{ fontSize: 12, color: f.decision === "aprobado" ? "#1e6b2c" : "#a1261b" }} title={f.comentario || undefined}>
-              {f.decision === "aprobado" ? "✓" : "✗"} {f.paso}: {f.quien}
-              {f.comoAdmin ? " (admin.)" : ""}
-              {f.propia ? " (su propia versión)" : ""}, {fechaHora(f.fecha).slice(0, 10)}
-            </div>
-          ))}
-          {a.traslado && <EstadoTraslado api={api} a={a} trasladable={trasladable} onTraslado={onTraslado} />}
+          {/* A copy that needs attention stays visible (it has its buttons); a finished one is in the tooltip. */}
+          {trasladoVisible && <EstadoTraslado api={api} a={a} trasladable={trasladable} onTraslado={onTraslado} />}
         </td>
-        <td style={td}>
-          {a.pasoNombre ? (
-            <>
-              <strong>{a.pasoNombre}</strong>
-              {a.pasos.length > 1 && (
-                <span style={{ color: "var(--tc-gray-500)" }}>
-                  {" "}
-                  (paso {a.pasoActual + 2} de {a.pasos.length + 1})
-                </span>
-              )}
-              <div style={{ fontSize: 12.5, color: "var(--tc-gray-700)" }}>{a.responsables.length ? a.responsables.join(", ") : "Sin asignar: solo administradores"}</div>
-            </>
-          ) : rechazo ? (
-            <>
-              <strong>Corregir y subir una versión nueva</strong>
-              <div style={{ fontSize: 12.5, color: "#a1261b" }}>Motivo: {rechazo.comentario}</div>
-              <div style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>La versión corregida no entra sola a este flujo: aparece como aviso en el archivo.</div>
-            </>
-          ) : (
-            "—"
-          )}
-        </td>
-        <td style={{ ...td, whiteSpace: "nowrap" }}>
-          {puede && (
-            <button type="button" style={{ ...acceptButton, ...pequeno, display: "block", marginBottom: 4 }} onClick={onDecidir}>
-              {abierto === "decidir" ? "Cerrar" : "Decidir"}
-            </button>
-          )}
-          {trasladable && sinCarpeta(a) && (
-            <button type="button" style={{ ...linkBtn, display: "block", marginBottom: 4 }} onClick={onCarpeta} title="Copiar la versión aprobada a una carpeta donde tengas permiso">
-              {abierto === "carpeta" ? "Cerrar" : a.traslado?.versionId === a.versionAprobadaId ? "Poner en otra carpeta…" : "Poner en una carpeta…"}
-            </button>
-          )}
-          <button type="button" style={linkBtn} onClick={onHistorial}>
-            {abierto === "historial" ? "Cerrar" : "Historial"}
-          </button>
-        </td>
+        {conEspera && (
+          <td style={td}>
+            {a.pasoNombre ? (
+              <span title={a.pasos.length > 1 ? `Paso ${a.pasoActual + 2} de ${a.pasos.length + 1}` : undefined}>
+                <strong>{a.pasoNombre}</strong>
+                <div style={{ fontSize: 12.5, color: "var(--tc-gray-700)" }}>{a.responsables.length ? a.responsables.join(", ") : "Sin asignar: solo administradores"}</div>
+              </span>
+            ) : rechazo ? (
+              <span title="La versión corregida no entra sola a este flujo: aparece como aviso en el archivo.">
+                <strong>Corregir</strong>
+                <div style={{ fontSize: 12.5, color: "#a1261b" }}>Motivo: {rechazo.comentario}</div>
+              </span>
+            ) : null}
+          </td>
+        )}
+        {conAcciones && (
+          <td style={{ ...td, whiteSpace: "nowrap" }}>
+            {puede && (
+              <button type="button" style={{ ...acceptButton, ...pequeno, display: "block", marginBottom: 4 }} onClick={onDecidir}>
+                {abierto === "decidir" ? "Cerrar" : "Decidir"}
+              </button>
+            )}
+            {trasladable && sinCarpeta(a) && (
+              <button type="button" style={{ ...linkBtn, display: "block", marginBottom: 4 }} onClick={onCarpeta} title="Copiar la versión aprobada a una carpeta donde tengas permiso">
+                {abierto === "carpeta" ? "Cerrar" : a.traslado?.versionId === a.versionAprobadaId ? "Poner en otra carpeta…" : "Poner en una carpeta…"}
+              </button>
+            )}
+          </td>
+        )}
       </tr>
       {abierto === "decidir" && (
         <tr>
-          <td style={{ ...td, background: "#f6f8fb" }} colSpan={4}>
+          <td style={{ ...td, background: "#f6f8fb" }} colSpan={columnas}>
             <Decision api={api} projectId={projectId} a={a} propia={propia} onDecidido={onDecidido} />
           </td>
         </tr>
       )}
       {abierto === "carpeta" && (
         <tr>
-          <td style={{ ...td, background: "#f6f8fb" }} colSpan={4}>
+          <td style={{ ...td, background: "#f6f8fb" }} colSpan={columnas}>
             <PonerEnCarpeta api={api} projectId={projectId} a={a} onTraslado={onTraslado} />
-          </td>
-        </tr>
-      )}
-      {abierto === "historial" && (
-        <tr>
-          <td style={{ ...td, background: "#f6f8fb" }} colSpan={4}>
-            {historial?.error && <Notice kind="error">{historial.error}</Notice>}
-            {!historial?.entradas && !historial?.error && "Cargando…"}
-            {historial?.entradas && historial.entradas.length === 0 && "Sin historial."}
-            {historial?.entradas && historial.entradas.length > 0 && (
-              <ul style={{ margin: 0, paddingLeft: 18, display: "grid", gap: 4, fontSize: 13 }}>
-                {historial.entradas.map((e) => (
-                  <li key={e.id}>
-                    <strong>{fechaHora(e.ocurrido ?? e.creado)}</strong>
-                    {e.usuario ? ` · ${e.usuario}` : ""} · {e.detalle}
-                  </li>
-                ))}
-              </ul>
-            )}
           </td>
         </tr>
       )}

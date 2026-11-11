@@ -4824,6 +4824,35 @@ Código: [`components/flujo-aprobacion/EditorFlujo.tsx`](components/flujo-aproba
 `Explorador` de Publicar, y guarda la ruta igual) y `FlujoAprobacionApp.tsx` (`ventanaEditor`: Nuevo y Editar ya no
 van en el panel).
 
+### Panel del flujo más limpio (11-11-2026)
+
+Pedido por el dueño con dos capturas («ocultar textos para descontaminar la
+vista»). Nada se borra: lo que se quitó de la vista sale como **texto emergente**
+al pasar el mouse.
+
+- **Detalles**: el recuadro gris «Flujo cerrado desde la primera decisión…»
+  pasa a una etiqueta pequeña **«Cerrado»** junto al estado; el texto completo
+  sale al pasar el mouse.
+- **Archivos**, en la tabla:
+  - Bajo el nombre ya no salen la carpeta ni «Subió …»: van en el texto
+    emergente del nombre (que sigue abriendo la versión en Trimble).
+  - Bajo el estado ya no salen las firmas («✓ Revisa: …») ni «➜ En «carpeta»:
+    versión 1»: van en el texto emergente de la etiqueta del estado. Una copia
+    que necesita atención (error, pendiente, otro archivo con ese nombre)
+    **sigue visible**, con sus botones; también el aviso de versión nueva.
+  - La columna **Espera** solo sale si algún archivo de la lista espera un paso
+    o está rechazado (paso y responsables; o «Corregir» con el motivo; el resto
+    en el texto emergente). Sin nada esperando, sin «—».
+  - Se quitó el enlace **Historial** de cada archivo: el bloque **Historial**
+    del flujo, más abajo, tiene todo. La última columna solo sale con
+    **Decidir** o **Poner en una carpeta…**.
+- **Permisos de Trimble** ya no aparece como bloque fijo: sale cuando se pide
+  con **⋮ → Revisar permisos de Trimble**.
+
+Código: `components/flujo-aprobacion/Archivos.tsx` (`conEspera`,
+`conAcciones`, `columnas`, `ayudaArchivo`, `ayudaEstado`) y
+`PanelFlujo.tsx` (etiqueta «Cerrado», `conPermisos`).
+
 ### Guía rápida
 
 1. Instale la extensión con

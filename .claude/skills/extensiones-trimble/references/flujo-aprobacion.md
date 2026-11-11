@@ -727,6 +727,20 @@ y «‹», carpetas con «›», archivos con casilla y versión, «Marcar todos
 conservadas entre carpetas; los ya elegidos salen marcados y deshabilitados;
 `maximo` = MAX_ARCHIVOS − elegidos; ruta `carpeta.ruta.join(" / ") + nombre`
 (igual que el Explorador). Escape cierra solo ese cuadro (`EditorFlujo` ignora
-Escape mientras `eligiendo`). El `Explorador` de Publicar ya no se usa aquí. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+Escape mientras `eligiendo`). El `Explorador` de Publicar ya no se usa aquí.
+
+## Panel más limpio (11-11-2026)
+
+Pedido con capturas («ocultar textos»): lo quitado pasa a `title`, nada se
+borra. `PanelFlujo`: el recuadro «Flujo cerrado…» es ahora una etiqueta
+«Cerrado» con el texto en `title`; el bloque «Permisos de Trimble» solo se
+monta tras ⋮ → «Revisar permisos de Trimble» (`conPermisos`). `Archivos`:
+carpeta y «Subió» en el `title` del nombre (`ayudaArchivo`); firmas y la copia
+«hecho» en el `title` de la etiqueta de estado (`ayudaEstado`); `EstadoTraslado`
+solo se ve si la copia no está `hecho` (tiene botones); columna Espera solo si
+alguna fila visible espera o está rechazada (`conEspera`), la de acciones solo
+con Decidir/Poner en carpeta (`conAcciones`), `colSpan={columnas}`. Se quitó el
+historial por archivo (`verHistorial`, `api.historial(undefined, id)` ya no se
+usa aquí): el bloque Historial del flujo lo tiene. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

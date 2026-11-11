@@ -154,7 +154,9 @@ export default function PanelFlujo({
     }
   }
 
+  const [conPermisos, setConPermisos] = useState(false);
   const verPermisos = () => {
+    setConPermisos(true);
     setAbiertas((x) => new Set([...x, "permisos"]));
     setTimeout(() => permisosRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
   };
@@ -217,6 +219,14 @@ export default function PanelFlujo({
         <div style={{ marginBottom: 10, display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
           <EtiquetaEstado estado={fila.estado} ayuda={ayudaEstado(fila)} desactivado={!f.activo} />
           <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>{fila.detalleEstado}</span>
+          {fila.cierre && (
+            <span
+              title={`Flujo cerrado desde la primera decisión (${describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF, y reactivarlo cuando haya una versión nueva.`}
+              style={{ fontSize: 12, color: "var(--tc-gray-500)", border: "1px solid #d9dde3", borderRadius: 3, padding: "1px 7px", cursor: "help" }}
+            >
+              Cerrado
+            </span>
+          )}
         </div>
         {fila.conVersionNueva > 0 && (
           <div style={{ margin: "0 0 10px", fontSize: 13, color: "#7a4b00", background: "#fff7e6", border: "1px solid #f3d9a4", borderRadius: 4, padding: "7px 10px" }}>
@@ -252,11 +262,6 @@ export default function PanelFlujo({
             )}
           </div>
         )}
-        {fila.cierre && (
-          <p style={{ margin: "0 0 10px", fontSize: 13, color: "var(--tc-gray-700)", background: "#f3f4f6", border: "1px solid #e5e7eb", borderRadius: 4, padding: "7px 10px" }}>
-            <strong>Flujo cerrado</strong> desde la primera decisión ({describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF, y reactivarlo cuando haya una versión nueva.
-          </p>
-        )}
         <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.vencido ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.vencido ? " (vencido, con archivos esperando decisión)" : ""}</span> : "Sin fecha"}</Dato>
         <Dato etiqueta="Pasos y responsables">
           <div>
@@ -282,7 +287,7 @@ export default function PanelFlujo({
         <Archivos key={f.id} api={api} projectId={projectId} flujoId={f.id} datos={archivos} error={errorArchivos} onCambio={onCambioArchivos} />
       </Bloque>
 
-      {puede && (
+      {puede && conPermisos && (
         <div ref={permisosRef}>
           <Bloque titulo="Permisos de Trimble" abierto={abiertas.has("permisos")} onAlternar={() => alternar("permisos")}>
             <Permisos api={api} flujoId={f.id} />
