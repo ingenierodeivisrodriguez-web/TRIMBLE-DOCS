@@ -4916,6 +4916,21 @@ ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
 - La barra azul «Archivos revisados: no hay versiones nuevas · Revisar ahora»
   quedó como una línea pequeña debajo de las tarjetas; cuando la revisión
   encuentra versiones nuevas o errores, sale el aviso completo como antes.
+- **«Abrió el archivo» en el historial** (pedido del mismo día, con captura;
+  aceptado «anotando solo a quien recibió el aviso»): cuando la persona avisada
+  abre el archivo **desde la extensión** (clic en el nombre del archivo en la
+  tabla, o «Ábrela en Trimble» al decidir), el historial anota, por ejemplo:
+  «Abrió la versión 1 de «CT-0001…» como responsable de «revisa»; lo avisó la
+  tarea de Trimble FLUJO-10 del 11-11-2026 13:38 (2 minutos antes)».
+  - Se anota solo a quien recibió el aviso: el responsable del paso que espera
+    (o alguien de su grupo) y, si el archivo fue rechazado, quien lo subió («que
+    le rechazaron, para corregirla»). A los demás no.
+  - Solo la primera vez que cada persona abre cada versión; con una versión
+    nueva se anota otra vez. Sale también en el PDF de trazabilidad.
+  - **Límite**: Trimble no registra quién abre un archivo en su visor (su
+    registro de actividad solo tiene descargas, `FILE_DOWNLOAD`), así que si la
+    persona lo abre directo desde el explorador de Trimble no se puede anotar.
+  - Si anotar falla, el archivo se abre igual.
 - **Prueba de conexión → tarea**: prueba primero este formato (código
   «PRUEBA-hhmmss», título, vencimiento mañana, tipo «Flujo de aprobación», luego
   «Solicitud»…) y dice qué aceptó Trimble; después de cerrarla espera 4

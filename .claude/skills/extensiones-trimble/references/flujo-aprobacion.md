@@ -783,6 +783,18 @@ activos y, por estado, `{ flujos, archivos }`, de todas las filas sin filtrar) y
 `Tablero.tsx` con 4 tarjetas (Flujos, Por revisar, Por aprobar, Aprobados) que
 fijan `filtro.estado` al hacer clic (otro clic lo quita). `RevisionCarpetas`
 sin novedades es una línea fina con «Revisar ahora»; con cambios o errores, el
-`Notice` de antes. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+`Notice` de antes.
+«Abrió el archivo» (11-11-2026, aceptado «solo a quien recibió el aviso»):
+`apertura.ts` (`planApertura`, `registrarApertura`, `lapso`), ruta `POST
+/api/flujo-aprobacion/abierto` (`{ archivoId }` → `{ anotado }`), `api.abierto`;
+`Archivos.tsx` llama `onAbierto` en el clic del nombre y de «Ábrela en Trimble»
+(sin esperar; si `anotado`, `onCambio()` recarga el historial). Se anota si
+quien abre es responsable del paso que espera (persona o miembro del grupo) o
+quien subió una versión rechazada; una vez por persona y `version` (busca
+`archivo-abierto` en el historial del archivo); la tarea que lo avisó sale de
+`a.tareas` (misma versión y paso, o `correccion`). Acción `archivo-abierto` =
+«Abrió el archivo» en `ACCIONES` (sale en el PDF). Trimble no registra
+aperturas en su visor: su `POST /activities/list` solo trae `FILE_DOWNLOAD` (no
+hay FILE_VIEW); leer esas descargas sería una fase aparte si el dueño la pide. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

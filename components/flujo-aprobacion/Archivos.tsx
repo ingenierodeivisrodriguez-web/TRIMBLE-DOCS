@@ -153,6 +153,13 @@ export default function Archivos({ api, projectId, flujoId, datos, error, onCamb
                     onCambio();
                   }}
                   trasladable={trasladableDe(a)}
+                  onAbierto={() =>
+                    // «Abrió el archivo» in the history (11-11-2026): never in the way of opening it.
+                    void api
+                      .abierto(a.id)
+                      .then((r) => r.anotado && onCambio())
+                      .catch(() => undefined)
+                  }
                   onTraslado={(texto, err) => {
                     setResultado({ kind: err ? "error" : "info", texto });
                     if (!err) setAbierto(null);
@@ -183,6 +190,7 @@ function FilaArchivo({
   onDecidido,
   trasladable,
   onTraslado,
+  onAbierto,
 }: {
   api: FlujoApi;
   projectId: string;
@@ -200,6 +208,8 @@ function FilaArchivo({
   onDecidido: (r: { mensaje: string; aviso: string | null }) => void;
   trasladable: boolean;
   onTraslado: (texto: string, error: boolean) => void;
+  /** The file was opened from the extension (to note it in the history). */
+  onAbierto: () => void;
 }) {
   const [color, fondo] = COLOR[a.estado];
   // The folder: the path without its last part (the name there may be a newer version's).
@@ -214,7 +224,7 @@ function FilaArchivo({
     <>
       <tr style={{ background: a.estado === "nueva-version" ? "#fffaf2" : undefined }}>
         <td style={td}>
-          <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={{ ...linkBtn, fontWeight: 600 }} title={ayudaArchivo}>
+          <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={{ ...linkBtn, fontWeight: 600 }} title={ayudaArchivo} onClick={onAbierto}>
             {a.nombre}
           </a>
         </td>
@@ -260,7 +270,7 @@ function FilaArchivo({
       {abierto === "decidir" && (
         <tr>
           <td style={{ ...td, background: "#f6f8fb" }} colSpan={columnas}>
-            <Decision api={api} projectId={projectId} a={a} propia={propia} onDecidido={onDecidido} />
+            <Decision api={api} projectId={projectId} a={a} propia={propia} onDecidido={onDecidido} onAbierto={onAbierto} />
           </td>
         </tr>
       )}
@@ -395,7 +405,21 @@ function PonerEnCarpeta({ api, projectId, a, onTraslado }: { api: FlujoApi; proj
  * version: leave it where it is, or put it in a folder too (the one used
  * before is proposed).
  */
-function Decision({ api, projectId, a, propia, onDecidido }: { api: FlujoApi; projectId: string; a: ArchivoInfo; propia: boolean; onDecidido: (r: { mensaje: string; aviso: string | null }) => void }) {
+function Decision({
+  api,
+  projectId,
+  a,
+  propia,
+  onDecidido,
+  onAbierto,
+}: {
+  api: FlujoApi;
+  projectId: string;
+  a: ArchivoInfo;
+  propia: boolean;
+  onDecidido: (r: { mensaje: string; aviso: string | null }) => void;
+  onAbierto: () => void;
+}) {
   const [comentario, setComentario] = useState("");
   const [ocupado, setOcupado] = useState<"aprobar" | "rechazar" | null>(null);
   const [error, setError] = useState("");
@@ -432,7 +456,7 @@ function Decision({ api, projectId, a, propia, onDecidido }: { api: FlujoApi; pr
     <div style={{ display: "grid", gap: 8, maxWidth: 760 }}>
       <div style={{ fontSize: 13.5 }}>
         Decides sobre la <strong>versión {a.revision ?? "?"}</strong> de «{a.nombre}» en el paso <strong>«{a.pasoNombre}»</strong>.{" "}
-        <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={linkBtn}>
+        <a href={a.enlace} target="_blank" rel="noopener noreferrer" style={linkBtn} onClick={onAbierto}>
           Ábrela en Trimble
         </a>{" "}
         antes de decidir.

@@ -40,6 +40,8 @@ export interface FlujoApi {
   trazabilidad(filtro: Record<string, string>): Promise<{ trazas: Traza[]; filtro: FiltroTraza; hitos: Record<string, string>; por: string }>;
   comentarios(flujoId: string): Promise<{ comentarios: Comentario[] }>;
   comentar(flujoId: string, texto: string): Promise<{ comentarios: Comentario[] }>;
+  /** Notes that the caller opened the file from the extension (only the notified person, first time per version). */
+  abierto(archivoId: string): Promise<{ anotado: boolean }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -77,5 +79,6 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     },
     comentarios: (flujoId) => request(`/comentarios?flujoId=${encodeURIComponent(flujoId)}`),
     comentar: (flujoId, texto) => post("/comentarios", { flujoId, texto }),
+    abierto: (archivoId) => post("/abierto", { archivoId }),
   };
 }
