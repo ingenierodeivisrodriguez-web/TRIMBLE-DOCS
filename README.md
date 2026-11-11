@@ -4881,6 +4881,11 @@ ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
   aceptó «Flujo de aprobación»)»). Sin permiso (401/403) no insiste.
 - Sin código todavía (antes de ejecutar el SQL), la tarea va sin código y
   Trimble le pone el suyo.
+- **Lista** (pedido del mismo día, con captura): se quitó el filtro **Grupos**
+  (no se usa; quedan Propietario, Usuarios, Estado, Fecha de vencimiento y
+  «Tengo por revisar») y los flujos salen **del más nuevo al más viejo** según su
+  código (FLUJO-12, FLUJO-11…), activos o desactivados; los que aún no tienen
+  código, al final.
 - **Prueba de conexión → tarea**: prueba primero este formato (código
   «PRUEBA-hhmmss», título, vencimiento mañana, tipo «Flujo de aprobación», luego
   «Solicitud»…) y dice qué aceptó Trimble; después de cerrarla espera 4

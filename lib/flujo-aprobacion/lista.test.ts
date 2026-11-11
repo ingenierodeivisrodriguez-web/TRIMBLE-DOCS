@@ -46,10 +46,20 @@ const DOS_PASOS = pasos(null, null);
 /** A registered file waiting at step `pasoActual` of a two-step flow (Revisa, Aprueba). */
 const archivo = (flujoId: string, estado: EstadoArchivo, meToca = false, pasoActual = 0, conPasos: PasoFlujo[] = DOS_PASOS) => ({ flujoId, estado, meToca, pasos: conPasos, pasoActual });
 
-const TORRE = flujo("f1", "Aprobar Torre 1", { vence: "2026-11-05", pasos: pasos({ tipo: "grupo", id: "g-arq", nombre: "Arquitectura" }, persona("pepe", "Pepe Gómez")) });
-const ESTRUCTURA = flujo("f2", "Aprobar estructura", { vence: "2026-11-10", creadoPor: "Deivis", pasos: pasos(persona("luz", "Luz Mora"), persona("luz", "Luz Mora")) });
-const VIEJO = flujo("f3", "Aprobar anteproyecto", { activo: false });
+const TORRE = flujo("f1", "Aprobar Torre 1", { codigo: 2, vence: "2026-11-05", pasos: pasos({ tipo: "grupo", id: "g-arq", nombre: "Arquitectura" }, persona("pepe", "Pepe Gómez")) });
+const ESTRUCTURA = flujo("f2", "Aprobar estructura", { codigo: 3, vence: "2026-11-10", creadoPor: "Deivis", pasos: pasos(persona("luz", "Luz Mora"), persona("luz", "Luz Mora")) });
+const VIEJO = flujo("f3", "Aprobar anteproyecto", { codigo: 1, activo: false });
 const ARCHIVOS = [archivo("f1", "pendiente", true), archivo("f1", "nueva-version", false, 1), archivo("f1", "aprobado"), archivo("f2", "aprobado")];
+
+test("los flujos salen del más nuevo al más viejo según su código; los que aún no tienen código, al final", () => {
+  const sinCodigo = flujo("f9", "Sin número");
+  const nuevoDesactivado = flujo("f4", "Nuevo desactivado", { codigo: 4, activo: false });
+  assert.deepEqual(
+    filasFlujos([VIEJO, sinCodigo, TORRE, nuevoDesactivado, ESTRUCTURA], [], HOY).map((f) => f.flujo.codigo ?? null),
+    [4, 3, 2, 1, null],
+    "only by code: a deactivated flow keeps its place"
+  );
+});
 
 test("cada fila trae archivos, pendientes, lo que me toca, responsables por paso, estado del documento y vencimiento", () => {
   const filas = filasFlujos([VIEJO, ESTRUCTURA, TORRE], ARCHIVOS, HOY);
@@ -93,10 +103,7 @@ test("los filtros: propietario, persona o grupo asignado, estado, vencimiento, t
   assert.deepEqual(hitos({ texto: "TORRE" }), ["Aprobar Torre 1"]);
   const o = opcionesFiltro(filas);
   assert.deepEqual(o.propietarios, ["Ana Ruiz", "Deivis"]);
-  assert.deepEqual(
-    o.grupos.map((g) => g.nombre),
-    ["Arquitectura"]
-  );
+  assert.equal("grupos" in o, false, "no Grupos filter");
   assert.deepEqual(
     o.personas.map((p) => p.nombre),
     ["Luz Mora", "Pepe Gómez"]

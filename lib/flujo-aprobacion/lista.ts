@@ -117,12 +117,13 @@ export function filasFlujos(flujos: Flujo[], archivos: ArchivoLista[], hoy: stri
         conVersionNueva: suyos.filter((a) => a.estado !== "retirado" && !!a.versionNueva).length,
       };
     })
-    .sort((a, b) => Number(b.flujo.activo) - Number(a.flujo.activo) || porNombre.compare(a.flujo.hito, b.flujo.hito));
+    // Newest first by code (FLUJO-12, FLUJO-11…, 11-11-2026); flows still without a code go last, by name.
+    .sort((a, b) => (b.flujo.codigo ?? 0) - (a.flujo.codigo ?? 0) || porNombre.compare(a.flujo.hito, b.flujo.hito));
 }
 
 export interface FiltroLista {
   propietario?: string;
-  /** "persona:id" or "grupo:id": flows where they are responsible for a step. */
+  /** "persona:id": flows where that person is responsible for a step ("grupo:id" still works, but there is no Grupos filter since 11-11-2026). */
   quien?: string;
   /** A documents' state, or "desactivado" for deactivated flows. */
   estado?: EstadoDocumento | "desactivado" | "";
@@ -131,15 +132,13 @@ export interface FiltroLista {
   texto?: string;
 }
 
-/** The options of the dropdowns, from what the flows have. */
-export function opcionesFiltro(filas: FilaFlujo[]): { propietarios: string[]; personas: { id: string; nombre: string }[]; grupos: { id: string; nombre: string }[] } {
+/** The options of the dropdowns, from what the flows have (no Grupos filter: the owner doesn't use it, 11-11-2026). */
+export function opcionesFiltro(filas: FilaFlujo[]): { propietarios: string[]; personas: { id: string; nombre: string }[] } {
   const porNombre = new Intl.Collator("es", { sensitivity: "base" });
   const propietarios = [...new Set(filas.map((f) => f.flujo.creadoPor).filter((x): x is string => !!x))].sort(porNombre.compare);
   const personas = new Map<string, string>();
-  const grupos = new Map<string, string>();
-  for (const f of filas) for (const r of responsablesDe(f.flujo)) (r.tipo === "grupo" ? grupos : personas).set(r.id, r.nombre);
-  const lista = (m: Map<string, string>) => [...m].map(([id, n]) => ({ id, nombre: n })).sort((a, b) => porNombre.compare(a.nombre, b.nombre));
-  return { propietarios, personas: lista(personas), grupos: lista(grupos) };
+  for (const f of filas) for (const r of responsablesDe(f.flujo)) if (r.tipo === "persona") personas.set(r.id, r.nombre);
+  return { propietarios, personas: [...personas].map(([id, nombre]) => ({ id, nombre })).sort((a, b) => porNombre.compare(a.nombre, b.nombre)) };
 }
 
 export function filtrarFilas(filas: FilaFlujo[], filtro: FiltroLista, hoy: string): FilaFlujo[] {

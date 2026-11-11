@@ -765,6 +765,9 @@ solo con 400/409/422 y devuelve `etiqueta`; `notificar` calcula
 guarda `TareaTrimble.etiqueta`; el historial dice «Tarea de Trimble FLUJO-01
 para…» y «Cerró la tarea de Trimble FLUJO-01 «…»». Falta confirmar en Trimble
 real si acepta el tipo propio y etiquetas repetidas (la prueba de conexión lo
-dice). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+dice). Lista: `filasFlujos` ordena por `codigo` descendente (sin código al
+final, por nombre; ya no pone primero los activos) y `opcionesFiltro` ya no
+devuelve `grupos`: se quitó el filtro Grupos (`filtro.quien` con «grupo:» sigue
+funcionando por dentro). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

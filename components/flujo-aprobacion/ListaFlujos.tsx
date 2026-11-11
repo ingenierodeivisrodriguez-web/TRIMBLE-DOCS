@@ -75,7 +75,7 @@ export default function ListaFlujos({
   total: number;
   filtro: FiltroLista;
   onFiltro: (f: FiltroLista) => void;
-  opciones: { propietarios: string[]; personas: { id: string; nombre: string }[]; grupos: { id: string; nombre: string }[] };
+  opciones: { propietarios: string[]; personas: { id: string; nombre: string }[] };
   seleccionado: string | null;
   onSeleccionar: (id: string) => void;
   /** Whoever created the flow, or a project administrator. */
@@ -105,14 +105,6 @@ export default function ListaFlujos({
           {opciones.personas.map((p) => (
             <option key={p.id} value={`persona:${p.id}`}>
               {p.nombre}
-            </option>
-          ))}
-        </select>
-        <select value={filtro.quien?.startsWith("grupo:") ? filtro.quien : ""} onChange={(e) => cambiar({ quien: e.target.value })} style={filtroSelect} aria-label="Grupos">
-          <option value="">Grupos</option>
-          {opciones.grupos.map((g) => (
-            <option key={g.id} value={`grupo:${g.id}`}>
-              {g.nombre}
             </option>
           ))}
         </select>
