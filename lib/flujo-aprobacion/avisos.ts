@@ -7,6 +7,7 @@
  * A ToDo for a group that Trimble refuses is sent again to its members.
  */
 import type { Respuesta } from "../compras/cde";
+import { codigoFlujo } from "./flujos";
 import { corto } from "./prueba";
 import { responsablesArchivo } from "./registro";
 import type { ArchivoRegistro, Aviso, Firma, Flujo } from "./types";
@@ -16,8 +17,29 @@ export const MAX_EN_AVISO = 15;
 
 const recorte = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
+/** What a ToDo needs from its flow. */
+export type FlujoTarea = Pick<Flujo, "hito" | "pasos"> & Partial<Pick<Flujo, "notas" | "vence" | "codigo">>;
+
+/**
+ * The texts Trimble shows on the flow's ToDos (11-11-2026): the code on the
+ * line above, only the flow's title, only its description (the title again
+ * when it has none: Trimble requires one) and its due date at noon in Colombia,
+ * so it shows that same day.
+ */
+export function textosTarea(flujo: Pick<Flujo, "hito"> & Partial<Pick<Flujo, "notas" | "vence" | "codigo">>): NonNullable<Aviso["trimble"]> {
+  return {
+    label: codigoFlujo(flujo.codigo),
+    title: recorte(flujo.hito, 120),
+    description: recorte((flujo.notas ?? "").trim() || flujo.hito, 3000),
+    dueDate: flujo.vence ? `${flujo.vence}T17:00:00+0000` : null,
+  };
+}
+
+/** The ToDo types tried, in order: the owner's wish, then «Solicitud» (Trimble's list is fixed). */
+export const TIPOS_TAREA = ["Flujo de aprobación", "Request"] as const;
+
 /** One ToDo per (step, same people) for the files of a flow that now wait for someone. */
-export function avisosRevision(archivos: ArchivoRegistro[], flujo: Pick<Flujo, "hito" | "pasos">, enlace: (a: ArchivoRegistro) => string): Aviso[] {
+export function avisosRevision(archivos: ArchivoRegistro[], flujo: FlujoTarea, enlace: (a: ArchivoRegistro) => string): Aviso[] {
   const grupos = new Map<string, { archivos: ArchivoRegistro[]; para: Aviso["para"] }>();
   for (const a of archivos) {
     const resp = responsablesArchivo(a, flujo);
@@ -40,6 +62,7 @@ export function avisosRevision(archivos: ArchivoRegistro[], flujo: Pick<Flujo, "
         [`Flujo de aprobación «${hito}»: te toca el paso «${paso}».`, ...lineas, ...mas, `Apruébalos o recházalos en la extensión Flujo de aprobación: abre el flujo «${hito}» → Archivos → Me toca.`].join("\n"),
         3000
       ),
+      trimble: textosTarea(flujo),
       para,
       archivos: as.map((x) => x.id),
       tipo: "revision" as const,
@@ -49,8 +72,9 @@ export function avisosRevision(archivos: ArchivoRegistro[], flujo: Pick<Flujo, "
 }
 
 /** The ToDo to the uploader of a rejected version, with the reason (null when Trimble didn't say who uploaded it). */
-export function avisoRechazo(a: ArchivoRegistro, firma: Firma, hito: string, enlace: string): Aviso | null {
+export function avisoRechazo(a: ArchivoRegistro, firma: Firma, flujo: Pick<Flujo, "hito"> & Partial<Pick<Flujo, "notas" | "vence" | "codigo">>, enlace: string): Aviso | null {
   if (!a.subidoPorId) return null;
+  const hito = flujo.hito;
   const carpeta = a.ruta.slice(0, Math.max(0, a.ruta.length - a.nombre.length - 3));
   return {
     titulo: recorte(`Corregir: ${a.nombre} (rechazado) — ${hito}`, 120),
@@ -63,6 +87,7 @@ export function avisoRechazo(a: ArchivoRegistro, firma: Firma, hito: string, enl
       ].join("\n"),
       3000
     ),
+    trimble: textosTarea(flujo),
     para: [{ tipo: "persona", id: a.subidoPorId, nombre: a.subidoPor }],
     archivos: [a.id],
     tipo: "correccion",
@@ -100,32 +125,88 @@ export async function cerrarTarea(actualizar: (cuerpo: Record<string, unknown>) 
   return { ok: false, estado: null, mensaje: ultima ? `Trimble no la cerró (${ultima.estado}): ${corto(ultima)}` : "Trimble no la cerró." };
 }
 
+/** A ToDo body to try, the code it puts on it and what it left out (for the history). */
+export interface VarianteTarea {
+  cuerpo: Record<string, unknown>;
+  etiqueta: string | null;
+  nota: string;
+}
+
+/**
+ * The ToDo bodies tried, in order, until Trimble accepts one: the flow's code,
+ * title, description, due date and type «Flujo de aprobación»; then type
+ * «Solicitud», then no type; the code with a suffix («FLUJO-01-2») in case
+ * Trimble wants it unique; without the due date; and the format of before
+ * (summary + links), which is known to work. A notice without the flow's
+ * texts (older callers) only sends that last one.
+ */
+export function variantesTarea(projectId: string, aviso: Aviso, assignees: unknown[], otraEtiqueta: string | null = null): VarianteTarea[] {
+  const anterior: VarianteTarea = { cuerpo: { projectId, label: aviso.titulo, description: aviso.descripcion, assignees }, etiqueta: null, nota: "" };
+  const t = aviso.trimble;
+  if (!t) return [anterior];
+  const out: VarianteTarea[] = [];
+  const etiquetas = t.label ? [t.label, ...(otraEtiqueta && otraEtiqueta !== t.label ? [otraEtiqueta] : [])] : [null];
+  const base = (etiqueta: string | null) => ({ projectId, ...(etiqueta ? { label: etiqueta } : {}), title: t.title, description: t.description, assignees });
+  for (const etiqueta of etiquetas) {
+    const repetida = etiqueta && etiqueta !== t.label ? `«${t.label}» ya estaba usada en Trimble` : "";
+    for (const tipo of [...TIPOS_TAREA, null]) {
+      const sinTipo = tipo === "Request" ? "tipo «Solicitud»: Trimble no aceptó «Flujo de aprobación»" : tipo === null ? "sin tipo: Trimble no aceptó «Flujo de aprobación» ni «Solicitud»" : "";
+      out.push({ cuerpo: { ...base(etiqueta), ...(t.dueDate ? { dueDate: t.dueDate } : {}), ...(tipo ? { type: tipo } : {}) }, etiqueta, nota: [sinTipo, repetida].filter(Boolean).join("; ") });
+    }
+  }
+  const ultima = etiquetas[etiquetas.length - 1];
+  if (t.dueDate) out.push({ cuerpo: base(ultima), etiqueta: ultima, nota: "sin tipo ni fecha de vencimiento: Trimble no los aceptó" });
+  out.push({ ...anterior, nota: "con el texto de antes: Trimble no aceptó el título del flujo" });
+  return out;
+}
+
+/** Statuses after which another body may work (a field Trimble didn't take); any other stops trying. */
+const REINTENTAR = [400, 409, 422];
+
 /** Creates the ToDo in Trimble; a group Trimble refuses is replaced by its members. Never throws. */
 export async function enviarAviso(
   crear: (cuerpo: Record<string, unknown>) => Promise<Respuesta>,
   projectId: string,
   aviso: Aviso,
-  miembros: (groupId: string) => Promise<{ id: string }[]>
-): Promise<{ ok: boolean; todoId: string | null; mensaje: string }> {
-  const cuerpo = (assignees: { id: string; type: string }[]) => ({ projectId, label: aviso.titulo, description: aviso.descripcion, assignees });
+  miembros: (groupId: string) => Promise<{ id: string }[]>,
+  /** The code to use if Trimble refuses the flow's one as repeated («FLUJO-01-2»). */
+  otraEtiqueta: string | null = null
+): Promise<{ ok: boolean; todoId: string | null; mensaje: string; etiqueta: string | null }> {
   const quienes = aviso.para.map((p) => p.nombre + (p.tipo === "grupo" ? " (grupo)" : "")).join(", ");
+  const id = (respuesta: unknown) => {
+    const v = (respuesta as { id?: unknown } | null)?.id;
+    return typeof v === "string" ? v : null;
+  };
+  const probar = async (assignees: { id: string; type: string }[]): Promise<{ r: Respuesta; v: VarianteTarea | null }> => {
+    let ultima: Respuesta = { estado: 0, cuerpo: null };
+    for (const v of variantesTarea(projectId, aviso, assignees, otraEtiqueta)) {
+      const r = await crear(v.cuerpo);
+      if (ok(r)) return { r, v };
+      ultima = r;
+      if (!REINTENTAR.includes(r.estado)) break;
+    }
+    return { r: ultima, v: null };
+  };
+  const hecho = (r: Respuesta, v: VarianteTarea, extra: string) => ({
+    ok: true,
+    todoId: id(r.cuerpo),
+    etiqueta: v.etiqueta,
+    mensaje: `Tarea de Trimble ${v.etiqueta ? `${v.etiqueta} ` : ""}para ${quienes}${extra}: «${aviso.titulo}»${v.nota ? ` (${v.nota})` : ""}.`,
+  });
   try {
-    const r = await crear(cuerpo(aviso.para.map((p) => ({ id: p.id, type: p.tipo === "grupo" ? "GROUP" : "USER" }))));
-    const id = (respuesta: unknown) => {
-      const v = (respuesta as { id?: unknown } | null)?.id;
-      return typeof v === "string" ? v : null;
-    };
-    if (ok(r)) return { ok: true, todoId: id(r.cuerpo), mensaje: `Tarea de Trimble para ${quienes}: «${aviso.titulo}».` };
+    const a = await probar(aviso.para.map((p) => ({ id: p.id, type: p.tipo === "grupo" ? "GROUP" : "USER" })));
+    if (a.v) return hecho(a.r, a.v, "");
+    const r = a.r;
     if (!aviso.para.some((p) => p.tipo === "grupo") || r.estado === 401 || r.estado === 403) {
-      return { ok: false, todoId: null, mensaje: `Trimble no creó la tarea para ${quienes} (${r.estado}): ${corto(r)}` };
+      return { ok: false, todoId: null, etiqueta: null, mensaje: `Trimble no creó la tarea para ${quienes} (${r.estado}): ${corto(r)}` };
     }
     const personas = new Set(aviso.para.filter((p) => p.tipo === "persona").map((p) => p.id));
     for (const g of aviso.para.filter((p) => p.tipo === "grupo")) for (const m of await miembros(g.id)) personas.add(m.id);
-    if (!personas.size) return { ok: false, todoId: null, mensaje: `Trimble no aceptó la tarea para el grupo y el grupo no tiene miembros: no se avisó a ${quienes}.` };
-    const otra = await crear(cuerpo([...personas].map((id) => ({ id, type: "USER" }))));
-    if (ok(otra)) return { ok: true, todoId: id(otra.cuerpo), mensaje: `Tarea de Trimble para ${quienes} (a cada miembro del grupo): «${aviso.titulo}».` };
-    return { ok: false, todoId: null, mensaje: `Trimble no creó la tarea para ${quienes} (${otra.estado}): ${corto(otra)}` };
+    if (!personas.size) return { ok: false, todoId: null, etiqueta: null, mensaje: `Trimble no aceptó la tarea para el grupo y el grupo no tiene miembros: no se avisó a ${quienes}.` };
+    const b = await probar([...personas].map((id) => ({ id, type: "USER" })));
+    if (b.v) return hecho(b.r, b.v, " (a cada miembro del grupo)");
+    return { ok: false, todoId: null, etiqueta: null, mensaje: `Trimble no creó la tarea para ${quienes} (${b.r.estado}): ${corto(b.r)}` };
   } catch (err) {
-    return { ok: false, todoId: null, mensaje: `No se pudo crear la tarea para ${quienes}: ${err instanceof Error ? err.message : String(err)}` };
+    return { ok: false, todoId: null, etiqueta: null, mensaje: `No se pudo crear la tarea para ${quienes}: ${err instanceof Error ? err.message : String(err)}` };
   }
 }

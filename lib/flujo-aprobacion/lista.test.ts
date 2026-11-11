@@ -1,10 +1,25 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cambiosFlujo, claveHito, describirCierre, primerasDecisiones, revisarDatos, textoCerrado } from "./flujos";
+import { cambiosFlujo, claveHito, codigoFlujo, describirCierre, primerasDecisiones, revisarDatos, textoCerrado } from "./flujos";
+import { memoryStore } from "./store";
 import { estadoDocumento, estadoDocumentos, estaVencido, filasFlujos, filtrarFilas, opcionesFiltro, responsablesFlujo, sumarDias } from "./lista";
 import type { EstadoArchivo, Flujo, PasoFlujo, Responsable } from "./types";
 
 const HOY = "2026-11-06";
+
+test("cada flujo tiene un código por proyecto en orden de creación: FLUJO-01, FLUJO-02…; se busca por código", async () => {
+  assert.equal(codigoFlujo(1), "FLUJO-01");
+  assert.equal(codigoFlujo(12), "FLUJO-12");
+  assert.equal(codigoFlujo(105), "FLUJO-105");
+  assert.equal(codigoFlujo(null), "");
+  const store = memoryStore();
+  const nuevo = (proyecto: string, hito: string) =>
+    store.crearFlujo({ proyecto, hito, hitoClave: hito, pasos: [], archivos: [], carpetas: [], destino: null, activo: true, creado: "", creadoPor: null, actualizado: "", actualizadoPor: null });
+  assert.deepEqual([(await nuevo("A", "uno")).codigo, (await nuevo("A", "dos")).codigo, (await nuevo("B", "otro")).codigo], [1, 2, 1]);
+  const filas = filasFlujos(await store.flujos("A"), [], HOY);
+  for (const q of ["FLUJO-02", "flujo 02", "flujo02"]) assert.deepEqual(filtrarFilas(filas, { texto: q }, HOY).map((f) => f.flujo.hito), ["dos"], q);
+  assert.deepEqual(filtrarFilas(filas, { texto: "uno" }, HOY).map((f) => f.flujo.hito), ["uno"]);
+});
 const persona = (id: string, nombre: string): Responsable => ({ tipo: "persona", id, nombre });
 const pasos = (revisa: Responsable | null, aprueba: Responsable | null): PasoFlujo[] => [
   { id: "p1", nombre: "Revisa", responsable: revisa },

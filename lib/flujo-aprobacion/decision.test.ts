@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Respuesta } from "../compras/cde";
-import { avisoRechazo, avisosRevision, enviarAviso, MAX_EN_AVISO } from "./avisos";
+import { avisoRechazo, avisosRevision, enviarAviso, MAX_EN_AVISO, textosTarea, variantesTarea } from "./avisos";
 import { Decisor, planDecision, puedeDecidir, revisarTexto } from "./decision";
 import type { ArchivoRegistro, PasoFlujo } from "./types";
 
@@ -116,11 +116,68 @@ test("los avisos juntan los archivos que esperan a las mismas personas en el mis
 test("el aviso de rechazo va a quien subió la versión, con el motivo y dónde subir la corrección", () => {
   const a = archivo();
   const r = planDecision(a, "rechazar", quien("luz"), false, "Faltan los ejes", AHORA);
-  const aviso = avisoRechazo(a, r.firma, "Aprobar Torre 1", "https://tc/modelo")!;
+  const aviso = avisoRechazo(a, r.firma, { hito: "Aprobar Torre 1" }, "https://tc/modelo")!;
   assert.equal(aviso.titulo, "Corregir: ARQ-T1.rvt (rechazado) — Aprobar Torre 1");
   assert.deepEqual(aviso.para, [{ tipo: "persona", id: "juan", nombre: "Juan Pérez" }]);
   assert.match(aviso.descripcion, /luz rechazó la versión 5 en «Revisa».*\nMotivo: Faltan los ejes\nCorrige el archivo y sube la versión nueva con el mismo nombre en la misma carpeta \(Obra \/ Arquitectura\)/);
-  assert.equal(avisoRechazo(archivo({ subidoPorId: null }), r.firma, "x", "u"), null);
+  assert.equal(avisoRechazo(archivo({ subidoPorId: null }), r.firma, { hito: "x" }, "u"), null);
+});
+
+test("la tarea de Trimble lleva el código del flujo, solo su título, solo su descripción y su fecha de vencimiento", () => {
+  assert.deepEqual(textosTarea({ hito: "CARGAR ARCHIVO", notas: "PERMITE CARGAR", vence: "2026-11-11", codigo: 1 }), {
+    label: "FLUJO-01",
+    title: "CARGAR ARCHIVO",
+    description: "PERMITE CARGAR",
+    dueDate: "2026-11-11T17:00:00+0000",
+  });
+  const sinNada = textosTarea({ hito: "Aprobar Torre 1", notas: "  ", vence: null, codigo: null });
+  assert.equal(sinNada.label, "", "before the SQL gives it a number: Trimble numbers the ToDo");
+  assert.equal(sinNada.description, "Aprobar Torre 1", "Trimble requires a description: the title again");
+  assert.equal(sinNada.dueDate, null);
+  assert.equal(textosTarea({ hito: "x", codigo: 105 }).label, "FLUJO-105");
+});
+
+test("si Trimble no acepta el tipo, la fecha o el código repetido, se prueba sin ese dato y al final con el texto de antes", () => {
+  const aviso = { titulo: "Revisar: a.pdf (Revisa) — X", descripcion: "detalle", para: [], archivos: ["a1"], trimble: { label: "FLUJO-03", title: "X", description: "D", dueDate: "2026-11-30T17:00:00+0000" } };
+  const v = variantesTarea("P", aviso, [{ id: "luz", type: "USER" }], "FLUJO-03-2");
+  assert.deepEqual(
+    v.map((x) => [x.cuerpo.label, x.cuerpo.type ?? null, x.cuerpo.dueDate ? "fecha" : null, x.cuerpo.title ?? null]),
+    [
+      ["FLUJO-03", "Flujo de aprobación", "fecha", "X"],
+      ["FLUJO-03", "Request", "fecha", "X"],
+      ["FLUJO-03", null, "fecha", "X"],
+      ["FLUJO-03-2", "Flujo de aprobación", "fecha", "X"],
+      ["FLUJO-03-2", "Request", "fecha", "X"],
+      ["FLUJO-03-2", null, "fecha", "X"],
+      ["FLUJO-03-2", null, null, "X"],
+      ["Revisar: a.pdf (Revisa) — X", null, null, null],
+    ]
+  );
+  assert.equal(v[0].nota, "");
+  assert.match(v[1].nota, /tipo «Solicitud»/);
+  assert.match(v[3].nota, /«FLUJO-03» ya estaba usada en Trimble/);
+  assert.deepEqual(variantesTarea("P", { ...aviso, trimble: undefined }, []).length, 1, "a notice without the flow's texts: the format of before");
+});
+
+test("Trimble rechaza el tipo propio y el código repetido: la tarea sale con «Solicitud» y FLUJO-03-2, y el historial lo dice", async () => {
+  const pedidos: Record<string, unknown>[] = [];
+  const crear = async (cuerpo: Record<string, unknown>): Promise<Respuesta> => {
+    pedidos.push(cuerpo);
+    if (cuerpo.type === "Flujo de aprobación") return { estado: 400, cuerpo: { message: "Invalid type" } };
+    if (cuerpo.label === "FLUJO-03") return { estado: 409, cuerpo: { message: "label already exists" } };
+    return { estado: 201, cuerpo: { id: "todo5" } };
+  };
+  const aviso = { titulo: "Revisar: a.pdf (Aprueba) — X", descripcion: "d", para: [{ tipo: "persona" as const, id: "pepe", nombre: "Pepe" }], archivos: ["a1"], trimble: { label: "FLUJO-03", title: "X", description: "D", dueDate: null } };
+  const r = await enviarAviso(crear, "P", aviso, async () => [], "FLUJO-03-2");
+  assert.equal(r.ok, true);
+  assert.equal(r.etiqueta, "FLUJO-03-2");
+  assert.equal(pedidos.length, 5);
+  assert.equal(r.mensaje, "Tarea de Trimble FLUJO-03-2 para Pepe: «Revisar: a.pdf (Aprueba) — X» (tipo «Solicitud»: Trimble no aceptó «Flujo de aprobación»; «FLUJO-03» ya estaba usada en Trimble).");
+  // Without permission it doesn't keep trying.
+  let veces = 0;
+  const sinPermiso = await enviarAviso(async () => (veces++, { estado: 403, cuerpo: "Forbidden" }), "P", aviso, async () => []);
+  assert.equal(sinPermiso.ok, false);
+  assert.equal(veces, 1);
 });
 
 test("si Trimble no acepta la tarea para un grupo, se manda a cada miembro; los errores no se lanzan", async () => {

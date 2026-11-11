@@ -695,17 +695,18 @@ por flujo y versión; proponer la carpeta de la copia anterior aunque sea otra
 fila. Sin la fase 2, una versión nueva no se puede revisar (el archivo queda
 en su flujo cerrado).
 
-Prueba real de cerrar tareas (10-11-2026, Laboratorio): `PATCH /todos/{id}`
-con `{ status: "CLOSED" }` respondió bien, pero al releerla seguía **`NEW`**: no
-se cerró, y `cerrarTarea` lo dio por hecho (solo mira la respuesta del PATCH).
-Swagger de Trimble (`UpdateToDoRequest`): `type, title, label, description,
+Cerrar tareas **funciona en Trimble real**: `PATCH /todos/{id}` con
+`{ status: "CLOSED" }` dejó «Cerrada» las tareas de «CARGAR ARCHIVO» y
+«prueeba de cerrar tarea» (captura del dueño, 11-11-2026; historial
+`tarea-cerrada`). La prueba de conexión había releído al instante y vio «NEW»
+(Trimble tarda): ahora espera `ESPERA_RELEER_MS` = 4000 (`deps.esperar`).
+Swagger de Trimble: `UpdateToDoRequest` = `type, title, label, description,
 dueDate, percentComplete, status, priority, assignees`; estados `NEW,
-IN_PROGRESS, RESOLVED, BLOCKED, CLOSED` (`DONE` no existe). Propuesto al dueño
-y **sin OK todavía**: confirmar releyendo con `GET /todos/{id}` (solo anotar
-«Cerró» si dice CLOSED), quitar DONE, y que la prueba intente variantes
-(CLOSED; RESOLVED→CLOSED; CLOSED + percentComplete 100; con label y
-description) mostrando la respuesta textual y el estado releído. Plan B: que el
-dueño copie con F12 → Red lo que manda Trimble al cerrar una tarea a mano.
+IN_PROGRESS, RESOLVED, BLOCKED, CLOSED`; `type` es una lista fija `Fault,
+Clash, Request, Inquiry, Remark, Comment, Issue, Solution`; `label` = «Unique
+label for the ToDo within a project» (ej. PROJ-21); `dueDate` ISO 8601 (ej.
+`2015-05-21T00:00:00+0000`); en `POST /todos` son obligatorios `description` y
+`projectId`.
 
 ## Cuadro flotante para crear y editar (10-11-2026)
 
@@ -741,6 +742,29 @@ solo se ve si la copia no está `hecho` (tiene botones); columna Espera solo si
 alguna fila visible espera o está rechazada (`conEspera`), la de acciones solo
 con Decidir/Poner en carpeta (`conAcciones`), `colSpan={columnas}`. Se quitó el
 historial por archivo (`verHistorial`, `api.historial(undefined, id)` ya no se
-usa aquí): el bloque Historial del flujo lo tiene. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+usa aquí): el bloque Historial del flujo lo tiene.
+
+## Código del flujo y texto de las tareas (11-11-2026)
+
+Pedido con captura de ToDo de Trimble; aceptado el plan. Columna
+`aprobacion_flujos.codigo` (int): trigger `aprobacion_codigo_flujo` (before
+insert, `pg_advisory_xact_lock(hashtext('aprobacion-codigo:'||proyecto))`,
+max+1), índice único `(proyecto, codigo)`, relleno de los existentes por
+`creado, id` después del máximo (re-ejecutable). `memoryStore.crearFlujo` hace
+lo mismo. `codigoFlujo(n)` → «FLUJO-01» (2 dígitos mínimo). Se ve en
+`ListaFlujos` (arriba del nombre), `PanelFlujo` (arriba del título), PDF
+(`trazabilidad` arma `hitos` como «FLUJO-01 · hito») y el buscador (`filtrarFilas`
+compara sin guiones ni espacios). Tarea: `Aviso.trimble = textosTarea(flujo)` =
+`{ label: código, title: hito, description: notas || hito, dueDate:
+`${vence}T17:00:00+0000` }`; `Aviso.titulo`/`descripcion` siguen como resumen
+para el historial y como último respaldo. `variantesTarea`: por cada etiqueta
+[código, código-n] × tipo [«Flujo de aprobación», «Request», sin tipo] con
+fecha; luego sin tipo ni fecha; luego el formato de antes. `enviarAviso` sigue
+solo con 400/409/422 y devuelve `etiqueta`; `notificar` calcula
+`otraEtiqueta` = código-(tareas distintas del flujo + 1) y `guardarTareas`
+guarda `TareaTrimble.etiqueta`; el historial dice «Tarea de Trimble FLUJO-01
+para…» y «Cerró la tarea de Trimble FLUJO-01 «…»». Falta confirmar en Trimble
+real si acepta el tipo propio y etiquetas repetidas (la prueba de conexión lo
+dice). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

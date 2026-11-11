@@ -33,7 +33,12 @@ export interface DepsPrueba {
   actualizarTarea?(todoId: string, cuerpo: Record<string, unknown>): Promise<Respuesta>;
   fetch?: typeof fetch;
   reloj?: () => number;
+  /** Waits before reading the closed ToDo again (Trimble takes a moment to show the new state). */
+  esperar?: (ms: number) => Promise<void>;
 }
+
+/** How long the test waits before reading the closed ToDo again (11-11-2026: read at once, it still said NEW). */
+export const ESPERA_RELEER_MS = 4000;
 
 /** Groups whose members are read (one request each). */
 export const MAX_GRUPOS = 40;
@@ -86,10 +91,19 @@ export function enlacesArchivo(projectId: string, a: { id: string; nombre: strin
   };
 }
 
-/** The ToDo bodies tried, in order, until Trimble accepts one. */
-export function formatosTarea(o: { projectId: string; titulo: string; descripcion: string; asignadoId: string; tipo: "USER" | "GROUP" }): { formato: string; cuerpo: Record<string, unknown> }[] {
+/**
+ * The ToDo bodies tried, in order, until Trimble accepts one: first the flows'
+ * format (11-11-2026: code above, title, description, due date and type
+ * «Flujo de aprobación», then «Solicitud», then without them), then the formats of before.
+ */
+export function formatosTarea(o: { projectId: string; titulo: string; descripcion: string; asignadoId: string; tipo: "USER" | "GROUP"; etiqueta?: string; vence?: string }): { formato: string; cuerpo: Record<string, unknown> }[] {
   const asignado = { id: o.asignadoId, type: o.tipo };
+  const nuevo = (tipo: string | null, conFecha: boolean) => ({ projectId: o.projectId, ...(o.etiqueta ? { label: o.etiqueta } : {}), title: o.titulo, description: o.descripcion, assignees: [asignado], ...(conFecha && o.vence ? { dueDate: `${o.vence}T17:00:00+0000` } : {}), ...(tipo ? { type: tipo } : {}) });
   return [
+    { formato: "código + título + tipo «Flujo de aprobación» + vencimiento", cuerpo: nuevo("Flujo de aprobación", true) },
+    { formato: "código + título + tipo «Solicitud» + vencimiento", cuerpo: nuevo("Request", true) },
+    { formato: "código + título + vencimiento (sin tipo)", cuerpo: nuevo(null, true) },
+    { formato: "código + título (sin tipo ni vencimiento)", cuerpo: nuevo(null, false) },
     { formato: "label + assignees [{ id, type }]", cuerpo: { projectId: o.projectId, label: o.titulo, description: o.descripcion, assignees: [asignado] } },
     { formato: "title + assignees [{ id, type }]", cuerpo: { projectId: o.projectId, title: o.titulo, description: o.descripcion, assignees: [asignado] } },
     { formato: "label + assignees [id]", cuerpo: { projectId: o.projectId, label: o.titulo, description: o.descripcion, assignees: [o.asignadoId] } },
@@ -216,7 +230,11 @@ export async function pasoPrueba(deps: DepsPrueba, body: unknown): Promise<Prueb
   const tipos = await c.pedir("GET", `/todos/types?projectId=${encodeURIComponent(deps.projectId)}`);
   const listaTipos = ok(tipos) && Array.isArray(tipos.cuerpo) ? (tipos.cuerpo as unknown[]).map((t) => texto((t as Record<string, unknown>)?.name) ?? texto((t as Record<string, unknown>)?.label) ?? "").filter(Boolean) : null;
 
-  const creada = await intentar((cuerpo) => c.pedir("POST", "/todos", { cuerpo }), formatosTarea({ projectId: deps.projectId, titulo, descripcion, asignadoId, tipo }));
+  // Like the flows' ToDos: a code above (unique, with the time), a title, a due date (tomorrow) and the type.
+  const ahora = new Date(deps.reloj ? deps.reloj() : Date.now());
+  const etiqueta = `PRUEBA-${ahora.toISOString().slice(11, 19).replace(/:/g, "")}`;
+  const vence = new Date(ahora.getTime() + 86_400_000).toISOString().slice(0, 10);
+  const creada = await intentar((cuerpo) => c.pedir("POST", "/todos", { cuerpo }), formatosTarea({ projectId: deps.projectId, titulo, descripcion, asignadoId, tipo, etiqueta, vence }));
   const base = { titulo, intentos: creada.intentos, tipos: listaTipos, tiposHttp: tipos.estado };
   if (!creada.respuesta) {
     const ultimo = creada.intentos[creada.intentos.length - 1];
@@ -239,11 +257,17 @@ export async function pasoPrueba(deps: DepsPrueba, body: unknown): Promise<Prueb
   // Closing it, as the flow does when a step is decided (10-11-2026); then what Trimble says when read again.
   const estadoAntes = ok(leida) ? texto((leida.cuerpo as Record<string, unknown> | null)?.status) : null;
   const cierre = deps.actualizarTarea ? await cerrarTarea((cuerpo) => deps.actualizarTarea!(todoId, cuerpo)) : null;
+  if (cierre?.ok) await (deps.esperar ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms))))(ESPERA_RELEER_MS);
   const releida = cierre?.ok ? await c.pedir("GET", `/todos/${encodeURIComponent(todoId)}`) : null;
   const estadoDespues = releida && ok(releida) ? texto((releida.cuerpo as Record<string, unknown> | null)?.status) : null;
 
   const partes = [
     `Trimble creó la tarea «${titulo}» para ${nombre} (${tipo === "USER" ? "persona" : "grupo"}) con el formato «${creada.aceptado}».`,
+    creada.aceptado?.includes("«Flujo de aprobación»")
+      ? "Aceptó el código arriba, el tipo «Flujo de aprobación» y la fecha de vencimiento: así salen las tareas de los flujos."
+      : creada.aceptado?.startsWith("código")
+        ? "No aceptó el tipo «Flujo de aprobación»: las tareas de los flujos salen con lo que sí aceptó (mira el formato)."
+        : "",
     adjunto.aceptado ? "El archivo quedó adjunto a la tarea." : "No se pudo adjuntar el archivo: el enlace va en la descripción.",
     confirmado === false ? `Ojo: al leer la tarea, Trimble no muestra a ${nombre} como asignado.` : "",
     cierre

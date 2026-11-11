@@ -259,7 +259,7 @@ test("la trazabilidad de un archivo cuenta quién subió, quién aprobó y quié
       ["Trasladó al destino", "Pepe"],
     ]
   );
-  assert.equal(r.hitos[e.f.id], "Aprobar Torre 1");
+  assert.equal(r.hitos[e.f.id], "FLUJO-01 · Aprobar Torre 1", "the PDF names the flow with its code");
   const una = await trazabilidad(e.como("luz"), new URLSearchParams({ archivoId: r.trazas[0].archivo.id }));
   assert.equal(una.trazas.length, 1, "any member can read it");
   await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ desde: "04-11-2026" })), /Las fechas no son válidas/);

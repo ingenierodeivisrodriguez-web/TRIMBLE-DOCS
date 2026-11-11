@@ -20,6 +20,11 @@ export function limpiarTexto(s: string): string {
 }
 
 /** The title as compared for repeats: lower case, without accents or double spaces. */
+/** A flow's code as people see it: «FLUJO-01», «FLUJO-12», «FLUJO-105» ("" before it has one). */
+export function codigoFlujo(n: number | null | undefined): string {
+  return n && n > 0 ? `FLUJO-${String(n).padStart(2, "0")}` : "";
+}
+
 export function claveHito(hito: string): string {
   return limpiarTexto(hito)
     .normalize("NFD")

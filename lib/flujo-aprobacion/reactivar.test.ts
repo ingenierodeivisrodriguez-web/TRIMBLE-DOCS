@@ -104,7 +104,7 @@ test("cada paso decidido cierra su tarea de Trimble; un rechazo deja una tarea d
   assert.deepEqual(a.tareas?.find((t) => t.id === "todo3")?.tipo, "correccion", "the ToDo to Juan to correct it stays open");
   const h = (await historial(e.creador, null, a.id)).entradas.filter((x) => x.accion === "tarea-cerrada").map((x) => x.detalle);
   assert.equal(h.length, 2);
-  assert.match(h[0], /^Cerró la tarea de Trimble «Revisar: modelo.rvt \(Aprueba\) — aprobar torre 2»: Trimble la dejó en estado CLOSED\.$/);
+  assert.match(h[0], /^Cerró la tarea de Trimble FLUJO-01 «Revisar: modelo.rvt \(Aprueba\) — aprobar torre 2»: Trimble la dejó en estado CLOSED\.$/);
 });
 
 test("si Trimble no deja cerrar la tarea, la decisión vale igual y queda anotado en el historial", async () => {
@@ -115,7 +115,7 @@ test("si Trimble no deja cerrar la tarea, la decisión vale igual y queda anotad
   assert.equal(a.pasoNombre, "Aprueba");
   assert.equal(a.tareas?.[0].cerrada ?? null, null);
   assert.match(a.tareas?.[0].cierre ?? "", /Trimble no la cerró \(403\)/);
-  assert.ok((await historial(e.creador, null, a.id)).entradas.some((x) => x.accion === "tarea-no-cerrada" && /No se pudo cerrar la tarea de Trimble «Revisar: modelo.rvt \(Revisa\)/.test(x.detalle)));
+  assert.ok((await historial(e.creador, null, a.id)).entradas.some((x) => x.accion === "tarea-no-cerrada" && /No se pudo cerrar la tarea de Trimble FLUJO-01 «Revisar: modelo.rvt \(Revisa\)/.test(x.detalle)));
 });
 
 test("reactivar: solo con una versión nueva, por quien creó el flujo; entra la nueva desde el primer paso y queda todo en el historial", async () => {

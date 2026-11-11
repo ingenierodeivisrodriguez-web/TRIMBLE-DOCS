@@ -6,7 +6,7 @@
  * a first decision, and the filters (owner, user, group, state, due date,
  * "tengo por revisar").
  */
-import { nombreResponsable } from "./flujos";
+import { codigoFlujo, nombreResponsable } from "./flujos";
 import { ESPERANDO } from "./registro";
 import type { ArchivoInfo, Cierre, Flujo, Responsable } from "./types";
 
@@ -144,6 +144,7 @@ export function opcionesFiltro(filas: FilaFlujo[]): { propietarios: string[]; pe
 
 export function filtrarFilas(filas: FilaFlujo[], filtro: FiltroLista, hoy: string): FilaFlujo[] {
   const texto = (filtro.texto ?? "").trim().toLowerCase();
+  const compacto = texto.replace(/[-\s]/g, "");
   const [tipo, id] = (filtro.quien ?? "").split(":");
   return filas.filter((f) => {
     const v = f.flujo.vence ?? null;
@@ -155,7 +156,7 @@ export function filtrarFilas(filas: FilaFlujo[], filtro: FiltroLista, hoy: strin
     if (filtro.vence === "7dias" && !(v && v >= hoy && v <= sumarDias(hoy, 7))) return false;
     if (filtro.vence === "sin-fecha" && v) return false;
     if (filtro.porRevisar && f.porRevisar === 0) return false;
-    if (texto && !f.flujo.hito.toLowerCase().includes(texto)) return false;
+    if (texto && !f.flujo.hito.toLowerCase().includes(texto) && !(compacto && codigoFlujo(f.flujo.codigo).toLowerCase().replace(/[-\s]/g, "").includes(compacto))) return false;
     return true;
   });
 }

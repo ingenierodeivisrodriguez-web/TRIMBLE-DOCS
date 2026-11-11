@@ -16,6 +16,7 @@ import { esIdTrimble, FlujoError } from "./errores";
 import {
   cambiosFlujo,
   claveHito,
+  codigoFlujo,
   conflictosArchivos,
   describirPasos,
   describirResponsables,
@@ -355,7 +356,7 @@ export async function trazabilidad(ctx: Ctx, q: { get(nombre: string): string | 
   if (desde && hasta && desde > hasta) throw new FlujoError("La fecha inicial es posterior a la final.");
   const filtro: FiltroTraza = { flujoId, estado: estado as FiltroTraza["estado"], desde, hasta, texto: opcional("texto")?.slice(0, 100) };
   const [flujos, archivos, entradas] = await Promise.all([ctx.store.flujos(ctx.projectId), ctx.store.archivos(ctx.projectId), ctx.store.historialArchivos(ctx.projectId)]);
-  const hitos = new Map(flujos.map((f) => [f.id, f.hito]));
+  const hitos = new Map(flujos.map((f) => [f.id, f.codigo ? `${codigoFlujo(f.codigo)} · ${f.hito}` : f.hito]));
   const elegidos = archivoId ? archivos.filter((a) => a.id === archivoId) : archivos;
   if (archivoId && !elegidos.length) throw new FlujoError("Ese archivo no está registrado en este proyecto.", 404);
   return { trazas: armarTrazas(elegidos, entradas, hitos, filtro), filtro, hitos: Object.fromEntries(hitos), por: ctx.caller.name };

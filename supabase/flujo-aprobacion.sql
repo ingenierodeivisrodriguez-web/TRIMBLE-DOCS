@@ -314,3 +314,46 @@ update public.aprobacion_archivos a
 -- [{ "id", "tipo": revision | correccion, "pasoId", "versionId", "titulo",
 --    "creada", "cerrada", "cierre" }].
 alter table public.aprobacion_archivos add column if not exists tareas jsonb not null default '[]'::jsonb;
+
+-- ---------------------------------------- código de cada flujo (11-11-2026)
+-- Un número por proyecto en orden de creación, que se muestra como «FLUJO-01»
+-- en la extensión y en las tareas de Trimble. Nunca cambia: los flujos no se
+-- borran.
+alter table public.aprobacion_flujos add column if not exists codigo integer;
+
+-- Los flujos que todavía no tienen número lo reciben por fecha de creación,
+-- después del mayor que ya tenga el proyecto (se puede repetir sin cambiar nada).
+update public.aprobacion_flujos f
+set codigo = n.codigo
+from (
+  select s.id,
+         coalesce((select max(m.codigo) from public.aprobacion_flujos m where m.proyecto = s.proyecto), 0)
+           + row_number() over (partition by s.proyecto order by s.creado, s.id) as codigo
+  from public.aprobacion_flujos s
+  where s.codigo is null
+) n
+where f.id = n.id;
+
+create unique index if not exists aprobacion_flujos_codigo on public.aprobacion_flujos (proyecto, codigo);
+
+-- Un flujo nuevo toma el siguiente número de su proyecto. El bloqueo por
+-- proyecto evita que dos flujos creados a la vez tomen el mismo.
+create or replace function public.aprobacion_codigo_flujo() returns trigger
+language plpgsql
+set search_path = public
+as $$
+begin
+  if new.codigo is null then
+    perform pg_advisory_xact_lock(hashtext('aprobacion-codigo:' || new.proyecto));
+    select coalesce(max(codigo), 0) + 1 into new.codigo
+    from public.aprobacion_flujos
+    where proyecto = new.proyecto;
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists aprobacion_flujos_codigo on public.aprobacion_flujos;
+create trigger aprobacion_flujos_codigo
+  before insert on public.aprobacion_flujos
+  for each row execute function public.aprobacion_codigo_flujo();

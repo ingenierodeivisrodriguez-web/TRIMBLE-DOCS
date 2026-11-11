@@ -70,11 +70,10 @@ test("al registrar un archivo nuevo se avisa con una tarea de Trimble a quien ti
   const e = await escenario();
   assert.match(e.registro.mensaje, /1 archivo nuevo\. Se avisó a los revisores con 1 tarea de Trimble\./);
   assert.equal(e.tareas.length, 1);
-  assert.equal(e.tareas[0].label, "Revisar: modelo.rvt (Revisa) — Aprobar Torre 1");
-  assert.deepEqual(e.tareas[0].assignees, [{ id: "g-arq", type: "GROUP" }]);
-  assert.match(String(e.tareas[0].description), /• modelo.rvt — versión 1: https:\/\/web.connect.trimble.com\/projects\/P\/viewer\/3d\?modelId=modelo&versionId=modelo-v1/);
+  // The ToDo shows the flow's code, title and description (its title again: it has none), with the type «Flujo de aprobación».
+  assert.deepEqual(e.tareas[0], { projectId: "P", label: "FLUJO-01", title: "Aprobar Torre 1", description: "Aprobar Torre 1", assignees: [{ id: "g-arq", type: "GROUP" }], type: "Flujo de aprobación" });
   const h = await historial(e.admin, e.f.id);
-  assert.ok(h.entradas.some((x) => x.accion === "aviso-enviado" && /Tarea de Trimble para Arquitectura \(grupo\)/.test(x.detalle)));
+  assert.ok(h.entradas.some((x) => x.accion === "aviso-enviado" && /^Tarea de Trimble FLUJO-01 para Arquitectura \(grupo\): «Revisar: modelo.rvt \(Revisa\) — Aprobar Torre 1»\.$/.test(x.detalle)));
 });
 
 test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa versión con sus firmas", async () => {
@@ -82,7 +81,7 @@ test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa ve
   let a = await e.modelo();
   const r1 = await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "" }, "aprobar");
   assert.equal(r1.mensaje, "Aprobaste «Revisa» de «modelo.rvt»: pasa a «Aprueba».");
-  assert.match(r1.aviso!, /Tarea de Trimble para Pepe/);
+  assert.match(r1.aviso!, /Tarea de Trimble FLUJO-01 para Pepe/);
   assert.deepEqual(e.tareas[1].assignees, [{ id: "pepe", type: "USER" }]);
   a = await e.modelo();
   assert.equal(a.pasoNombre, "Aprueba");
@@ -111,9 +110,9 @@ test("rechazar exige motivo y avisa a quien subió; la versión corregida queda 
   await assert.rejects(() => decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "" }, "rechazar"), /Escribe el motivo del rechazo/);
   const r = await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "Faltan los ejes" }, "rechazar");
   assert.equal(r.mensaje, "«modelo.rvt» queda rechazado (versión 1).");
-  assert.match(r.aviso!, /Tarea de Trimble para Juan: «Corregir: modelo.rvt \(rechazado\) — Aprobar Torre 1»/);
+  assert.match(r.aviso!, /Tarea de Trimble FLUJO-01 para Juan: «Corregir: modelo.rvt \(rechazado\) — Aprobar Torre 1»/);
   assert.deepEqual(e.tareas[1].assignees, [{ id: "juan", type: "USER" }]);
-  assert.match(String(e.tareas[1].description), /Motivo: Faltan los ejes/);
+  assert.equal(e.tareas[1].title, "Aprobar Torre 1", "only the flow's title: the reason is seen in the extension");
   a = await e.modelo();
   assert.equal(a.estado, "rechazado");
   assert.equal(a.firmas[0].comentario, "Faltan los ejes");

@@ -7,7 +7,7 @@
  * in the history).
  */
 import { buildFileViewerUrl } from "../format";
-import { avisoRechazo, avisosRevision, enviarAviso } from "./avisos";
+import { avisoRechazo, avisosRevision, enviarAviso, FlujoTarea } from "./avisos";
 import { planDecision, puedeDecidir, revisarTexto } from "./decision";
 import { FlujoError } from "./errores";
 import type { Ctx } from "./service";
@@ -31,12 +31,23 @@ type Linea = Omit<EntradaHistorial, "id" | "creado">;
 export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], momento: string, filas: ArchivoRegistro[] = []): Promise<{ lineas: Linea[]; enviados: number; fallidos: number; textos: string[] }> {
   const lineas: Linea[] = [];
   const textos: string[] = [];
-  const creadas: { aviso: Aviso; todoId: string }[] = [];
+  const creadas: { aviso: Aviso; todoId: string; etiqueta: string | null }[] = [];
   let enviados = 0;
   let fallidos = 0;
+  // How many ToDos the flow already made: if Trimble wants each code unique, the next one is «FLUJO-01-<n + 1>».
+  let hechas = avisos.some((a) => a.trimble?.label)
+    ? await ctx.store
+        .archivos(ctx.projectId)
+        .then((as) => new Set(as.filter((a) => a.flujoId === flujoId).flatMap((a) => (a.tareas ?? []).map((t) => t.id))).size)
+        .catch(() => 0)
+    : 0;
   for (const aviso of avisos.slice(0, MAX_AVISOS)) {
-    const r = await enviarAviso((cuerpo) => ctx.tc.crearTarea(cuerpo), ctx.projectId, aviso, (g) => ctx.tc.miembros(g).catch(() => []));
-    if (r.ok && r.todoId) creadas.push({ aviso, todoId: r.todoId });
+    const otra = aviso.trimble?.label && hechas > 0 ? `${aviso.trimble.label}-${hechas + 1}` : null;
+    const r = await enviarAviso((cuerpo) => ctx.tc.crearTarea(cuerpo), ctx.projectId, aviso, (g) => ctx.tc.miembros(g).catch(() => []), otra);
+    if (r.ok && r.todoId) {
+      creadas.push({ aviso, todoId: r.todoId, etiqueta: r.etiqueta });
+      hechas++;
+    }
     if (r.ok) enviados++;
     else fallidos++;
     textos.push(r.mensaje);
@@ -56,7 +67,7 @@ export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], mome
 }
 
 /** The ToDos for a flow's files that now wait for someone (new, new version, next step). */
-export async function avisarRevision(ctx: Ctx, flujo: Pick<Flujo, "id" | "hito" | "pasos">, archivos: ArchivoRegistro[], momento: string) {
+export async function avisarRevision(ctx: Ctx, flujo: Pick<Flujo, "id"> & FlujoTarea, archivos: ArchivoRegistro[], momento: string) {
   if (!archivos.length) return { lineas: [], enviados: 0, fallidos: 0, textos: [] };
   const avisos = avisosRevision(archivos, flujo, (a) => enlaceDe(ctx.projectId, a));
   return notificar(ctx, flujo.id, avisos, momento, archivos);
@@ -126,7 +137,7 @@ export async function decidir(ctx: Ctx, body: unknown, decision: "aprobar" | "re
     lineas.push(...r.lineas);
     aviso = r.textos[0] ?? `«${plan.siguiente.nombre}» no tiene responsable en este flujo: no se avisó a nadie (solo un administrador puede decidirlo).`;
   } else if (plan.accion === "rechazado") {
-    const av = avisoRechazo(hecho, plan.firma, flujo.hito, enlaceDe(ctx.projectId, hecho));
+    const av = avisoRechazo(hecho, plan.firma, flujo, enlaceDe(ctx.projectId, hecho));
     if (av) {
       const r = await notificar(ctx, a.flujoId, [av], momento, [hecho]);
       lineas.push(...r.lineas);

@@ -78,6 +78,7 @@ const deFlujo = (f: Fila): Flujo => ({
   revisadoPor: t(f.revisado_por),
   vence: t(f.vence),
   notas: t(f.notas) ?? "",
+  codigo: f.codigo === null || f.codigo === undefined ? null : Number(f.codigo),
 });
 
 const deComentario = (f: Fila): Comentario => ({
@@ -351,7 +352,9 @@ export function memoryStore(): FlujoStore {
       return f ? copia(f) : null;
     },
     async crearFlujo(f) {
-      const nuevo: Flujo = { ...copia(f), id: id(), version: 1 };
+      // Like the database trigger: the next number of its project.
+      const codigo = Math.max(0, ...[...flujos.values()].filter((x) => x.proyecto === f.proyecto).map((x) => x.codigo ?? 0)) + 1;
+      const nuevo: Flujo = { ...copia(f), id: id(), version: 1, codigo };
       revisar(nuevo);
       flujos.set(nuevo.id, nuevo);
       return copia(nuevo);

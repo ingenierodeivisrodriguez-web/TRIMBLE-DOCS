@@ -4761,13 +4761,12 @@ se rechaza. Aceptó el plan con sus supuestos. Hay que volver a ejecutar
   Trimble acepta `CLOSED` o `DONE`.
 - Las tareas creadas **antes** de este cambio no se cierran solas (no se guardó
   su número).
-- **Resultado de la prueba real (10-11-2026, proyecto Laboratorio)**: Trimble
-  respondió bien al `PATCH` con `CLOSED`, pero al leer la tarea otra vez seguía
-  en **`NEW`**: la tarea **no se cerró** y la extensión lo dio por hecho. Según el
-  Swagger de Trimble (`UpdateToDoRequest`), los estados son `NEW`,
-  `IN_PROGRESS`, `RESOLVED`, `BLOCKED` y `CLOSED` (`DONE` no existe).
-  **Pendiente**, a la espera del OK del dueño: confirmar el cierre releyendo la
-  tarea y que la prueba intente varias formas mostrando la respuesta textual.
+- **Confirmado en Trimble real (10/11-11-2026, proyecto Laboratorio)**: las
+  tareas de «CARGAR ARCHIVO» y «prueeba de cerrar tarea» quedaron **«Cerrada»**
+  en ToDo de Trimble al decidir su paso (`PATCH` con `CLOSED`). En la prueba
+  de conexión salió «NEW» porque se leyó al instante: ahora la prueba espera 4
+  segundos antes de leerla otra vez. Según el Swagger de Trimble, los estados
+  son `NEW`, `IN_PROGRESS`, `RESOLVED`, `BLOCKED` y `CLOSED`.
 
 Código: [`lib/flujo-aprobacion/reactivar.ts`](lib/flujo-aprobacion/reactivar.ts)
 (`reactivarFlujo`), `registro.ts` (`planReactivar`, línea
@@ -4852,6 +4851,48 @@ al pasar el mouse.
 Código: `components/flujo-aprobacion/Archivos.tsx` (`conEspera`,
 `conAcciones`, `columnas`, `ayudaArchivo`, `ayudaEstado`) y
 `PanelFlujo.tsx` (etiqueta «Cerrado», `conPermisos`).
+
+### Código de cada flujo y texto de las tareas de Trimble (11-11-2026)
+
+Pedido por el dueño con una captura de ToDo de Trimble: (1) códigos para los
+flujos («flujo 01»); (2) el título de la tarea, solo el del flujo; (3) la
+descripción, solo la del flujo; (4) la fecha de vencimiento del flujo; (5) el
+tipo «Flujo de aprobación». Aceptó el plan («Sí, hazlo así»). Hay que volver a
+ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
+
+- **Código**: cada flujo tiene un número por proyecto en orden de creación,
+  que se muestra como **FLUJO-01**, FLUJO-02… (FLUJO-105 pasado el 99). Lo pone
+  la base de datos al crear el flujo (un trigger con bloqueo por proyecto) y
+  nunca cambia; los flujos que ya existían lo recibieron por fecha de creación.
+  Se ve arriba del nombre en la lista y en el panel, en el PDF de trazabilidad
+  («FLUJO-01 · CARGAR ARCHIVO») y se busca por él («flujo 01», «FLUJO-01»).
+- **Tarea de Trimble**: arriba, el código (donde Trimble pone «LABO-4»); título:
+  solo el del flujo; descripción: solo la del flujo (si no tiene, el título,
+  porque Trimble la exige); fecha de vencimiento: la del flujo (al mediodía de
+  Colombia, para que salga ese mismo día); tipo: **«Flujo de aprobación»**.
+  Ya no dice el paso, el archivo, el enlace ni el motivo del rechazo: eso se
+  ve en la extensión (Me toca). Todas las tareas de un flujo se ven iguales.
+- **Si Trimble no acepta algo**, se vuelve a intentar sin eso, para que el
+  responsable siempre reciba su tarea: el tipo pasa a **«Solicitud»** (la lista
+  de tipos de Trimble es fija) y luego sin tipo; si dice que el código ya está
+  usado, sale **FLUJO-01-2**, FLUJO-01-3…; luego sin fecha; y al final con el
+  texto de antes. El historial dice con qué salió («Tarea de Trimble FLUJO-01
+  para Luz: «Revisar: plano.pdf (Revisa) — hito» (tipo «Solicitud»: Trimble no
+  aceptó «Flujo de aprobación»)»). Sin permiso (401/403) no insiste.
+- Sin código todavía (antes de ejecutar el SQL), la tarea va sin código y
+  Trimble le pone el suyo.
+- **Prueba de conexión → tarea**: prueba primero este formato (código
+  «PRUEBA-hhmmss», título, vencimiento mañana, tipo «Flujo de aprobación», luego
+  «Solicitud»…) y dice qué aceptó Trimble; después de cerrarla espera 4
+  segundos antes de leerla otra vez.
+
+Código: `supabase/flujo-aprobacion.sql` (columna `codigo`, índice único
+`(proyecto, codigo)`, trigger `aprobacion_codigo_flujo`), `flujos.ts`
+(`codigoFlujo`), `avisos.ts` (`textosTarea`, `TIPOS_TAREA`,
+`variantesTarea`, `enviarAviso` con respaldo), `decisiones.ts` (`notificar`
+calcula el código alterno), `tareas.ts` (la tarea guarda su código), `lista.ts`
+(buscar por código), `service.ts` (nombre del PDF), `prueba.ts`
+(`formatosTarea`, `ESPERA_RELEER_MS`); pantallas `ListaFlujos` y `PanelFlujo`.
 
 ### Guía rápida
 

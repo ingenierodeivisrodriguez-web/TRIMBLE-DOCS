@@ -121,8 +121,10 @@ export interface Flujo {
   revisadoPor?: string | null;
   /** Due date of the milestone, "AAAA-MM-DD" (optional). */
   vence?: string | null;
-  /** Free notes about the flow. */
+  /** Free notes about the flow (shown as «Descripción»). */
   notas?: string;
+  /** Its number in the project, in creation order (11-11-2026): shown as «FLUJO-01». Set by the database. */
+  codigo?: number | null;
 }
 
 /** A comment on a flow: only added, never edited or deleted. */
@@ -270,6 +272,8 @@ export interface TareaTrimble {
   /** The version it is about. */
   versionId: string | null;
   titulo: string;
+  /** The code Trimble shows on it («FLUJO-01», «FLUJO-01-2»), when it has one. */
+  etiqueta?: string | null;
   creada: string;
   /** When it was closed; null or missing while it is open. */
   cerrada?: string | null;
@@ -344,8 +348,16 @@ export interface Traslado {
 
 /** A Trimble ToDo to send: to whom, its title and text. */
 export interface Aviso {
+  /** What it is about, for the history and the stored ToDo («Revisar: plano.pdf (Revisa) — hito»). */
   titulo: string;
+  /** The detailed text (files and links): only sent if Trimble refuses the flow's own texts. */
   descripcion: string;
+  /**
+   * What Trimble shows on the ToDo (11-11-2026, the owner's wish): the flow's
+   * code on the line above («FLUJO-01»; "" lets Trimble number it), the flow's
+   * title and description, and its due date (ISO 8601, or null).
+   */
+  trimble?: { label: string; title: string; description: string; dueDate: string | null };
   para: { tipo: "persona" | "grupo"; id: string; nombre: string }[];
   /** The registered files it is about. */
   archivos: string[];

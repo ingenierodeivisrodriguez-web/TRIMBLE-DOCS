@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useRef, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
-import { describirCierre, diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
+import { codigoFlujo, describirCierre, diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
 import type { FilaFlujo } from "../../lib/flujo-aprobacion/lista";
 import type { ArchivoInfo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
 import { botonPeligro, botonSecundario } from "../compras/estilos";
@@ -164,7 +164,10 @@ export default function PanelFlujo({
   return (
     <div style={{ background: "#fff", minHeight: "100%" }}>
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10, padding: "16px 16px 8px" }}>
-        <h2 style={{ margin: 0, fontSize: 19, fontWeight: 500, color: "var(--tc-gray-700)", lineHeight: 1.3 }}>{f.hito}</h2>
+        <div>
+          {f.codigo ? <div style={{ fontSize: 12, color: "var(--tc-gray-500)", letterSpacing: 0.3, marginBottom: 2 }}>{codigoFlujo(f.codigo)}</div> : null}
+          <h2 style={{ margin: 0, fontSize: 19, fontWeight: 500, color: "var(--tc-gray-700)", lineHeight: 1.3 }}>{f.hito}</h2>
+        </div>
         <button type="button" onClick={onCerrar} style={{ ...icono, fontSize: 20 }} title="Cerrar los detalles" aria-label="Cerrar los detalles">
           ✕
         </button>

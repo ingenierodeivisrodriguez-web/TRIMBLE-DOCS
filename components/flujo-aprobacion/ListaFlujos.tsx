@@ -1,7 +1,7 @@
 "use client";
 
 import type { CSSProperties } from "react";
-import { describirCierre, diaVisible } from "../../lib/flujo-aprobacion/flujos";
+import { codigoFlujo, describirCierre, diaVisible } from "../../lib/flujo-aprobacion/flujos";
 import type { EstadoDocumento, FilaFlujo, FiltroLista } from "../../lib/flujo-aprobacion/lista";
 import type { Flujo } from "../../lib/flujo-aprobacion/types";
 import { C } from "../presupuesto/ui";
@@ -175,6 +175,7 @@ export default function ListaFlujos({
                   onMouseLeave={(e) => !activa && (e.currentTarget.style.background = "")}
                 >
                   <td style={td}>
+                    {f.flujo.codigo ? <span style={{ display: "block", fontSize: 11.5, color: "var(--tc-gray-500)", letterSpacing: 0.3 }}>{codigoFlujo(f.flujo.codigo)}</span> : null}
                     <span style={{ color: "var(--tc-blue-700)", fontWeight: activa ? 600 : 500 }}>{f.flujo.hito}</span>
                   </td>
                   <td style={{ ...td, textAlign: "center", color: "var(--tc-blue-700)" }}>{f.archivos}</td>

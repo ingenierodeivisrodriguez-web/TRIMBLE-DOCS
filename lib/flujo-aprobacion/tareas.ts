@@ -37,14 +37,14 @@ export function tareasPorCerrar(cambiadas: Pick<ArchivoRegistro, "id">[], todas:
 }
 
 /** Notes on each file the ToDos just created about it (best effort: a ToDo not noted is just never closed by the flow). */
-export async function guardarTareas(ctx: Ctx, creadas: { aviso: Aviso; todoId: string }[], filas: ArchivoRegistro[], momento: string): Promise<void> {
+export async function guardarTareas(ctx: Ctx, creadas: { aviso: Aviso; todoId: string; etiqueta?: string | null }[], filas: ArchivoRegistro[], momento: string): Promise<void> {
   const porId = new Map(filas.map((f) => [f.id, f]));
-  for (const { aviso, todoId } of creadas) {
+  for (const { aviso, todoId, etiqueta } of creadas) {
     if (!aviso.tipo) continue;
     for (const id of aviso.archivos) {
       const f = porId.get(id);
       if (!f) continue;
-      const tarea: TareaTrimble = { id: todoId, tipo: aviso.tipo, pasoId: aviso.pasoId ?? null, versionId: f.versionId, titulo: aviso.titulo, creada: momento };
+      const tarea: TareaTrimble = { id: todoId, tipo: aviso.tipo, pasoId: aviso.pasoId ?? null, versionId: f.versionId, titulo: aviso.titulo, ...(etiqueta ? { etiqueta } : {}), creada: momento };
       try {
         porId.set(id, await ctx.store.actualizarArchivo(id, { tareas: [...(f.tareas ?? []), tarea] }));
       } catch {
@@ -71,7 +71,7 @@ export async function cerrarTareas(ctx: Ctx, cambiadas: Pick<ArchivoRegistro, "i
         accion: r.ok ? "tarea-cerrada" : "tarea-no-cerrada",
         usuario: ctx.caller.name,
         usuarioId: ctx.caller.id,
-        detalle: r.ok ? `Cerró la tarea de Trimble «${tarea.titulo}»: ${r.mensaje}` : `No se pudo cerrar la tarea de Trimble «${tarea.titulo}»: ${r.mensaje}`,
+        detalle: `${r.ok ? "Cerró" : "No se pudo cerrar"} la tarea de Trimble ${tarea.etiqueta ? `${tarea.etiqueta} ` : ""}«${tarea.titulo}»: ${r.mensaje}`,
         archivoId: archivos.length === 1 ? archivos[0].id : null,
         fileId: archivos.length === 1 ? archivos[0].fileId : null,
         ocurrido: momento,
