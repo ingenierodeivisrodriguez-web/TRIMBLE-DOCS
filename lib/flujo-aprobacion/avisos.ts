@@ -10,6 +10,7 @@ import type { Respuesta } from "../compras/cde";
 import { codigoFlujo } from "./flujos";
 import { corto } from "./prueba";
 import { responsablesArchivo } from "./registro";
+import type { DatosCorreo } from "./correo";
 import type { ArchivoRegistro, Aviso, Firma, Flujo } from "./types";
 
 /** Files listed with their link in one ToDo; the rest are counted. */
@@ -67,6 +68,16 @@ export function avisosRevision(archivos: ArchivoRegistro[], flujo: FlujoTarea, e
       archivos: as.map((x) => x.id),
       tipo: "revision" as const,
       pasoId: a.pasos[a.pasoActual]?.id ?? null,
+      correo: {
+        tipo: "revision",
+        codigo: codigoFlujo(flujo.codigo),
+        hito,
+        notas: flujo.notas ?? "",
+        vence: flujo.vence ?? null,
+        paso,
+        archivos: as.map((x) => ({ nombre: x.nombre, revision: x.revision ?? null, enlace: enlace(x), nueva: x.estado === "nueva-version" })),
+        mas: 0,
+      } satisfies DatosCorreo,
     };
   });
 }
@@ -92,6 +103,17 @@ export function avisoRechazo(a: ArchivoRegistro, firma: Firma, flujo: Pick<Flujo
     archivos: [a.id],
     tipo: "correccion",
     pasoId: null,
+    correo: {
+      tipo: "correccion",
+      codigo: codigoFlujo(flujo.codigo),
+      hito,
+      notas: flujo.notas ?? "",
+      vence: flujo.vence ?? null,
+      paso: firma.paso,
+      archivos: [{ nombre: a.nombre, revision: firma.revision ?? a.revision ?? null, enlace, nueva: false }],
+      mas: 0,
+      rechazo: { quien: firma.quien, motivo: firma.comentario, carpeta },
+    },
   };
 }
 

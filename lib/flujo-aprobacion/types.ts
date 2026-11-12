@@ -7,6 +7,8 @@
  * - estado-subida / estado-visor: following that copy.
  * - tarea: a ToDo assigned to a person or group, with the file attached.
  */
+import type { DatosCorreo } from "./correo";
+
 export type PasoPrueba = "equipo" | "archivo" | "copiar" | "estado-subida" | "estado-visor" | "tarea";
 
 export const PASOS_PRUEBA: PasoPrueba[] = ["equipo", "archivo", "copiar", "estado-subida", "estado-visor", "tarea"];
@@ -364,6 +366,8 @@ export interface Aviso {
   /** What it asks for, to close it later: deciding a step, or correcting a rejected version. */
   tipo?: "revision" | "correccion";
   pasoId?: string | null;
+  /** What the extension's own e-mail says (11-11-2026); without it no e-mail goes. */
+  correo?: DatosCorreo;
 }
 
 /** What a folder walk found: a file with its latest version. */

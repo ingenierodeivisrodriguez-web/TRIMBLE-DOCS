@@ -12,6 +12,7 @@ import type { FolderPermissions, ProjectGroup, ProjectUser, RawFolderItem } from
 import type { Limites } from "./recorrido";
 import type { Respuesta } from "../compras/cde";
 import type { Lado } from "../publicar/copiar";
+import type { Correo } from "./correo";
 import { esIdTrimble, FlujoError } from "./errores";
 import {
   cambiosFlujo,
@@ -60,6 +61,8 @@ export interface TrimbleFlujo {
   actualizarTarea?(todoId: string, cuerpo: Record<string, unknown>): Promise<Respuesta>;
   /** This project through the caller's token, for copying to the destination (phase 4). */
   lado: Lado;
+  /** The project's name in Trimble, for the e-mails (11-11-2026). Missing: "Trimble Connect". */
+  nombreProyecto?(): Promise<string>;
   /** For the content of a copy that goes through the server (tests). */
   fetch?: typeof fetch;
 }
@@ -70,6 +73,8 @@ export interface Ctx {
   store: FlujoStore;
   tc: TrimbleFlujo;
   ahora?: () => Date;
+  /** The extension's own e-mails (11-11-2026); missing when Vercel has no Gmail account set: no e-mail goes. */
+  correo?: Correo;
   /** For the file reading's time budget (tests). */
   reloj?: () => number;
   limites?: Limites;

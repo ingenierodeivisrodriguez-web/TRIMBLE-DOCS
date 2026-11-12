@@ -42,6 +42,8 @@ export interface FlujoApi {
   comentar(flujoId: string, texto: string): Promise<{ comentarios: Comentario[] }>;
   /** Notes that the caller opened the file from the extension (only the notified person, first time per version). */
   abierto(archivoId: string): Promise<{ anotado: boolean }>;
+  /** «Enviar correo de prueba» (administrators): a sample e-mail to the caller's own address. */
+  correoPrueba(): Promise<{ mensaje: string }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -80,5 +82,6 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     comentarios: (flujoId) => request(`/comentarios?flujoId=${encodeURIComponent(flujoId)}`),
     comentar: (flujoId, texto) => post("/comentarios", { flujoId, texto }),
     abierto: (archivoId) => post("/abierto", { archivoId }),
+    correoPrueba: () => post("/correo-prueba", {}),
   };
 }

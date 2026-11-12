@@ -36,6 +36,8 @@ export const ACCIONES: Record<string, string> = {
   "aviso-enviado": "Avisó (tarea de Trimble)",
   "archivo-abierto": "Abrió el archivo",
   "aviso-fallido": "Aviso no enviado",
+  "correo-enviado": "Envió el correo de aviso",
+  "correo-fallido": "Correo de aviso no enviado",
   trasladado: "Trasladó al destino",
   "traslado-diferencia": "Traslado en espera",
   "traslado-error": "Traslado fallido",

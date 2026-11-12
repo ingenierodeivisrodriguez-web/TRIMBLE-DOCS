@@ -4944,6 +4944,62 @@ calcula el código alterno), `tareas.ts` (la tarea guarda su código), `lista.ts
 (buscar por código), `service.ts` (nombre del PDF), `prueba.ts`
 (`formatosTarea`, `ESPERA_RELEER_MS`); pantallas `ListaFlujos` y `PanelFlujo`.
 
+### Correos propios de la extensión (11-11-2026, fase 1)
+
+Pedido del dueño: que la extensión le mande **su propio correo** al responsable
+cuando le toca un paso, con un botón que lo lleve a la extensión, aparte del
+correo de las tareas de Trimble y configurable. Plan aceptado en fases; esta es
+la fase 1 (el envío). La fase 2 (ventana de configuración, con la opción de no
+crear la tarea de Trimble para que solo llegue este correo) y la fase 3
+(enlace al flujo exacto, recordatorio de vencidos) esperan su OK.
+
+- **Cuándo sale**: en los mismos momentos que la tarea de Trimble: un archivo
+  entra al flujo, pasa al paso siguiente, entra una versión con «Reactivar el
+  flujo», y al rechazar (a quien subió la versión). Sale **aunque Trimble no
+  cree la tarea**. Va a cada persona responsable y a cada miembro del grupo
+  responsable, uno por uno (cada quien con su nombre; nadie ve los correos de
+  los demás), a la dirección que la persona tiene en Trimble. Hasta 25 personas
+  por aviso; las retiradas del proyecto no.
+- **Qué dice**: asunto «FLUJO-01 · Te toca «Revisa»: título del flujo» (o
+  «FLUJO-01 · Rechazado: corrige «archivo» — título»); dentro, el proyecto, el
+  código y título del flujo, su descripción, el vencimiento (DD-MM-AAAA), los
+  archivos con su versión y su enlace al visor, el motivo del rechazo y dónde
+  subir la corrección, y el botón **«Abrir Flujo de aprobación»**.
+- **El botón** abre la extensión en ese proyecto:
+  `https://web.connect.trimble.com/projects/<proyecto>/extension/<id>/flujo_aprobacion_open`.
+  El id (`8e7cd6d3-3e0e-16d7-12f4-02d6a673090e`) sale de la dirección que el dueño
+  copió con la extensión abierta en su proyecto; no es un hash del manifiesto,
+  así que Trimble podría darle otro en otro proyecto (`FLUJO_EXTENSION_ID` en
+  Vercel lo reemplaza; en la fase 2 quedará editable por proyecto).
+- **Historial**: «Envió el correo de aviso — Correo a Luz Pérez <luz@obra.co>:
+  «…»» o «Correo de aviso no enviado» con el motivo en palabras (clave de Gmail
+  mala, sin conexión, dirección rechazada, límite diario, «sin correo en
+  Trimble: Pepe»). Sale también en el PDF de trazabilidad. El mensaje que ve
+  quien decide dice la tarea y el correo.
+- **Enviar correo de prueba** (⋮ arriba a la derecha, solo administradores):
+  manda un ejemplo a tu propio correo, desde la cuenta configurada, para
+  confirmar la clave y probar el botón. Si falta la cuenta lo dice («en Vercel
+  faltan las variables…»).
+- **La cuenta**: un Gmail con verificación en dos pasos y una **contraseña de
+  aplicación**; solo en Vercel: `FLUJO_CORREO_USUARIO` (la dirección),
+  `FLUJO_CORREO_CLAVE` (las 16 letras; los espacios se ignoran) y
+  `FLUJO_CORREO_NOMBRE` (opcional, el nombre que ven). Las variables valen desde
+  la publicación siguiente. Sin las dos primeras no sale ningún correo ni se
+  anota nada. Gmail permite unos 500 correos al día.
+- Se probó: el texto y el HTML del correo (lo escrito por las personas se
+  escapa), los destinatarios, los errores, el envío dentro del flujo y la
+  prueba, con una cuenta falsa; y la conexión real a `smtp.gmail.com:465` con
+  un usuario inventado (Gmail respondió 535 y el mensaje dice «Gmail no aceptó
+  el usuario o la clave…»). El envío real se confirma con «Enviar correo de
+  prueba».
+
+Código: `correo.ts` (`enlaceExtension`, `armarCorreo`, `destinatarios`,
+`enviarCorreos`, `mensajeErrorCorreo`, `correoPrueba`), `smtp.ts`
+(`correoDesdeEntorno`, nodemailer 10.2.1 con Gmail), `avisos.ts` (cada aviso
+lleva `correo: DatosCorreo`), `decisiones.ts` (`notificar` manda el correo
+después de la tarea), ruta `POST /api/flujo-aprobacion/correo-prueba`,
+`api.correoPrueba`; menú ⋮ de `FlujoAprobacionApp`.
+
 ### Guía rápida
 
 1. Instale la extensión con

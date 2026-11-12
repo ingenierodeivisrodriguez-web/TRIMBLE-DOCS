@@ -137,6 +137,15 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
       setAviso({ kind: "error", texto: message(err) });
     }
   }
+  // «Enviar correo de prueba» (administrators, 11-11-2026): checks the Gmail account set in Vercel.
+  async function probarCorreo() {
+    setAviso({ kind: "info", texto: "Enviando el correo de prueba…" });
+    try {
+      setAviso({ kind: "info", texto: (await api.correoPrueba()).mensaje });
+    } catch (err) {
+      setAviso({ kind: "error", texto: message(err) });
+    }
+  }
   async function pdf(f: Flujo) {
     try {
       await descargarTrazabilidad(api, { flujoId: f.id }, projectName, f.hito);
@@ -230,6 +239,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
                 titulo="Más opciones"
                 opciones={[
                   { texto: "Exportar trazabilidad (todos los flujos)…", onClick: () => setVentana("trazabilidad") },
+                  { texto: "Enviar correo de prueba", onClick: () => void probarCorreo(), oculto: !datos?.esAdmin },
                 ]}
               />
             </div>

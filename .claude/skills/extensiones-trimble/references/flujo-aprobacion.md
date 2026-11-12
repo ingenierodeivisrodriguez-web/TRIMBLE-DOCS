@@ -795,6 +795,23 @@ quien subió una versión rechazada; una vez por persona y `version` (busca
 `a.tareas` (misma versión y paso, o `correccion`). Acción `archivo-abierto` =
 «Abrió el archivo» en `ACCIONES` (sale en el PDF). Trimble no registra
 aperturas en su visor: su `POST /activities/list` solo trae `FILE_DOWNLOAD` (no
-hay FILE_VIEW); leer esas descargas sería una fase aparte si el dueño la pide. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+hay FILE_VIEW); leer esas descargas sería una fase aparte si el dueño la pide.
+Correos propios (11-11-2026, pedido «que no sea la notificación de tareas»;
+plan en fases, fase 1 hecha con su «Sí, listo» tras poner las variables):
+`correo.ts` + `smtp.ts` (nodemailer 10.2.1 exacto, Gmail
+`smtp.gmail.com:465`, variables `FLUJO_CORREO_USUARIO`, `FLUJO_CORREO_CLAVE`,
+`FLUJO_CORREO_NOMBRE`, `FLUJO_EXTENSION_ID`; sin las dos primeras `ctx.correo`
+queda `undefined` y no sale nada ni se anota). `notificar` manda el correo
+después de cada tarea (aunque la tarea falle), a cada persona y miembro de
+grupo por separado (máx. 25 por aviso), y anota `correo-enviado` /
+`correo-fallido`; con EAUTH no sigue intentando. El botón usa
+`enlaceExtension`: `/projects/<id>/extension/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e/flujo_aprobacion_open`
+(dirección que pegó el dueño; el id NO es MD5 del manifiesto, puede cambiar por
+proyecto). «Enviar correo de prueba» en el ⋮ de la cabecera (solo admins) →
+`POST /correo-prueba` → `correoPrueba`. Pendiente con su OK: fase 2 (ventana
+«Correos de aviso…»: activar, eventos, textos, CC, id de la extensión por
+proyecto y «crear también la tarea de Trimble: sí/no», tabla nueva en
+Supabase) y fase 3 (abrir el flujo exacto con una tarea de un solo uso,
+recordatorio diario de vencidos con el cron). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

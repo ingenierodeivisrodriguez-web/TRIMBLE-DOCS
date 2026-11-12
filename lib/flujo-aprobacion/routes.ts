@@ -24,6 +24,7 @@ import {
 import { FlujoError } from "./errores";
 import type { DepsPrueba } from "./prueba";
 import type { Ctx, ElementoTrimble, TrimbleFlujo } from "./service";
+import { correoDesdeEntorno } from "./smtp";
 import { flujoStore } from "./store";
 
 export interface RouteContext {
@@ -110,6 +111,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
       crearTarea: (cuerpo) => clienteTrimble(servidor, token).pedir("POST", "/todos", { cuerpo }),
       actualizarTarea: (todoId, cuerpo) => patchTrimble(servidor, token, `/todos/${encodeURIComponent(todoId)}`, cuerpo),
       lado: { projectId, servidor, cliente: clienteTrimble(servidor, token) },
+      nombreProyecto: async () => (await elProyecto()).name,
     };
     return await run({
       projectId,
@@ -120,6 +122,8 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
         projectId,
         caller,
         tc: trimble,
+        // Gmail with Vercel's variables; without them no e-mail goes (11-11-2026).
+        correo: correoDesdeEntorno(),
         get store() {
           return flujoStore();
         },
