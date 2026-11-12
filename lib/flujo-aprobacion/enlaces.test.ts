@@ -94,7 +94,7 @@ test("cada correo lleva el enlace propio de su persona, con el botón «Abrir el
   assert.equal(enlace?.expira, "2027-01-10T18:38:00.000Z", "it works for 60 days");
 
   const sin = await escenario({ origen: null });
-  assert.match(sin.enviados[0].texto, /\nAbrir Flujo de aprobación: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\//, "without this app's address, the extension's");
+  assert.match(sin.enviados[0].texto, /\nAbrir Flujos documentales: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\//, "without this app's address, the extension's");
   assert.notEqual(nuevoToken(), nuevoToken());
 });
 
@@ -138,7 +138,7 @@ test("el botón del correo de prueba lleva a la extensión y dice que funciona",
   const e = await escenario();
   await correoPrueba(e.ctx("ana", true));
   const m = e.enviados[e.enviados.length - 1];
-  assert.match(m.texto, /\nAbrir Flujo de aprobación: https:\/\/app\.test\/api\/flujo-aprobacion\/ir\//);
+  assert.match(m.texto, /\nAbrir Flujos documentales: https:\/\/app\.test\/api\/flujo-aprobacion\/ir\//);
   assert.equal(await abrirEnlace(e.store, tokenDe(m), e.ahora()), EXT);
   assert.deepEqual(await tomarPendiente(e.ctx("ana", true)), { flujoId: null, porRevisar: false, mensaje: "Entraste con el botón del correo de prueba: el botón funciona." });
 });
@@ -189,7 +189,7 @@ test("sin vencer, ya decidido, apagado o sin cuenta no hay recordatorio; con var
   const m = dos.enviados[dos.enviados.length - 1];
   assert.equal(m.asunto, "Recordatorio: 2 archivos vencidos esperan tu paso — SELVIA");
   assert.match(m.texto, /FLUJO-01 — Planos torre 1[\s\S]*FLUJO-02 — Planos torre 2/);
-  assert.match(m.texto, /\nAbrir Flujo de aprobación: https:\/\/app\.test\//, "several flows: the button opens the extension");
+  assert.match(m.texto, /\nAbrir Flujos documentales: https:\/\/app\.test\//, "several flows: the button opens the extension");
   await abrirEnlace(dos.store, tokenDe(m), new Date("2026-11-12T12:01:00Z"));
   dos.minutos(60 * 17 + 25);
   assert.deepEqual(await tomarPendiente(dos.ctx("luz")), { flujoId: null, porRevisar: true, mensaje: null }, "it shows the files waiting for her");

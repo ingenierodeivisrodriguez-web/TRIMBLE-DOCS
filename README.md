@@ -4060,7 +4060,23 @@ Rutas, todas con `?projectId=` del proyecto abierto y el token del usuario
 `GET /api/publicar/cuenta`, `POST /api/publicar/cuenta/conectar|completar|desconectar`,
 `GET /api/publicar/cuenta/revisar` y `GET /api/publicar/mantener` (Cron).
 
-## Flujo de aprobación (proyecto)
+## Flujos documentales (antes «Flujo de aprobación», proyecto)
+
+**Nombre (12-11-2026)**: el dueño la renombró **«Flujos documentales»**, porque
+sirve para aprobar, revisar, supervisar, inspeccionar, auditar… (cada paso
+lleva el nombre que se le ponga). Cambió lo que se ve: el menú lateral de
+Trimble (lo pone la página al abrir, sin reinstalar), el título, el manifiesto
+(nombre y descripción, en la lista de extensiones del proyecto), los correos
+(franja, botón «Abrir Flujos documentales», pie y remitente por defecto), el
+PDF de trazabilidad, la página del enlace vencido y el tipo pedido para las
+tareas de Trimble («Flujo documental»; Trimble lo cambia por «Solicitud»). **No
+cambió** la dirección `/flujo-aprobacion`, los archivos `manifest-flujo-aprobacion.json`
+e ícono, el comando del menú `flujo_aprobacion_open` (el botón de los correos
+lo usa), las tablas `aprobacion_*` ni el código «FLUJO-01»: nadie reinstala y
+los enlaces ya enviados siguen sirviendo. El nombre está en
+`lib/flujo-aprobacion/nombre.ts` (`NOMBRE_EXTENSION`, `TIPO_TAREA`). El nombre
+del remitente en Vercel (`FLUJO_CORREO_NOMBRE`), si se puso, lo cambia el dueño.
+Las secciones de abajo conservan el nombre de cuando se escribieron.
 
 Objetivo: automatizar la revisión y aprobación de los entregables del proyecto
 (modelos `.rvt`, planos `.pdf` y `.dwg`, fotos, documentos, Excel) y su paso

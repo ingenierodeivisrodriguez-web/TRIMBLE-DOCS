@@ -69,7 +69,7 @@ export interface FlujoStore {
   flujosVencidos(hoy: string): Promise<Flujo[]>;
 }
 
-const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
+const SETUP_HINT = "La base de datos de Flujos documentales no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
 export const HITO_REPETIDO = "Ya hay un flujo con ese título o hito en el proyecto (activo o desactivado): usa otro, o activa ese.";
 export const CARPETA_OCUPADA = "Una de las carpetas de revisión ya está en otro flujo activo: una carpeta solo puede estar en un flujo activo.";
 export const ARCHIVO_OCUPADO = "Uno de los archivos ya está en otro flujo activo: un archivo solo puede estar en un flujo activo.";
@@ -608,7 +608,7 @@ export function flujoStore(): FlujoStore {
   if (selected === undefined) selected = supabaseStore();
   if (selected) return selected;
   if (process.env.NODE_ENV === "production") {
-    throw new StoreError("La base de datos de Flujo de aprobación no está conectada. Conecta la integración de Supabase al proyecto en Vercel, ejecuta supabase/flujo-aprobacion.sql y vuelve a desplegar.");
+    throw new StoreError("La base de datos de Flujos documentales no está conectada. Conecta la integración de Supabase al proyecto en Vercel, ejecuta supabase/flujo-aprobacion.sql y vuelve a desplegar.");
   }
   return (devStore ??= memoryStore());
 }

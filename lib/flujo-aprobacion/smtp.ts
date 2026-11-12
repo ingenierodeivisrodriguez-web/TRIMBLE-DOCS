@@ -9,8 +9,9 @@
  */
 import { createTransport } from "nodemailer";
 import type { Correo } from "./correo";
+import { NOMBRE_EXTENSION } from "./nombre";
 
-export const NOMBRE_REMITENTE = "Flujo de aprobación";
+export const NOMBRE_REMITENTE = NOMBRE_EXTENSION;
 
 /** This app's public address, for the e-mails' links (`FLUJO_URL_PUBLICA`, else the one asked). */
 export function urlPublica(pedida: string | null, env: Record<string, string | undefined> = process.env): string {

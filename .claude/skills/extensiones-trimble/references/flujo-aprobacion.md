@@ -843,6 +843,14 @@ revisar»); `esMia` en `lista.ts`: por-revisar = `misRevisar > 0` (archivos con
 `meToca` en un paso que no es el último), por-aprobar = `misAprobar > 0` (en el
 último), aprobado = estado aprobado y `participe` (persona responsable de un
 paso o firma con `quienId` = yo; `filasFlujos(..., yo)`). `resumen.mios` da la
-línea «N te tocan»; el número grande sigue siendo el del proyecto. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+línea «N te tocan»; el número grande sigue siendo el del proyecto.
+Nombre (12-11-2026): la extensión se llama **«Flujos documentales»** (elegido
+por el dueño entre varias opciones). Todo texto visible usa `NOMBRE_EXTENSION`
+de `nombre.ts` (menú lateral vía `menuTitle`, título, correos, PDF, página del
+enlace) y `TIPO_TAREA` = «Flujo documental» para las tareas; el manifiesto
+cambió su `title`/`description`. Sin cambiar: ruta `/flujo-aprobacion`,
+`menuCommand: "flujo_aprobacion_open"` (lo usa el enlace de los correos),
+nombres de archivos, tablas `aprobacion_*`, código FLUJO-01. La pestaña
+«Flujos de aprobación» de Control de Obra es otra cosa: no se tocó. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

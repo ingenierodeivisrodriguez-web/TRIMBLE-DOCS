@@ -112,7 +112,7 @@ test("los avisos juntan los archivos que esperan a las mismas personas en el mis
   assert.match(avisos[0].descripcion, /• A-101.pdf — versión 3 \(versión nueva\): https:\/\/tc\/plano/);
   assert.equal(avisos[1].titulo, "Revisar: Memoria.docx (Aprueba) — Aprobar Torre 1");
   const muchos = avisosRevision(Array.from({ length: MAX_EN_AVISO + 3 }, (_, i) => archivo({ id: `x${i}`, fileId: `x${i}`, nombre: `x${i}.pdf` })), FLUJO, () => "u");
-  assert.match(muchos[0].descripcion, /… y 3 más: ábrelos en Flujo de aprobación, flujo «Aprobar Torre 1» → Archivos → Me toca\./);
+  assert.match(muchos[0].descripcion, /… y 3 más: ábrelos en Flujos documentales, flujo «Aprobar Torre 1» → Archivos → Me toca\./);
   assert.deepEqual(avisosRevision([archivo()], { hito: "x", pasos: [{ id: "p1", nombre: "Revisa" }] }, () => "u"), [], "a step without responsible: no notice");
 });
 
@@ -146,10 +146,10 @@ test("si Trimble no acepta el tipo, la fecha o el código repetido, se prueba si
   assert.deepEqual(
     v.map((x) => [x.cuerpo.label, x.cuerpo.type ?? null, x.cuerpo.dueDate ? "fecha" : null, x.cuerpo.title ?? null]),
     [
-      ["FLUJO-03", "Flujo de aprobación", "fecha", "X"],
+      ["FLUJO-03", "Flujo documental", "fecha", "X"],
       ["FLUJO-03", "Request", "fecha", "X"],
       ["FLUJO-03", null, "fecha", "X"],
-      ["FLUJO-03-2", "Flujo de aprobación", "fecha", "X"],
+      ["FLUJO-03-2", "Flujo documental", "fecha", "X"],
       ["FLUJO-03-2", "Request", "fecha", "X"],
       ["FLUJO-03-2", null, "fecha", "X"],
       ["FLUJO-03-2", null, null, "X"],
@@ -166,7 +166,7 @@ test("Trimble rechaza el tipo propio y el código repetido: la tarea sale con «
   const pedidos: Record<string, unknown>[] = [];
   const crear = async (cuerpo: Record<string, unknown>): Promise<Respuesta> => {
     pedidos.push(cuerpo);
-    if (cuerpo.type === "Flujo de aprobación") return { estado: 400, cuerpo: { message: "Invalid type" } };
+    if (cuerpo.type === "Flujo documental") return { estado: 400, cuerpo: { message: "Invalid type" } };
     if (cuerpo.label === "FLUJO-03") return { estado: 409, cuerpo: { message: "label already exists" } };
     return { estado: 201, cuerpo: { id: "todo5" } };
   };
@@ -175,7 +175,7 @@ test("Trimble rechaza el tipo propio y el código repetido: la tarea sale con «
   assert.equal(r.ok, true);
   assert.equal(r.etiqueta, "FLUJO-03-2");
   assert.equal(pedidos.length, 5);
-  assert.equal(r.mensaje, "Tarea de Trimble FLUJO-03-2 para Pepe: «Revisar: a.pdf (Aprueba) — X» (tipo «Solicitud»: Trimble no aceptó «Flujo de aprobación»; «FLUJO-03» ya estaba usada en Trimble).");
+  assert.equal(r.mensaje, "Tarea de Trimble FLUJO-03-2 para Pepe: «Revisar: a.pdf (Aprueba) — X» (tipo «Solicitud»: Trimble no aceptó «Flujo documental»; «FLUJO-03» ya estaba usada en Trimble).");
   // Without permission it doesn't keep trying.
   let veces = 0;
   const sinPermiso = await enviarAviso(async () => (veces++, { estado: 403, cuerpo: "Forbidden" }), "P", aviso, async () => []);

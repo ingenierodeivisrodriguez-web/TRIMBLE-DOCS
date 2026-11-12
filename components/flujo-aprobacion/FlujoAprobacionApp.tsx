@@ -10,6 +10,7 @@ import { baseInput, message, Modal, Notice } from "../presupuesto/ui";
 import { descargarTrazabilidad } from "./descargas";
 import EditorFlujo from "./EditorFlujo";
 import ListaFlujos from "./ListaFlujos";
+import { NOMBRE_EXTENSION } from "../../lib/flujo-aprobacion/nombre";
 import ConfigCorreos from "./ConfigCorreos";
 import MenuPuntos from "./MenuPuntos";
 import PanelFlujo from "./PanelFlujo";
@@ -213,7 +214,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
         <div style={{ flex: "1 1 auto", minWidth: 0, display: "grid", gap: 12 }}>
           <header style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
             <div style={{ display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" }}>
-              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 500, color: "var(--tc-gray-700)" }}>Flujo de aprobación</h1>
+              <h1 style={{ margin: 0, fontSize: 20, fontWeight: 500, color: "var(--tc-gray-700)" }}>{NOMBRE_EXTENSION}</h1>
               <input
                 value={filtro.texto ?? ""}
                 onChange={(e) => setFiltro({ ...filtro, texto: e.target.value })}

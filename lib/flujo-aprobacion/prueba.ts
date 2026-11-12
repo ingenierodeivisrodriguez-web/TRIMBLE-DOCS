@@ -17,6 +17,7 @@ import { buildFileViewerUrl } from "../format";
 import { copiarUltimaVersion, leerArchivo, leerEstadoVisor, Lado } from "../publicar/copiar";
 import type { ProjectGroup, ProjectUser } from "../trimbleApi";
 import { cerrarTarea } from "./avisos";
+import { NOMBRE_EXTENSION, TIPO_TAREA } from "./nombre";
 import { esIdTrimble, FlujoError } from "./errores";
 import { GrupoEquipo, IntentoTrimble, PASOS_PRUEBA, PasoPrueba, PersonaEquipo, PruebaResponse, TAREA_PRUEBA, VersionTrimble } from "./types";
 
@@ -100,7 +101,7 @@ export function formatosTarea(o: { projectId: string; titulo: string; descripcio
   const asignado = { id: o.asignadoId, type: o.tipo };
   const nuevo = (tipo: string | null, conFecha: boolean) => ({ projectId: o.projectId, ...(o.etiqueta ? { label: o.etiqueta } : {}), title: o.titulo, description: o.descripcion, assignees: [asignado], ...(conFecha && o.vence ? { dueDate: `${o.vence}T17:00:00+0000` } : {}), ...(tipo ? { type: tipo } : {}) });
   return [
-    { formato: "código + título + tipo «Flujo de aprobación» + vencimiento", cuerpo: nuevo("Flujo de aprobación", true) },
+    { formato: `código + título + tipo «${TIPO_TAREA}» + vencimiento`, cuerpo: nuevo(TIPO_TAREA, true) },
     { formato: "código + título + tipo «Solicitud» + vencimiento", cuerpo: nuevo("Request", true) },
     { formato: "código + título + vencimiento (sin tipo)", cuerpo: nuevo(null, true) },
     { formato: "código + título (sin tipo ni vencimiento)", cuerpo: nuevo(null, false) },
@@ -222,7 +223,7 @@ export async function pasoPrueba(deps: DepsPrueba, body: unknown): Promise<Prueb
   const nombre = (typeof o.asignadoNombre === "string" ? o.asignadoNombre.trim().slice(0, 120) : "") || asignadoId;
   const titulo = `${TAREA_PRUEBA}: revisar ${a.nombre}`.slice(0, 120);
   const descripcion = [
-    `Tarea de prueba de la extensión Flujo de aprobación (se puede borrar).`,
+    `Tarea de prueba de la extensión ${NOMBRE_EXTENSION} (se puede borrar).`,
     `Archivo: ${a.nombre}, versión ${a.revision ?? "?"}.`,
     `Abrir en Trimble Connect: ${enlaces.visor}`,
   ].join("\n");
@@ -263,10 +264,10 @@ export async function pasoPrueba(deps: DepsPrueba, body: unknown): Promise<Prueb
 
   const partes = [
     `Trimble creó la tarea «${titulo}» para ${nombre} (${tipo === "USER" ? "persona" : "grupo"}) con el formato «${creada.aceptado}».`,
-    creada.aceptado?.includes("«Flujo de aprobación»")
-      ? "Aceptó el código arriba, el tipo «Flujo de aprobación» y la fecha de vencimiento: así salen las tareas de los flujos."
+    creada.aceptado?.includes(`«${TIPO_TAREA}»`)
+      ? `Aceptó el código arriba, el tipo «${TIPO_TAREA}» y la fecha de vencimiento: así salen las tareas de los flujos.`
       : creada.aceptado?.startsWith("código")
-        ? "No aceptó el tipo «Flujo de aprobación»: las tareas de los flujos salen con lo que sí aceptó (mira el formato)."
+        ? `No aceptó el tipo «${TIPO_TAREA}»: las tareas de los flujos salen con lo que sí aceptó (mira el formato).`
         : "",
     adjunto.aceptado ? "El archivo quedó adjunto a la tarea." : "No se pudo adjuntar el archivo: el enlace va en la descripción.",
     confirmado === false ? `Ojo: al leer la tarea, Trimble no muestra a ${nombre} como asignado.` : "",

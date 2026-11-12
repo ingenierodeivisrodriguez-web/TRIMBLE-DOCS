@@ -70,11 +70,11 @@ test("el correo «te toca» lleva el código, el paso, la descripción, el venci
   assert.match(c.texto, /^Hola Luz,\n\nTe toca el paso «Revisa» del flujo:\nFLUJO-07 — Planos torre 1\nProyecto: SELVIA\n\nRevisar ejes y niveles\nVence: 20-11-2026\n/);
   assert.match(c.texto, /• A-101\.pdf — versión 2 \(versión nueva\): https:\/\/web\.connect\.trimble\.com\/projects\/P\/viewer\/2D\?id=f1&version=v2/);
   assert.match(c.texto, /En la extensión: flujo FLUJO-07 «Planos torre 1» → Archivos → Me toca → Decidir\./);
-  assert.match(c.texto, /Abrir Flujo de aprobación: https:\/\/web\.connect\.trimble\.com\/projects\/BUJGfcZ3AEI\/extension\//);
+  assert.match(c.texto, /Abrir Flujos documentales: https:\/\/web\.connect\.trimble\.com\/projects\/BUJGfcZ3AEI\/extension\//);
   assert.match(c.html, /Te toca el paso «Revisa» del flujo:/);
   assert.match(c.html, /Vence: <b>20-11-2026<\/b>/);
   assert.match(c.html, /<a href="https:\/\/web\.connect\.trimble\.com\/projects\/P\/viewer\/2D\?id=f1&amp;version=v2"[^>]*>A-101\.pdf<\/a> — versión 2 \(versión nueva\)/);
-  assert.match(c.html, />Abrir Flujo de aprobación<\/a>/);
+  assert.match(c.html, />Abrir Flujos documentales<\/a>/);
   assert.doesNotMatch(c.html, /Abrir el archivo/, "only the rejection has the file's button");
 });
 
@@ -262,7 +262,7 @@ test("al entrar el archivo al flujo, la responsable recibe el correo además de 
   assert.match(m.texto, /Proyecto: SELVIA/);
   assert.match(m.texto, /Vence: 20-11-2026/);
   assert.match(m.texto, /• modelo\.rvt — versión 1: https:\/\/web\.connect\.trimble\.com\/projects\/P\/viewer\/3d/);
-  assert.match(m.texto, /Abrir Flujo de aprobación: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e\/flujo_aprobacion_open/);
+  assert.match(m.texto, /Abrir Flujos documentales: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e\/flujo_aprobacion_open/);
   const [linea] = await e.lineas();
   assert.equal(linea.accion, "correo-enviado");
   assert.equal(linea.detalle, "Correo a Luz Pérez <luz@obra.co>: «FLUJO-01 · Te toca «Revisa»: Planos torre 1».");
@@ -299,10 +299,10 @@ test("el correo de prueba: solo administradores, a su propio correo, y dice qué
   const e = await escenario();
   await assert.rejects(() => correoPrueba(e.ctx("luz")), /Solo un administrador/);
   const r = await correoPrueba(e.ctx("ana", true));
-  assert.equal(r.mensaje, "Te envié un correo de prueba a ana@obra.co, desde avisos@gmail.com. Revísalo (mira también la carpeta de spam la primera vez) y prueba su botón «Abrir Flujo de aprobación».");
+  assert.equal(r.mensaje, "Te envié un correo de prueba a ana@obra.co, desde avisos@gmail.com. Revísalo (mira también la carpeta de spam la primera vez) y prueba su botón «Abrir Flujos documentales».");
   const m = e.enviados[e.enviados.length - 1];
   assert.equal(m.asunto, "Prueba · FLUJO-00 · Te toca «Revisa»: Ejemplo: aprobar planos de arquitectura");
-  assert.match(m.html, /Correo de prueba de Flujo de aprobación: así llegará el aviso/);
+  assert.match(m.html, /Correo de prueba de Flujos documentales: así llegará el aviso/);
   assert.match(m.texto, /Vence: 18-11-2026/, "the sample is due a week later");
   assert.match(m.html, /\/projects\/P\/extension\/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e\/flujo_aprobacion_open/);
 
@@ -325,7 +325,7 @@ test("sin la tarea de Trimble: solo sale el correo, con los textos del proyecto,
   assert.equal(m.asunto, "[FLUJO-01] Revisar modelo.rvt — vence 20-11-2026");
   assert.match(m.texto, /\n\nLuz Pérez, el flujo te espera en «Revisa»\.\n/);
   assert.deepEqual(m.copia, ["jefe@obra.co"]);
-  assert.match(m.texto, /Abrir Flujo de aprobación: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\/otro-id-1234\/flujo_aprobacion_open/);
+  assert.match(m.texto, /Abrir Flujos documentales: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\/otro-id-1234\/flujo_aprobacion_open/);
   const entradas = await e.todas();
   assert.equal(entradas.filter((x) => x.accion === "aviso-enviado").length, 0, "no ToDo line");
   assert.equal(entradas.find((x) => x.accion === "correo-enviado")?.detalle, "Correo a Luz Pérez <luz@obra.co>: «[FLUJO-01] Revisar modelo.rvt — vence 20-11-2026»; copia a jefe@obra.co.");

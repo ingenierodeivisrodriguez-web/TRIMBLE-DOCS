@@ -11,6 +11,7 @@ import type { ProjectUser } from "../trimbleApi";
 import { CONFIG_INICIAL, ConfigCorreo, conInicial, cambiosCorreo, rellenar, revisarConfigCorreo, TextoCorreo } from "./configCorreo";
 import { crearEnlace } from "./enlaces";
 import { FlujoError } from "./errores";
+import { NOMBRE_EXTENSION } from "./nombre";
 import { diaVisible } from "./flujos";
 import type { Ctx } from "./service";
 import type { Aviso } from "./types";
@@ -146,7 +147,7 @@ export function marcoCorreo(proyecto: string, contenido: string, pie: string, av
   return [
     `<div style="background:#f4f6f9;padding:24px 12px;font-family:'Segoe UI',Arial,Helvetica,sans-serif">`,
     `<div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #dfe4ea;border-radius:6px;overflow:hidden">`,
-    `<div style="background:${AZUL};color:#ffffff;padding:14px 22px;font-size:15px;font-weight:600">Flujo de aprobación<span style="font-weight:400;opacity:.85"> · ${escapar(proyecto)}</span></div>`,
+    `<div style="background:${AZUL};color:#ffffff;padding:14px 22px;font-size:15px;font-weight:600">${NOMBRE_EXTENSION}<span style="font-weight:400;opacity:.85"> · ${escapar(proyecto)}</span></div>`,
     aviso ? `<div style="background:#fff6dc;color:#7a5600;padding:10px 22px;font-size:13px;border-bottom:1px solid #f1e2b3">${escapar(aviso)}</div>` : "",
     `<div style="padding:22px">`,
     contenido,
@@ -164,7 +165,7 @@ export function bloqueFlujo(codigo: string, hito: string, notas = "", extra = ""
 }
 
 /** The button's words: the flow by its code when the link opens it (phase 3), the extension otherwise. */
-export const textoBoton = (codigo: string, alFlujo: boolean) => (alFlujo && codigo ? `Abrir el flujo ${codigo}` : "Abrir Flujo de aprobación");
+export const textoBoton = (codigo: string, alFlujo: boolean) => (alFlujo && codigo ? `Abrir el flujo ${codigo}` : `Abrir ${NOMBRE_EXTENSION}`);
 
 /**
  * The e-mail of a notice for one person: subject, plain text and HTML (with
@@ -181,7 +182,7 @@ export function armarCorreo(
   const { asunto, intro } = textos(d, quien.nombre, comun.proyecto, plantilla);
   const hola = `Hola${quien.nombre ? ` ${unaLinea(quien.nombre)}` : ""},`;
   const archivo = d.archivos[0];
-  const aviso = d.prueba ? "Correo de prueba de Flujo de aprobación: así llegará el aviso. Los datos de abajo son de ejemplo; prueba el botón: debe abrir la extensión en este proyecto." : "";
+  const aviso = d.prueba ? `Correo de prueba de ${NOMBRE_EXTENSION}: así llegará el aviso. Los datos de abajo son de ejemplo; prueba el botón: debe abrir la extensión en este proyecto.` : "";
   const vence = d.vence ? diaVisible(d.vence) : "";
   const notas = d.notas.trim();
   const lineaArchivo = (a: DatosCorreo["archivos"][number]) => `${a.nombre} — versión ${a.revision ?? "?"}${a.nueva ? " (versión nueva)" : ""}`;
@@ -191,7 +192,7 @@ export function armarCorreo(
     d.tipo === "correccion" && d.rechazo
       ? `Corrige el archivo y sube la versión nueva con el mismo nombre en la misma carpeta (${d.rechazo.carpeta}).`
       : `En la extensión: flujo ${d.codigo ? `${d.codigo} ` : ""}«${unaLinea(d.hito)}» → Archivos → Me toca → Decidir.`;
-  const pie = "Este correo lo envía la extensión Flujo de aprobación de Trimble Connect. No lo respondas: los comentarios van en el flujo.";
+  const pie = `Este correo lo envía la extensión ${NOMBRE_EXTENSION} de Trimble Connect. No lo respondas: los comentarios van en el flujo.`;
   const etiqueta = textoBoton(d.codigo, !!comun.alFlujo && !d.prueba);
 
   const texto = [
@@ -448,6 +449,6 @@ export async function correoPrueba(ctx: Ctx): Promise<{ mensaje: string }> {
     throw new FlujoError(`No se pudo enviar el correo de prueba: ${mensajeErrorCorreo(err)}.`, 502, "correo-fallido");
   }
   return {
-    mensaje: `Te envié un correo de prueba a ${yo.correo}, desde ${ctx.correo.desde}. Revísalo (mira también la carpeta de spam la primera vez) y prueba su botón «Abrir Flujo de aprobación».`,
+    mensaje: `Te envié un correo de prueba a ${yo.correo}, desde ${ctx.correo.desde}. Revísalo (mira también la carpeta de spam la primera vez) y prueba su botón «Abrir ${NOMBRE_EXTENSION}».`,
   };
 }

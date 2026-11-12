@@ -9,6 +9,7 @@
 import type { Respuesta } from "../compras/cde";
 import { codigoFlujo } from "./flujos";
 import { corto } from "./prueba";
+import { NOMBRE_EXTENSION, TIPO_TAREA } from "./nombre";
 import { responsablesArchivo } from "./registro";
 import type { DatosCorreo } from "./correo";
 import type { ArchivoRegistro, Aviso, Firma, Flujo } from "./types";
@@ -36,8 +37,8 @@ export function textosTarea(flujo: Pick<Flujo, "hito"> & Partial<Pick<Flujo, "no
   };
 }
 
-/** The ToDo types tried, in order: the owner's wish, then «Solicitud» (Trimble's list is fixed). */
-export const TIPOS_TAREA = ["Flujo de aprobación", "Request"] as const;
+/** The ToDo types tried, in order: the owner's wish («Flujo documental» since the rename of 12-11-2026), then «Solicitud» (Trimble's list is fixed). */
+export const TIPOS_TAREA = [TIPO_TAREA, "Request"] as const;
 
 /** One ToDo per (step, same people) for the files of a flow that now wait for someone. */
 export function avisosRevision(archivos: ArchivoRegistro[], flujo: FlujoTarea, enlace: (a: ArchivoRegistro) => string): Aviso[] {
@@ -56,11 +57,11 @@ export function avisosRevision(archivos: ArchivoRegistro[], flujo: FlujoTarea, e
     const hito = flujo.hito;
     const paso = a.pasos[a.pasoActual]?.nombre ?? "";
     const lineas = as.slice(0, MAX_EN_AVISO).map((x) => `• ${x.nombre} — versión ${x.revision ?? "?"}${x.estado === "nueva-version" ? " (versión nueva)" : ""}: ${enlace(x)}`);
-    const mas = as.length > MAX_EN_AVISO ? [`… y ${as.length - MAX_EN_AVISO} más: ábrelos en Flujo de aprobación, flujo «${hito}» → Archivos → Me toca.`] : [];
+    const mas = as.length > MAX_EN_AVISO ? [`… y ${as.length - MAX_EN_AVISO} más: ábrelos en ${NOMBRE_EXTENSION}, flujo «${hito}» → Archivos → Me toca.`] : [];
     return {
       titulo: recorte(as.length === 1 ? `Revisar: ${a.nombre} (${paso}) — ${hito}` : `Revisar ${as.length} archivos (${paso}) — ${hito}`, 120),
       descripcion: recorte(
-        [`Flujo de aprobación «${hito}»: te toca el paso «${paso}».`, ...lineas, ...mas, `Apruébalos o recházalos en la extensión Flujo de aprobación: abre el flujo «${hito}» → Archivos → Me toca.`].join("\n"),
+        [`Flujo «${hito}»: te toca el paso «${paso}».`, ...lineas, ...mas, `Apruébalos o recházalos en la extensión ${NOMBRE_EXTENSION}: abre el flujo «${hito}» → Archivos → Me toca.`].join("\n"),
         3000
       ),
       trimble: textosTarea(flujo),
@@ -172,7 +173,7 @@ export function variantesTarea(projectId: string, aviso: Aviso, assignees: unkno
   for (const etiqueta of etiquetas) {
     const repetida = etiqueta && etiqueta !== t.label ? `«${t.label}» ya estaba usada en Trimble` : "";
     for (const tipo of [...TIPOS_TAREA, null]) {
-      const sinTipo = tipo === "Request" ? "tipo «Solicitud»: Trimble no aceptó «Flujo de aprobación»" : tipo === null ? "sin tipo: Trimble no aceptó «Flujo de aprobación» ni «Solicitud»" : "";
+      const sinTipo = tipo === "Request" ? `tipo «Solicitud»: Trimble no aceptó «${TIPO_TAREA}»` : tipo === null ? `sin tipo: Trimble no aceptó «${TIPO_TAREA}» ni «Solicitud»` : "";
       out.push({ cuerpo: { ...base(etiqueta), ...(t.dueDate ? { dueDate: t.dueDate } : {}), ...(tipo ? { type: tipo } : {}) }, etiqueta, nota: [sinTipo, repetida].filter(Boolean).join("; ") });
     }
   }

@@ -185,8 +185,8 @@ test("la tarea prueba formatos hasta que Trimble la acepta, adjunta el archivo y
       if (metodo === "POST" && ruta === "/todos") {
         recibidas.push(cuerpo);
         const c = cuerpo as { type?: string; assignees: unknown[] };
-        // Refuses the type «Flujo de aprobación» (not in its list), accepts «Request».
-        return c.type === "Flujo de aprobación" ? { estado: 400, cuerpo: { message: "Invalid type" } } : { estado: 201, cuerpo: { id: "todo1", ...c } };
+        // Refuses the type «Flujo documental» (not in its list), accepts «Request».
+        return c.type === "Flujo documental" ? { estado: 400, cuerpo: { message: "Invalid type" } } : { estado: 201, cuerpo: { id: "todo1", ...c } };
       }
       if (metodo === "POST" && ruta === "/todos/todo1/attachments") return { estado: 200, cuerpo: {} };
       if (metodo === "GET" && ruta === "/todos/todo1") return { estado: 200, cuerpo: { id: "todo1", assignees: [{ id: "g1", type: "GROUP" }] } };
@@ -198,11 +198,11 @@ test("la tarea prueba formatos hasta que Trimble la acepta, adjunta el archivo y
   assert.equal(recibidas.length, 2);
   assert.equal(r.datos.formato, "código + título + tipo «Solicitud» + vencimiento");
   assert.match(String((recibidas[1] as { label: string }).label), /^PRUEBA-\d{6}$/);
-  assert.match(r.mensaje, /No aceptó el tipo «Flujo de aprobación»/);
+  assert.match(r.mensaje, /No aceptó el tipo «Flujo documental»/);
   assert.equal(r.datos.adjunto, "attachments [fileId]");
   assert.equal(r.datos.confirmado, true);
   assert.deepEqual(r.datos.tipos, ["Revisión", "Observación"]);
-  assert.match(r.mensaje, /Trimble creó la tarea «Prueba Flujo de aprobación: revisar SEL-ARQ-TR1.rvt» para Arquitectura \(grupo\)/);
+  assert.match(r.mensaje, /Trimble creó la tarea «Prueba Flujos documentales: revisar SEL-ARQ-TR1.rvt» para Arquitectura \(grupo\)/);
   assert.match(r.mensaje, /El archivo quedó adjunto/);
   const intentos = r.datos.intentos as { http: number; detalle: string }[];
   assert.deepEqual(
@@ -235,7 +235,7 @@ test("después de cerrar la tarea de prueba espera unos segundos antes de leerla
   assert.deepEqual(esperas, [4000]);
   assert.equal(r.datos.estadoCerrada, "CLOSED");
   assert.match(r.mensaje, /Al leerla otra vez, su estado es CLOSED \(antes NEW\)/);
-  assert.match(r.mensaje, /Aceptó el código arriba, el tipo «Flujo de aprobación» y la fecha de vencimiento/);
+  assert.match(r.mensaje, /Aceptó el código arriba, el tipo «Flujo documental» y la fecha de vencimiento/);
 });
 
 test("si Trimble rechaza todos los formatos de tarea, lo dice con cada respuesta", async () => {
@@ -267,7 +267,7 @@ test("si la tarea queda sin la persona asignada, avisa", async () => {
 
 test("los formatos de tarea usan USER o GROUP según a quién va", () => {
   const f = formatosTarea({ projectId: "P", titulo: "T", descripcion: "D", asignadoId: "g1", tipo: "GROUP", etiqueta: "PRUEBA-195600", vence: "2026-11-12" });
-  assert.deepEqual(f[0].cuerpo, { projectId: "P", label: "PRUEBA-195600", title: "T", description: "D", assignees: [{ id: "g1", type: "GROUP" }], dueDate: "2026-11-12T17:00:00+0000", type: "Flujo de aprobación" });
+  assert.deepEqual(f[0].cuerpo, { projectId: "P", label: "PRUEBA-195600", title: "T", description: "D", assignees: [{ id: "g1", type: "GROUP" }], dueDate: "2026-11-12T17:00:00+0000", type: "Flujo documental" });
   assert.equal(f[1].cuerpo.type, "Request");
   assert.deepEqual(f.find((x) => x.formato === "label + assignees [id]")!.cuerpo.assignees, ["g1"]);
 });

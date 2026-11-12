@@ -12,6 +12,7 @@ import { botonCorreo, bloqueFlujo, Correo, enlaceExtension, escapar, ID_EXTENSIO
 import { enlaceDe } from "./decisiones";
 import { crearEnlace, EnlaceCorreo } from "./enlaces";
 import { codigoFlujo, diaVisible } from "./flujos";
+import { NOMBRE_EXTENSION } from "./nombre";
 import { ESPERANDO } from "./registro";
 import type { FlujoStore } from "./store";
 import { diaColombia } from "./trazabilidad";
@@ -55,7 +56,7 @@ export function armarRecordatorio(
   const intro = "Estos archivos esperan tu paso y su flujo ya venció:";
   const unico = vencidos.length === 1 ? codigoFlujo(vencidos[0].flujo.codigo) : "";
   const etiqueta = textoBoton(unico, comun.alFlujo);
-  const pie = "Este recordatorio llega cada día mientras tengas archivos vencidos esperando tu paso. Lo envía la extensión Flujo de aprobación de Trimble Connect.";
+  const pie = `Este recordatorio llega cada día mientras tengas archivos vencidos esperando tu paso. Lo envía la extensión ${NOMBRE_EXTENSION} de Trimble Connect.`;
   const linea = (v: VencidoFlujo) => `Venció el ${diaVisible(v.flujo.vence ?? "")} (${haceDias(dias(v.flujo.vence ?? comun.hoy, comun.hoy))}) · paso «${v.paso}»`;
 
   const texto = [

@@ -21,7 +21,7 @@ export interface PruebaResponse {
 }
 
 /** The title every test ToDo starts with, so it is easy to find and delete. */
-export const TAREA_PRUEBA = "Prueba Flujo de aprobación";
+export const TAREA_PRUEBA = "Prueba Flujos documentales";
 
 export interface PersonaEquipo {
   id: string;

@@ -4,6 +4,7 @@
 // to the destination and when). Letter, landscape so the details fit.
 import { fechaHora } from "../compras/formato";
 import { pdfSafe } from "../graficos/pdfReport";
+import { NOMBRE_EXTENSION } from "./nombre";
 import { describirFiltro, FiltroTraza, resumenTraza, Traza } from "./trazabilidad";
 
 const M = 12;
@@ -41,7 +42,7 @@ export async function pdfTrazabilidad(o: {
   };
   const encabezado = () => {
     fuente(13, true, [21, 90, 122]);
-    doc.text(pdfSafe(`Trazabilidad - Flujo de aprobación`), M, y + 4);
+    doc.text(pdfSafe(`Trazabilidad - ${NOMBRE_EXTENSION}`), M, y + 4);
     fuente(9);
     doc.text(pdfSafe(o.proyecto), ancho - M, y + 4, { align: "right" });
     y += 9;

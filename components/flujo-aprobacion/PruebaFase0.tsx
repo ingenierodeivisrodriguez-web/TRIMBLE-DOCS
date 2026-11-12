@@ -178,7 +178,7 @@ export default function PruebaFase0({ api, projectId, projectName }: { api: Fluj
     });
 
   const resumen = [
-    `Flujo de aprobación – fase 0 – ${projectName || projectId} – ${fechaHora(new Date().toISOString())}`,
+    `Flujos documentales – fase 0 – ${projectName || projectId} – ${fechaHora(new Date().toISOString())}`,
     ...lineas.map((l) => `${l.ok ? "✓" : "✗"} ${l.paso}: ${l.mensaje}`),
     ...(equipo ? [`Grupos: ${equipo.grupos.map((g) => `${g.nombre} (${g.miembros === null ? "sin miembros leídos" : contar(g.miembros.length, "miembro leído", "miembros leídos")}${g.total !== null ? `, Trimble dice ${g.total}` : ""})`).join("; ") || "ninguno"}`] : []),
     ...(info

@@ -70,8 +70,8 @@ test("al registrar un archivo nuevo se avisa con una tarea de Trimble a quien ti
   const e = await escenario();
   assert.match(e.registro.mensaje, /1 archivo nuevo\. Se avisó a los revisores con 1 tarea de Trimble\./);
   assert.equal(e.tareas.length, 1);
-  // The ToDo shows the flow's code, title and description (its title again: it has none), with the type «Flujo de aprobación».
-  assert.deepEqual(e.tareas[0], { projectId: "P", label: "FLUJO-01", title: "Aprobar Torre 1", description: "Aprobar Torre 1", assignees: [{ id: "g-arq", type: "GROUP" }], type: "Flujo de aprobación" });
+  // The ToDo shows the flow's code, title and description (its title again: it has none), with the type «Flujo documental».
+  assert.deepEqual(e.tareas[0], { projectId: "P", label: "FLUJO-01", title: "Aprobar Torre 1", description: "Aprobar Torre 1", assignees: [{ id: "g-arq", type: "GROUP" }], type: "Flujo documental" });
   const h = await historial(e.admin, e.f.id);
   assert.ok(h.entradas.some((x) => x.accion === "aviso-enviado" && /^Tarea de Trimble FLUJO-01 para Arquitectura \(grupo\): «Revisar: modelo.rvt \(Revisa\) — Aprobar Torre 1»\.$/.test(x.detalle)));
 });
