@@ -36,6 +36,11 @@ export interface FilaFlujo {
   cierre: Cierre | null;
   /** Files with a newer version in Trimble than the one the flow reviews (the flow keeps its own). */
   conVersionNueva: number;
+  /** Files waiting for the caller at a step that isn't the last (review) and at the last one (approval). */
+  misRevisar: number;
+  misAprobar: number;
+  /** The caller is responsible for one of its steps, or decided on one of its files. */
+  participe: boolean;
 }
 
 /** Past its due date with files still waiting (only active flows). */
@@ -50,7 +55,7 @@ export function sumarDias(dia: string, n: number): string {
   return d.toISOString().slice(0, 10);
 }
 
-type ArchivoLista = Pick<ArchivoInfo, "flujoId" | "estado" | "meToca" | "pasos" | "pasoActual" | "versionNueva">;
+type ArchivoLista = Pick<ArchivoInfo, "flujoId" | "estado" | "meToca" | "pasos" | "pasoActual" | "versionNueva"> & Partial<Pick<ArchivoInfo, "firmas">>;
 
 /** Where one registered file stands (null when it was retired from the flow). */
 export function estadoDocumento(a: Pick<ArchivoInfo, "estado" | "pasos" | "pasoActual">): Exclude<EstadoDocumento, "sin-archivos"> | null {
@@ -110,6 +115,16 @@ export interface ResumenTablero {
   porAprobar: CifraTablero;
   aprobados: CifraTablero;
   rechazados: CifraTablero;
+  /** The caller's flows of each card (12-11-2026): what a click on it shows. */
+  mios: { porRevisar: number; porAprobar: number; aprobados: number };
+}
+
+/** A card of the dashboard, which shows the caller's flows in that state (12-11-2026). */
+export type Tarjeta = "por-revisar" | "por-aprobar" | "aprobado";
+
+/** Whether a row is the caller's for that card: files waiting for them at that kind of step, or approved where they took part. */
+export function esMia(f: Pick<FilaFlujo, "misRevisar" | "misAprobar" | "participe" | "estado">, t: Tarjeta): boolean {
+  return t === "por-revisar" ? f.misRevisar > 0 : t === "por-aprobar" ? f.misAprobar > 0 : f.estado === "aprobado" && f.participe;
 }
 
 /**
@@ -129,16 +144,24 @@ export function resumenTablero(filas: FilaFlujo[], archivos: Pick<ArchivoInfo, "
     porAprobar: cifra("por-aprobar"),
     aprobados: cifra("aprobado"),
     rechazados: cifra("rechazado"),
+    mios: {
+      porRevisar: filas.filter((f) => esMia(f, "por-revisar")).length,
+      porAprobar: filas.filter((f) => esMia(f, "por-aprobar")).length,
+      aprobados: filas.filter((f) => esMia(f, "aprobado")).length,
+    },
   };
 }
 
-export function filasFlujos(flujos: Flujo[], archivos: ArchivoLista[], hoy: string, cierres: Record<string, Cierre> = {}): FilaFlujo[] {
+/** `yo`: the caller's Trimble id, to know the flows where they took part. */
+export function filasFlujos(flujos: Flujo[], archivos: ArchivoLista[], hoy: string, cierres: Record<string, Cierre> = {}, yo = ""): FilaFlujo[] {
   const porNombre = new Intl.Collator("es", { numeric: true, sensitivity: "base" });
   return flujos
     .map((f) => {
       const suyos = archivos.filter((a) => a.flujoId === f.id);
       const pendientes = suyos.filter((a) => ESPERANDO.includes(a.estado)).length;
-      const porRevisar = suyos.filter((a) => ESPERANDO.includes(a.estado) && a.meToca).length;
+      const mios = suyos.filter((a) => ESPERANDO.includes(a.estado) && a.meToca);
+      const porRevisar = mios.length;
+      const misAprobar = mios.filter((a) => a.pasoActual >= a.pasos.length - 1).length;
       const { estado, detalle } = estadoDocumentos(suyos);
       return {
         flujo: f,
@@ -151,6 +174,9 @@ export function filasFlujos(flujos: Flujo[], archivos: ArchivoLista[], hoy: stri
         vencido: estaVencido(f, pendientes, hoy),
         cierre: cierres[f.id] ?? null,
         conVersionNueva: suyos.filter((a) => a.estado !== "retirado" && !!a.versionNueva).length,
+        misRevisar: porRevisar - misAprobar,
+        misAprobar,
+        participe: !!yo && (f.pasos.some((p) => p.responsable?.tipo === "persona" && p.responsable.id === yo) || suyos.some((a) => (a.firmas ?? []).some((x) => x.quienId === yo))),
       };
     })
     // Newest first by code (FLUJO-12, FLUJO-11…, 11-11-2026); flows still without a code go last, by name.
@@ -166,6 +192,8 @@ export interface FiltroLista {
   vence?: "vencidos" | "7dias" | "sin-fecha" | "";
   porRevisar?: boolean;
   texto?: string;
+  /** A dashboard card clicked: only the caller's flows in that state (12-11-2026). */
+  tarjeta?: Tarjeta | "";
 }
 
 /** The options of the dropdowns, from what the flows have (no Grupos filter: the owner doesn't use it, 11-11-2026). */
@@ -191,6 +219,7 @@ export function filtrarFilas(filas: FilaFlujo[], filtro: FiltroLista, hoy: strin
     if (filtro.vence === "7dias" && !(v && v >= hoy && v <= sumarDias(hoy, 7))) return false;
     if (filtro.vence === "sin-fecha" && v) return false;
     if (filtro.porRevisar && f.porRevisar === 0) return false;
+    if (filtro.tarjeta && !esMia(f, filtro.tarjeta)) return false;
     if (texto && !f.flujo.hito.toLowerCase().includes(texto) && !(compacto && codigoFlujo(f.flujo.codigo).toLowerCase().replace(/[-\s]/g, "").includes(compacto))) return false;
     return true;
   });

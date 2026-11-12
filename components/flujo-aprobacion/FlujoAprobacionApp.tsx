@@ -139,7 +139,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
   };
 
   const hoy = diaColombia(new Date().toISOString());
-  const filas = useMemo(() => (datos ? filasFlujos(datos.flujos, archivos?.archivos ?? [], hoy, datos.cierres) : []), [datos, archivos, hoy]);
+  const filas = useMemo(() => (datos ? filasFlujos(datos.flujos, archivos?.archivos ?? [], hoy, datos.cierres, datos.yo) : []), [datos, archivos, hoy]);
   const visibles = useMemo(() => filtrarFilas(filas, filtro, hoy), [filas, filtro, hoy]);
   const opciones = useMemo(() => opcionesFiltro(filas), [filas]);
   const resumen = useMemo(() => resumenTablero(filas, archivos?.archivos ?? []), [filas, archivos]);
@@ -253,7 +253,14 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               />
             </div>
           </header>
-          {datos && <Tablero resumen={resumen} estado={filtro.estado ?? ""} onEstado={(estado) => setFiltro({ ...filtro, estado })} />}
+          {datos && (
+            <Tablero
+              resumen={resumen}
+              tarjeta={filtro.tarjeta ?? ""}
+              // A card shows the caller's flows in that state; it replaces the Estado filter and «Tengo por revisar».
+              onTarjeta={(tarjeta) => setFiltro({ ...filtro, tarjeta, estado: "", porRevisar: false })}
+            />
+          )}
           {datos && <RevisionCarpetas api={api} flujos={datos.flujos} onTermino={cargarArchivos} />}
           {error && <Notice kind="error">{error}</Notice>}
           {aviso && <Notice kind={aviso.kind}>{aviso.texto}</Notice>}

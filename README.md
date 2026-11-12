@@ -4909,10 +4909,24 @@ ejecutar **`supabase/flujo-aprobacion.sql`** (columna `codigo`).
   tarjetas**: **Flujos** (total, con cuántos activos y desactivados), **Por
   revisar**, **Por aprobar** y **Aprobados** (cuántos flujos tienen ese estado
   en la columna Estado, y debajo cuántos de sus archivos: «4 archivos esperando
-  aprobación»). Cuentan todos los flujos, aunque la lista esté filtrada. Un clic
-  en una tarjeta deja en la lista solo esos flujos (es el mismo filtro Estado);
-  otro clic, o «Flujos», muestra todos. Los rechazados siguen en la columna
-  Estado y en el filtro.
+  aprobación»). Cuentan todos los flujos, aunque la lista esté filtrada. Otro
+  clic, o «Flujos», muestra todos. Los rechazados siguen en la columna Estado y
+  en el filtro.
+  - **Desde el 12-11-2026** (pedido con captura: «si hay 4 pendientes por
+    aprobar por Pepe, abajo se muestren esas cuatro»), el clic en una tarjeta
+    deja en la lista **solo los flujos de quien entró**: «Por revisar», los que
+    tienen archivos esperando su revisión (es responsable del paso que espera,
+    o miembro del grupo responsable, y no es el último); «Por aprobar», los que
+    tienen archivos esperando su aprobación (el último paso); «Aprobados», los
+    aprobados donde fue responsable de un paso o decidió. Cada tarjeta dice
+    debajo cuántos son («2 te tocan», «3 con tu participación»); el número
+    grande sigue siendo el de todo el proyecto. Un flujo con un archivo en
+    revisión y otro esperando tu aprobación sale en «Por aprobar» aunque su
+    Estado diga «Por revisar». El filtro **Estado** de la lista sigue mostrando
+    todos los flujos de ese estado. Si no hay ninguno, la lista lo explica («No
+    tienes archivos esperando tu aprobación…»). Código: `lista.ts` (`esMia`,
+    `misRevisar`, `misAprobar`, `participe`, `filtro.tarjeta`,
+    `resumen.mios`), `Tablero.tsx`.
 - La barra azul «Archivos revisados: no hay versiones nuevas · Revisar ahora»
   quedó como una línea pequeña debajo de las tarjetas; cuando la revisión
   encuentra versiones nuevas o errores, sale el aviso completo como antes.

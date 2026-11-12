@@ -60,6 +60,7 @@ test("el tablero cuenta los flujos por su estado y sus archivos en ese estado, d
     porAprobar: { flujos: 0, archivos: 1 },
     aprobados: { flujos: 1, archivos: 2 },
     rechazados: { flujos: 0, archivos: 0 },
+    mios: { porRevisar: 1, porAprobar: 0, aprobados: 0 },
   });
   // Files of another project's flow (or a flow not listed) don't count.
   assert.equal(resumenTablero(filas, [...ARCHIVOS, archivo("otro", "aprobado")]).aprobados.archivos, 2);
@@ -177,4 +178,48 @@ test("la fila cuenta los archivos con una versión más nueva en Trimble (sin lo
   const filas = filasFlujos([TORRE], [{ ...archivo("f1", "aprobado"), versionNueva: vn }, { ...archivo("f1", "retirado"), versionNueva: vn }, archivo("f1", "pendiente")], HOY);
   assert.equal(filas[0].conVersionNueva, 1);
   assert.equal(filas[0].estado, "por-revisar", "the state is about the flow's own versions");
+});
+
+test("al hacer clic en una tarjeta se ven solo los flujos de quien entró: si a Pepe le tocan 4 por aprobar, salen esos 4", () => {
+  const pepe = persona("pepe", "Pepe Gómez");
+  const luz = persona("luz", "Luz Mora");
+  // Five flows waiting for approval: four of Pepe's, one of Luz's (meToca says whose turn it is, for the caller Pepe).
+  const deAprobar = [1, 2, 3, 4].map((n) => flujo(`p${n}`, `Planos ${n}`, { codigo: n, pasos: pasos(luz, pepe) }));
+  const deLuz = flujo("l1", "Planos de Luz", { codigo: 5, pasos: pasos(pepe, luz) });
+  // A flow whose state is «por revisar» (one file in review) but with another file waiting for Pepe's approval.
+  const mixto = flujo("m1", "Mixto", { codigo: 6, pasos: pasos(luz, pepe) });
+  // Approved: where Pepe is responsible, where he decided as a group member, and one without him.
+  const aprobadoSuyo = flujo("a1", "Aprobado suyo", { codigo: 7, pasos: pasos(luz, pepe) });
+  const aprobadoGrupo = flujo("a2", "Aprobado por su grupo", { codigo: 8, pasos: pasos(luz, { tipo: "grupo", id: "g", nombre: "Arquitectura" }) });
+  const aprobadoAjeno = flujo("a3", "Aprobado ajeno", { codigo: 9, pasos: pasos(luz, luz) });
+  const firmaPepe = { pasoId: "p2", paso: "Aprueba", decision: "aprobado" as const, quien: "Pepe", quienId: "pepe", comoAdmin: false, fecha: "", revision: 1, versionId: "v", comentario: "" };
+  const archivos = [
+    ...deAprobar.map((f) => archivo(f.id, "pendiente", true, 1)),
+    archivo("l1", "pendiente", false, 1),
+    archivo("m1", "pendiente", false, 0),
+    archivo("m1", "pendiente", true, 1),
+    archivo("a1", "aprobado"),
+    { ...archivo("a2", "aprobado"), firmas: [firmaPepe] },
+    archivo("a3", "aprobado"),
+  ];
+  const filas = filasFlujos([...deAprobar, deLuz, mixto, aprobadoSuyo, aprobadoGrupo, aprobadoAjeno], archivos, HOY, {}, "pepe");
+  const nombres = (t: "por-revisar" | "por-aprobar" | "aprobado") => filtrarFilas(filas, { tarjeta: t }, HOY).map((f) => f.flujo.hito);
+
+  assert.deepEqual(nombres("por-aprobar"), ["Mixto", "Planos 4", "Planos 3", "Planos 2", "Planos 1"]);
+  assert.deepEqual(nombres("por-revisar"), [], "nothing waits for his review");
+  assert.deepEqual(nombres("aprobado"), ["Aprobado por su grupo", "Aprobado suyo"]);
+  const r = resumenTablero(filas, archivos);
+  assert.deepEqual(r.mios, { porRevisar: 0, porAprobar: 5, aprobados: 2 });
+  assert.equal(r.porAprobar.flujos, 5, "the card's big number is still every flow in that state");
+
+  // Luz sees hers: the one waiting for her approval and the files waiting for her review.
+  const deLuzFilas = filasFlujos(
+    [...deAprobar, deLuz, mixto],
+    [...deAprobar.map((f) => archivo(f.id, "pendiente", false, 1)), archivo("l1", "pendiente", true, 1), archivo("m1", "pendiente", true, 0), archivo("m1", "pendiente", false, 1)],
+    HOY,
+    {},
+    "luz"
+  );
+  assert.deepEqual(filtrarFilas(deLuzFilas, { tarjeta: "por-aprobar" }, HOY).map((f) => f.flujo.hito), ["Planos de Luz"]);
+  assert.deepEqual(filtrarFilas(deLuzFilas, { tarjeta: "por-revisar" }, HOY).map((f) => f.flujo.hito), ["Mixto"]);
 });

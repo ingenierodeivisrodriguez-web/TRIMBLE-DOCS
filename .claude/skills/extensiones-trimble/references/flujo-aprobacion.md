@@ -836,6 +836,13 @@ vercel.json): flujos activos con `vence < hoy`, archivos en `ESPERANDO`,
 destinatarios = enlaces `tipo=revision` del mismo archivo y `pasoId` (correo
 guardado; pasos avisados antes de la fase 3 no se recuerdan), uno por persona y
 proyecto, `recordado` evita repetir el día, `recordatorio-enviado/fallido`
-con usuario «Recordatorio automático». Config `recordatorios` (inicial true). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+con usuario «Recordatorio automático». Config `recordatorios` (inicial true).
+Tarjetas del tablero (12-11-2026, «se muestre el listado donde él es
+responsable»): el clic pone `filtro.tarjeta` (y limpia Estado y «Tengo por
+revisar»); `esMia` en `lista.ts`: por-revisar = `misRevisar > 0` (archivos con
+`meToca` en un paso que no es el último), por-aprobar = `misAprobar > 0` (en el
+último), aprobado = estado aprobado y `participe` (persona responsable de un
+paso o firma con `quienId` = yo; `filasFlujos(..., yo)`). `resumen.mios` da la
+línea «N te tocan»; el número grande sigue siendo el del proyecto. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

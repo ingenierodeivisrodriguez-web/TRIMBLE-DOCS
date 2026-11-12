@@ -2,7 +2,7 @@
 
 import type { CSSProperties } from "react";
 import { codigoFlujo, describirCierre, diaVisible } from "../../lib/flujo-aprobacion/flujos";
-import type { EstadoDocumento, FilaFlujo, FiltroLista } from "../../lib/flujo-aprobacion/lista";
+import type { EstadoDocumento, FilaFlujo, FiltroLista, Tarjeta } from "../../lib/flujo-aprobacion/lista";
 import type { Flujo } from "../../lib/flujo-aprobacion/types";
 import { C } from "../presupuesto/ui";
 import MenuPuntos from "./MenuPuntos";
@@ -47,6 +47,13 @@ const filtroSelect: CSSProperties = {
   padding: "4px 2px",
   maxWidth: 200,
 };
+/** The empty list after a dashboard card: nothing of the caller's in that state. */
+const VACIO_TARJETA: Record<Tarjeta, string> = {
+  "por-revisar": "No tienes archivos esperando tu revisión: aquí salen los flujos donde eres responsable del paso que espera.",
+  "por-aprobar": "No tienes archivos esperando tu aprobación: aquí salen los flujos donde eres responsable del último paso y ya les toca.",
+  aprobado: "No hay flujos aprobados donde hayas sido responsable o hayas decidido.",
+};
+
 const th: CSSProperties = { textAlign: "left", padding: "12px 10px", fontWeight: 400, fontSize: 14, color: "var(--tc-gray-700)", borderBottom: `1px solid ${C.border}`, background: "#fafbfc", whiteSpace: "nowrap" };
 const td: CSSProperties = { padding: "12px 10px", fontSize: 14, borderBottom: `1px solid ${C.grid}`, verticalAlign: "middle" };
 
@@ -88,7 +95,7 @@ export default function ListaFlujos({
   onPdf: (f: Flujo) => void;
 }) {
   const cambiar = (c: Partial<FiltroLista>) => onFiltro({ ...filtro, ...c });
-  const hayFiltro = !!(filtro.propietario || filtro.quien || filtro.estado || filtro.vence || filtro.porRevisar || filtro.texto);
+  const hayFiltro = !!(filtro.propietario || filtro.quien || filtro.estado || filtro.vence || filtro.porRevisar || filtro.texto || filtro.tarjeta);
   return (
     <div>
       <div style={{ display: "flex", gap: 18, flexWrap: "wrap", alignItems: "center", margin: "4px 0 12px" }}>
@@ -149,7 +156,11 @@ export default function ListaFlujos({
             {filas.length === 0 && (
               <tr>
                 <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={7}>
-                  {total === 0 ? "Todavía no hay flujos en este proyecto. Crea el primero con «Nuevo»." : "Ningún flujo cumple estos filtros."}
+                  {total === 0
+                    ? "Todavía no hay flujos en este proyecto. Crea el primero con «Nuevo»."
+                    : filtro.tarjeta
+                      ? VACIO_TARJETA[filtro.tarjeta]
+                      : "Ningún flujo cumple estos filtros."}
                 </td>
               </tr>
             )}
