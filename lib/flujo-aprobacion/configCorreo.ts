@@ -20,6 +20,8 @@ export interface ConfigCorreo {
   tareasTrimble: boolean;
   /** Which notices send an e-mail: a step that waits for someone, a rejected file to its uploader. */
   eventos: { revision: boolean; correccion: boolean };
+  /** The daily reminder to whoever has files waiting in an overdue flow (phase 3). */
+  recordatorios: boolean;
   textos: { revision: TextoCorreo; correccion: TextoCorreo };
   /** Addresses that get one copy of each notice. */
   copia: string[];
@@ -37,6 +39,7 @@ export const CONFIG_INICIAL: ConfigCorreo = {
   activo: true,
   tareasTrimble: true,
   eventos: { revision: true, correccion: true },
+  recordatorios: true,
   textos: TEXTOS_INICIALES,
   copia: [],
   idExtension: null,
@@ -98,6 +101,7 @@ export function conInicial(datos: unknown): ConfigCorreo {
     activo: bool(d.activo, true),
     tareasTrimble: bool(d.tareasTrimble, true),
     eventos: { revision: bool(ev.revision, true), correccion: bool(ev.correccion, true) },
+    recordatorios: bool(d.recordatorios, true),
     textos: { revision: t("revision"), correccion: t("correccion") },
     copia: separarCorreos(d.copia).filter((c) => CORREO_VALIDO.test(c)).slice(0, MAX_COPIA),
     idExtension: typeof d.idExtension === "string" && ID_SOLO.test(d.idExtension) ? d.idExtension : null,
@@ -183,6 +187,7 @@ export function cambiosCorreo(antes: ConfigCorreo, despues: ConfigCorreo): strin
   si(antes.tareasTrimble !== despues.tareasTrimble, `Crear también la tarea de Trimble: ${sino(despues.tareasTrimble)}`);
   si(antes.eventos.revision !== despues.eventos.revision, `Correo cuando a alguien le toca un paso: ${sino(despues.eventos.revision)}`);
   si(antes.eventos.correccion !== despues.eventos.correccion, `Correo cuando rechazan un archivo: ${sino(despues.eventos.correccion)}`);
+  si(antes.recordatorios !== despues.recordatorios, `Recordatorio diario de vencidos: ${sino(despues.recordatorios)}`);
   for (const [k, nombre] of [
     ["revision", "«Te toca un paso»"],
     ["correccion", "«Archivo rechazado»"],

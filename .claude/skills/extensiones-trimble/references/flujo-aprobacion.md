@@ -821,7 +821,21 @@ no se apaga la tarea con los correos apagados ni sin cuenta de Gmail; sin
 tarea ni correo se anota `aviso-fallido` «No se avisó…». `configDe` nunca
 falla (sin fila o sin tabla = inicial). «Enviar correo de prueba» quedó dentro
 de la ventana y usa los textos guardados con `datosEjemplo` (FLUJO-00).
-Pendiente con su OK: fase 3 (abrir el flujo exacto con una tarea de un solo
-uso, recordatorio diario de vencidos con el cron). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+Fase 3 (12-11-2026, «sigue con la fase 3, y ocultas la pestaña de correo de
+aviso»): la opción «Correos de aviso…» quedó `oculto: true` en el ⋮ (config de
+SELVIA guardada: correos sí, tareas no). `enlaces.ts`: cada correo lleva un
+enlace por persona (`aprobacion_enlaces_correo`, token base64url de 24 bytes,
+60 días); `GET /ir/[token]` es pública (sin `handle`): marca `abierto` y
+redirige a `enlaceExtension` del proyecto; al cargar, la app llama
+`POST /pendiente` → `tomarPendiente` (clic de esa misma persona en los últimos
+`MINUTOS_CLIC`=20, `usado` una sola vez) y abre el panel del flujo; anota
+`entro-desde-correo`. `ctx.origen` = `urlPublica(req.nextUrl.origin)`
+(`FLUJO_URL_PUBLICA`); sin origen o sin tabla, botón de antes.
+`recordatorios.ts` + cron `0 12 * * *` (7:00 Colombia; tercer cron de
+vercel.json): flujos activos con `vence < hoy`, archivos en `ESPERANDO`,
+destinatarios = enlaces `tipo=revision` del mismo archivo y `pasoId` (correo
+guardado; pasos avisados antes de la fase 3 no se recuerdan), uno por persona y
+proyecto, `recordado` evita repetir el día, `recordatorio-enviado/fallido`
+con usuario «Recordatorio automático». Config `recordatorios` (inicial true). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

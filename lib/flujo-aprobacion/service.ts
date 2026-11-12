@@ -75,6 +75,8 @@ export interface Ctx {
   ahora?: () => Date;
   /** The extension's own e-mails (11-11-2026); missing when Vercel has no Gmail account set: no e-mail goes. */
   correo?: Correo;
+  /** This app's public address, for the e-mails' own links (phase 3). Missing: they point at the extension. */
+  origen?: string;
   /** For the file reading's time budget (tests). */
   reloj?: () => number;
   limites?: Limites;

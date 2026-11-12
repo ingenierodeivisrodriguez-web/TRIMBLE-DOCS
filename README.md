@@ -4951,8 +4951,8 @@ cuando le toca un paso, con un botón que lo lleve a la extensión, aparte del
 correo de las tareas de Trimble y configurable. Plan aceptado en fases; esta es
 la fase 1 (el envío). La fase 2 (ventana de configuración, con la opción de no
 crear la tarea de Trimble para que solo llegue este correo) está en la sección
-siguiente; la fase 3 (enlace al flujo exacto, recordatorio de vencidos) espera
-su OK.
+siguiente y la fase 3 (enlace al flujo exacto, recordatorio de vencidos) en la
+de después.
 
 - **Cuándo sale**: en los mismos momentos que la tarea de Trimble: un archivo
   entra al flujo, pasa al paso siguiente, entra una versión con «Reactivar el
@@ -5006,7 +5006,10 @@ después de la tarea), ruta `POST /api/flujo-aprobacion/correo-prueba`,
 
 Con el correo de prueba recibido, el dueño pidió «sigue con la fase 2». En
 **⋮ → «Correos de aviso…»** (solo administradores del proyecto en Trimble) se
-elige, por proyecto:
+elige, por proyecto (el 12-11-2026, ya configurada —correos sí, tarea de Trimble
+no—, el dueño pidió **ocultar esa opción del menú**: la ventana sigue en el
+código y se vuelve a mostrar con `oculto: !datos?.esAdmin` en
+`FlujoAprobacionApp`):
 
 - **Qué se envía**: «Enviar los correos de la extensión» y «Crear también la
   tarea de Trimble». Si se quita la tarea, Trimble no crea la tarea ni manda su
@@ -5053,6 +5056,62 @@ Código: `configCorreo.ts` (`ConfigCorreo`, `TEXTOS_INICIALES`, `DATOS_TEXTO`,
 `enviarCorreos`), `store.ts` (`configCorreo`, `guardarConfigCorreo`),
 `decisiones.ts` (`notificar` lee la configuración; `resumenAvisos`), ruta
 `GET/POST /api/flujo-aprobacion/correos`, pantalla `ConfigCorreos.tsx`.
+
+### El botón abre el flujo y recordatorio diario (12-11-2026, fase 3)
+
+Pedido del dueño: «sigue con la fase 3, y ocultas la pestaña de correo de
+aviso» (con captura del menú ⋮). Ya en Trimble real los avisos salían solo por
+correo (FLUJO-13 «correo solo»).
+
+- **El botón del correo abre ese flujo.** Trimble no tiene una dirección que
+  abra una extensión en una pantalla dada, así que cada correo lleva un enlace
+  propio para cada persona (un código al azar que nadie puede adivinar), que
+  pasa por esta app (`/api/flujo-aprobacion/ir/<código>`): anota el clic y
+  lleva a la persona a la extensión en su proyecto de Trimble. Cuando la
+  extensión abre, pregunta si esa misma persona de Trimble hizo clic en los
+  últimos 20 minutos y, si sí, **abre el panel de ese flujo** (con «Me toca» si
+  le toca algo). Cada clic abre el flujo una vez; a otra persona que use el
+  enlace se le abre la extensión normal. El enlace sirve 60 días; vencido o
+  inexistente muestra «Este enlace ya no sirve…». El botón dice «Abrir el flujo
+  FLUJO-13».
+- El historial anota **«Entró desde el correo»**: «Entró al flujo con el botón
+  del correo «te toca» enviado el 12-11-2026 07:49».
+- El botón del **correo de prueba** también pasa por ahí: al hacer clic, la
+  extensión dice «Entraste con el botón del correo de prueba: el botón funciona».
+- **Recordatorio diario de vencidos** (Vercel Cron, todos los días a las 7:00
+  de Colombia, `/api/flujo-aprobacion/recordatorios`): a quien tenga archivos
+  esperando su paso en un flujo **activo cuyo vencimiento ya pasó** le llega un
+  correo por proyecto con todos sus vencidos («Recordatorio: 2 archivos vencidos
+  esperan tu paso — SELVIA»; por flujo: código, título, «Venció el 10-11-2026
+  (hace 2 días) · paso «Revisa»» y los archivos con su enlace), y un botón que
+  abre el flujo (o la extensión con «Tengo por revisar» si son varios flujos).
+  - Como corre sin sesión de Trimble, escribe a las personas a las que fue el
+    correo «te toca» de ese archivo y paso, al correo al que fue (lo guarda cada
+    enlace). Los pasos avisados **antes de esta fase** no tienen ese registro y
+    no reciben recordatorio; los avisos nuevos sí.
+  - Una vez al día por persona; el historial anota «Recordatorio de vencido —
+    Recordatorio a Luz…: «modelo.rvt» espera «Revisa»; el flujo venció el
+    10-11-2026» (usuario «Recordatorio automático»), o «Recordatorio no
+    enviado» con el motivo. Hasta 200 recordatorios por día.
+  - Se apaga con «Recordatorio diario de vencidos» en «Correos de aviso» (oculta;
+    viene encendido) o apagando los correos de la extensión.
+  - Con `CRON_SECRET` puesta en Vercel, solo Vercel puede llamar esa ruta (como
+    las de Manuales y Publicar).
+- **SQL**: tabla nueva `aprobacion_enlaces_correo` (código, proyecto, flujo,
+  persona, correo, tipo, archivos, paso, clic, uso, día del último
+  recordatorio), con RLS y sin borrar. Hay que **volver a ejecutar
+  `supabase/flujo-aprobacion.sql`**; probada dos veces en PGlite. Sin la tabla,
+  los correos salen con el botón de antes (abre la extensión).
+- `FLUJO_URL_PUBLICA` (opcional, Vercel): la dirección de la app para los
+  enlaces; por defecto la de cada solicitud o `https://trimble-docs.vercel.app`.
+
+Código: `enlaces.ts` (`nuevoToken`, `crearEnlace`, `abrirEnlace`,
+`tomarPendiente`, `MINUTOS_CLIC`, `DIAS_ENLACE`), `recordatorios.ts`
+(`armarRecordatorio`, `enviarRecordatorios`), `correo.ts` (`marcoCorreo`,
+`bloqueFlujo`, `textoBoton`, `enlacePara` en `enviarCorreos`), `store.ts`
+(enlaces y `flujosVencidos`), rutas `GET /ir/[token]` (pública),
+`POST /pendiente` y `GET /recordatorios` (cron), `vercel.json`;
+`FlujoAprobacionApp` pregunta `api.pendiente()` al cargar.
 
 ### Guía rápida
 

@@ -10,6 +10,7 @@ import { buildFileViewerUrl } from "../format";
 import type { ProjectUser } from "../trimbleApi";
 import { avisoRechazo, avisosRevision, enviarAviso, FlujoTarea } from "./avisos";
 import { configDe, destinatarios, enlaceBoton, enviarCorreos, mensajeErrorCorreo } from "./correo";
+import { crearEnlace } from "./enlaces";
 import { planDecision, puedeDecidir, revisarTexto } from "./decision";
 import { FlujoError } from "./errores";
 import type { Ctx } from "./service";
@@ -92,8 +93,19 @@ export async function notificar(
     if (correo && datos && config.activo && config.eventos[datos.tipo]) {
       comun ??= { proyecto: (await ctx.tc.nombreProyecto?.().catch(() => "")) || "Trimble Connect", enlace: enlaceBoton(ctx, config) };
       const deTodos = comun;
+      // Each person's own link, which opens this flow (phase 3) and keeps who was written to.
+      const origen = ctx.origen;
+      const enlacePara = origen
+        ? (g: { id: string; nombre: string; correo: string | null }) =>
+            crearEnlace(
+              ctx.store,
+              origen,
+              { proyecto: ctx.projectId, flujoId, usuarioId: g.id, nombre: g.nombre, correo: g.correo, tipo: datos.tipo, archivos: aviso.archivos, pasoId: aviso.pasoId ?? null, proyectoNombre: deTodos.proyecto },
+              new Date(momento)
+            )
+        : undefined;
       const c = await destinatarios(aviso.para, personas, (g) => ctx.tc.miembros(g).catch(() => []))
-        .then((gente) => enviarCorreos(correo, datos, gente, deTodos, { plantilla: config.textos[datos.tipo], copia: config.copia }))
+        .then((gente) => enviarCorreos(correo, datos, gente, deTodos, { plantilla: config.textos[datos.tipo], copia: config.copia, enlacePara }))
         .catch((err: unknown) => ({ ok: false, enviados: 0, mensaje: `No se pudo enviar el correo: ${mensajeErrorCorreo(err)}.` }));
       correos += c.enviados;
       if (!c.ok) fallidos++;

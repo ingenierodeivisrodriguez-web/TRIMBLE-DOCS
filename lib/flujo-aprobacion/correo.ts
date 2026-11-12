@@ -9,6 +9,7 @@
  */
 import type { ProjectUser } from "../trimbleApi";
 import { CONFIG_INICIAL, ConfigCorreo, conInicial, cambiosCorreo, rellenar, revisarConfigCorreo, TextoCorreo } from "./configCorreo";
+import { crearEnlace } from "./enlaces";
 import { FlujoError } from "./errores";
 import { diaVisible } from "./flujos";
 import type { Ctx } from "./service";
@@ -129,19 +130,54 @@ export function datosEjemplo(projectId: string, hoy: Date, tipo: DatosCorreo["ti
 const AZUL = "#2f4f8f";
 const GRIS = "#6a7686";
 
-function boton(texto: string, enlace: string, principal: boolean): string {
+/** A button of the e-mail (a link styled as one). */
+export function botonCorreo(texto: string, enlace: string, principal: boolean): string {
   const estilo = principal
     ? `background:${AZUL};color:#ffffff;border:1px solid ${AZUL}`
     : `background:#ffffff;color:${AZUL};border:1px solid ${AZUL}`;
   return `<a href="${escapar(enlace)}" style="${estilo};display:inline-block;padding:10px 20px;border-radius:3px;text-decoration:none;font-weight:600;font-size:14px;margin:0 8px 8px 0">${escapar(texto)}</a>`;
 }
 
+/** A paragraph of the e-mail. */
+export const parrafoCorreo = (contenido: string, estilo = "") => `<p style="margin:0 0 12px;font-size:14px;line-height:1.5;color:#2b3645;${estilo}">${contenido}</p>`;
+
+/** The frame every e-mail shares: the blue band with the project, an optional notice, the content and the footer. */
+export function marcoCorreo(proyecto: string, contenido: string, pie: string, aviso = ""): string {
+  return [
+    `<div style="background:#f4f6f9;padding:24px 12px;font-family:'Segoe UI',Arial,Helvetica,sans-serif">`,
+    `<div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #dfe4ea;border-radius:6px;overflow:hidden">`,
+    `<div style="background:${AZUL};color:#ffffff;padding:14px 22px;font-size:15px;font-weight:600">Flujo de aprobación<span style="font-weight:400;opacity:.85"> · ${escapar(proyecto)}</span></div>`,
+    aviso ? `<div style="background:#fff6dc;color:#7a5600;padding:10px 22px;font-size:13px;border-bottom:1px solid #f1e2b3">${escapar(aviso)}</div>` : "",
+    `<div style="padding:22px">`,
+    contenido,
+    `</div>`,
+    `<div style="padding:12px 22px;background:#f7f9fb;border-top:1px solid #eef1f5;font-size:12px;color:#8a95a5">${escapar(pie)}</div>`,
+    `</div></div>`,
+  ].join("");
+}
+
+/** The flow's code and title, with its description, as the e-mails show them. */
+export function bloqueFlujo(codigo: string, hito: string, notas = "", extra = ""): string {
+  return `<div style="border-left:3px solid ${AZUL};padding:4px 0 4px 12px;margin:0 0 14px">${codigo ? `<div style="font-size:12px;color:${GRIS};letter-spacing:.3px">${escapar(codigo)}</div>` : ""}<div style="font-size:17px;font-weight:600;color:#1f2a38">${escapar(unaLinea(hito))}</div>${
+    notas ? `<div style="font-size:13.5px;color:#3d4a5c;margin-top:4px;white-space:pre-line">${escapar(notas)}</div>` : ""
+  }${extra}</div>`;
+}
+
+/** The button's words: the flow by its code when the link opens it (phase 3), the extension otherwise. */
+export const textoBoton = (codigo: string, alFlujo: boolean) => (alFlujo && codigo ? `Abrir el flujo ${codigo}` : "Abrir Flujo de aprobación");
+
 /**
  * The e-mail of a notice for one person: subject, plain text and HTML (with
  * inline styles, which is what e-mail programs read). The subject and the
  * opening line come from the project's texts; everything people wrote is escaped.
+ * `comun.alFlujo`: the link is this person's own, which opens the flow (phase 3).
  */
-export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { proyecto: string; enlace: string }, plantilla?: TextoCorreo): { asunto: string; texto: string; html: string } {
+export function armarCorreo(
+  d: DatosCorreo,
+  quien: { nombre: string },
+  comun: { proyecto: string; enlace: string; alFlujo?: boolean },
+  plantilla?: TextoCorreo
+): { asunto: string; texto: string; html: string } {
   const { asunto, intro } = textos(d, quien.nombre, comun.proyecto, plantilla);
   const hola = `Hola${quien.nombre ? ` ${unaLinea(quien.nombre)}` : ""},`;
   const archivo = d.archivos[0];
@@ -156,6 +192,7 @@ export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { 
       ? `Corrige el archivo y sube la versión nueva con el mismo nombre en la misma carpeta (${d.rechazo.carpeta}).`
       : `En la extensión: flujo ${d.codigo ? `${d.codigo} ` : ""}«${unaLinea(d.hito)}» → Archivos → Me toca → Decidir.`;
   const pie = "Este correo lo envía la extensión Flujo de aprobación de Trimble Connect. No lo respondas: los comentarios van en el flujo.";
+  const etiqueta = textoBoton(d.codigo, !!comun.alFlujo && !d.prueba);
 
   const texto = [
     ...(aviso ? [aviso, ""] : []),
@@ -172,24 +209,17 @@ export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { 
     "",
     comoSigue,
     "",
-    `Abrir Flujo de aprobación: ${comun.enlace}`,
+    `${etiqueta}: ${comun.enlace}`,
     "",
     "—",
     pie,
   ].join("\n");
 
-  const p = (contenido: string, estilo = "") => `<p style="margin:0 0 12px;font-size:14px;line-height:1.5;color:#2b3645;${estilo}">${contenido}</p>`;
-  const html = [
-    `<div style="background:#f4f6f9;padding:24px 12px;font-family:'Segoe UI',Arial,Helvetica,sans-serif">`,
-    `<div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #dfe4ea;border-radius:6px;overflow:hidden">`,
-    `<div style="background:${AZUL};color:#ffffff;padding:14px 22px;font-size:15px;font-weight:600">Flujo de aprobación<span style="font-weight:400;opacity:.85"> · ${escapar(comun.proyecto)}</span></div>`,
-    aviso ? `<div style="background:#fff6dc;color:#7a5600;padding:10px 22px;font-size:13px;border-bottom:1px solid #f1e2b3">${escapar(aviso)}</div>` : "",
-    `<div style="padding:22px">`,
+  const p = parrafoCorreo;
+  const contenido = [
     p(escapar(hola)),
     p(escapar(intro), "white-space:pre-line"),
-    `<div style="border-left:3px solid ${AZUL};padding:4px 0 4px 12px;margin:0 0 14px">${d.codigo ? `<div style="font-size:12px;color:${GRIS};letter-spacing:.3px">${escapar(d.codigo)}</div>` : ""}<div style="font-size:17px;font-weight:600;color:#1f2a38">${escapar(unaLinea(d.hito))}</div>${
-      notas ? `<div style="font-size:13.5px;color:#3d4a5c;margin-top:4px;white-space:pre-line">${escapar(notas)}</div>` : ""
-    }</div>`,
+    bloqueFlujo(d.codigo, d.hito, notas),
     vence ? p(`Vence: <b>${escapar(vence)}</b>`) : "",
     d.tipo === "correccion" && d.rechazo ? p(`<b>Motivo:</b> ${escapar(d.rechazo.motivo)}`, "background:#fdecec;border-radius:4px;padding:8px 10px") : "",
     archivos.length
@@ -199,14 +229,11 @@ export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { 
       : "",
     mas ? p(`… y ${mas} más.`) : "",
     p(escapar(comoSigue), `color:${GRIS};font-size:13px`),
-    `<div style="margin:18px 0 4px">${boton("Abrir Flujo de aprobación", comun.enlace, true)}${
-      d.tipo === "correccion" && archivo ? boton("Abrir el archivo", archivo.enlace, false) : ""
+    `<div style="margin:18px 0 4px">${botonCorreo(etiqueta, comun.enlace, true)}${
+      d.tipo === "correccion" && archivo ? botonCorreo("Abrir el archivo", archivo.enlace, false) : ""
     }</div>`,
-    `</div>`,
-    `<div style="padding:12px 22px;background:#f7f9fb;border-top:1px solid #eef1f5;font-size:12px;color:#8a95a5">${escapar(pie)}</div>`,
-    `</div></div>`,
   ].join("");
-  return { asunto, texto, html };
+  return { asunto, texto, html: marcoCorreo(comun.proyecto, contenido, pie, aviso) };
 }
 
 /** Someone an e-mail goes to, with their address as Trimble has it (null: Trimble has none). */
@@ -264,14 +291,16 @@ const persona = (d: Destinatario) => (d.correo ? `${d.nombre} <${d.correo}>` : d
 /**
  * Sends the e-mail of a notice to each of its people, one by one (each with
  * their own name; nobody sees the others' addresses); the copy goes once, on
- * the first e-mail that leaves. Never throws: says what happened, for the history.
+ * the first e-mail that leaves. `enlacePara` gives each person their own link
+ * that opens the flow (phase 3; without it, or if it fails, the extension's
+ * address). Never throws: says what happened, for the history.
  */
 export async function enviarCorreos(
   correo: Correo,
   d: DatosCorreo,
   gente: Destinatario[],
   comun: { proyecto: string; enlace: string },
-  opciones: { plantilla?: TextoCorreo; copia?: string[] } = {}
+  opciones: { plantilla?: TextoCorreo; copia?: string[]; enlacePara?: (g: Destinatario) => Promise<string> } = {}
 ): Promise<{ ok: boolean; enviados: number; mensaje: string }> {
   const asunto = asuntoCorreo(d, opciones.plantilla, comun.proyecto);
   const conCorreo = gente.filter((g) => g.correo).slice(0, MAX_DESTINATARIOS);
@@ -284,7 +313,8 @@ export async function enviarCorreos(
   const mal: { d: Destinatario; error: string }[] = [];
   for (const g of conCorreo) {
     try {
-      const m = armarCorreo(d, g, comun, opciones.plantilla);
+      const propio = opciones.enlacePara ? await opciones.enlacePara(g).catch(() => null) : null;
+      const m = armarCorreo(d, g, { ...comun, enlace: propio ?? comun.enlace, alFlujo: !!propio }, opciones.plantilla);
       await correo.enviar({ para: { nombre: g.nombre, correo: g.correo! }, ...(copia.length ? { copia } : {}), ...m });
       bien.push(g);
       if (copia.length) [copiado, copia] = [copia, []];
@@ -399,9 +429,21 @@ export async function correoPrueba(ctx: Ctx): Promise<{ mensaje: string }> {
   const [yo] = await destinatarios([{ tipo: "persona", id: ctx.caller.id, nombre: ctx.caller.name }], () => ctx.tc.personas(), async () => []);
   if (!yo?.correo) throw new FlujoError("Trimble no tiene tu correo en el equipo del proyecto: no hay a dónde enviar la prueba.", 409, "sin-correo");
   const [proyecto, config] = await Promise.all([ctx.tc.nombreProyecto?.().catch(() => "") ?? Promise.resolve(""), configDe(ctx)]);
-  const d = datosEjemplo(ctx.projectId, ctx.ahora?.() ?? new Date());
+  const ahora = ctx.ahora?.() ?? new Date();
+  const d = datosEjemplo(ctx.projectId, ahora);
+  const nombreProyecto = proyecto || "Trimble Connect";
+  // Its own link (phase 3): clicking it shows in the extension that the button works.
+  const origen = ctx.origen;
+  const propio = origen
+    ? await crearEnlace(
+        ctx.store,
+        origen,
+        { proyecto: ctx.projectId, flujoId: null, usuarioId: yo.id, nombre: yo.nombre, correo: yo.correo, tipo: "prueba", archivos: [], pasoId: null, proyectoNombre: nombreProyecto },
+        ahora
+      ).catch(() => null)
+    : null;
   try {
-    await ctx.correo.enviar({ para: { nombre: yo.nombre, correo: yo.correo }, ...armarCorreo(d, yo, { proyecto: proyecto || "Trimble Connect", enlace: enlaceBoton(ctx, config) }, config.textos.revision) });
+    await ctx.correo.enviar({ para: { nombre: yo.nombre, correo: yo.correo }, ...armarCorreo(d, yo, { proyecto: nombreProyecto, enlace: propio ?? enlaceBoton(ctx, config) }, config.textos.revision) });
   } catch (err) {
     throw new FlujoError(`No se pudo enviar el correo de prueba: ${mensajeErrorCorreo(err)}.`, 502, "correo-fallido");
   }

@@ -81,6 +81,21 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
     cargarArchivos();
   }, [cargar, cargarArchivos]);
 
+  // Arriving from an e-mail's button (phase 3): open that flow, or the files waiting for the person.
+  const preguntado = useRef(false);
+  useEffect(() => {
+    if (!datos || preguntado.current) return;
+    preguntado.current = true;
+    api
+      .pendiente()
+      .then((p) => {
+        if (p.flujoId && datos.flujos.some((f) => f.id === p.flujoId)) setPanel({ tipo: "detalle", id: p.flujoId });
+        else if (p.porRevisar) setFiltro((f) => ({ ...f, porRevisar: true }));
+        if (p.mensaje) setAviso({ kind: "info", texto: p.mensaje });
+      })
+      .catch(() => undefined);
+  }, [api, datos]);
+
   // Trimble's people and groups, for choosing each step's responsible: read when the form opens.
   const editando = panel?.tipo === "nuevo" || panel?.tipo === "editar";
   useEffect(() => {
@@ -232,7 +247,8 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
                 opciones={[
                   { texto: "Exportar trazabilidad (todos los flujos)…", onClick: () => setVentana("trazabilidad") },
                   // «Correos de aviso» (administrators): the e-mails, the Trimble ToDos and the test e-mail.
-                  { texto: "Correos de aviso…", onClick: () => setVentana("correos"), oculto: !datos?.esAdmin },
+                  // Hidden at the owner's request (12-11-2026, once set): `oculto: !datos?.esAdmin` shows it again.
+                  { texto: "Correos de aviso…", onClick: () => setVentana("correos"), oculto: true },
                 ]}
               />
             </div>

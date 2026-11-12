@@ -1,6 +1,7 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
 import type { ConfigCorreo } from "./configCorreo";
+import type { EnlaceCorreo } from "./enlaces";
 import { ACCIONES_DECISION } from "./flujos";
 import type { ArchivoFlujo, ArchivoRegistro, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, TareaTrimble, Traslado, VersionNueva } from "./types";
 
@@ -52,6 +53,20 @@ export interface FlujoStore {
   configCorreo(proyecto: string): Promise<{ datos: unknown; version: number; actualizado: string; actualizadoPor: string | null } | null>;
   /** Saves them while `version` is the stored one (0: none saved yet); false when someone saved before. */
   guardarConfigCorreo(proyecto: string, datos: ConfigCorreo, version: number, por: string, momento: string): Promise<boolean>;
+  /** The e-mails' own links (phase 3). */
+  crearEnlace(e: EnlaceCorreo): Promise<void>;
+  enlace(token: string): Promise<EnlaceCorreo | null>;
+  marcarEnlaceAbierto(token: string, momento: string): Promise<void>;
+  /** The caller's latest link clicked since `desde` and not used yet. */
+  enlacePendiente(proyecto: string, usuarioId: string, desde: string): Promise<EnlaceCorreo | null>;
+  /** Marks it used, only once: false when it already was. */
+  marcarEnlaceUsado(token: string, momento: string): Promise<boolean>;
+  /** The project's links of «te toca» e-mails (who was written to for each file and step). */
+  enlacesRevision(proyecto: string): Promise<EnlaceCorreo[]>;
+  /** Notes the day a reminder went for those links. */
+  marcarRecordado(tokens: string[], dia: string): Promise<void>;
+  /** The active flows of every project whose due date ("AAAA-MM-DD") is before `hoy` (for the daily reminder). */
+  flujosVencidos(hoy: string): Promise<Flujo[]>;
 }
 
 const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
@@ -198,6 +213,41 @@ const aArchivo = (a: Partial<ArchivoRegistro>): Fila =>
     detectado: a.detectado,
     actualizado: a.actualizado,
   });
+
+const deEnlace = (f: Fila): EnlaceCorreo => ({
+  token: String(f.token),
+  proyecto: String(f.proyecto),
+  flujoId: t(f.flujo_id),
+  usuarioId: String(f.usuario_id),
+  nombre: t(f.nombre) ?? "",
+  correo: t(f.correo),
+  tipo: (["revision", "correccion", "prueba", "recordatorio"].includes(String(f.tipo)) ? f.tipo : "revision") as EnlaceCorreo["tipo"],
+  archivos: arr<string>(f.archivos),
+  pasoId: t(f.paso_id),
+  proyectoNombre: t(f.proyecto_nombre) ?? "",
+  creado: String(f.creado),
+  expira: String(f.expira),
+  abierto: t(f.abierto),
+  usado: t(f.usado),
+  recordado: t(f.recordado),
+});
+const aEnlace = (e: EnlaceCorreo): Fila => ({
+  token: e.token,
+  proyecto: e.proyecto,
+  flujo_id: e.flujoId,
+  usuario_id: e.usuarioId,
+  nombre: e.nombre,
+  correo: e.correo,
+  tipo: e.tipo,
+  archivos: e.archivos,
+  paso_id: e.pasoId,
+  proyecto_nombre: e.proyectoNombre,
+  creado: e.creado,
+  expira: e.expira,
+  abierto: e.abierto,
+  usado: e.usado,
+  recordado: e.recordado,
+});
 
 function sinIndefinidos(f: Fila): Fila {
   return Object.fromEntries(Object.entries(f).filter(([, v]) => v !== undefined));
@@ -346,6 +396,38 @@ function supabaseStore(): FlujoStore | null {
       });
       return filas.length > 0;
     },
+    async crearEnlace(e) {
+      await call(`/aprobacion_enlaces_correo`, { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify(aEnlace(e)) });
+    },
+    async enlace(token) {
+      const filas = await json<Fila[]>(`/aprobacion_enlaces_correo?token=${eq(token)}&select=*`);
+      return filas[0] ? deEnlace(filas[0]) : null;
+    },
+    async marcarEnlaceAbierto(token, momento) {
+      await call(`/aprobacion_enlaces_correo?token=${eq(token)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ abierto: momento }) });
+    },
+    async enlacePendiente(proyecto, usuarioId, desde) {
+      const filas = await json<Fila[]>(
+        `/aprobacion_enlaces_correo?proyecto=${eq(proyecto)}&usuario_id=${eq(usuarioId)}&usado=is.null&abierto=gte.${encodeURIComponent(desde)}&select=*&order=abierto.desc&limit=1`
+      );
+      return filas[0] ? deEnlace(filas[0]) : null;
+    },
+    async marcarEnlaceUsado(token, momento) {
+      const filas = await json<Fila[]>(`/aprobacion_enlaces_correo?token=${eq(token)}&usado=is.null`, { method: "PATCH", headers: representar, body: JSON.stringify({ usado: momento }) });
+      return filas.length > 0;
+    },
+    async enlacesRevision(proyecto) {
+      return (await all<Fila>(`/aprobacion_enlaces_correo?proyecto=${eq(proyecto)}&tipo=eq.revision&select=*&order=creado.asc`)).map(deEnlace);
+    },
+    async marcarRecordado(tokens, dia) {
+      for (let i = 0; i < tokens.length; i += 100) {
+        const lista = tokens.slice(i, i + 100).join(",");
+        await call(`/aprobacion_enlaces_correo?token=in.(${lista})`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ recordado: dia }) });
+      }
+    },
+    async flujosVencidos(hoy) {
+      return (await all<Fila>(`/aprobacion_flujos?activo=is.true&vence=lt.${encodeURIComponent(hoy)}&select=*&order=proyecto.asc`)).map(deFlujo);
+    },
   };
 }
 
@@ -359,6 +441,7 @@ export function memoryStore(): FlujoStore {
   const revisando = new Map<string, string>();
   const trasladando = new Map<string, string>();
   const correos = new Map<string, { datos: unknown; version: number; actualizado: string; actualizadoPor: string | null }>();
+  const enlaces = new Map<string, EnlaceCorreo>();
   let contador = 0;
   const id = () => `00000000-0000-4000-8000-${String(++contador).padStart(12, "0")}`;
   const copia = <T>(x: T): T => structuredClone(x);
@@ -478,6 +561,42 @@ export function memoryStore(): FlujoStore {
       if ((correos.get(proyecto)?.version ?? 0) !== version) return false;
       correos.set(proyecto, { datos: copia(datos), version: version + 1, actualizado: momento, actualizadoPor: por });
       return true;
+    },
+    async crearEnlace(e) {
+      if (enlaces.has(e.token)) throw new StoreError("Ya existe.", 409);
+      enlaces.set(e.token, copia(e));
+    },
+    async enlace(token) {
+      const e = enlaces.get(token);
+      return e ? copia(e) : null;
+    },
+    async marcarEnlaceAbierto(token, momento) {
+      const e = enlaces.get(token);
+      if (e) e.abierto = momento;
+    },
+    async enlacePendiente(proyecto, usuarioId, desde) {
+      const e = [...enlaces.values()]
+        .filter((x) => x.proyecto === proyecto && x.usuarioId === usuarioId && !x.usado && x.abierto && x.abierto >= desde)
+        .sort((a, b) => b.abierto!.localeCompare(a.abierto!))[0];
+      return e ? copia(e) : null;
+    },
+    async marcarEnlaceUsado(token, momento) {
+      const e = enlaces.get(token);
+      if (!e || e.usado) return false;
+      e.usado = momento;
+      return true;
+    },
+    async enlacesRevision(proyecto) {
+      return [...enlaces.values()].filter((e) => e.proyecto === proyecto && e.tipo === "revision").sort((a, b) => a.creado.localeCompare(b.creado)).map(copia);
+    },
+    async marcarRecordado(tokens, dia) {
+      for (const tk of tokens) {
+        const e = enlaces.get(tk);
+        if (e) e.recordado = dia;
+      }
+    },
+    async flujosVencidos(hoy) {
+      return [...flujos.values()].filter((f) => f.activo && f.vence && f.vence < hoy).map(copia);
     },
   };
 }

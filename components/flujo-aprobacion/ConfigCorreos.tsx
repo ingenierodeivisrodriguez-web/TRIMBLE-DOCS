@@ -14,6 +14,7 @@ interface Formulario {
   activo: boolean;
   tareasTrimble: boolean;
   eventos: ConfigCorreo["eventos"];
+  recordatorios: boolean;
   textos: ConfigCorreo["textos"];
   copia: string;
   enlace: string;
@@ -23,6 +24,7 @@ const deEstado = (e: EstadoCorreos): Formulario => ({
   activo: e.config.activo,
   tareasTrimble: e.config.tareasTrimble,
   eventos: { ...e.config.eventos },
+  recordatorios: e.config.recordatorios,
   textos: { revision: { ...e.config.textos.revision }, correccion: { ...e.config.textos.correccion } },
   copia: e.config.copia.join(", "),
   enlace: e.config.idExtension ? e.enlace : "",
@@ -215,6 +217,13 @@ export default function ConfigCorreos({ api, projectId, projectName, onClose }: 
                 </Casilla>
                 <Casilla marcada={form.eventos.correccion} onCambio={(correccion) => cambiar({ eventos: { ...form.eventos, correccion } })}>
                   Cuando rechazan un archivo (a quien subió la versión)
+                </Casilla>
+                <Casilla
+                  marcada={form.recordatorios}
+                  onCambio={(recordatorios) => cambiar({ recordatorios })}
+                  nota="A las 7:00, a quien tenga archivos esperando su paso en un flujo vencido: un correo por persona con todos sus vencidos."
+                >
+                  Recordatorio diario de vencidos
                 </Casilla>
               </div>
 

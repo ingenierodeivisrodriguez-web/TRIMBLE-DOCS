@@ -376,3 +376,34 @@ alter table public.aprobacion_config_correo enable row level security;
 revoke all on public.aprobacion_config_correo from anon, authenticated;
 revoke delete, truncate on table public.aprobacion_config_correo from public, anon, authenticated, service_role;
 grant select, insert, update on public.aprobacion_config_correo to service_role;
+
+-- ---------------------------------------- enlaces de los correos (12-11-2026)
+-- Cada correo de aviso lleva un enlace propio para cada persona: al hacer clic,
+-- la extensión abre ese flujo para esa misma persona de Trimble. El enlace
+-- guarda también a quién se escribió (y a qué correo), que es lo que usa el
+-- recordatorio diario de vencidos, que corre sin sesión de Trimble.
+create table if not exists public.aprobacion_enlaces_correo (
+  token text primary key,
+  proyecto text not null,
+  flujo_id uuid,
+  usuario_id text not null,
+  nombre text,
+  correo text,
+  tipo text not null default 'revision',
+  archivos jsonb not null default '[]'::jsonb,
+  paso_id text,
+  proyecto_nombre text,
+  creado timestamptz not null default now(),
+  expira timestamptz not null,
+  abierto timestamptz,
+  usado timestamptz,
+  recordado date
+);
+
+create index if not exists aprobacion_enlaces_correo_persona on public.aprobacion_enlaces_correo (proyecto, usuario_id, abierto desc);
+create index if not exists aprobacion_enlaces_correo_tipo on public.aprobacion_enlaces_correo (proyecto, tipo);
+
+alter table public.aprobacion_enlaces_correo enable row level security;
+revoke all on public.aprobacion_enlaces_correo from anon, authenticated;
+revoke delete, truncate on table public.aprobacion_enlaces_correo from public, anon, authenticated, service_role;
+grant select, insert, update on public.aprobacion_enlaces_correo to service_role;

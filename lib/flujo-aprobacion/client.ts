@@ -2,6 +2,7 @@ import { createRequester, TokenSource } from "../propiedades/client";
 import type { CarpetaInfo } from "../publicar/types";
 import type { FiltroTraza, Traza } from "./trazabilidad";
 import type { EstadoCorreos } from "./correo";
+import type { Pendiente } from "./enlaces";
 import type { ArchivoInfo, AvisoPermisos, Comentario, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
 
 export interface DatosFlujoEnvio {
@@ -47,6 +48,8 @@ export interface FlujoApi {
   correoPrueba(): Promise<{ mensaje: string }>;
   /** «Correos de aviso» (administrators). */
   correos(): Promise<EstadoCorreos>;
+  /** When the extension opens: the flow an e-mail's button asked for (phase 3). */
+  pendiente(): Promise<Pendiente>;
   /** Saves them; `config.enlace` is what was pasted as the extension's address. */
   guardarCorreos(config: Record<string, unknown>, version: number): Promise<EstadoCorreos & { mensaje: string }>;
 }
@@ -89,6 +92,7 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     abierto: (archivoId) => post("/abierto", { archivoId }),
     correoPrueba: () => post("/correo-prueba", {}),
     correos: () => request("/correos"),
+    pendiente: () => post("/pendiente", {}),
     guardarCorreos: (config, version) => post("/correos", { config, version }),
   };
 }

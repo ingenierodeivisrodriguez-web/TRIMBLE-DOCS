@@ -12,6 +12,11 @@ import type { Correo } from "./correo";
 
 export const NOMBRE_REMITENTE = "Flujo de aprobación";
 
+/** This app's public address, for the e-mails' links (`FLUJO_URL_PUBLICA`, else the one asked). */
+export function urlPublica(pedida: string | null, env: Record<string, string | undefined> = process.env): string {
+  return (env.FLUJO_URL_PUBLICA?.trim() || pedida || "https://trimble-docs.vercel.app").replace(/\/+$/, "");
+}
+
 export function correoDesdeEntorno(env: Record<string, string | undefined> = process.env): Correo | undefined {
   const usuario = env.FLUJO_CORREO_USUARIO?.trim();
   const clave = env.FLUJO_CORREO_CLAVE?.replace(/\s+/g, "");

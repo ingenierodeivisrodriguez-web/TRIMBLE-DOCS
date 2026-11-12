@@ -24,7 +24,7 @@ import {
 import { FlujoError } from "./errores";
 import type { DepsPrueba } from "./prueba";
 import type { Ctx, ElementoTrimble, TrimbleFlujo } from "./service";
-import { correoDesdeEntorno } from "./smtp";
+import { correoDesdeEntorno, urlPublica } from "./smtp";
 import { flujoStore } from "./store";
 
 export interface RouteContext {
@@ -124,6 +124,7 @@ export async function handle(req: NextRequest, run: (ctx: RouteContext) => Promi
         tc: trimble,
         // Gmail with Vercel's variables; without them no e-mail goes (11-11-2026).
         correo: correoDesdeEntorno(),
+        origen: urlPublica(req.nextUrl.origin),
         get store() {
           return flujoStore();
         },

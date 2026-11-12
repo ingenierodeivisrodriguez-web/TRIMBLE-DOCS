@@ -1,6 +1,7 @@
 {
   "crons": [
     { "path": "/api/manuales/mantener", "schedule": "0 11 * * *" },
-    { "path": "/api/publicar/mantener", "schedule": "30 11 * * *" }
+    { "path": "/api/publicar/mantener", "schedule": "30 11 * * *" },
+    { "path": "/api/flujo-aprobacion/recordatorios", "schedule": "0 12 * * *" }
   ]
 }
