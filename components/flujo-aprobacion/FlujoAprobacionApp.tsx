@@ -10,6 +10,7 @@ import { baseInput, message, Modal, Notice } from "../presupuesto/ui";
 import { descargarTrazabilidad } from "./descargas";
 import EditorFlujo from "./EditorFlujo";
 import ListaFlujos from "./ListaFlujos";
+import ConfigCorreos from "./ConfigCorreos";
 import MenuPuntos from "./MenuPuntos";
 import PanelFlujo from "./PanelFlujo";
 import RevisionCarpetas from "./RevisionCarpetas";
@@ -49,7 +50,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
   const [filtro, setFiltro] = useState<FiltroLista>({});
   // «Prueba de conexión con Trimble» is hidden since 11-11-2026 (the owner: no longer needed);
   // PruebaFase0.tsx and /api/flujo-aprobacion/prueba stay, to show it again if Trimble changes.
-  const [ventana, setVentana] = useState<"trazabilidad" | null>(null);
+  const [ventana, setVentana] = useState<"trazabilidad" | "correos" | null>(null);
   const [aviso, setAviso] = useState<{ kind: "info" | "error"; texto: string } | null>(null);
   const ancho = useAncho();
   const angosto = ancho < 1000;
@@ -133,15 +134,6 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
   async function activar(f: Flujo) {
     try {
       cambio(await api.cambiarEstado(f.id, f.version, true));
-    } catch (err) {
-      setAviso({ kind: "error", texto: message(err) });
-    }
-  }
-  // «Enviar correo de prueba» (administrators, 11-11-2026): checks the Gmail account set in Vercel.
-  async function probarCorreo() {
-    setAviso({ kind: "info", texto: "Enviando el correo de prueba…" });
-    try {
-      setAviso({ kind: "info", texto: (await api.correoPrueba()).mensaje });
     } catch (err) {
       setAviso({ kind: "error", texto: message(err) });
     }
@@ -239,7 +231,8 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
                 titulo="Más opciones"
                 opciones={[
                   { texto: "Exportar trazabilidad (todos los flujos)…", onClick: () => setVentana("trazabilidad") },
-                  { texto: "Enviar correo de prueba", onClick: () => void probarCorreo(), oculto: !datos?.esAdmin },
+                  // «Correos de aviso» (administrators): the e-mails, the Trimble ToDos and the test e-mail.
+                  { texto: "Correos de aviso…", onClick: () => setVentana("correos"), oculto: !datos?.esAdmin },
                 ]}
               />
             </div>
@@ -296,6 +289,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
           <Trazabilidad api={api} flujos={datos?.flujos ?? []} projectName={projectName} />
         </Modal>
       )}
+      {ventana === "correos" && <ConfigCorreos api={api} projectId={projectId} projectName={projectName} onClose={() => setVentana(null)} />}
     </div>
   );
 }

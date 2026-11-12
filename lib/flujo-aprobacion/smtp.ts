@@ -34,6 +34,7 @@ export function correoDesdeEntorno(env: Record<string, string | undefined> = pro
       await transporte.sendMail({
         from: { name: nombre, address: usuario },
         to: { name: m.para.nombre, address: m.para.correo },
+        ...(m.copia?.length ? { cc: m.copia } : {}),
         subject: m.asunto,
         text: m.texto,
         html: m.html,

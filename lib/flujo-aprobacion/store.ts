@@ -1,5 +1,6 @@
 import { clienteSupabase, eq, faltaTabla } from "../compras/supabase";
 import { StoreError } from "../propiedades/store";
+import type { ConfigCorreo } from "./configCorreo";
 import { ACCIONES_DECISION } from "./flujos";
 import type { ArchivoFlujo, ArchivoRegistro, CarpetaFlujo, Comentario, EntradaHistorial, EstadoArchivo, Firma, Flujo, PasoFlujo, TareaTrimble, Traslado, VersionNueva } from "./types";
 
@@ -47,6 +48,10 @@ export interface FlujoStore {
   /** Takes a file for copying it to the destination until `hasta`, unless someone else holds it (false). */
   tomarTraslado(id: string, hasta: string, ahora: string): Promise<boolean>;
   soltarTraslado(id: string): Promise<void>;
+  /** The project's «Correos de aviso» as saved (the jsonb as it is), or null when never saved. */
+  configCorreo(proyecto: string): Promise<{ datos: unknown; version: number; actualizado: string; actualizadoPor: string | null } | null>;
+  /** Saves them while `version` is the stored one (0: none saved yet); false when someone saved before. */
+  guardarConfigCorreo(proyecto: string, datos: ConfigCorreo, version: number, por: string, momento: string): Promise<boolean>;
 }
 
 const SETUP_HINT = "La base de datos de Flujo de aprobación no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
@@ -318,6 +323,29 @@ function supabaseStore(): FlujoStore | null {
     async soltarTraslado(id) {
       await call(`/aprobacion_archivos?id=${eq(id)}`, { method: "PATCH", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ traslado_hasta: null }) });
     },
+    async configCorreo(proyecto) {
+      const filas = await json<Fila[]>(`/aprobacion_config_correo?proyecto=${eq(proyecto)}&select=*`);
+      const f = filas[0];
+      return f ? { datos: f.datos, version: Number(f.version), actualizado: String(f.actualizado), actualizadoPor: t(f.actualizado_por) } : null;
+    },
+    async guardarConfigCorreo(proyecto, datos, version, por, momento) {
+      if (version === 0) {
+        // The first save; another administrator saving first makes it a repeated key.
+        try {
+          await call(`/aprobacion_config_correo`, { method: "POST", headers: { Prefer: "return=minimal" }, body: JSON.stringify({ proyecto, datos, version: 1, actualizado: momento, actualizado_por: por }) });
+          return true;
+        } catch (err) {
+          if (err instanceof StoreError && err.status === 409) return false;
+          throw err;
+        }
+      }
+      const filas = await json<Fila[]>(`/aprobacion_config_correo?proyecto=${eq(proyecto)}&version=eq.${version}`, {
+        method: "PATCH",
+        headers: representar,
+        body: JSON.stringify({ datos, version: version + 1, actualizado: momento, actualizado_por: por }),
+      });
+      return filas.length > 0;
+    },
   };
 }
 
@@ -330,6 +358,7 @@ export function memoryStore(): FlujoStore {
   const archivos = new Map<string, ArchivoRegistro>();
   const revisando = new Map<string, string>();
   const trasladando = new Map<string, string>();
+  const correos = new Map<string, { datos: unknown; version: number; actualizado: string; actualizadoPor: string | null }>();
   let contador = 0;
   const id = () => `00000000-0000-4000-8000-${String(++contador).padStart(12, "0")}`;
   const copia = <T>(x: T): T => structuredClone(x);
@@ -440,6 +469,15 @@ export function memoryStore(): FlujoStore {
     },
     async soltarTraslado(aid) {
       trasladando.delete(aid);
+    },
+    async configCorreo(proyecto) {
+      const c = correos.get(proyecto);
+      return c ? copia(c) : null;
+    },
+    async guardarConfigCorreo(proyecto, datos, version, por, momento) {
+      if ((correos.get(proyecto)?.version ?? 0) !== version) return false;
+      correos.set(proyecto, { datos: copia(datos), version: version + 1, actualizado: momento, actualizadoPor: por });
+      return true;
     },
   };
 }

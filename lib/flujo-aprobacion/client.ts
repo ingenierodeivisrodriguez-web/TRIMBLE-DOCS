@@ -1,6 +1,7 @@
 import { createRequester, TokenSource } from "../propiedades/client";
 import type { CarpetaInfo } from "../publicar/types";
 import type { FiltroTraza, Traza } from "./trazabilidad";
+import type { EstadoCorreos } from "./correo";
 import type { ArchivoInfo, AvisoPermisos, Comentario, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
 
 export interface DatosFlujoEnvio {
@@ -44,6 +45,10 @@ export interface FlujoApi {
   abierto(archivoId: string): Promise<{ anotado: boolean }>;
   /** «Enviar correo de prueba» (administrators): a sample e-mail to the caller's own address. */
   correoPrueba(): Promise<{ mensaje: string }>;
+  /** «Correos de aviso» (administrators). */
+  correos(): Promise<EstadoCorreos>;
+  /** Saves them; `config.enlace` is what was pasted as the extension's address. */
+  guardarCorreos(config: Record<string, unknown>, version: number): Promise<EstadoCorreos & { mensaje: string }>;
 }
 
 /** The HTTP client for /api/flujo-aprobacion, authenticated with the user's Trimble token. */
@@ -83,5 +88,7 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     comentar: (flujoId, texto) => post("/comentarios", { flujoId, texto }),
     abierto: (archivoId) => post("/abierto", { archivoId }),
     correoPrueba: () => post("/correo-prueba", {}),
+    correos: () => request("/correos"),
+    guardarCorreos: (config, version) => post("/correos", { config, version }),
   };
 }

@@ -807,11 +807,21 @@ grupo por separado (máx. 25 por aviso), y anota `correo-enviado` /
 `correo-fallido`; con EAUTH no sigue intentando. El botón usa
 `enlaceExtension`: `/projects/<id>/extension/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e/flujo_aprobacion_open`
 (dirección que pegó el dueño; el id NO es MD5 del manifiesto, puede cambiar por
-proyecto). «Enviar correo de prueba» en el ⋮ de la cabecera (solo admins) →
-`POST /correo-prueba` → `correoPrueba`. Pendiente con su OK: fase 2 (ventana
-«Correos de aviso…»: activar, eventos, textos, CC, id de la extensión por
-proyecto y «crear también la tarea de Trimble: sí/no», tabla nueva en
-Supabase) y fase 3 (abrir el flujo exacto con una tarea de un solo uso,
-recordatorio diario de vencidos con el cron). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
+proyecto). El dueño confirmó que el correo de prueba llega (11-11-2026) y
+aprobó la fase 2 («sigue con la fase 2»): ⋮ → «Correos de aviso…» (solo
+admins; `ConfigCorreos.tsx`, `GET/POST /correos`), configuración por proyecto
+en la tabla `aprobacion_config_correo` (`datos` jsonb + `version`; el dueño
+debe reejecutar el SQL). `configCorreo.ts` es puro (lo usa la vista previa):
+`activo`, `tareasTrimble` (apagada = no se crea la tarea ni su correo),
+`eventos.revision/correccion`, `textos` (asunto + intro con `{codigo}`
+`{flujo}` `{paso}` `{archivo}` `{version}` `{vence}` `{proyecto}` `{persona}`
+`{quien}`), `copia` (máx. 5, una copia por aviso en CC del primer correo),
+`idExtension` (de la dirección pegada; debe ser del mismo proyecto). Reglas:
+no se apaga la tarea con los correos apagados ni sin cuenta de Gmail; sin
+tarea ni correo se anota `aviso-fallido` «No se avisó…». `configDe` nunca
+falla (sin fila o sin tabla = inicial). «Enviar correo de prueba» quedó dentro
+de la ventana y usa los textos guardados con `datosEjemplo` (FLUJO-00).
+Pendiente con su OK: fase 3 (abrir el flujo exacto con una tarea de un solo
+uso, recordatorio diario de vencidos con el cron). Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).

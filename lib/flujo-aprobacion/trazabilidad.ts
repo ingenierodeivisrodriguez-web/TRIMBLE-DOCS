@@ -38,6 +38,7 @@ export const ACCIONES: Record<string, string> = {
   "aviso-fallido": "Aviso no enviado",
   "correo-enviado": "Envió el correo de aviso",
   "correo-fallido": "Correo de aviso no enviado",
+  "correos-config": "Cambió los correos de aviso",
   trasladado: "Trasladó al destino",
   "traslado-diferencia": "Traslado en espera",
   "traslado-error": "Traslado fallido",

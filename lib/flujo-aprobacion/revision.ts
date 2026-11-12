@@ -8,7 +8,7 @@
  * an administrator's review (who sees every folder). Nothing is deleted.
  */
 import { fechaHora } from "../compras/formato";
-import { avisarRevision, enlaceDe } from "./decisiones";
+import { avisarRevision, enlaceDe, resumenAvisos } from "./decisiones";
 import { FlujoError } from "./errores";
 import { nombreResponsable } from "./flujos";
 import { LIMITES, leerArchivos } from "./recorrido";
@@ -137,8 +137,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     const avisos = [
       r.completo ? "" : ` Revisión incompleta (${r.motivo}): lo que no se vio no se marcó como retirado.`,
       noVistos > 0 ? ` ${contar(noVistos, "archivo registrado no apareció", "archivos registrados no aparecieron")} en tu revisión; solo la de un administrador los confirma como retirados.` : "",
-      avisados.enviados ? ` Se avisó a los revisores con ${contar(avisados.enviados, "tarea", "tareas")} de Trimble.` : "",
-      avisados.fallidos ? ` ${contar(avisados.fallidos, "aviso no se pudo enviar", "avisos no se pudieron enviar")} (ver Historial).` : "",
+      resumenAvisos(avisados, "a los revisores"),
     ].join("");
     return {
       ...base,

@@ -9,7 +9,7 @@
 import { buildFileViewerUrl } from "../format";
 import type { ProjectUser } from "../trimbleApi";
 import { avisoRechazo, avisosRevision, enviarAviso, FlujoTarea } from "./avisos";
-import { destinatarios, enlaceExtension, enviarCorreos, mensajeErrorCorreo } from "./correo";
+import { configDe, destinatarios, enlaceBoton, enviarCorreos, mensajeErrorCorreo } from "./correo";
 import { planDecision, puedeDecidir, revisarTexto } from "./decision";
 import { FlujoError } from "./errores";
 import type { Ctx } from "./service";
@@ -31,15 +31,26 @@ type Linea = Omit<EntradaHistorial, "id" | "creado">;
  * Each ToDo created is noted on its files (`filas`), so it can be closed later.
  * Besides each ToDo, the extension's own e-mail to the same people (11-11-2026),
  * when Vercel has the Gmail account set; it goes even if Trimble refused the ToDo.
+ * «Correos de aviso» (phase 2) says whether each one goes: the ToDo, the e-mail,
+ * which notices, their texts and who gets a copy.
+ * `enviados`/`fallidos` count ToDos and notices that failed; `correos`, e-mails sent.
  */
-export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], momento: string, filas: ArchivoRegistro[] = []): Promise<{ lineas: Linea[]; enviados: number; fallidos: number; textos: string[] }> {
+export async function notificar(
+  ctx: Ctx,
+  flujoId: string,
+  avisos: Aviso[],
+  momento: string,
+  filas: ArchivoRegistro[] = []
+): Promise<{ lineas: Linea[]; enviados: number; fallidos: number; correos: number; textos: string[] }> {
   const lineas: Linea[] = [];
   const textos: string[] = [];
   const creadas: { aviso: Aviso; todoId: string; etiqueta: string | null }[] = [];
   let enviados = 0;
   let fallidos = 0;
+  let correos = 0;
+  const config = await configDe(ctx);
   // How many ToDos the flow already made: if Trimble wants each code unique, the next one is «FLUJO-01-<n + 1>».
-  let hechas = avisos.some((a) => a.trimble?.label)
+  let hechas = config.tareasTrimble && avisos.some((a) => a.trimble?.label)
     ? await ctx.store
         .archivos(ctx.projectId)
         .then((as) => new Set(as.filter((a) => a.flujoId === flujoId).flatMap((a) => (a.tareas ?? []).map((t) => t.id))).size)
@@ -50,55 +61,70 @@ export async function notificar(ctx: Ctx, flujoId: string, avisos: Aviso[], mome
   const personas = () => (equipo ??= ctx.tc.personas().catch(() => []));
   let comun: { proyecto: string; enlace: string } | null = null;
   for (const aviso of avisos.slice(0, MAX_AVISOS)) {
-    const otra = aviso.trimble?.label && hechas > 0 ? `${aviso.trimble.label}-${hechas + 1}` : null;
-    const r = await enviarAviso((cuerpo) => ctx.tc.crearTarea(cuerpo), ctx.projectId, aviso, (g) => ctx.tc.miembros(g).catch(() => []), otra);
-    if (r.ok && r.todoId) {
-      creadas.push({ aviso, todoId: r.todoId, etiqueta: r.etiqueta });
-      hechas++;
-    }
-    if (r.ok) enviados++;
-    else fallidos++;
     const enArchivos = aviso.archivos.length > 1 ? ` (${aviso.archivos.length} archivos)` : "";
-    lineas.push({
+    const linea = (accion: string, detalle: string): Linea => ({
       proyecto: ctx.projectId,
       flujoId,
-      accion: r.ok ? "aviso-enviado" : "aviso-fallido",
+      accion,
       usuario: ctx.caller.name,
       usuarioId: ctx.caller.id,
-      detalle: `${r.mensaje}${enArchivos}`,
+      detalle: `${detalle}${enArchivos}`,
       archivoId: aviso.archivos.length === 1 ? aviso.archivos[0] : null,
       ocurrido: momento,
     });
-    let textoCorreo = "";
+    const dichos: string[] = [];
+    // The Trimble ToDo (and Trimble's e-mail), unless «Correos de aviso» turned it off.
+    if (config.tareasTrimble) {
+      const otra = aviso.trimble?.label && hechas > 0 ? `${aviso.trimble.label}-${hechas + 1}` : null;
+      const r = await enviarAviso((cuerpo) => ctx.tc.crearTarea(cuerpo), ctx.projectId, aviso, (g) => ctx.tc.miembros(g).catch(() => []), otra);
+      if (r.ok && r.todoId) {
+        creadas.push({ aviso, todoId: r.todoId, etiqueta: r.etiqueta });
+        hechas++;
+      }
+      if (r.ok) enviados++;
+      else fallidos++;
+      lineas.push(linea(r.ok ? "aviso-enviado" : "aviso-fallido", r.mensaje));
+      dichos.push(r.mensaje);
+    }
+    // The extension's own e-mail.
     const correo = ctx.correo;
-    if (correo && aviso.correo) {
-      const datos = aviso.correo;
-      comun ??= { proyecto: (await ctx.tc.nombreProyecto?.().catch(() => "")) || "Trimble Connect", enlace: enlaceExtension(ctx.projectId, correo.idExtension) };
+    const datos = aviso.correo;
+    if (correo && datos && config.activo && config.eventos[datos.tipo]) {
+      comun ??= { proyecto: (await ctx.tc.nombreProyecto?.().catch(() => "")) || "Trimble Connect", enlace: enlaceBoton(ctx, config) };
       const deTodos = comun;
       const c = await destinatarios(aviso.para, personas, (g) => ctx.tc.miembros(g).catch(() => []))
-        .then((gente) => enviarCorreos(correo, datos, gente, deTodos))
+        .then((gente) => enviarCorreos(correo, datos, gente, deTodos, { plantilla: config.textos[datos.tipo], copia: config.copia }))
         .catch((err: unknown) => ({ ok: false, enviados: 0, mensaje: `No se pudo enviar el correo: ${mensajeErrorCorreo(err)}.` }));
-      textoCorreo = c.mensaje;
-      lineas.push({
-        proyecto: ctx.projectId,
-        flujoId,
-        accion: c.ok ? "correo-enviado" : "correo-fallido",
-        usuario: ctx.caller.name,
-        usuarioId: ctx.caller.id,
-        detalle: `${c.mensaje}${enArchivos}`,
-        archivoId: aviso.archivos.length === 1 ? aviso.archivos[0] : null,
-        ocurrido: momento,
-      });
+      correos += c.enviados;
+      if (!c.ok) fallidos++;
+      lineas.push(linea(c.ok ? "correo-enviado" : "correo-fallido", c.mensaje));
+      dichos.push(c.mensaje);
+    } else if (!config.tareasTrimble) {
+      // Neither the ToDo nor the e-mail: noted, so nobody thinks the person knows.
+      const quienes = aviso.para.map((p) => p.nombre + (p.tipo === "grupo" ? " (grupo)" : "")).join(", ");
+      const porque = !correo ? "las tareas de Trimble están apagadas en «Correos de aviso» y no hay cuenta de Gmail en Vercel" : "en «Correos de aviso» están apagados la tarea de Trimble y el correo de este aviso";
+      const texto = `No se avisó a ${quienes} («${aviso.titulo}»): ${porque}.`;
+      fallidos++;
+      lineas.push(linea("aviso-fallido", texto));
+      dichos.push(texto);
     }
-    textos.push(textoCorreo ? `${r.mensaje} ${textoCorreo}` : r.mensaje);
+    if (dichos.length) textos.push(dichos.join(" "));
   }
   await guardarTareas(ctx, creadas, filas, momento);
-  return { lineas, enviados, fallidos, textos };
+  return { lineas, enviados, fallidos, correos, textos };
+}
+
+const contar = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
+
+/** « Se avisó a los revisores con 1 tarea de Trimble y 2 correos. 1 aviso no se pudo enviar (ver Historial).» */
+export function resumenAvisos(r: { enviados: number; fallidos: number; correos?: number }, aQuien = ""): string {
+  const con = [r.enviados ? `${contar(r.enviados, "tarea", "tareas")} de Trimble` : "", r.correos ? contar(r.correos, "correo", "correos") : ""].filter(Boolean).join(" y ");
+  return [con ? ` Se avisó${aQuien ? ` ${aQuien}` : ""} con ${con}.` : "", r.fallidos ? ` ${contar(r.fallidos, "aviso no se pudo enviar", "avisos no se pudieron enviar")} (ver Historial).` : ""].join("");
 }
 
 /** The ToDos for a flow's files that now wait for someone (new, new version, next step). */
 export async function avisarRevision(ctx: Ctx, flujo: Pick<Flujo, "id"> & FlujoTarea, archivos: ArchivoRegistro[], momento: string) {
-  if (!archivos.length) return { lineas: [], enviados: 0, fallidos: 0, textos: [] };
+  if (!archivos.length) return { lineas: [], enviados: 0, fallidos: 0, correos: 0, textos: [] };
   const avisos = avisosRevision(archivos, flujo, (a) => enlaceDe(ctx.projectId, a));
   return notificar(ctx, flujo.id, avisos, momento, archivos);
 }

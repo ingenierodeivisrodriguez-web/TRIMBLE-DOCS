@@ -11,12 +11,15 @@ import {
   destinatarios,
   enlaceExtension,
   enviarCorreos,
+  guardarCorreos,
   ID_EXTENSION,
+  leerCorreos,
   MAX_DESTINATARIOS,
   MensajeCorreo,
   mensajeErrorCorreo,
 } from "./correo";
-import { decidir } from "./decisiones";
+import { CONFIG_INICIAL, TEXTOS_INICIALES } from "./configCorreo";
+import { decidir, resumenAvisos } from "./decisiones";
 import { FlujoError } from "./errores";
 import { listarArchivos } from "./revision";
 import { Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
@@ -204,8 +207,9 @@ test("sin las variables de Vercel no hay correo; la clave se toma sin espacios",
 const EQUIPO = [persona("ana", "Ana", { role: "ADMIN" }), persona("juan", "Juan"), persona("luz", "Luz"), persona("pepe", "Pepe", { email: "" }), persona("deivis", "Deivis")];
 
 /** modelo.rvt uploaded by Juan; a flow «Planos torre 1»: Revisa = Luz, Aprueba = Pepe (no e-mail in Trimble). */
-async function escenario(conCorreo = true, tareas = true) {
+async function escenario(conCorreo = true, tareas = true, config?: Record<string, unknown>) {
   const store = memoryStore();
+  let tareasCreadas = 0;
   const archivo: RawFolderItem = { id: "modelo", name: "modelo.rvt", type: "FILE", createdOn: "", modifiedOn: "2026-11-01T15:00:00.000Z", modifiedBy: { id: "juan", firstName: "Juan" }, versionId: "modelo-v1", revision: 1 };
   const tc: TrimbleFlujo = {
     carpeta: async () => {
@@ -219,7 +223,7 @@ async function escenario(conCorreo = true, tareas = true) {
     items: async (id) => (id === "arq" ? [archivo] : []),
     version: async () => "modelo-v1",
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
-    crearTarea: async () => (tareas ? { estado: 201, cuerpo: { id: "todo1" } } : { estado: 403, cuerpo: { message: "Forbidden" } }),
+    crearTarea: async () => (tareasCreadas++, tareas ? { estado: 201, cuerpo: { id: `todo${tareasCreadas}` } } : { estado: 403, cuerpo: { message: "Forbidden" } }),
     actualizarTarea: async (_id, cuerpo) => ({ estado: 200, cuerpo: { status: cuerpo.status } }),
     nombreProyecto: async () => "SELVIA",
   };
@@ -232,6 +236,7 @@ async function escenario(conCorreo = true, tareas = true) {
     ahora: () => new Date("2026-11-11T18:38:00Z"),
     ...(conCorreo ? { correo } : {}),
   });
+  if (config) await guardarCorreos(ctx("ana", true), { config: { ...CONFIG_INICIAL, ...config }, version: 0 });
   await guardarFlujo(ctx("deivis"), {
     hito: "Planos torre 1",
     notas: "Revisar ejes",
@@ -244,7 +249,8 @@ async function escenario(conCorreo = true, tareas = true) {
   });
   const modelo = async () => (await listarArchivos(ctx("deivis"))).archivos.find((a) => a.fileId === "modelo")!;
   const lineas = async () => (await historial(ctx("deivis"), null, null)).entradas.filter((e) => e.accion.startsWith("correo-"));
-  return { ctx, enviados, modelo, lineas };
+  const todas = async () => (await historial(ctx("deivis"), null, null)).entradas;
+  return { ctx, enviados, modelo, lineas, todas, tareas: () => tareasCreadas };
 }
 
 test("al entrar el archivo al flujo, la responsable recibe el correo además de la tarea, y queda en el historial", async () => {
@@ -295,10 +301,98 @@ test("el correo de prueba: solo administradores, a su propio correo, y dice qué
   const r = await correoPrueba(e.ctx("ana", true));
   assert.equal(r.mensaje, "Te envié un correo de prueba a ana@obra.co, desde avisos@gmail.com. Revísalo (mira también la carpeta de spam la primera vez) y prueba su botón «Abrir Flujo de aprobación».");
   const m = e.enviados[e.enviados.length - 1];
-  assert.equal(m.asunto, "Correo de prueba de Flujo de aprobación");
-  assert.match(m.html, /Prueba el botón de abajo/);
+  assert.equal(m.asunto, "Prueba · FLUJO-00 · Te toca «Revisa»: Ejemplo: aprobar planos de arquitectura");
+  assert.match(m.html, /Correo de prueba de Flujo de aprobación: así llegará el aviso/);
+  assert.match(m.texto, /Vence: 18-11-2026/, "the sample is due a week later");
   assert.match(m.html, /\/projects\/P\/extension\/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e\/flujo_aprobacion_open/);
 
   const sin = await escenario(false);
   await assert.rejects(() => correoPrueba(sin.ctx("ana", true)), /faltan las variables FLUJO_CORREO_USUARIO y FLUJO_CORREO_CLAVE/);
+});
+
+// ------------------------------------------------------- «Correos de aviso»
+
+test("sin la tarea de Trimble: solo sale el correo, con los textos del proyecto, la copia y la dirección de la extensión de este proyecto", async () => {
+  const e = await escenario(true, true, {
+    tareasTrimble: false,
+    copia: "jefe@obra.co",
+    textos: { ...TEXTOS_INICIALES, revision: { asunto: "[{codigo}] Revisar {archivo} — vence {vence}", intro: "{persona}, el flujo te espera en «{paso}»." } },
+    enlace: "https://web.connect.trimble.com/projects/P/extension/otro-id-1234/flujo_aprobacion_open",
+  });
+  assert.equal(e.tareas(), 0, "no ToDo was created");
+  assert.equal(e.enviados.length, 1);
+  const [m] = e.enviados;
+  assert.equal(m.asunto, "[FLUJO-01] Revisar modelo.rvt — vence 20-11-2026");
+  assert.match(m.texto, /\n\nLuz Pérez, el flujo te espera en «Revisa»\.\n/);
+  assert.deepEqual(m.copia, ["jefe@obra.co"]);
+  assert.match(m.texto, /Abrir Flujo de aprobación: https:\/\/web\.connect\.trimble\.com\/projects\/P\/extension\/otro-id-1234\/flujo_aprobacion_open/);
+  const entradas = await e.todas();
+  assert.equal(entradas.filter((x) => x.accion === "aviso-enviado").length, 0, "no ToDo line");
+  assert.equal(entradas.find((x) => x.accion === "correo-enviado")?.detalle, "Correo a Luz Pérez <luz@obra.co>: «[FLUJO-01] Revisar modelo.rvt — vence 20-11-2026»; copia a jefe@obra.co.");
+});
+
+test("un aviso apagado no manda correo; sin tarea ni correo queda anotado que no se avisó a nadie", async () => {
+  const e = await escenario(true, true, { eventos: { revision: false, correccion: true } });
+  assert.equal(e.enviados.length, 0);
+  assert.equal(e.tareas(), 1, "the ToDo still goes");
+
+  const nada = await escenario(true, true, { tareasTrimble: false, eventos: { revision: false, correccion: true } });
+  assert.equal(nada.tareas(), 0);
+  assert.equal(nada.enviados.length, 0);
+  const fallo = (await nada.todas()).find((x) => x.accion === "aviso-fallido");
+  assert.equal(fallo?.detalle, "No se avisó a Luz Pérez («Revisar: modelo.rvt (Revisa) — Planos torre 1»): en «Correos de aviso» están apagados la tarea de Trimble y el correo de este aviso.");
+  // The rejection's e-mail is still on.
+  const a = await nada.modelo();
+  const r = await decidir(nada.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "Faltan los ejes" }, "rechazar");
+  assert.match(r.aviso ?? "", /^Correo a Juan Pérez <juan@obra\.co>: «FLUJO-01 · Rechazado: corrige «modelo\.rvt» — Planos torre 1»\.$/);
+});
+
+test("los correos apagados no salen aunque haya cuenta; la tarea de Trimble sí", async () => {
+  const e = await escenario(true, true, { activo: false });
+  assert.equal(e.enviados.length, 0);
+  assert.equal(e.tareas(), 1);
+  assert.deepEqual(await e.lineas(), []);
+});
+
+test("«Correos de aviso»: solo administradores, se guarda con versión, el historial dice qué cambió y no se apagan las tareas sin cuenta de Gmail", async () => {
+  const e = await escenario();
+  await assert.rejects(() => leerCorreos(e.ctx("luz")), /Solo un administrador del proyecto en Trimble ve los correos de aviso/);
+  const antes = await leerCorreos(e.ctx("ana", true));
+  assert.equal(antes.version, 0);
+  assert.equal(antes.configurado, true);
+  assert.equal(antes.desde, "avisos@gmail.com");
+  assert.equal(antes.enlace, "https://web.connect.trimble.com/projects/P/extension/8e7cd6d3-3e0e-16d7-12f4-02d6a673090e/flujo_aprobacion_open");
+  assert.deepEqual(antes.config, CONFIG_INICIAL);
+
+  const r = await guardarCorreos(e.ctx("ana", true), { config: { ...CONFIG_INICIAL, tareasTrimble: false }, version: 0 });
+  assert.equal(r.version, 1);
+  assert.equal(r.actualizadoPor, "Ana");
+  assert.equal(r.config.tareasTrimble, false);
+  assert.match(r.mensaje, /Se guardaron los correos de aviso/);
+  const linea = (await e.todas()).find((x) => x.accion === "correos-config");
+  assert.equal(linea?.detalle, "Cambió los correos de aviso: Crear también la tarea de Trimble: no.");
+  assert.equal(linea?.flujoId, null);
+  assert.equal(ACCIONES["correos-config"], "Cambió los correos de aviso");
+
+  // Two administrators at once: the second, with the old version, is refused and keeps what they wrote.
+  await assert.rejects(() => guardarCorreos(e.ctx("ana", true), { config: { ...CONFIG_INICIAL, activo: false }, version: 0 }), /Otro administrador cambió los correos de aviso/);
+  assert.match((await guardarCorreos(e.ctx("ana", true), { config: { ...CONFIG_INICIAL, tareasTrimble: false }, version: 1 })).mensaje, /No había cambios/);
+  await assert.rejects(() => guardarCorreos(e.ctx("luz"), { config: CONFIG_INICIAL, version: 1 }), /Solo un administrador/);
+
+  const sin = await escenario(false);
+  await assert.rejects(() => guardarCorreos(sin.ctx("ana", true), { config: { ...CONFIG_INICIAL, tareasTrimble: false }, version: 0 }), /mientras no haya cuenta de Gmail en Vercel/);
+});
+
+test("el correo de prueba usa los textos guardados del proyecto", async () => {
+  const e = await escenario(true, true, { textos: { ...TEXTOS_INICIALES, revision: { asunto: "Revisar {flujo}", intro: "Hola {persona}: te toca «{paso}»." } } });
+  await correoPrueba(e.ctx("ana", true));
+  const m = e.enviados[e.enviados.length - 1];
+  assert.equal(m.asunto, "Prueba · Revisar Ejemplo: aprobar planos de arquitectura");
+  assert.match(m.texto, /Hola Ana Pérez: te toca «Revisa»\./);
+});
+
+test("el resumen de los avisos cuenta tareas y correos", () => {
+  assert.equal(resumenAvisos({ enviados: 1, fallidos: 0, correos: 2 }, "a los revisores"), " Se avisó a los revisores con 1 tarea de Trimble y 2 correos.");
+  assert.equal(resumenAvisos({ enviados: 0, fallidos: 1, correos: 1 }), " Se avisó con 1 correo. 1 aviso no se pudo enviar (ver Historial).");
+  assert.equal(resumenAvisos({ enviados: 0, fallidos: 0 }), "");
 });

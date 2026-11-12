@@ -9,7 +9,7 @@
  * deleted: the decisions on the earlier versions stay in the history.
  */
 import { fechaHora } from "../compras/formato";
-import { avisarRevision } from "./decisiones";
+import { avisarRevision, resumenAvisos } from "./decisiones";
 import { FlujoError } from "./errores";
 import { conflictosArchivos, puedeCambiar } from "./flujos";
 import { detalleCambio, planReactivar } from "./registro";
@@ -19,7 +19,6 @@ import { cerrarTareas } from "./tareas";
 import type { ArchivoRegistro, EntradaHistorial, EstadoFlujos } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-const contar = (n: number, uno: string, varios: string) => `${n} ${n === 1 ? uno : varios}`;
 
 type Linea = Omit<EntradaHistorial, "id" | "creado">;
 
@@ -91,7 +90,7 @@ export async function reactivarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlu
   await ctx.store.registrarVarios(lineas);
 
   const mensaje = hechos.length
-    ? `Se reactivó «${flujo.hito}»${activado}: ${lista} ${hechos.length === 1 ? "entra" : "entran"} a revisión desde el primer paso.${avisados.enviados ? ` Se avisó con ${contar(avisados.enviados, "tarea", "tareas")} de Trimble.` : ""}${avisados.fallidos ? ` ${contar(avisados.fallidos, "aviso no se pudo enviar", "avisos no se pudieron enviar")} (ver Historial).` : ""}`
+    ? `Se reactivó «${flujo.hito}»${activado}: ${lista} ${hechos.length === 1 ? "entra" : "entran"} a revisión desde el primer paso.${resumenAvisos(avisados)}`
     : `Las versiones nuevas ya no están en Trimble: no entró nada.${activado ? " El flujo quedó activo." : ""}`;
   return { ...(await estado(ctx)), mensaje };
 }

@@ -357,3 +357,22 @@ drop trigger if exists aprobacion_flujos_codigo on public.aprobacion_flujos;
 create trigger aprobacion_flujos_codigo
   before insert on public.aprobacion_flujos
   for each row execute function public.aprobacion_codigo_flujo();
+
+-- ---------------------------------------- correos de aviso (11-11-2026)
+-- Lo que los administradores de cada proyecto eligen en «Correos de aviso»:
+-- si la extensión manda sus correos, si se crea también la tarea de Trimble,
+-- para qué avisos, sus textos, a quién va copia y la dirección de la
+-- extensión en el proyecto. Una fila por proyecto; «version» evita que dos
+-- administradores se pisen. Nunca se borra: se cambia.
+create table if not exists public.aprobacion_config_correo (
+  proyecto text primary key,
+  datos jsonb not null default '{}'::jsonb,
+  version integer not null default 1,
+  actualizado timestamptz not null default now(),
+  actualizado_por text
+);
+
+alter table public.aprobacion_config_correo enable row level security;
+revoke all on public.aprobacion_config_correo from anon, authenticated;
+revoke delete, truncate on table public.aprobacion_config_correo from public, anon, authenticated, service_role;
+grant select, insert, update on public.aprobacion_config_correo to service_role;

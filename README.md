@@ -4950,8 +4950,9 @@ Pedido del dueño: que la extensión le mande **su propio correo** al responsabl
 cuando le toca un paso, con un botón que lo lleve a la extensión, aparte del
 correo de las tareas de Trimble y configurable. Plan aceptado en fases; esta es
 la fase 1 (el envío). La fase 2 (ventana de configuración, con la opción de no
-crear la tarea de Trimble para que solo llegue este correo) y la fase 3
-(enlace al flujo exacto, recordatorio de vencidos) esperan su OK.
+crear la tarea de Trimble para que solo llegue este correo) está en la sección
+siguiente; la fase 3 (enlace al flujo exacto, recordatorio de vencidos) espera
+su OK.
 
 - **Cuándo sale**: en los mismos momentos que la tarea de Trimble: un archivo
   entra al flujo, pasa al paso siguiente, entra una versión con «Reactivar el
@@ -4976,10 +4977,11 @@ crear la tarea de Trimble para que solo llegue este correo) y la fase 3
   mala, sin conexión, dirección rechazada, límite diario, «sin correo en
   Trimble: Pepe»). Sale también en el PDF de trazabilidad. El mensaje que ve
   quien decide dice la tarea y el correo.
-- **Enviar correo de prueba** (⋮ arriba a la derecha, solo administradores):
-  manda un ejemplo a tu propio correo, desde la cuenta configurada, para
-  confirmar la clave y probar el botón. Si falta la cuenta lo dice («en Vercel
-  faltan las variables…»).
+- **Enviar correo de prueba** (desde la fase 2, dentro de ⋮ → «Correos de
+  aviso…», solo administradores): manda un ejemplo a tu propio correo, desde la
+  cuenta configurada, para confirmar la clave y probar el botón. Si falta la
+  cuenta lo dice («en Vercel faltan las variables…»). El dueño confirmó el
+  11-11-2026 que el correo llega.
 - **La cuenta**: un Gmail con verificación en dos pasos y una **contraseña de
   aplicación**; solo en Vercel: `FLUJO_CORREO_USUARIO` (la dirección),
   `FLUJO_CORREO_CLAVE` (las 16 letras; los espacios se ignoran) y
@@ -4999,6 +5001,58 @@ Código: `correo.ts` (`enlaceExtension`, `armarCorreo`, `destinatarios`,
 lleva `correo: DatosCorreo`), `decisiones.ts` (`notificar` manda el correo
 después de la tarea), ruta `POST /api/flujo-aprobacion/correo-prueba`,
 `api.correoPrueba`; menú ⋮ de `FlujoAprobacionApp`.
+
+### Correos de aviso: la configuración (11-11-2026, fase 2)
+
+Con el correo de prueba recibido, el dueño pidió «sigue con la fase 2». En
+**⋮ → «Correos de aviso…»** (solo administradores del proyecto en Trimble) se
+elige, por proyecto:
+
+- **Qué se envía**: «Enviar los correos de la extensión» y «Crear también la
+  tarea de Trimble». Si se quita la tarea, Trimble no crea la tarea ni manda su
+  correo, y **solo llega el de la extensión** (lo que pidió el dueño: no usar
+  el correo de tareas). No se puede quitar la tarea si los correos están
+  apagados o si Vercel no tiene la cuenta de Gmail: nadie recibiría avisos.
+- **Cuándo**: «Cuando a alguien le toca un paso» (al entrar el archivo, al
+  pasar al paso siguiente o al reactivar el flujo) y «Cuando rechazan un
+  archivo» (a quien subió la versión). Si un aviso queda sin tarea y sin
+  correo, el historial lo dice: «No se avisó a Luz…: en «Correos de aviso»
+  están apagados la tarea de Trimble y el correo de este aviso».
+- **Textos**: el asunto y el texto del comienzo de cada correo («Te toca un
+  paso» y «Archivo rechazado»), con datos entre llaves que se ponen con un
+  clic: `{codigo}`, `{flujo}`, `{paso}`, `{archivo}` («A-101.pdf y 2 más»),
+  `{version}`, `{vence}` (DD-MM-AAAA), `{proyecto}`, `{persona}` (quien
+  recibe) y `{quien}` (quien rechazó). Un dato que no existe no deja guardar.
+  El resto del correo (descripción, vencimiento, archivos, motivo y botón)
+  siempre va. «Volver a los textos de antes» deja los de la fase 1.
+- **Enviar copia a**: hasta 5 correos; cada uno recibe **una** copia de cada
+  aviso (va en el primer correo que sale, en CC).
+- **Dirección de la extensión en este proyecto**: se pega la dirección del
+  navegador con la extensión abierta; se toma el código de la extensión y se
+  revisa que sea de este proyecto. Vacía, se usa la de siempre (o
+  `FLUJO_EXTENSION_ID`). Debajo dice qué abre el botón del correo.
+- **Vista previa** al lado, con datos de ejemplo, que cambia mientras se
+  escribe; avisos de quién se queda sin aviso; «Enviar correo de prueba» (usa
+  lo guardado: con cambios sin guardar está apagado).
+- Se guarda con versión: si otro administrador guardó antes, sale «Otro
+  administrador cambió los correos de aviso…» y lo escrito sigue en pantalla.
+  Cada cambio queda en el historial del proyecto («Cambió los correos de aviso:
+  Crear también la tarea de Trimble: no; Enviar copia a: …»).
+- Sin nada guardado, o si la tabla no existe todavía, los avisos siguen como
+  en la fase 1 (tarea + correo): un aviso nunca se detiene por la configuración.
+- Los mensajes al registrar o reactivar dicen «Se avisó a los revisores con 1
+  tarea de Trimble y 2 correos».
+- **SQL**: tabla nueva `aprobacion_config_correo` (una fila por proyecto,
+  `datos` jsonb, `version`), con RLS y sin borrar. Hay que **volver a ejecutar
+  `supabase/flujo-aprobacion.sql`**; se probó dos veces seguidas en PGlite.
+
+Código: `configCorreo.ts` (`ConfigCorreo`, `TEXTOS_INICIALES`, `DATOS_TEXTO`,
+`rellenar`, `conInicial`, `idDeExtension`, `revisarConfigCorreo`,
+`advertenciasCorreo`, `cambiosCorreo`), `correo.ts` (`valoresCorreo`,
+`datosEjemplo`, `configDe`, `leerCorreos`, `guardarCorreos`, copia en
+`enviarCorreos`), `store.ts` (`configCorreo`, `guardarConfigCorreo`),
+`decisiones.ts` (`notificar` lee la configuración; `resumenAvisos`), ruta
+`GET/POST /api/flujo-aprobacion/correos`, pantalla `ConfigCorreos.tsx`.
 
 ### Guía rápida
 

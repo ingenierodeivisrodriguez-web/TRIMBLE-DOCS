@@ -4,9 +4,11 @@
  * extension from its own Gmail account, with the flow, the step, the files and
  * a button that opens the extension in Trimble Connect. They go at the same
  * moments as the ToDos (a file enters a step, the next step, a rejection) and
- * never block anything: a failure is noted in the history.
+ * never block anything: a failure is noted in the history. Since phase 2 each
+ * project's administrators set them in «Correos de aviso» (configCorreo.ts).
  */
 import type { ProjectUser } from "../trimbleApi";
+import { CONFIG_INICIAL, ConfigCorreo, conInicial, cambiosCorreo, rellenar, revisarConfigCorreo, TextoCorreo } from "./configCorreo";
 import { FlujoError } from "./errores";
 import { diaVisible } from "./flujos";
 import type { Ctx } from "./service";
@@ -15,8 +17,8 @@ import type { Aviso } from "./types";
 /**
  * The extension's id in Trimble Connect, part of its address: taken from the
  * address the owner copied with the extension open (11-11-2026). Trimble may
- * give it another id in another project; `FLUJO_EXTENSION_ID` in Vercel
- * replaces it.
+ * give it another id in another project: «Correos de aviso» keeps one per
+ * project, and `FLUJO_EXTENSION_ID` in Vercel replaces it for all.
  */
 export const ID_EXTENSION = "8e7cd6d3-3e0e-16d7-12f4-02d6a673090e";
 /** The manifest's menu command, the last part of that address. */
@@ -27,9 +29,10 @@ export function enlaceExtension(projectId: string, idExtension: string = ID_EXTE
   return `https://web.connect.trimble.com/projects/${encodeURIComponent(projectId)}/extension/${encodeURIComponent(idExtension)}/${COMANDO_EXTENSION}`;
 }
 
-/** One e-mail to one person. */
+/** One e-mail to one person (and the copy, on the first e-mail of a notice). */
 export interface MensajeCorreo {
   para: { nombre: string; correo: string };
+  copia?: string[];
   asunto: string;
   texto: string;
   html: string;
@@ -61,7 +64,7 @@ export interface DatosCorreo {
   mas: number;
   /** correccion: who rejected, why, and the file's folder. */
   rechazo?: { quien: string; motivo: string; carpeta: string };
-  /** The test e-mail of «Enviar correo de prueba». */
+  /** The test e-mail of «Enviar correo de prueba» (sample data). */
   prueba?: boolean;
 }
 
@@ -76,15 +79,51 @@ export const escapar = (s: string) => s.replace(/[&<>"']/g, (c) => ESCAPES[c]);
 const unaLinea = (s: string) => s.replace(/[\r\n\t]+/g, " ").replace(/\s{2,}/g, " ").trim();
 const recorte = (s: string, n: number) => (s.length > n ? `${s.slice(0, n - 1)}…` : s);
 
-/** The subject: the code first, so the person finds the flow («FLUJO-01 · Te toca «Revisa»: Planos torre 1»). */
-export function asuntoCorreo(d: DatosCorreo): string {
-  const antes = d.codigo ? `${d.codigo} · ` : "";
-  const asunto = d.prueba
-    ? "Correo de prueba de Flujo de aprobación"
-    : d.tipo === "correccion"
-      ? `${antes}Rechazado: corrige «${d.archivos[0]?.nombre ?? ""}» — ${d.hito}`
-      : `${antes}Te toca «${d.paso}»: ${d.hito}`;
-  return recorte(unaLinea(asunto), 160);
+/** The data a text in braces can carry, for one e-mail. */
+export function valoresCorreo(d: DatosCorreo, persona: string, proyecto: string): Record<string, string> {
+  const a = d.archivos[0];
+  const otros = Math.max(0, d.archivos.length - 1) + d.mas;
+  return {
+    codigo: d.codigo,
+    flujo: unaLinea(d.hito),
+    paso: unaLinea(d.paso),
+    archivo: a ? (otros > 0 ? `${a.nombre} y ${otros} más` : a.nombre) : "",
+    version: a?.revision != null ? String(a.revision) : "?",
+    vence: d.vence ? diaVisible(d.vence) : "",
+    proyecto: unaLinea(proyecto),
+    persona: unaLinea(persona),
+    quien: d.rechazo ? unaLinea(d.rechazo.quien) : "",
+  };
+}
+
+/** The subject and opening line with the project's texts (or those of before). */
+function textos(d: DatosCorreo, persona: string, proyecto: string, plantilla?: TextoCorreo): { asunto: string; intro: string } {
+  const p = plantilla ?? CONFIG_INICIAL.textos[d.tipo];
+  const valores = valoresCorreo(d, persona, proyecto);
+  const asunto = recorte(unaLinea(rellenar(p.asunto, valores)), 160);
+  return { asunto: d.prueba ? recorte(`Prueba · ${asunto}`, 160) : asunto, intro: rellenar(p.intro, valores) };
+}
+
+/** The subject (the code first, so the person finds the flow: «FLUJO-01 · Te toca «Revisa»: Planos torre 1»). */
+export function asuntoCorreo(d: DatosCorreo, plantilla?: TextoCorreo, proyecto = ""): string {
+  return textos(d, "", proyecto, plantilla).asunto;
+}
+
+/** The sample of «Enviar correo de prueba» and the window's preview. */
+export function datosEjemplo(projectId: string, hoy: Date, tipo: DatosCorreo["tipo"] = "revision"): DatosCorreo {
+  const vence = new Date(hoy.getTime() + 7 * 86_400_000).toISOString().slice(0, 10);
+  return {
+    tipo,
+    codigo: "FLUJO-00",
+    hito: "Ejemplo: aprobar planos de arquitectura",
+    notas: "Aquí va la descripción del flujo.",
+    vence,
+    paso: "Revisa",
+    archivos: [{ nombre: "A-101 PLANTA.pdf", revision: 2, enlace: `https://web.connect.trimble.com/projects/${encodeURIComponent(projectId)}/data`, nueva: false }],
+    mas: 0,
+    ...(tipo === "correccion" ? { rechazo: { quien: "Pepe Gómez", motivo: "Faltan los ejes y los niveles.", carpeta: "Proyecto / Arquitectura" } } : {}),
+    prueba: true,
+  };
 }
 
 const AZUL = "#2f4f8f";
@@ -99,18 +138,14 @@ function boton(texto: string, enlace: string, principal: boolean): string {
 
 /**
  * The e-mail of a notice for one person: subject, plain text and HTML (with
- * inline styles, which is what e-mail programs read). Everything people wrote
- * (title, description, names, reason) is escaped.
+ * inline styles, which is what e-mail programs read). The subject and the
+ * opening line come from the project's texts; everything people wrote is escaped.
  */
-export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { proyecto: string; enlace: string }): { asunto: string; texto: string; html: string } {
-  const asunto = asuntoCorreo(d);
+export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { proyecto: string; enlace: string }, plantilla?: TextoCorreo): { asunto: string; texto: string; html: string } {
+  const { asunto, intro } = textos(d, quien.nombre, comun.proyecto, plantilla);
   const hola = `Hola${quien.nombre ? ` ${unaLinea(quien.nombre)}` : ""},`;
   const archivo = d.archivos[0];
-  const intro = d.prueba
-    ? "Este es un correo de prueba de la extensión Flujo de aprobación. Así llegarán los avisos cuando a alguien le toque un paso. Prueba el botón de abajo: debe abrir la extensión en este proyecto de Trimble Connect."
-    : d.tipo === "correccion" && d.rechazo
-      ? `${unaLinea(d.rechazo.quien)} rechazó la versión ${archivo?.revision ?? "?"} de «${archivo?.nombre ?? ""}» en el paso «${d.paso}» del flujo:`
-      : `Te toca el paso «${d.paso}» del flujo:`;
+  const aviso = d.prueba ? "Correo de prueba de Flujo de aprobación: así llegará el aviso. Los datos de abajo son de ejemplo; prueba el botón: debe abrir la extensión en este proyecto." : "";
   const vence = d.vence ? diaVisible(d.vence) : "";
   const notas = d.notas.trim();
   const lineaArchivo = (a: DatosCorreo["archivos"][number]) => `${a.nombre} — versión ${a.revision ?? "?"}${a.nueva ? " (versión nueva)" : ""}`;
@@ -119,23 +154,23 @@ export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { 
   const comoSigue =
     d.tipo === "correccion" && d.rechazo
       ? `Corrige el archivo y sube la versión nueva con el mismo nombre en la misma carpeta (${d.rechazo.carpeta}).`
-      : d.prueba
-        ? ""
-        : `En la extensión: flujo ${d.codigo ? `${d.codigo} ` : ""}«${unaLinea(d.hito)}» → Archivos → Me toca → Decidir.`;
+      : `En la extensión: flujo ${d.codigo ? `${d.codigo} ` : ""}«${unaLinea(d.hito)}» → Archivos → Me toca → Decidir.`;
   const pie = "Este correo lo envía la extensión Flujo de aprobación de Trimble Connect. No lo respondas: los comentarios van en el flujo.";
 
   const texto = [
+    ...(aviso ? [aviso, ""] : []),
     hola,
     "",
     intro,
-    ...(d.prueba ? [] : [`${d.codigo ? `${d.codigo} — ` : ""}${unaLinea(d.hito)}`]),
+    `${d.codigo ? `${d.codigo} — ` : ""}${unaLinea(d.hito)}`,
     `Proyecto: ${comun.proyecto}`,
-    ...(notas && !d.prueba ? ["", notas] : []),
+    ...(notas ? ["", notas] : []),
     ...(vence ? [`Vence: ${vence}`] : []),
     ...(d.tipo === "correccion" && d.rechazo ? ["", `Motivo: ${d.rechazo.motivo}`] : []),
     ...(archivos.length ? ["", "Archivos:", ...archivos.map((a) => `• ${lineaArchivo(a)}: ${a.enlace}`)] : []),
     ...(mas ? [`… y ${mas} más.`] : []),
-    ...(comoSigue ? ["", comoSigue] : []),
+    "",
+    comoSigue,
     "",
     `Abrir Flujo de aprobación: ${comun.enlace}`,
     "",
@@ -148,14 +183,13 @@ export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { 
     `<div style="background:#f4f6f9;padding:24px 12px;font-family:'Segoe UI',Arial,Helvetica,sans-serif">`,
     `<div style="max-width:580px;margin:0 auto;background:#ffffff;border:1px solid #dfe4ea;border-radius:6px;overflow:hidden">`,
     `<div style="background:${AZUL};color:#ffffff;padding:14px 22px;font-size:15px;font-weight:600">Flujo de aprobación<span style="font-weight:400;opacity:.85"> · ${escapar(comun.proyecto)}</span></div>`,
+    aviso ? `<div style="background:#fff6dc;color:#7a5600;padding:10px 22px;font-size:13px;border-bottom:1px solid #f1e2b3">${escapar(aviso)}</div>` : "",
     `<div style="padding:22px">`,
     p(escapar(hola)),
-    p(escapar(intro)),
-    d.prueba
-      ? ""
-      : `<div style="border-left:3px solid ${AZUL};padding:4px 0 4px 12px;margin:0 0 14px">${d.codigo ? `<div style="font-size:12px;color:${GRIS};letter-spacing:.3px">${escapar(d.codigo)}</div>` : ""}<div style="font-size:17px;font-weight:600;color:#1f2a38">${escapar(unaLinea(d.hito))}</div>${
-          notas ? `<div style="font-size:13.5px;color:#3d4a5c;margin-top:4px;white-space:pre-line">${escapar(notas)}</div>` : ""
-        }</div>`,
+    p(escapar(intro), "white-space:pre-line"),
+    `<div style="border-left:3px solid ${AZUL};padding:4px 0 4px 12px;margin:0 0 14px">${d.codigo ? `<div style="font-size:12px;color:${GRIS};letter-spacing:.3px">${escapar(d.codigo)}</div>` : ""}<div style="font-size:17px;font-weight:600;color:#1f2a38">${escapar(unaLinea(d.hito))}</div>${
+      notas ? `<div style="font-size:13.5px;color:#3d4a5c;margin-top:4px;white-space:pre-line">${escapar(notas)}</div>` : ""
+    }</div>`,
     vence ? p(`Vence: <b>${escapar(vence)}</b>`) : "",
     d.tipo === "correccion" && d.rechazo ? p(`<b>Motivo:</b> ${escapar(d.rechazo.motivo)}`, "background:#fdecec;border-radius:4px;padding:8px 10px") : "",
     archivos.length
@@ -164,7 +198,7 @@ export function armarCorreo(d: DatosCorreo, quien: { nombre: string }, comun: { 
           .join("")}</ul>`
       : "",
     mas ? p(`… y ${mas} más.`) : "",
-    comoSigue ? p(escapar(comoSigue), `color:${GRIS};font-size:13px`) : "",
+    p(escapar(comoSigue), `color:${GRIS};font-size:13px`),
     `<div style="margin:18px 0 4px">${boton("Abrir Flujo de aprobación", comun.enlace, true)}${
       d.tipo === "correccion" && archivo ? boton("Abrir el archivo", archivo.enlace, false) : ""
     }</div>`,
@@ -229,21 +263,31 @@ const persona = (d: Destinatario) => (d.correo ? `${d.nombre} <${d.correo}>` : d
 
 /**
  * Sends the e-mail of a notice to each of its people, one by one (each with
- * their own name; nobody sees the others' addresses). Never throws: says what
- * happened, for the history.
+ * their own name; nobody sees the others' addresses); the copy goes once, on
+ * the first e-mail that leaves. Never throws: says what happened, for the history.
  */
-export async function enviarCorreos(correo: Correo, d: DatosCorreo, gente: Destinatario[], comun: { proyecto: string; enlace: string }): Promise<{ ok: boolean; enviados: number; mensaje: string }> {
-  const asunto = asuntoCorreo(d);
+export async function enviarCorreos(
+  correo: Correo,
+  d: DatosCorreo,
+  gente: Destinatario[],
+  comun: { proyecto: string; enlace: string },
+  opciones: { plantilla?: TextoCorreo; copia?: string[] } = {}
+): Promise<{ ok: boolean; enviados: number; mensaje: string }> {
+  const asunto = asuntoCorreo(d, opciones.plantilla, comun.proyecto);
   const conCorreo = gente.filter((g) => g.correo).slice(0, MAX_DESTINATARIOS);
   const sinCorreo = gente.filter((g) => !g.correo);
   const fuera = gente.filter((g) => g.correo).length - conCorreo.length;
+  const yaVan = new Set(conCorreo.map((g) => g.correo!.toLowerCase()));
+  let copia = (opciones.copia ?? []).filter((c) => !yaVan.has(c.toLowerCase()));
+  let copiado: string[] = [];
   const bien: Destinatario[] = [];
   const mal: { d: Destinatario; error: string }[] = [];
   for (const g of conCorreo) {
     try {
-      const m = armarCorreo(d, g, comun);
-      await correo.enviar({ para: { nombre: g.nombre, correo: g.correo! }, ...m });
+      const m = armarCorreo(d, g, comun, opciones.plantilla);
+      await correo.enviar({ para: { nombre: g.nombre, correo: g.correo! }, ...(copia.length ? { copia } : {}), ...m });
       bien.push(g);
+      if (copia.length) [copiado, copia] = [copia, []];
     } catch (err) {
       mal.push({ d: g, error: mensajeErrorCorreo(err) });
       // A wrong key fails the same way for everyone: don't try the rest.
@@ -255,6 +299,7 @@ export async function enviarCorreos(correo: Correo, d: DatosCorreo, gente: Desti
   }
   const partes: string[] = [];
   if (bien.length) partes.push(`Correo a ${bien.map(persona).join(", ")}: «${asunto}»`);
+  if (copiado.length) partes.push(`copia a ${copiado.join(", ")}`);
   if (mal.length) {
     const errores = [...new Set(mal.map((m) => m.error).filter((e) => e !== "no se intentó"))];
     partes.push(`${bien.length ? "no se pudo enviar" : `No se pudo enviar el correo «${asunto}»`} a ${mal.map((m) => persona(m.d)).join(", ")}: ${errores.join("; ")}`);
@@ -265,12 +310,85 @@ export async function enviarCorreos(correo: Correo, d: DatosCorreo, gente: Desti
   return { ok: bien.length > 0 && !mal.length, enviados: bien.length, mensaje: `${partes.join("; ")}.` };
 }
 
+// ------------------------------------------------------- «Correos de aviso»
+
+/** What the window shows: the project's settings, who saved them and the sending account. */
+export interface EstadoCorreos {
+  config: ConfigCorreo;
+  /** 0 while nobody has saved them (the initial ones apply). */
+  version: number;
+  actualizado: string | null;
+  actualizadoPor: string | null;
+  /** Vercel has the Gmail account. */
+  configurado: boolean;
+  desde: string | null;
+  /** The address the e-mails' button opens in this project. */
+  enlace: string;
+}
+
+function exigirAdmin(ctx: Ctx, que: string) {
+  if (!ctx.caller.isAdmin) throw new FlujoError(`Solo un administrador del proyecto en Trimble ${que}.`, 403, "sin-permiso");
+}
+
+/** The extension id the e-mails' button uses in this project. */
+const idDe = (ctx: Ctx, c: ConfigCorreo) => c.idExtension ?? ctx.correo?.idExtension ?? ID_EXTENSION;
+
+/** The project's settings for sending (the initial ones when none were saved or they can't be read: a notice never stops). */
+export async function configDe(ctx: Ctx): Promise<ConfigCorreo> {
+  const g = await ctx.store.configCorreo(ctx.projectId).catch(() => null);
+  return conInicial(g?.datos);
+}
+
+/** The address of the e-mails' button in this project. */
+export const enlaceBoton = (ctx: Ctx, c: ConfigCorreo) => enlaceExtension(ctx.projectId, idDe(ctx, c));
+
+/** «Correos de aviso» as saved (administrators). */
+export async function leerCorreos(ctx: Ctx): Promise<EstadoCorreos> {
+  exigirAdmin(ctx, "ve los correos de aviso");
+  const g = await ctx.store.configCorreo(ctx.projectId);
+  const config = conInicial(g?.datos);
+  return {
+    config,
+    version: g?.version ?? 0,
+    actualizado: g?.actualizado ?? null,
+    actualizadoPor: g?.actualizadoPor ?? null,
+    configurado: !!ctx.correo,
+    desde: ctx.correo?.desde ?? null,
+    enlace: enlaceBoton(ctx, config),
+  };
+}
+
 /**
- * «Enviar correo de prueba» (administrators): sends a sample to the caller's
- * own address, to check the Gmail key in Vercel and the extension's button.
+ * { config, version }: saves «Correos de aviso» (administrators) while nobody
+ * saved in between; what changed goes to the history.
+ */
+export async function guardarCorreos(ctx: Ctx, body: unknown): Promise<EstadoCorreos & { mensaje: string }> {
+  exigirAdmin(ctx, "cambia los correos de aviso");
+  const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
+  const r = revisarConfigCorreo(b.config, ctx.projectId);
+  if (r.error !== null) throw new FlujoError(r.error);
+  if (!r.config.tareasTrimble && !ctx.correo) {
+    throw new FlujoError("No se pueden apagar las tareas de Trimble mientras no haya cuenta de Gmail en Vercel: nadie recibiría avisos.", 409, "correo-sin-configurar");
+  }
+  const conflicto = new FlujoError("Otro administrador cambió los correos de aviso mientras los editabas: recarga para ver sus cambios. Lo que escribiste sigue en pantalla.", 409, "version-conflict");
+  const version = typeof b.version === "number" && Number.isInteger(b.version) ? b.version : -1;
+  const actual = await ctx.store.configCorreo(ctx.projectId);
+  if ((actual?.version ?? 0) !== version) throw conflicto;
+  const cambios = cambiosCorreo(conInicial(actual?.datos), r.config);
+  if (!cambios.length) return { ...(await leerCorreos(ctx)), mensaje: "No había cambios que guardar." };
+  const momento = (ctx.ahora?.() ?? new Date()).toISOString();
+  if (!(await ctx.store.guardarConfigCorreo(ctx.projectId, r.config, version, ctx.caller.name, momento))) throw conflicto;
+  await ctx.store.registrar({ proyecto: ctx.projectId, flujoId: null, accion: "correos-config", usuario: ctx.caller.name, usuarioId: ctx.caller.id, detalle: `Cambió los correos de aviso: ${cambios.join("; ")}.` });
+  return { ...(await leerCorreos(ctx)), mensaje: "Se guardaron los correos de aviso: valen desde el próximo aviso." };
+}
+
+/**
+ * «Enviar correo de prueba» (administrators): sends a sample «te toca» e-mail,
+ * with the project's saved texts, to the caller's own address, to check the
+ * Gmail key in Vercel and the extension's button.
  */
 export async function correoPrueba(ctx: Ctx): Promise<{ mensaje: string }> {
-  if (!ctx.caller.isAdmin) throw new FlujoError("Solo un administrador del proyecto en Trimble envía el correo de prueba.", 403, "sin-permiso");
+  exigirAdmin(ctx, "envía el correo de prueba");
   if (!ctx.correo) {
     throw new FlujoError(
       "El correo no está configurado: en Vercel faltan las variables FLUJO_CORREO_USUARIO y FLUJO_CORREO_CLAVE (o se pusieron después de la última publicación y falta publicar otra vez).",
@@ -280,10 +398,10 @@ export async function correoPrueba(ctx: Ctx): Promise<{ mensaje: string }> {
   }
   const [yo] = await destinatarios([{ tipo: "persona", id: ctx.caller.id, nombre: ctx.caller.name }], () => ctx.tc.personas(), async () => []);
   if (!yo?.correo) throw new FlujoError("Trimble no tiene tu correo en el equipo del proyecto: no hay a dónde enviar la prueba.", 409, "sin-correo");
-  const proyecto = (await ctx.tc.nombreProyecto?.().catch(() => "")) || "Trimble Connect";
-  const d: DatosCorreo = { tipo: "revision", codigo: "", hito: "Correo de prueba", notas: "", vence: null, paso: "", archivos: [], mas: 0, prueba: true };
+  const [proyecto, config] = await Promise.all([ctx.tc.nombreProyecto?.().catch(() => "") ?? Promise.resolve(""), configDe(ctx)]);
+  const d = datosEjemplo(ctx.projectId, ctx.ahora?.() ?? new Date());
   try {
-    await ctx.correo.enviar({ para: { nombre: yo.nombre, correo: yo.correo }, ...armarCorreo(d, yo, { proyecto, enlace: enlaceExtension(ctx.projectId, ctx.correo.idExtension) }) });
+    await ctx.correo.enviar({ para: { nombre: yo.nombre, correo: yo.correo }, ...armarCorreo(d, yo, { proyecto: proyecto || "Trimble Connect", enlace: enlaceBoton(ctx, config) }, config.textos.revision) });
   } catch (err) {
     throw new FlujoError(`No se pudo enviar el correo de prueba: ${mensajeErrorCorreo(err)}.`, 502, "correo-fallido");
   }
