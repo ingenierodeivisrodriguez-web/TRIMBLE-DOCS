@@ -87,7 +87,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     await enTandas(plan.actualizar, async (c: Cambio) => {
       const a = await ctx.store.actualizarArchivo(c.id, c.cambios);
       if (!c.accion) return;
-      // A newer version waits for nobody: no ToDo.
+      // A newer version waits for nobody: no notice.
       if (ESPERANDO.includes(a.estado) && (c.accion === "version-reemplazada" || c.accion === "nueva-version")) aAvisar.push(a);
       const vn = c.accion === "version-nueva-vista" ? a.versionNueva : null;
       if (vn) {
@@ -120,7 +120,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
       retirados++;
     }
 
-    // A Trimble ToDo to the responsible of the first step of what now waits (phase 3).
+    // An e-mail to the responsible of the first step of what now waits (phase 3).
     const avisados = await avisarRevision(ctx, flujo, aAvisar, momento);
     lineas.push(...avisados.lineas);
     await ctx.store.registrarVarios(lineas);

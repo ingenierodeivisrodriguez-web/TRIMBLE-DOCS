@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Caller } from "../propiedades/service";
 import type { ProjectUser, RawFolderItem } from "../trimbleApi";
+import type { Correo, MensajeCorreo } from "./correo";
 import { decidir } from "./decisiones";
 import { FlujoError } from "./errores";
 import { reactivarFlujo } from "./reactivar";
@@ -13,7 +14,7 @@ const persona = (id: string, firstName: string, role = "USER"): ProjectUser => (
 const PERSONAS = [persona("ana", "Ana", "ADMIN"), persona("juan", "Juan"), persona("luz", "Luz"), persona("pepe", "Pepe"), persona("deivis", "Deivis")];
 
 /** modelo.rvt uploaded by Juan; a flow made by Deivis (not an administrator): Revisa = Luz, Aprueba = Pepe. */
-async function escenario(o: { cierre?: (todoId: string, cuerpo: Record<string, unknown>) => { estado: number; cuerpo: unknown } } = {}) {
+async function escenario() {
   const store = memoryStore();
   const arbol: Record<string, RawFolderItem[]> = {};
   const archivo = (revision: number, quien = "juan"): RawFolderItem => ({
@@ -27,8 +28,8 @@ async function escenario(o: { cierre?: (todoId: string, cuerpo: Record<string, u
     revision,
   });
   arbol.arq = [archivo(1)];
-  const tareas: Record<string, unknown>[] = [];
-  const cerradas: { id: string; cuerpo: Record<string, unknown> }[] = [];
+  const correos: MensajeCorreo[] = [];
+  const correo: Correo = { desde: "avisos@gmail.com", enviar: async (m) => void correos.push(m) };
   const tc: TrimbleFlujo = {
     carpeta: async () => {
       throw new FlujoError("No se usa.", 500);
@@ -41,20 +42,13 @@ async function escenario(o: { cierre?: (todoId: string, cuerpo: Record<string, u
     items: async (id) => arbol[id] ?? [],
     version: async () => arbol.arq[0].versionId ?? null,
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
-    crearTarea: async (cuerpo) => {
-      tareas.push(cuerpo);
-      return { estado: 201, cuerpo: { id: `todo${tareas.length}` } };
-    },
-    actualizarTarea: async (id, cuerpo) => {
-      cerradas.push({ id, cuerpo });
-      return o.cierre?.(id, cuerpo) ?? { estado: 200, cuerpo: { id, status: cuerpo.status } };
-    },
   };
   const ctx = (id: string, isAdmin = false): Ctx => ({
     projectId: "P",
     caller: { id, name: PERSONAS.find((p) => p.id === id)!.firstName, isAdmin, memberOfGroups: async () => new Set() } satisfies Caller,
     store,
     tc,
+    correo,
     ahora: () => new Date("2026-11-10T22:00:00Z"),
   });
   const creador = ctx("deivis");
@@ -78,59 +72,41 @@ async function escenario(o: { cierre?: (todoId: string, cuerpo: Record<string, u
     await revisarFlujo(creador, { flujoId: f.id });
   };
   const flujo = async () => (await estado(creador)).flujos[0];
-  return { store, tareas, cerradas, ctx, creador, f, modelo, decide, subir, flujo };
+  return { store, correos, ctx, creador, f, modelo, decide, subir, flujo };
 }
 
-test("cada paso decidido cierra su tarea de Trimble; un rechazo deja una tarea de corrección abierta", async () => {
+test("decidir no crea ni cierra tareas en Trimble: cada aviso es un correo y queda en el historial", async () => {
   const e = await escenario();
-  assert.deepEqual((await e.modelo()).tareas?.map((t) => [t.id, t.tipo, t.pasoId, t.versionId]), [["todo1", "revision", "p1", "modelo-v1"]]);
+  assert.deepEqual((await e.modelo()).tareas ?? [], [], "no ToDo noted on the file");
   await e.decide("luz", "aprobar");
-  assert.deepEqual(e.cerradas, [{ id: "todo1", cuerpo: { status: "CLOSED" } }], "Luz's ToDo for «Revisa»");
-  let a = await e.modelo();
-  assert.deepEqual(
-    a.tareas?.map((t) => [t.id, t.pasoId, t.cerrada ?? null, t.cierre ?? null]),
-    [
-      ["todo1", "p1", "2026-11-10T22:00:00.000Z", "CLOSED"],
-      ["todo2", "p2", null, null],
-    ]
-  );
   await e.decide("pepe", "rechazar", "Faltan los ejes");
   assert.deepEqual(
-    e.cerradas.map((c) => c.id),
-    ["todo1", "todo2"],
-    "Pepe's ToDo for «Aprueba» is closed when he decides"
+    e.correos.map((m) => [m.para.correo, m.asunto]),
+    [
+      ["luz@obra.co", "FLUJO-01 · Te toca «Revisa»: aprobar torre 2"],
+      ["pepe@obra.co", "FLUJO-01 · Te toca «Aprueba»: aprobar torre 2"],
+      ["juan@obra.co", "FLUJO-01 · Rechazado: corrige «modelo.rvt» — aprobar torre 2"],
+    ]
   );
-  a = await e.modelo();
-  assert.deepEqual(a.tareas?.find((t) => t.id === "todo3")?.tipo, "correccion", "the ToDo to Juan to correct it stays open");
-  const h = (await historial(e.creador, null, a.id)).entradas.filter((x) => x.accion === "tarea-cerrada").map((x) => x.detalle);
-  assert.equal(h.length, 2);
-  assert.match(h[0], /^Cerró la tarea de Trimble FLUJO-01 «Revisar: modelo.rvt \(Aprueba\) — aprobar torre 2»: Trimble la dejó en estado CLOSED\.$/);
+  const acciones = (await historial(e.creador, e.f.id)).entradas.map((x) => x.accion);
+  for (const accion of ["aviso-enviado", "aviso-fallido", "tarea-cerrada", "tarea-no-cerrada"]) assert.equal(acciones.includes(accion), false, `no «${accion}»`);
+  assert.equal(acciones.filter((x) => x === "correo-enviado").length, 3);
 });
 
-test("si Trimble no deja cerrar la tarea, la decisión vale igual y queda anotado en el historial", async () => {
-  const e = await escenario({ cierre: () => ({ estado: 403, cuerpo: "Forbidden" }) });
-  const r = await e.decide("luz", "aprobar");
-  assert.match(r.mensaje, /pasa a «Aprueba»/);
-  const a = await e.modelo();
-  assert.equal(a.pasoNombre, "Aprueba");
-  assert.equal(a.tareas?.[0].cerrada ?? null, null);
-  assert.match(a.tareas?.[0].cierre ?? "", /Trimble no la cerró \(403\)/);
-  assert.ok((await historial(e.creador, null, a.id)).entradas.some((x) => x.accion === "tarea-no-cerrada" && /No se pudo cerrar la tarea de Trimble FLUJO-01 «Revisar: modelo.rvt \(Revisa\)/.test(x.detalle)));
-});
-
-test("reactivar: solo con una versión nueva, por quien creó el flujo; entra la nueva desde el primer paso y queda todo en el historial", async () => {
+test("reactivar: solo con una versión nueva, por quien creó el flujo; entra la nueva desde el primer paso, el flujo se vuelve a abrir y queda todo en el historial", async () => {
   const e = await escenario();
   await e.decide("luz", "aprobar");
   await e.decide("pepe", "aprobar", "Cumple");
   let f = await e.flujo();
+  assert.equal((await estado(e.creador)).cierres[f.id]?.quien, "Pepe", "approved: closed");
   await assert.rejects(() => reactivarFlujo(e.creador, { id: f.id, version: f.version }), (err: unknown) => err instanceof FlujoError && err.code === "sin-version-nueva");
   await e.subir(2);
   assert.equal((await e.modelo()).estado, "aprobado", "a newer version is only noted");
   f = await e.flujo();
   await assert.rejects(() => reactivarFlujo(e.ctx("luz"), { id: f.id, version: f.version }), /Solo quien creó este flujo \(Deivis\) o un administrador del proyecto en Trimble puede reactivarlo/);
-  const tareasAntes = e.tareas.length;
+  const correosAntes = e.correos.length;
   const r = await reactivarFlujo(e.creador, { id: f.id, version: f.version });
-  assert.match(r.mensaje!, /^Se reactivó «aprobar torre 2»: «modelo.rvt» versión 2 entra a revisión desde el primer paso\. Se avisó con 1 tarea de Trimble\.$/);
+  assert.match(r.mensaje!, /^Se reactivó «aprobar torre 2»: «modelo.rvt» versión 2 entra a revisión desde el primer paso\. Se avisó con 1 correo\.$/);
   const a = await e.modelo();
   assert.equal(a.estado, "nueva-version");
   assert.equal(a.revision, 2);
@@ -139,32 +115,36 @@ test("reactivar: solo con una versión nueva, por quien creó el flujo; entra la
   assert.deepEqual(a.firmas, [], "a new review of version 2");
   assert.equal(a.revisionAprobada, 1, "version 1 stays as the approved one");
   assert.equal(a.versionNueva ?? null, null);
-  assert.equal(e.tareas.length, tareasAntes + 1, "Luz gets the ToDo for version 2");
+  assert.equal(e.correos.length, correosAntes + 1);
+  assert.equal(e.correos[e.correos.length - 1].para.correo, "luz@obra.co", "Luz gets the e-mail for version 2");
   const h = (await historial(e.creador, f.id)).entradas;
   assert.match(h.find((x) => x.accion === "flujo-reactivado")!.detalle, /^Reactivó «aprobar torre 2»: entra «modelo.rvt» versión 2\. Se revisan desde el primer paso; lo decidido antes queda en el historial\.$/);
   assert.match(h.find((x) => x.accion === "version-reactivada")!.detalle, /^Entra la versión 2 \(subida por Pepe el .+\) al reactivar el flujo «aprobar torre 2»: se revisa desde el primer paso; la versión 1 quedó aprobada\.$/);
   for (const accion of ["aprobado-paso", "aprobado", "version-nueva-vista"]) assert.ok(h.some((x) => x.accion === accion), `the history keeps «${accion}»`);
-  // It is still closed for editing, and version 2 goes through the steps again.
-  const cerrado = await e.flujo();
-  await assert.rejects(() => cambiarEstado(e.creador, { id: cerrado.id, version: cerrado.version, activo: false }), (err: unknown) => err instanceof FlujoError && err.code === "flujo-cerrado");
+  // Open again (version 2 waits for its decisions): its creator could change it, and it closes again with the last approval.
+  const abierto = await e.flujo();
+  assert.deepEqual((await estado(e.creador)).cierres, {});
   await e.decide("luz", "aprobar");
   assert.equal((await e.modelo()).pasoNombre, "Aprueba");
+  await e.decide("pepe", "aprobar");
+  const otra = await e.flujo();
+  assert.equal(otra.id, abierto.id);
+  await assert.rejects(() => cambiarEstado(e.creador, { id: otra.id, version: otra.version, activo: false }), (err: unknown) => err instanceof FlujoError && err.code === "flujo-cerrado");
 });
 
-test("reactivar un rechazado: entra la versión corregida y se cierra la tarea de corrección", async () => {
+test("reactivar un rechazado: entra la versión corregida y quien subió la anterior recibió su correo de corrección", async () => {
   const e = await escenario();
   await e.decide("luz", "rechazar", "Faltan los ejes");
-  const correccion = (await e.modelo()).tareas!.find((t) => t.tipo === "correccion")!;
+  assert.equal(e.correos[e.correos.length - 1].para.correo, "juan@obra.co");
   await e.subir(2);
   const f = await e.flujo();
   await reactivarFlujo(e.creador, { id: f.id, version: f.version });
-  assert.ok(e.cerradas.some((c) => c.id === correccion.id), "the ToDo to correct it is done");
   const a = await e.modelo();
   assert.equal(a.estado, "nueva-version");
   assert.match((await historial(e.creador, null, a.id)).entradas.find((x) => x.accion === "version-reactivada")!.detalle, /la versión 1 quedó rechazada\.$/);
 });
 
-test("reactivar un flujo desactivado lo deja activo; lo que esperaba decisión pasa a la versión nueva y su tarea se cierra", async () => {
+test("reactivar un flujo desactivado lo deja activo; lo que esperaba decisión pasa a la versión nueva", async () => {
   const e = await escenario();
   await e.subir(2);
   let f = await e.flujo();
@@ -175,6 +155,5 @@ test("reactivar un flujo desactivado lo deja activo; lo que esperaba decisión p
   assert.equal((await e.flujo()).activo, true);
   const a = await e.modelo();
   assert.equal(a.revision, 2);
-  assert.ok(e.cerradas.some((c) => c.id === "todo1"), "the ToDo for version 1 is closed: it won't be decided");
   assert.match((await historial(e.creador, null, a.id)).entradas.find((x) => x.accion === "version-reactivada")!.detalle, /la versión 1 no se decidió\.$/);
 });

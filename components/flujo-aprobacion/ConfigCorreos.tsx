@@ -11,8 +11,6 @@ type Tipo = "revision" | "correccion";
 
 /** What the window edits: the settings, with the copy and the extension's address as typed. */
 interface Formulario {
-  activo: boolean;
-  tareasTrimble: boolean;
   eventos: ConfigCorreo["eventos"];
   recordatorios: boolean;
   textos: ConfigCorreo["textos"];
@@ -21,8 +19,6 @@ interface Formulario {
 }
 
 const deEstado = (e: EstadoCorreos): Formulario => ({
-  activo: e.config.activo,
-  tareasTrimble: e.config.tareasTrimble,
   eventos: { ...e.config.eventos },
   recordatorios: e.config.recordatorios,
   textos: { revision: { ...e.config.textos.revision }, correccion: { ...e.config.textos.correccion } },
@@ -89,7 +85,7 @@ export default function ConfigCorreos({ api, projectId, projectName, onClose }: 
   const inicial = useMemo(() => (estado ? JSON.stringify(deEstado(estado)) : ""), [estado]);
   const cambiado = !!form && JSON.stringify(form) !== inicial;
   const config: ConfigCorreo | null = form
-    ? { ...form, copia: separarCorreos(form.copia), idExtension: idDeExtension(form.enlace, projectId).id }
+    ? { ...form, activo: true, copia: separarCorreos(form.copia), idExtension: idDeExtension(form.enlace, projectId).id }
     : null;
   const advertencias = config && estado ? advertenciasCorreo(config, estado.configurado) : [];
   // The button's address: the one pasted; empty, the server's default (estado.enlace while nothing was saved).
@@ -198,16 +194,7 @@ export default function ConfigCorreos({ api, projectId, projectName, onClose }: 
                     <span style={{ color: "#b3261e" }}>No hay cuenta de Gmail en Vercel: los correos no saldrán hasta ponerla.</span>
                   )}
                 </p>
-                <Casilla marcada={form.activo} onCambio={(activo) => cambiar({ activo })}>
-                  Enviar los correos de la extensión
-                </Casilla>
-                <Casilla
-                  marcada={form.tareasTrimble}
-                  onCambio={(tareasTrimble) => cambiar({ tareasTrimble })}
-                  nota="Trimble manda su propio correo con cada tarea. Si lo quitas, solo llega el correo de la extensión y no se crean tareas en Trimble."
-                >
-                  Crear también la tarea de Trimble
-                </Casilla>
+                <p style={ayuda}>El correo de la extensión es el único aviso de los flujos: no se crean tareas en Trimble.</p>
               </div>
 
               <div style={seccion}>
@@ -341,8 +328,7 @@ export default function ConfigCorreos({ api, projectId, projectName, onClose }: 
                 <>
                   <div style={{ fontSize: 13, color: "var(--tc-gray-700)", borderBottom: "1px solid #eef1f5", paddingBottom: 6 }}>
                     <b>Asunto:</b> {vista.asunto}
-                    {form.tareasTrimble ? null : <span style={{ ...ayuda, display: "block" }}>Sin tarea de Trimble: este es el único aviso que llega.</span>}
-                    {!form.activo || !form.eventos[tipo] ? <span style={{ display: "block", color: "#b3261e", fontSize: 12.5 }}>Este correo no se envía con lo marcado.</span> : null}
+                    {!form.eventos[tipo] ? <span style={{ display: "block", color: "#b3261e", fontSize: 12.5 }}>Este correo no se envía con lo marcado.</span> : null}
                   </div>
                   <iframe title="Vista previa del correo" sandbox="" srcDoc={vista.html} style={{ width: "100%", height: 560, border: "none", background: "#f4f6f9" }} />
                 </>

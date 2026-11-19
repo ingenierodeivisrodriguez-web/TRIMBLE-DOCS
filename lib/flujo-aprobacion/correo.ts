@@ -1,11 +1,12 @@
 /**
- * The extension's own e-mails (11-11-2026, the owner's wish): besides the
- * Trimble ToDo, the person whose turn it is gets an e-mail sent by the
- * extension from its own Gmail account, with the flow, the step, the files and
- * a button that opens the extension in Trimble Connect. They go at the same
- * moments as the ToDos (a file enters a step, the next step, a rejection) and
- * never block anything: a failure is noted in the history. Since phase 2 each
- * project's administrators set them in «Correos de aviso» (configCorreo.ts).
+ * The extension's own e-mails (11-11-2026, the owner's wish): the person whose
+ * turn it is gets an e-mail sent by the extension from its own Gmail account,
+ * with the flow, the step, the files and a button that opens the extension in
+ * Trimble Connect. They go when a file enters a step, at the next step and on
+ * a rejection, and never block anything: a failure is noted in the history.
+ * Since 19-11-2026 they are the flows' only notice (no Trimble ToDos). Since
+ * phase 2 each project's administrators set them in «Correos de aviso»
+ * (configCorreo.ts).
  */
 import type { ProjectUser } from "../trimbleApi";
 import { CONFIG_INICIAL, ConfigCorreo, conInicial, cambiosCorreo, rellenar, revisarConfigCorreo, TextoCorreo } from "./configCorreo";
@@ -50,7 +51,7 @@ export interface Correo {
   enviar(m: MensajeCorreo): Promise<void>;
 }
 
-/** What the e-mail of a notice says (built with the ToDo, from the same data). */
+/** What the e-mail of a notice says. */
 export interface DatosCorreo {
   tipo: "revision" | "correccion";
   /** «FLUJO-01», or "" for a flow without code. */
@@ -398,9 +399,6 @@ export async function guardarCorreos(ctx: Ctx, body: unknown): Promise<EstadoCor
   const b = (body && typeof body === "object" ? body : {}) as Record<string, unknown>;
   const r = revisarConfigCorreo(b.config, ctx.projectId);
   if (r.error !== null) throw new FlujoError(r.error);
-  if (!r.config.tareasTrimble && !ctx.correo) {
-    throw new FlujoError("No se pueden apagar las tareas de Trimble mientras no haya cuenta de Gmail en Vercel: nadie recibiría avisos.", 409, "correo-sin-configurar");
-  }
   const conflicto = new FlujoError("Otro administrador cambió los correos de aviso mientras los editabas: recarga para ver sus cambios. Lo que escribiste sigue en pantalla.", 409, "version-conflict");
   const version = typeof b.version === "number" && Number.isInteger(b.version) ? b.version : -1;
   const actual = await ctx.store.configCorreo(ctx.projectId);

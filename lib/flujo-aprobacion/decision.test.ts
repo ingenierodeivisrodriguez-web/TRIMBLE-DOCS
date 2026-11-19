@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import type { Respuesta } from "../compras/cde";
-import { avisoRechazo, avisosRevision, enviarAviso, MAX_EN_AVISO, textosTarea, variantesTarea } from "./avisos";
+import { avisoRechazo, avisosRevision } from "./avisos";
 import { Decisor, planDecision, puedeDecidir, revisarTexto } from "./decision";
 import type { ArchivoRegistro, PasoFlujo } from "./types";
 
@@ -105,14 +104,27 @@ test("los avisos juntan los archivos que esperan a las mismas personas en el mis
     archivo({ id: "a2", fileId: "plano", nombre: "A-101.pdf", estado: "nueva-version", revision: 3 }),
     archivo({ id: "a3", fileId: "otro", nombre: "Memoria.docx", pasoActual: 1 }),
   ];
-  const avisos = avisosRevision(archivos, FLUJO, (a) => `https://tc/${a.fileId}`);
+  const avisos = avisosRevision(archivos, { ...FLUJO, codigo: 3, notas: "Revisar ejes", vence: "2026-11-30" }, (a) => `https://tc/${a.fileId}`);
   assert.equal(avisos.length, 2);
   assert.equal(avisos[0].titulo, "Revisar 2 archivos (Revisa) — Aprobar Torre 1");
   assert.deepEqual(avisos[0].para, [{ tipo: "grupo", id: "g-arq", nombre: "Arquitectura" }]);
-  assert.match(avisos[0].descripcion, /• A-101.pdf — versión 3 \(versión nueva\): https:\/\/tc\/plano/);
+  assert.deepEqual(avisos[0].archivos, ["a1", "a2"]);
+  assert.equal(avisos[0].pasoId, "p1");
+  assert.deepEqual(avisos[0].correo, {
+    tipo: "revision",
+    codigo: "FLUJO-03",
+    hito: "Aprobar Torre 1",
+    notas: "Revisar ejes",
+    vence: "2026-11-30",
+    paso: "Revisa",
+    archivos: [
+      { nombre: "ARQ-T1.rvt", revision: 5, enlace: "https://tc/modelo", nueva: false },
+      { nombre: "A-101.pdf", revision: 3, enlace: "https://tc/plano", nueva: true },
+    ],
+    mas: 0,
+  });
   assert.equal(avisos[1].titulo, "Revisar: Memoria.docx (Aprueba) — Aprobar Torre 1");
-  const muchos = avisosRevision(Array.from({ length: MAX_EN_AVISO + 3 }, (_, i) => archivo({ id: `x${i}`, fileId: `x${i}`, nombre: `x${i}.pdf` })), FLUJO, () => "u");
-  assert.match(muchos[0].descripcion, /… y 3 más: ábrelos en Flujos documentales, flujo «Aprobar Torre 1» → Archivos → Me toca\./);
+  assert.equal("trimble" in avisos[0], false, "no Trimble ToDo since 19-11-2026: only the e-mail");
   assert.deepEqual(avisosRevision([archivo()], { hito: "x", pasos: [{ id: "p1", nombre: "Revisa" }] }, () => "u"), [], "a step without responsible: no notice");
 });
 
@@ -122,86 +134,8 @@ test("el aviso de rechazo va a quien subió la versión, con el motivo y dónde 
   const aviso = avisoRechazo(a, r.firma, { hito: "Aprobar Torre 1" }, "https://tc/modelo")!;
   assert.equal(aviso.titulo, "Corregir: ARQ-T1.rvt (rechazado) — Aprobar Torre 1");
   assert.deepEqual(aviso.para, [{ tipo: "persona", id: "juan", nombre: "Juan Pérez" }]);
-  assert.match(aviso.descripcion, /luz rechazó la versión 5 en «Revisa».*\nMotivo: Faltan los ejes\nCorrige el archivo y sube la versión nueva con el mismo nombre en la misma carpeta \(Obra \/ Arquitectura\)/);
+  assert.equal(aviso.tipo, "correccion");
+  assert.deepEqual(aviso.correo?.rechazo, { quien: "luz", motivo: "Faltan los ejes", carpeta: "Obra / Arquitectura" });
+  assert.deepEqual(aviso.correo?.archivos, [{ nombre: "ARQ-T1.rvt", revision: 5, enlace: "https://tc/modelo", nueva: false }]);
   assert.equal(avisoRechazo(archivo({ subidoPorId: null }), r.firma, { hito: "x" }, "u"), null);
-});
-
-test("la tarea de Trimble lleva el código del flujo, solo su título, solo su descripción y su fecha de vencimiento", () => {
-  assert.deepEqual(textosTarea({ hito: "CARGAR ARCHIVO", notas: "PERMITE CARGAR", vence: "2026-11-11", codigo: 1 }), {
-    label: "FLUJO-01",
-    title: "CARGAR ARCHIVO",
-    description: "PERMITE CARGAR",
-    dueDate: "2026-11-11T17:00:00+0000",
-  });
-  const sinNada = textosTarea({ hito: "Aprobar Torre 1", notas: "  ", vence: null, codigo: null });
-  assert.equal(sinNada.label, "", "before the SQL gives it a number: Trimble numbers the ToDo");
-  assert.equal(sinNada.description, "Aprobar Torre 1", "Trimble requires a description: the title again");
-  assert.equal(sinNada.dueDate, null);
-  assert.equal(textosTarea({ hito: "x", codigo: 105 }).label, "FLUJO-105");
-});
-
-test("si Trimble no acepta el tipo, la fecha o el código repetido, se prueba sin ese dato y al final con el texto de antes", () => {
-  const aviso = { titulo: "Revisar: a.pdf (Revisa) — X", descripcion: "detalle", para: [], archivos: ["a1"], trimble: { label: "FLUJO-03", title: "X", description: "D", dueDate: "2026-11-30T17:00:00+0000" } };
-  const v = variantesTarea("P", aviso, [{ id: "luz", type: "USER" }], "FLUJO-03-2");
-  assert.deepEqual(
-    v.map((x) => [x.cuerpo.label, x.cuerpo.type ?? null, x.cuerpo.dueDate ? "fecha" : null, x.cuerpo.title ?? null]),
-    [
-      ["FLUJO-03", "Flujo documental", "fecha", "X"],
-      ["FLUJO-03", "Request", "fecha", "X"],
-      ["FLUJO-03", null, "fecha", "X"],
-      ["FLUJO-03-2", "Flujo documental", "fecha", "X"],
-      ["FLUJO-03-2", "Request", "fecha", "X"],
-      ["FLUJO-03-2", null, "fecha", "X"],
-      ["FLUJO-03-2", null, null, "X"],
-      ["Revisar: a.pdf (Revisa) — X", null, null, null],
-    ]
-  );
-  assert.equal(v[0].nota, "");
-  assert.match(v[1].nota, /tipo «Solicitud»/);
-  assert.match(v[3].nota, /«FLUJO-03» ya estaba usada en Trimble/);
-  assert.deepEqual(variantesTarea("P", { ...aviso, trimble: undefined }, []).length, 1, "a notice without the flow's texts: the format of before");
-});
-
-test("Trimble rechaza el tipo propio y el código repetido: la tarea sale con «Solicitud» y FLUJO-03-2, y el historial lo dice", async () => {
-  const pedidos: Record<string, unknown>[] = [];
-  const crear = async (cuerpo: Record<string, unknown>): Promise<Respuesta> => {
-    pedidos.push(cuerpo);
-    if (cuerpo.type === "Flujo documental") return { estado: 400, cuerpo: { message: "Invalid type" } };
-    if (cuerpo.label === "FLUJO-03") return { estado: 409, cuerpo: { message: "label already exists" } };
-    return { estado: 201, cuerpo: { id: "todo5" } };
-  };
-  const aviso = { titulo: "Revisar: a.pdf (Aprueba) — X", descripcion: "d", para: [{ tipo: "persona" as const, id: "pepe", nombre: "Pepe" }], archivos: ["a1"], trimble: { label: "FLUJO-03", title: "X", description: "D", dueDate: null } };
-  const r = await enviarAviso(crear, "P", aviso, async () => [], "FLUJO-03-2");
-  assert.equal(r.ok, true);
-  assert.equal(r.etiqueta, "FLUJO-03-2");
-  assert.equal(pedidos.length, 5);
-  assert.equal(r.mensaje, "Tarea de Trimble FLUJO-03-2 para Pepe: «Revisar: a.pdf (Aprueba) — X» (tipo «Solicitud»: Trimble no aceptó «Flujo documental»; «FLUJO-03» ya estaba usada en Trimble).");
-  // Without permission it doesn't keep trying.
-  let veces = 0;
-  const sinPermiso = await enviarAviso(async () => (veces++, { estado: 403, cuerpo: "Forbidden" }), "P", aviso, async () => []);
-  assert.equal(sinPermiso.ok, false);
-  assert.equal(veces, 1);
-});
-
-test("si Trimble no acepta la tarea para un grupo, se manda a cada miembro; los errores no se lanzan", async () => {
-  const pedidos: unknown[] = [];
-  const crear = async (cuerpo: Record<string, unknown>): Promise<Respuesta> => {
-    pedidos.push(cuerpo.assignees);
-    const grupo = (cuerpo.assignees as { type: string }[]).some((x) => x.type === "GROUP");
-    return grupo ? { estado: 400, cuerpo: { message: "invalid assignee" } } : { estado: 201, cuerpo: { id: "todo9" } };
-  };
-  const aviso = { titulo: "Revisar: x", descripcion: "d", para: [{ tipo: "grupo" as const, id: "g-arq", nombre: "Arquitectura" }, { tipo: "persona" as const, id: "pepe", nombre: "Pepe" }], archivos: ["a1"] };
-  const r = await enviarAviso(crear, "P", aviso, async () => [{ id: "luz" }, { id: "pepe" }]);
-  assert.equal(r.ok, true);
-  assert.equal(r.todoId, "todo9");
-  assert.match(r.mensaje, /a cada miembro del grupo/);
-  assert.deepEqual(pedidos[1], [
-    { id: "pepe", type: "USER" },
-    { id: "luz", type: "USER" },
-  ]);
-  const falla = await enviarAviso(async () => {
-    throw new Error("red caída");
-  }, "P", aviso, async () => []);
-  assert.equal(falla.ok, false);
-  assert.match(falla.mensaje, /red caída/);
 });

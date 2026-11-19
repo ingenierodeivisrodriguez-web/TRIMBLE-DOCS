@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Caller } from "../propiedades/service";
 import type { ProjectUser, RawFolderItem } from "../trimbleApi";
+import type { Correo, MensajeCorreo } from "./correo";
 import { FlujoError } from "./errores";
 import { listarArchivos, revisarFlujo } from "./revision";
 import { Ctx, guardarFlujo, historial, TrimbleFlujo } from "./service";
@@ -37,7 +38,8 @@ function escenario() {
   arbol.fach = [archivo("fachada", "fachada.pdf", 1)];
   const borrados = new Set<string>();
   const sinPermiso = new Set<string>();
-  const tareas: Record<string, unknown>[] = [];
+  const correos: MensajeCorreo[] = [];
+  const correo: Correo = { desde: "avisos@gmail.com", enviar: async (m) => void correos.push(m) };
   const tc: TrimbleFlujo = {
     async carpeta() {
       throw new FlujoError("No se usa.", 500);
@@ -58,15 +60,11 @@ function escenario() {
     items: async (id) => (arbol[id] ? arbol[id] : Promise.reject(new Error("403"))),
     version: async (id) => Object.values(arbol).flat().find((x) => x.id === id)?.versionId ?? null,
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
-    crearTarea: async (cuerpo) => {
-      tareas.push(cuerpo);
-      return { estado: 201, cuerpo: { id: `todo${tareas.length}` } };
-    },
   };
   const caller = (id: string, isAdmin: boolean, grupos: string[] = []): Caller => ({ id, name: PERSONAS.find((p) => p.id === id)!.firstName, isAdmin, memberOfGroups: async (ids) => new Set(ids.filter((g) => grupos.includes(g))) });
-  const ctx = (c: Caller): Ctx => ({ projectId: "P", caller: c, store, tc, ahora: () => new Date("2026-11-09T20:00:00Z") });
+  const ctx = (c: Caller): Ctx => ({ projectId: "P", caller: c, store, tc, correo, ahora: () => new Date("2026-11-09T20:00:00Z") });
   const admin = ctx(caller("ana", true));
-  return { store, arbol, archivo, borrados, sinPermiso, tareas, admin, como: (id: string, grupos: string[] = []) => ctx(caller(id, false, grupos)) };
+  return { store, arbol, archivo, borrados, sinPermiso, correos, admin, como: (id: string, grupos: string[] = []) => ctx(caller(id, false, grupos)) };
 }
 
 async function conFlujo(e: ReturnType<typeof escenario>, archivos = ["modelo", "detalle", "fachada"]) {
@@ -119,10 +117,10 @@ test("solo entran los archivos elegidos: uno nuevo en la misma carpeta no entra 
   );
 });
 
-test("el flujo conserva su versión: una nueva queda anotada con quien la subió, sin tarea, y el archivo sigue con la del flujo", async () => {
+test("el flujo conserva su versión: una nueva queda anotada con quien la subió, sin aviso, y el archivo sigue con la del flujo", async () => {
   const e = escenario();
   const { f } = await conFlujo(e);
-  const tareas = e.tareas.length;
+  const correos = e.correos.length;
   e.arbol.arq[0] = e.archivo("modelo", "modelo.rvt", 2, PERSONAS[2]);
   const r = await revisarFlujo(e.como("juan"), { flujoId: f.id });
   assert.match(r.mensaje, /^«Aprobar arquitectura Torre 1»: 1 versión nueva en Trimble \(el flujo sigue con la versión que tiene: ver el aviso en el archivo\)\./);
@@ -135,7 +133,7 @@ test("el flujo conserva su versión: una nueva queda anotada con quien la subió
   assert.equal(a.versionNueva?.subidoPor, "Pepe Gómez");
   assert.match(a.enlace, /versionId=modelo-v1/);
   assert.match(a.enlaceNueva!, /versionId=modelo-v2/);
-  assert.equal(e.tareas.length, tareas, "nothing new to review in this flow: no ToDo");
+  assert.equal(e.correos.length, correos, "nothing new to review in this flow: no e-mail");
   const linea = (await historial(e.admin, null, a.id)).entradas.find((x) => x.accion === "version-nueva-vista")!;
   assert.equal(linea.usuario, "Pepe Gómez");
   assert.equal(linea.version, 2);

@@ -5,7 +5,6 @@
  * doesn't record who opens a file in its viewer (its activity log only has
  * downloads), so an opening straight from Trimble's explorer can't be noted.
  */
-import { fechaHora } from "../compras/formato";
 import { FlujoError } from "./errores";
 import { ESPERANDO, responsablesArchivo } from "./registro";
 import type { Ctx } from "./service";
@@ -44,11 +43,6 @@ export function planApertura(
   const responsable = ESPERANDO.includes(a.estado) && responsablesArchivo(a, flujo).some((r) => (r.tipo === "persona" ? r.id === quien.id : quien.grupos.has(r.id)));
   const corrige = a.estado === "rechazado" && !!a.subidoPorId && a.subidoPorId === quien.id;
   if (!responsable && !corrige) return null;
-  // The ToDo that told them: the open one for this step (or the correction) and this version.
-  const tarea = [...(a.tareas ?? [])]
-    .reverse()
-    .find((t) => t.versionId === a.versionId && (responsable ? t.tipo === "revision" && t.pasoId === paso?.id : t.tipo === "correccion"));
-  const aviso = tarea ? `; lo avisó la tarea de Trimble ${tarea.etiqueta ? `${tarea.etiqueta} ` : ""}del ${fechaHora(tarea.creada)} (${lapso(tarea.creada, momento)} antes)` : "";
   const v = `la versión ${a.revision ?? "?"} de «${a.nombre}»`;
   return {
     proyecto: a.proyecto,
@@ -56,7 +50,7 @@ export function planApertura(
     accion: "archivo-abierto",
     usuario: quien.nombre,
     usuarioId: quien.id,
-    detalle: responsable ? `Abrió ${v} como responsable de «${paso?.nombre ?? ""}»${aviso}.` : `Abrió ${v}, que le rechazaron, para corregirla${aviso}.`,
+    detalle: responsable ? `Abrió ${v} como responsable de «${paso?.nombre ?? ""}».` : `Abrió ${v}, que le rechazaron, para corregirla.`,
     archivoId: a.id,
     fileId: a.fileId,
     version: a.revision ?? null,

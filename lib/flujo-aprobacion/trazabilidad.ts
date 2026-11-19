@@ -25,6 +25,7 @@ export const ACCIONES: Record<string, string> = {
   "version-nueva-vista": "Subió una versión nueva (el flujo sigue con la suya)",
   "version-reactivada": "Entró la versión nueva (flujo reactivado)",
   "flujo-reactivado": "Reactivó el flujo",
+  // ToDo lines from 10-11-2026 to 19-11-2026 (the flows no longer create or close Trimble ToDos).
   "tarea-cerrada": "Cerró la tarea de Trimble",
   "tarea-no-cerrada": "Tarea de Trimble sin cerrar",
   "archivo-retirado": "Archivo retirado",

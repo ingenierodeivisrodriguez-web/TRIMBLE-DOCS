@@ -4,12 +4,16 @@
  * - a flow has a title or milestone that doesn't repeat in the project, the
  *   files its creator chose (1 to MAX_ARCHIVOS) and 1 to 5 steps after
  *   "Realiza", each with its responsible (a person or a group of Trimble);
- * - a file is in one active flow only (otherwise, which approval counts?);
+ * - since 19-11-2026 a file may be in several active flows (each one reviews
+ *   it on its own); before, it was in one active flow only;
+ * - a flow is closed (no editing, activating or deactivating) once every file
+ *   it reviews is approved: the last decision closes it (19-11-2026; from
+ *   09-11-2026 it was the first decision);
  * - since 09-11-2026 there are no review folders, no destination chosen in
  *   advance and no "who does what" by folder (the owner's decision).
  */
 import { fechaHora } from "../compras/formato";
-import { ArchivoFlujo, Cierre, Flujo, MAX_ARCHIVOS, MAX_PASOS, MIN_PASOS, PasoFlujo, Responsable } from "./types";
+import { ArchivoFlujo, Cierre, EstadoArchivo, Flujo, MAX_ARCHIVOS, MAX_PASOS, MIN_PASOS, PasoFlujo, Responsable } from "./types";
 
 /** The name of the first step: whoever uploads the file and corrects it if it is rejected. */
 export const PAPEL_REALIZA = "realiza";
@@ -143,19 +147,38 @@ export function puedeCambiar(f: Pick<Flujo, "creadoPorId">, quien: { id: string;
   return quien.esAdmin || (!!f.creadoPorId && f.creadoPorId === quien.id);
 }
 
-/** History actions that are a decision on a file: the first one closes the flow (09-11-2026). */
+/** History actions that are a decision on a file («aprobado» is the last step's approval: the file is approved). */
 export const ACCIONES_DECISION = ["aprobado-paso", "aprobado", "rechazado"];
 
-/** The first decision of each flow, from history lines in any order. */
-export function primerasDecisiones(entradas: { flujoId?: string | null; accion: string; creado: string; usuario: string | null; id?: number }[]): Record<string, Cierre> {
-  const out: Record<string, Cierre & { id: number }> = {};
+/**
+ * The closed flows (owner, 19-11-2026: "la última decisión es la que cierra el
+ * flujo, ejemplo pepe tiene que revisar y juan tiene que aprobar entonces
+ * cuando juan apruebe el flujo se cierra"): every file the flow reviews (not
+ * retired) is approved at its last step. When and by whom: the flow's latest
+ * approval in the history. A step approved, a rejection, or a version that
+ * entered by reactivating the flow leaves it open, so its creator can still
+ * edit it. From 09-11-2026 to then the first decision closed it.
+ */
+export function cierresFlujos(
+  archivos: { flujoId: string; estado: EstadoArchivo }[],
+  entradas: { flujoId?: string | null; accion: string; creado: string; usuario: string | null; id?: number }[]
+): Record<string, Cierre> {
+  const estados = new Map<string, EstadoArchivo[]>();
+  for (const a of archivos) if (a.estado !== "retirado") estados.set(a.flujoId, [...(estados.get(a.flujoId) ?? []), a.estado]);
+  const ultimas: Record<string, Cierre & { id: number }> = {};
   for (const e of entradas) {
-    if (!e.flujoId || !ACCIONES_DECISION.includes(e.accion)) continue;
-    const antes = out[e.flujoId];
+    if (!e.flujoId || e.accion !== "aprobado") continue;
+    const antes = ultimas[e.flujoId];
     const id = e.id ?? 0;
-    if (!antes || e.creado < antes.fecha || (e.creado === antes.fecha && id < antes.id)) out[e.flujoId] = { fecha: e.creado, quien: e.usuario ?? "", id };
+    if (!antes || e.creado > antes.fecha || (e.creado === antes.fecha && id > antes.id)) ultimas[e.flujoId] = { fecha: e.creado, quien: e.usuario ?? "", id };
   }
-  return Object.fromEntries(Object.entries(out).map(([k, { fecha, quien }]) => [k, { fecha, quien }]));
+  const out: Record<string, Cierre> = {};
+  for (const [flujoId, es] of estados) {
+    if (!es.every((x) => x === "aprobado")) continue;
+    const u = ultimas[flujoId];
+    out[flujoId] = { fecha: u?.fecha ?? "", quien: u?.quien ?? "" };
+  }
+  return out;
 }
 
 /** "09-11-2026, de Jaiden Rincon": when the flow was closed and by whose decision. */
@@ -165,5 +188,5 @@ export function describirCierre(c: Cierre): string {
 
 /** Why a closed flow can't be edited, activated or deactivated. */
 export function textoCerrado(hito: string, c: Cierre): string {
-  return `«${hito}» ya tiene decisiones (la primera el ${describirCierre(c)}): el flujo quedó cerrado y no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF.`;
+  return `«${hito}» ya terminó: todos sus archivos quedaron aprobados (la última decisión el ${describirCierre(c)}). El flujo quedó cerrado y no se puede editar, activar ni desactivar. Se puede comentar, sacar el PDF y reactivarlo cuando haya una versión nueva.`;
 }

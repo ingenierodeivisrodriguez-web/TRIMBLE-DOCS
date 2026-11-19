@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Caller } from "../propiedades/service";
 import type { ProjectUser, RawFolderItem } from "../trimbleApi";
+import type { Correo, MensajeCorreo } from "./correo";
 import { decidir } from "./decisiones";
 import { FlujoError } from "./errores";
+import { reactivarFlujo } from "./reactivar";
 import { listarArchivos, revisarFlujo } from "./revision";
 import { cambiarEstado, Ctx, estado, guardarFlujo, historial, TrimbleFlujo } from "./service";
 import { memoryStore } from "./store";
@@ -26,7 +28,8 @@ async function escenario() {
     revision,
   });
   arbol.arq = [archivo("modelo", "modelo.rvt", 1)];
-  const tareas: Record<string, unknown>[] = [];
+  const correos: MensajeCorreo[] = [];
+  const correo: Correo = { desde: "avisos@gmail.com", enviar: async (m) => void correos.push(m) };
   const tc: TrimbleFlujo = {
     carpeta: async () => {
       throw new FlujoError("No se usa.", 500);
@@ -39,16 +42,13 @@ async function escenario() {
     items: async (id) => arbol[id] ?? [],
     version: async (id) => arbol.arq.find((x) => x.id === id)?.versionId ?? null,
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
-    crearTarea: async (cuerpo) => {
-      tareas.push(cuerpo);
-      return { estado: 201, cuerpo: { id: `todo${tareas.length}` } };
-    },
   };
   const ctx = (id: string, isAdmin = false): Ctx => ({
     projectId: "P",
     caller: { id, name: PERSONAS.find((p) => p.id === id)!.firstName, isAdmin, memberOfGroups: async (ids) => new Set(ids.filter((g) => g === "g-arq" && (id === "luz" || id === "eva"))) } satisfies Caller,
     store,
     tc,
+    correo,
     ahora: () => new Date("2026-11-04T22:00:00Z"),
   });
   const admin = ctx("ana", true);
@@ -63,17 +63,17 @@ async function escenario() {
   const f = guardado.flujos[0];
   const registro = { mensaje: guardado.mensaje ?? "" };
   const modelo = async () => (await listarArchivos(admin)).archivos.find((a) => a.fileId === "modelo")!;
-  return { store, arbol, archivo, tareas, ctx, admin, f, registro, modelo };
+  return { store, arbol, archivo, correos, ctx, admin, f, registro, modelo };
 }
 
-test("al registrar un archivo nuevo se avisa con una tarea de Trimble a quien tiene el primer paso", async () => {
+test("al registrar un archivo nuevo se avisa por correo a quien tiene el primer paso, sin crear tarea en Trimble", async () => {
   const e = await escenario();
-  assert.match(e.registro.mensaje, /1 archivo nuevo\. Se avisó a los revisores con 1 tarea de Trimble\./);
-  assert.equal(e.tareas.length, 1);
-  // The ToDo shows the flow's code, title and description (its title again: it has none), with the type «Flujo documental».
-  assert.deepEqual(e.tareas[0], { projectId: "P", label: "FLUJO-01", title: "Aprobar Torre 1", description: "Aprobar Torre 1", assignees: [{ id: "g-arq", type: "GROUP" }], type: "Flujo documental" });
+  assert.match(e.registro.mensaje, /1 archivo nuevo\. Se avisó a los revisores con 2 correos\./);
+  assert.deepEqual(e.correos.map((m) => m.para.correo).sort(), ["eva@obra.co", "luz@obra.co"], "both members of the group");
+  assert.equal(e.correos[0].asunto, "FLUJO-01 · Te toca «Revisa»: Aprobar Torre 1");
   const h = await historial(e.admin, e.f.id);
-  assert.ok(h.entradas.some((x) => x.accion === "aviso-enviado" && /^Tarea de Trimble FLUJO-01 para Arquitectura \(grupo\): «Revisar: modelo.rvt \(Revisa\) — Aprobar Torre 1»\.$/.test(x.detalle)));
+  assert.ok(h.entradas.some((x) => x.accion === "correo-enviado"));
+  assert.equal(h.entradas.filter((x) => x.accion === "aviso-enviado").length, 0, "no Trimble ToDo since 19-11-2026");
 });
 
 test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa versión con sus firmas", async () => {
@@ -81,8 +81,8 @@ test("paso a paso: alguien del grupo revisa, Pepe aprueba; queda aprobada esa ve
   let a = await e.modelo();
   const r1 = await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "" }, "aprobar");
   assert.equal(r1.mensaje, "Aprobaste «Revisa» de «modelo.rvt»: pasa a «Aprueba».");
-  assert.match(r1.aviso!, /Tarea de Trimble FLUJO-01 para Pepe/);
-  assert.deepEqual(e.tareas[1].assignees, [{ id: "pepe", type: "USER" }]);
+  assert.equal(r1.aviso, "Correo a Pepe <pepe@obra.co>: «FLUJO-01 · Te toca «Aprueba»: Aprobar Torre 1».");
+  assert.equal(e.correos[e.correos.length - 1].para.correo, "pepe@obra.co");
   a = await e.modelo();
   assert.equal(a.pasoNombre, "Aprueba");
   // Eva (same group) can't approve a step that is no longer hers.
@@ -110,14 +110,14 @@ test("rechazar exige motivo y avisa a quien subió; la versión corregida queda 
   await assert.rejects(() => decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "" }, "rechazar"), /Escribe el motivo del rechazo/);
   const r = await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "Faltan los ejes" }, "rechazar");
   assert.equal(r.mensaje, "«modelo.rvt» queda rechazado (versión 1).");
-  assert.match(r.aviso!, /Tarea de Trimble FLUJO-01 para Juan: «Corregir: modelo.rvt \(rechazado\) — Aprobar Torre 1»/);
-  assert.deepEqual(e.tareas[1].assignees, [{ id: "juan", type: "USER" }]);
-  assert.equal(e.tareas[1].title, "Aprobar Torre 1", "only the flow's title: the reason is seen in the extension");
+  assert.equal(r.aviso, "Correo a Juan <juan@obra.co>: «FLUJO-01 · Rechazado: corrige «modelo.rvt» — Aprobar Torre 1».");
+  assert.match(e.correos[e.correos.length - 1].texto, /Motivo: Faltan los ejes/);
   a = await e.modelo();
   assert.equal(a.estado, "rechazado");
   assert.equal(a.firmas[0].comentario, "Faltan los ejes");
 
   // The corrected version doesn't enter this flow by itself (10-11-2026): it is only noted.
+  const correosAntes = e.correos.length;
   e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2)];
   const otra = await revisarFlujo(e.ctx("juan"), { flujoId: e.f.id });
   assert.match(otra.mensaje, /1 versión nueva en Trimble/);
@@ -126,7 +126,7 @@ test("rechazar exige motivo y avisa a quien subió; la versión corregida queda 
   assert.equal(a.revision, 1);
   assert.equal(a.versionNueva?.revision, 2);
   assert.equal(a.firmas.length, 1, "the rejection stays");
-  assert.equal(e.tareas.length, 2, "no ToDo: nothing new to review in this flow");
+  assert.equal(e.correos.length, correosAntes, "no e-mail: nothing new to review in this flow");
 });
 
 test("se decide solo la versión del flujo; si en Trimble hay una más nueva, se decide igual y queda anotado", async () => {
@@ -248,32 +248,77 @@ const mismosPasos = (f: { id: string; version: number; hito: string }, vence: st
   ],
   vence,
 });
-const cerrado = (err: unknown) => err instanceof FlujoError && err.code === "flujo-cerrado" && err.status === 409 && /ya tiene decisiones \(la primera el \d\d-\d\d-\d{4}, de Luz\): el flujo quedó cerrado y no se puede editar, activar ni desactivar/.test(err.message);
+const cerrado = (err: unknown) =>
+  err instanceof FlujoError &&
+  err.code === "flujo-cerrado" &&
+  err.status === 409 &&
+  /ya terminó: todos sus archivos quedaron aprobados \(la última decisión el \d\d-\d\d-\d{4}, de Pepe\)\. El flujo quedó cerrado y no se puede editar, activar ni desactivar/.test(err.message);
 
-test("después de la primera decisión el flujo queda cerrado: ni el creador ni un administrador lo editan o desactivan, y sigue revisando versiones nuevas", async () => {
+test("la última decisión cierra el flujo: cuando Luz revisa sigue abierto y su creador lo edita; cuando Pepe aprueba nadie lo edita ni lo desactiva, y sigue anotando versiones nuevas", async () => {
   const e = await escenario();
-  // Before any decision its creator (an administrator here) still changes it.
-  const antes = await guardarFlujo(e.admin, mismosPasos(e.f, "2026-11-20"));
-  assert.deepEqual(antes.cierres, {});
-  const a = await e.modelo();
+  let a = await e.modelo();
   await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId }, "aprobar");
+  const abierto = await estado(e.admin);
+  assert.deepEqual(abierto.cierres, {}, "a step approved doesn't close it");
+  // Its creator (an administrator here) still changes it.
+  const editado = await guardarFlujo(e.admin, mismosPasos(abierto.flujos[0], "2026-11-20"));
+  assert.equal(editado.flujos[0].vence, "2026-11-20");
+  a = await e.modelo();
+  await decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId, texto: "Cumple" }, "aprobar");
   const st = await estado(e.ctx("juan"));
   const f = st.flujos[0];
-  assert.equal(st.cierres[f.id]?.quien, "Luz", "everyone sees it closed");
+  assert.equal(st.cierres[f.id]?.quien, "Pepe", "everyone sees it closed, by the last approval");
   await assert.rejects(() => guardarFlujo(e.admin, mismosPasos(f, "2026-11-30")), cerrado);
   await assert.rejects(() => cambiarEstado(e.admin, { id: f.id, version: f.version, activo: false }), cerrado);
   assert.equal((await estado(e.admin)).flujos[0].vence, "2026-11-20", "nothing changed");
-  // A rejected or corrected document still goes through the same steps.
+  // A newer version is still noted.
   e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2)];
   assert.match((await revisarFlujo(e.ctx("juan"), { flujoId: f.id })).mensaje, /1 versión nueva/);
 });
 
-test("un flujo desactivado que ya tiene una decisión no se vuelve a activar", async () => {
+test("con dos archivos se cierra cuando el último queda aprobado; un rechazo lo deja abierto y reactivarlo lo vuelve a abrir", async () => {
   const e = await escenario();
-  const st = await cambiarEstado(e.admin, { id: e.f.id, version: e.f.version, activo: false });
+  e.arbol.arq = [...e.arbol.arq, e.archivo("plano", "plano.pdf", 1)];
+  let st = await guardarFlujo(e.admin, { ...mismosPasos(e.f, ""), archivos: ["modelo", "plano"] });
+  const archivoDe = async (fileId: string) => (await listarArchivos(e.admin)).archivos.find((x) => x.fileId === fileId)!;
+  const decide = async (quien: string, fileId: string, d: "aprobar" | "rechazar", texto = "") => {
+    const x = await archivoDe(fileId);
+    await decidir(e.ctx(quien), { archivoId: x.id, versionId: x.versionId, texto }, d);
+  };
+  const cierres = async () => (await estado(e.admin)).cierres;
+  await decide("luz", "modelo", "aprobar");
+  await decide("pepe", "modelo", "aprobar");
+  assert.deepEqual(await cierres(), {}, "plano.pdf still waits");
+  await decide("luz", "plano", "rechazar", "Faltan cotas");
+  assert.deepEqual(await cierres(), {}, "a rejection doesn't close it");
+  // The corrected plan enters by reactivating the flow and goes through both steps.
+  e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 1), e.archivo("plano", "plano.pdf", 2)];
+  await revisarFlujo(e.ctx("juan"), { flujoId: e.f.id });
+  st = await estado(e.admin);
+  await reactivarFlujo(e.admin, { id: st.flujos[0].id, version: st.flujos[0].version });
+  await decide("luz", "plano", "aprobar");
+  assert.deepEqual(await cierres(), {});
+  await decide("pepe", "plano", "aprobar", "Cumple");
+  assert.equal((await cierres())[e.f.id]?.quien, "Pepe", "the last file approved closes it");
+  // A newer version brought in by reactivating opens it again: there is something to decide.
+  e.arbol.arq = [e.archivo("modelo", "modelo.rvt", 2), e.archivo("plano", "plano.pdf", 2)];
+  await revisarFlujo(e.ctx("juan"), { flujoId: e.f.id });
+  st = await estado(e.admin);
+  await reactivarFlujo(e.admin, { id: st.flujos[0].id, version: st.flujos[0].version });
+  assert.deepEqual(await cierres(), {});
+});
+
+test("un flujo desactivado con todo aprobado no se vuelve a activar; con un paso decidido sí", async () => {
+  const e = await escenario();
+  let st = await cambiarEstado(e.admin, { id: e.f.id, version: e.f.version, activo: false });
   assert.equal(st.flujos[0].activo, false, "without decisions it can be deactivated");
-  const a = await e.modelo();
+  let a = await e.modelo();
   await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId }, "aprobar");
+  st = await cambiarEstado(e.admin, { id: st.flujos[0].id, version: st.flujos[0].version, activo: true });
+  assert.equal(st.flujos[0].activo, true, "a step decided: still open");
+  st = await cambiarEstado(e.admin, { id: st.flujos[0].id, version: st.flujos[0].version, activo: false });
+  a = await e.modelo();
+  await decidir(e.ctx("pepe"), { archivoId: a.id, versionId: a.versionId }, "aprobar");
   const f = (await estado(e.admin)).flujos[0];
   await assert.rejects(() => cambiarEstado(e.admin, { id: f.id, version: f.version, activo: true }), cerrado);
 });

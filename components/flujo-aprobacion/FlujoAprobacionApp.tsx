@@ -247,7 +247,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
                 titulo="Más opciones"
                 opciones={[
                   { texto: "Exportar trazabilidad (todos los flujos)…", onClick: () => setVentana("trazabilidad") },
-                  // «Correos de aviso» (administrators): the e-mails, the Trimble ToDos and the test e-mail.
+                  // «Correos de aviso» (administrators): the e-mails (the only notice since 19-11-2026) and the test e-mail.
                   // Hidden at the owner's request (12-11-2026, once set): `oculto: !datos?.esAdmin` shows it again.
                   { texto: "Correos de aviso…", onClick: () => setVentana("correos"), oculto: true },
                 ]}

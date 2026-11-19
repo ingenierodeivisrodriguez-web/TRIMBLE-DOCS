@@ -10,7 +10,6 @@
 import type { Caller } from "../propiedades/service";
 import type { FolderPermissions, ProjectGroup, ProjectUser, RawFolderItem } from "../trimbleApi";
 import type { Limites } from "./recorrido";
-import type { Respuesta } from "../compras/cde";
 import type { Lado } from "../publicar/copiar";
 import type { Correo } from "./correo";
 import { esIdTrimble, FlujoError } from "./errores";
@@ -25,7 +24,7 @@ import {
   limpiarTexto,
   nombreDeRuta,
   PasoEnvio,
-  primerasDecisiones,
+  cierresFlujos,
   puedeCambiar,
   revisarDatos,
   textoCerrado,
@@ -54,10 +53,6 @@ export interface TrimbleFlujo {
   items(folderId: string): Promise<RawFolderItem[]>;
   /** The id of a file's latest version in Trimble right now (phase 3). */
   version(fileId: string): Promise<string | null>;
-  /** POST /todos with that body (phase 3). Answers never throw: the status says what happened. */
-  crearTarea(cuerpo: Record<string, unknown>): Promise<Respuesta>;
-  /** PATCH /todos/{id} with that body, to close a ToDo (10-11-2026). Answers never throw. Missing: ToDos are not closed. */
-  actualizarTarea?(todoId: string, cuerpo: Record<string, unknown>): Promise<Respuesta>;
   /** This project through the caller's token, for copying to the destination (phase 4). */
   lado: Lado;
   /** The project's name in Trimble, for the e-mails (11-11-2026). Missing: "Trimble Connect". */
@@ -116,12 +111,17 @@ async function enTandas<T, R>(xs: T[], f: (x: T) => Promise<R>): Promise<R[]> {
   return out;
 }
 
-/** The flows closed by a first decision (from the history, which is never edited). */
+/** The flows closed by their last decision: every file approved (when and by whom, from the history). */
 async function cierres(ctx: Ctx): Promise<Record<string, Cierre>> {
-  return primerasDecisiones(await ctx.store.decisiones(ctx.projectId));
+  const [archivos, decisiones] = await Promise.all([ctx.store.archivos(ctx.projectId), ctx.store.decisiones(ctx.projectId)]);
+  return cierresFlujos(archivos, decisiones);
 }
 
-/** Once a flow has a decision nobody edits, activates or deactivates it, administrators included (09-11-2026). */
+/**
+ * Once every file of a flow is approved nobody edits, activates or deactivates
+ * it, administrators included (09-11-2026; since 19-11-2026 the last decision
+ * closes it, not the first one).
+ */
 async function exigirAbierto(ctx: Ctx, f: Flujo) {
   const c = (await cierres(ctx))[f.id];
   if (c) throw new FlujoError(textoCerrado(f.hito, c), 409, "flujo-cerrado");
@@ -159,7 +159,7 @@ function conResponsables(pasos: (PasoEnvio & { id: string; nombre: string })[], 
  * { id?, version?, hito, archivos: [fileIds], pasos: [{ id?, nombre, responsable: { tipo, id } }], vence?, notas? }:
  * creates a flow (any member of the project) or changes it (whoever created it,
  * or an administrator). Then its files are registered at once (new ones wait
- * for the first step and its responsible gets a Trimble ToDo; files taken out
+ * for the first step and its responsible gets the e-mail; files taken out
  * are retired, never deleted).
  */
 export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujos> {
@@ -225,7 +225,7 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujo
     await registrar(ctx, antes.id, "flujo-modificado", cambiosFlujo(antes, guardado));
   }
 
-  // Register its files now: whoever saved sees them waiting, and the first responsible gets the ToDo.
+  // Register its files now: whoever saved sees them waiting, and the first responsible gets the e-mail.
   let mensaje: string | undefined;
   if (guardado.activo) {
     try {

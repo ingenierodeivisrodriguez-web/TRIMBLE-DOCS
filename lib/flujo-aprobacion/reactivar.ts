@@ -4,9 +4,11 @@
  * creador tenga un botón de reactivar el flujo… se debe guardar toda la
  * trazabilidad"). Its creator or an administrator brings the newer versions
  * in: each one is reviewed again from the first step and its responsible gets
- * the ToDo; files without a newer version stay as they are. A deactivated flow
- * becomes active again. The flow stays closed for editing, and nothing is
- * deleted: the decisions on the earlier versions stay in the history.
+ * the e-mail; files without a newer version stay as they are. A deactivated
+ * flow becomes active again. Nothing is deleted: the decisions on the earlier
+ * versions stay in the history. A flow closed because everything was approved
+ * opens again, since it has files to decide (19-11-2026: the last decision
+ * closes it).
  */
 import { fechaHora } from "../compras/formato";
 import { avisarRevision, resumenAvisos } from "./decisiones";
@@ -15,7 +17,6 @@ import { puedeCambiar } from "./flujos";
 import { detalleCambio, planReactivar } from "./registro";
 import { revisarFlujo } from "./revision";
 import { Ctx, estado } from "./service";
-import { cerrarTareas } from "./tareas";
 import type { ArchivoRegistro, EntradaHistorial, EstadoFlujos } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -81,10 +82,9 @@ export async function reactivarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlu
       : `Reactivó «${flujo.hito}»${activado}, pero las versiones nuevas ya no estaban en Trimble: no entró nada.`,
     ocurrido: momento,
   });
-  // The first step's responsible gets the ToDo; the ToDos of what was replaced are closed.
+  // The first step's responsible gets the e-mail.
   const avisados = await avisarRevision(ctx, flujo, hechos, momento);
   lineas.push(...avisados.lineas);
-  lineas.push(...(await cerrarTareas(ctx, hechos, momento)));
   await ctx.store.registrarVarios(lineas);
 
   const mensaje = hechos.length

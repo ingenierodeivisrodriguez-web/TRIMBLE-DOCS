@@ -41,8 +41,6 @@ async function escenario(opciones: { origen?: string | null; dos?: boolean; conf
     items: async (id) => (id === "arq" ? items : []),
     version: async (id) => `${id}-v1`,
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
-    crearTarea: async () => ({ estado: 201, cuerpo: { id: `todo-${Math.random()}` } }),
-    actualizarTarea: async (_id, cuerpo) => ({ estado: 200, cuerpo: { status: cuerpo.status } }),
     nombreProyecto: async () => "SELVIA",
   };
   const enviados: MensajeCorreo[] = [];
@@ -179,7 +177,6 @@ test("sin vencer, ya decidido, apagado o sin cuenta no hay recordatorio; con var
   assert.deepEqual(e.enviados.slice(-1).map((m) => m.para.correo), ["pepe@obra.co"], "only who waits now");
 
   assert.equal((await (await escenario({ config: { recordatorios: false } })).recordar(new Date("2026-11-12T12:00:00Z"))).enviados, 0);
-  assert.equal((await (await escenario({ config: { activo: false } })).recordar(new Date("2026-11-12T12:00:00Z"))).enviados, 0);
   assert.equal((await (await escenario({ origen: null })).recordar(new Date("2026-11-12T12:00:00Z"))).enviados, 0, "notified without links (before phase 3): nobody to write to");
   const sinCuenta = await escenario();
   assert.match((await enviarRecordatorios({ store: sinCuenta.store, origen: ORIGEN, ahora: new Date("2026-11-12T12:00:00Z") })).mensaje, /No hay cuenta de Gmail/);

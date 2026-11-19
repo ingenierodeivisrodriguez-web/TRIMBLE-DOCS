@@ -574,6 +574,9 @@ cambios de SQL.
   primera decisión nadie edita ni desactiva y sigue revisando versiones nuevas;
   un desactivado con decisión no se reactiva).
 
+Desde el 19-11-2026 lo cierra la **última** decisión (ver «Cierre con la
+última decisión y sin tareas de Trimble» al final).
+
 ## Versión fija del flujo (10-11-2026)
 
 Pedido del dueño: "cuando se hace el flujo nuevo, la versión del archivo debe
@@ -868,3 +871,41 @@ tareas, enlaces de correo por id de registro). `planRegistro` filtra por
 (etiqueta en `trazabilidad.ts`). El error del disparador o de la clave vieja
 dice que falta volver a correr el SQL (`ARCHIVO_OCUPADO`). No se exige que
 esté decidido en los otros flujos (eso era la fase 2 descartada).
+
+## Cierre con la última decisión y sin tareas de Trimble (19-11-2026)
+
+El dueño, con capturas del panel y del historial (líneas «Cerró la tarea de
+Trimble» / «Avisó (tarea de Trimble)»): «1. cambia la regla "la primera
+decisión cierra el flujo" para que sea la última decisión… cuando juan apruebe
+el flujo se cierra. 2. elimina totalmente la creación de tareas en trimble al
+crear y cerrar flujos. 3. resalta el texto de la descripción». Hecho
+directamente (ajustes pedidos), sin SQL.
+
+- Cierre: `cierresFlujos(archivos, decisiones)` en `flujos.ts` (reemplaza
+  `primerasDecisiones`): cerrado = todos los registros no retirados del flujo
+  en `aprobado`; fecha/quién = la última línea `aprobado` del flujo en el
+  historial (o vacíos). `service.cierres` lee `store.archivos` +
+  `store.decisiones` (una consulta más por carga). Aprobar un paso o rechazar
+  deja abierto; reactivar lo reabre (hay archivos sin decidir). Editar con
+  archivos en proceso es seguro: cada registro guarda su copia de `pasos` y
+  `responsablesArchivo` lee el responsable actual por id de paso. Hueco
+  conocido (también antes): cambiar el responsable de un paso que ya espera no
+  le manda correo a la persona nueva. `textoCerrado`: «… ya terminó: todos sus
+  archivos quedaron aprobados (la última decisión el …)».
+- Sin tareas: borrado `tareas.ts` (+ test); `avisos.ts` solo arma `Aviso`
+  (`titulo, para, archivos, tipo, pasoId, correo`; sin `descripcion` ni
+  `trimble`); `notificar(ctx, flujoId, avisos, momento)` → `Notificado {
+  lineas, fallidos, correos, textos }` (sin `enviados`), anota
+  `aviso-fallido` «No se avisó a …: no hay cuenta de Gmail en Vercel… / los
+  correos están apagados… / este aviso está apagado…»; `resumenAvisos` solo
+  cuenta correos. `TrimbleFlujo` sin `crearTarea`/`actualizarTarea`
+  (routes.ts solo deja el PATCH de la prueba de conexión oculta, que tiene su
+  propio `cerrarTarea`/`ESTADOS_CIERRE` en `prueba.ts`). `ConfigCorreo` sin
+  `tareasTrimble` (lo guardado se ignora); `activo: false` ya no se puede
+  guardar (los correos son el único aviso); la ventana no tiene las casillas
+  «Enviar los correos» ni «Crear también la tarea». `apertura.ts` ya no dice
+  qué tarea avisó. `ArchivoRegistro.tareas` y las etiquetas viejas del
+  historial quedan para los datos de antes. Las tareas ya creadas siguen en
+  Trimble.
+- Descripción: `PanelFlujo` la pone en un recuadro `#eef4fb` con borde
+  izquierdo `#2f4f8f` y letra `#1c2f52`.

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cambiosFlujo, claveHito, codigoFlujo, describirCierre, primerasDecisiones, revisarDatos, textoCerrado } from "./flujos";
+import { cambiosFlujo, cierresFlujos, claveHito, codigoFlujo, describirCierre, revisarDatos, textoCerrado } from "./flujos";
 import { memoryStore } from "./store";
 import { estadoDocumento, estadoDocumentos, estaVencido, filasFlujos, filtrarFilas, opcionesFiltro, responsablesFlujo, resumenTablero, sumarDias } from "./lista";
 import type { EstadoArchivo, Flujo, PasoFlujo, Responsable } from "./types";
@@ -151,23 +151,39 @@ test("con varios archivos: rechazado si alguno lo está, luego lo que espera, y 
   assert.deepEqual(estadoDocumentos([archivo("f", "retirado")]), { estado: "sin-archivos", detalle: "Ningún archivo registrado todavía" });
 });
 
-test("el flujo queda cerrado desde su primera decisión: cuándo y de quién, en DD-MM-AAAA", () => {
-  const cierres = primerasDecisiones([
+test("la última decisión cierra el flujo: cuando todos sus archivos quedan aprobados (cuándo y de quién, en DD-MM-AAAA)", () => {
+  const decisiones = [
     { id: 9, flujoId: "f1", accion: "aprobado", creado: "2026-11-09T21:00:00.000Z", usuario: "Pepe Gómez" },
-    { id: 3, flujoId: "f1", accion: "aprobado-paso", creado: "2026-11-09T19:30:00.000Z", usuario: "Luz Mora" },
-    { id: 1, flujoId: "f1", accion: "flujo-creado", creado: "2026-11-08T12:00:00.000Z", usuario: "Ana Ruiz" },
-    { id: 2, flujoId: null, accion: "rechazado", creado: "2026-11-08T13:00:00.000Z", usuario: "Otro" },
-    { id: 5, flujoId: "f2", accion: "rechazado", creado: "2026-11-10T04:30:00.000Z", usuario: null },
-  ]);
-  assert.deepEqual(cierres, { f1: { fecha: "2026-11-09T19:30:00.000Z", quien: "Luz Mora" }, f2: { fecha: "2026-11-10T04:30:00.000Z", quien: "" } });
-  assert.equal(describirCierre(cierres.f1), "09-11-2026, de Luz Mora");
-  assert.equal(describirCierre(cierres.f2), "09-11-2026, de alguien", "Colombian calendar day");
-  assert.match(textoCerrado("Aprobar Torre 1", cierres.f1), /«Aprobar Torre 1» ya tiene decisiones \(la primera el 09-11-2026, de Luz Mora\): el flujo quedó cerrado y no se puede editar, activar ni desactivar/);
+    { id: 12, flujoId: "f1", accion: "aprobado", creado: "2026-11-10T04:30:00.000Z", usuario: "Luz Mora" },
+    { id: 13, flujoId: "f1", accion: "aprobado-paso", creado: "2026-11-11T19:30:00.000Z", usuario: "Ana Ruiz" },
+    { id: 2, flujoId: null, accion: "aprobado", creado: "2026-11-12T13:00:00.000Z", usuario: "Otro" },
+    { id: 5, flujoId: "f2", accion: "aprobado", creado: "2026-11-10T04:30:00.000Z", usuario: "Pepe Gómez" },
+  ];
+  const archivos: { flujoId: string; estado: EstadoArchivo }[] = [
+    { flujoId: "f1", estado: "aprobado" },
+    { flujoId: "f1", estado: "aprobado" },
+    { flujoId: "f1", estado: "retirado" },
+    { flujoId: "f2", estado: "aprobado" },
+    { flujoId: "f2", estado: "rechazado" },
+    { flujoId: "f3", estado: "retirado" },
+    { flujoId: "f4", estado: "aprobado" },
+    { flujoId: "f4", estado: "pendiente" },
+    { flujoId: "f5", estado: "aprobado" },
+  ];
+  const cierres = cierresFlujos(archivos, decisiones);
+  assert.deepEqual(
+    cierres,
+    { f1: { fecha: "2026-11-10T04:30:00.000Z", quien: "Luz Mora" }, f5: { fecha: "", quien: "" } },
+    "f2 has a rejected file, f3 none, f4 one still waiting; a step approved isn't the last decision"
+  );
+  assert.equal(describirCierre(cierres.f1), "09-11-2026, de Luz Mora", "Colombian calendar day");
+  assert.equal(describirCierre(cierres.f5), "fecha sin registrar, de alguien");
+  assert.match(textoCerrado("Aprobar Torre 1", cierres.f1), /^«Aprobar Torre 1» ya terminó: todos sus archivos quedaron aprobados \(la última decisión el 09-11-2026, de Luz Mora\)\. El flujo quedó cerrado y no se puede editar, activar ni desactivar\./);
   const filas = filasFlujos([TORRE, ESTRUCTURA], ARCHIVOS, HOY, cierres);
   assert.deepEqual(
     filas.map((f) => [f.flujo.id, f.cierre?.quien ?? null]),
     [
-      ["f2", ""],
+      ["f2", null],
       ["f1", "Luz Mora"],
     ]
   );

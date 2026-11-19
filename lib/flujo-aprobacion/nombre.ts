@@ -6,5 +6,5 @@
  */
 export const NOMBRE_EXTENSION = "Flujos documentales";
 
-/** The type asked for the Trimble ToDos (one flow each); Trimble's list is fixed, so it falls back to «Solicitud». */
+/** The ToDo type tried by the hidden connection test (the flows create no Trimble ToDos since 19-11-2026). */
 export const TIPO_TAREA = "Flujo documental";

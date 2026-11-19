@@ -165,16 +165,17 @@ export interface EstadoFlujos {
   esAdmin: boolean;
   yo: string;
   flujos: Flujo[];
-  /** The flows closed by a first decision, by flow id. */
+  /** The flows closed by their last decision (every file approved), by flow id. */
   cierres: Record<string, Cierre>;
   /** After saving: what registering its files did (or why it waits for the next review). */
   mensaje?: string;
 }
 
 /**
- * A flow's first decision (a step approved, an approval or a rejection, on any
- * of its files): from then on nobody edits, activates or deactivates the flow
- * (owner's request of 09-11-2026). It keeps reviewing new versions of its files.
+ * When a flow was closed: the last approval that left every one of its files
+ * approved (19-11-2026; from 09-11-2026 it was its first decision). From then
+ * on nobody edits, activates or deactivates the flow. It keeps noting new
+ * versions of its files, and reactivating it opens it again.
  */
 export interface Cierre {
   /** When, as the history recorded it. */
@@ -253,7 +254,7 @@ export interface ArchivoRegistro {
    * pero sí debería aparecer un mensaje diciendo que existe una nueva versión").
    */
   versionNueva?: VersionNueva | null;
-  /** The Trimble ToDos the flow created about this file (since 10-11-2026), to close them when they are done. */
+  /** The Trimble ToDos the flow created about this file from 10-11-2026 to 19-11-2026 (kept as they were; nothing reads them since). */
   tareas?: TareaTrimble[];
   detectado: string;
   actualizado: string;
@@ -350,20 +351,12 @@ export interface Traslado {
 
 /** A Trimble ToDo to send: to whom, its title and text. */
 export interface Aviso {
-  /** What it is about, for the history and the stored ToDo («Revisar: plano.pdf (Revisa) — hito»). */
+  /** What it is about, for the history («Revisar: plano.pdf (Revisa) — hito»). */
   titulo: string;
-  /** The detailed text (files and links): only sent if Trimble refuses the flow's own texts. */
-  descripcion: string;
-  /**
-   * What Trimble shows on the ToDo (11-11-2026, the owner's wish): the flow's
-   * code on the line above («FLUJO-01»; "" lets Trimble number it), the flow's
-   * title and description, and its due date (ISO 8601, or null).
-   */
-  trimble?: { label: string; title: string; description: string; dueDate: string | null };
   para: { tipo: "persona" | "grupo"; id: string; nombre: string }[];
   /** The registered files it is about. */
   archivos: string[];
-  /** What it asks for, to close it later: deciding a step, or correcting a rejected version. */
+  /** What it asks for: deciding a step, or correcting a rejected version. */
   tipo?: "revision" | "correccion";
   pasoId?: string | null;
   /** What the extension's own e-mail says (11-11-2026); without it no e-mail goes. */

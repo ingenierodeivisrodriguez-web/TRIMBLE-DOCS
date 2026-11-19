@@ -528,7 +528,7 @@ function Decision({
           {ocupado === "rechazar" ? "Rechazando…" : "Rechazar"}
         </button>
         <span style={{ fontSize: 12.5, color: "var(--tc-gray-500)", alignSelf: "center" }}>
-          Se avisa por tarea de Trimble a {ultimo ? "quien subió el archivo si lo rechazas" : "quien siga, o a quien subió el archivo si lo rechazas"}.
+          Se avisa por correo a {ultimo ? "quien subió el archivo si lo rechazas" : "quien siga, o a quien subió el archivo si lo rechazas"}.
         </span>
       </div>
     </div>

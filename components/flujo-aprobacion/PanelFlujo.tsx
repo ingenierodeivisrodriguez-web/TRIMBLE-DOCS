@@ -216,7 +216,7 @@ export default function PanelFlujo({
           <span style={{ fontSize: 13, color: "var(--tc-gray-500)" }}>{fila.detalleEstado}</span>
           {fila.cierre && (
             <span
-              title={`Flujo cerrado desde la primera decisión (${describirCierre(fila.cierre)}): ya no se puede editar, activar ni desactivar. Se puede seguir decidiendo, comentando y sacando el PDF, y reactivarlo cuando haya una versión nueva.`}
+              title={`Flujo cerrado desde la última decisión (${describirCierre(fila.cierre)}): todos sus archivos quedaron aprobados. Ya no se puede editar, activar ni desactivar. Se puede comentar, sacar el PDF y reactivarlo cuando haya una versión nueva.`}
               style={{ fontSize: 12, color: "var(--tc-gray-500)", border: "1px solid #d9dde3", borderRadius: 3, padding: "1px 7px", cursor: "help" }}
             >
               Cerrado
@@ -244,7 +244,7 @@ export default function PanelFlujo({
                     </li>
                   ))}
                 </ul>
-                El responsable del primer paso recibe la tarea de Trimble{!f.activo ? " y el flujo queda activo" : ""}. No se borra nada: lo decidido antes queda en el historial y en el PDF. Los pasos y los responsables siguen iguales.
+                El responsable del primer paso recibe el correo de aviso{!f.activo ? " y el flujo queda activo" : ""}. No se borra nada: lo decidido antes queda en el historial y en el PDF. Los pasos y los responsables siguen iguales.
                 <div style={{ display: "flex", gap: 8, marginTop: 8 }}>
                   <button type="button" style={{ ...acceptButton, padding: "5px 12px", fontSize: 13.5 }} disabled={reactivando} onClick={() => void reactivarFlujo()}>
                     {reactivando ? "Reactivando…" : "Reactivar"}
@@ -272,7 +272,11 @@ export default function PanelFlujo({
           {f.archivos.length} {f.archivos.length === 1 ? "elegido" : "elegidos"} · {fila.pendientes} esperando decisión{fila.porRevisar ? ` (${fila.porRevisar} te tocan)` : ""}
         </Dato>
         {f.destino && <Dato etiqueta="Carpeta destino (flujo anterior)">{f.destino.ruta}</Dato>}
-        {f.notas && <Dato etiqueta="Descripción"><span style={{ whiteSpace: "pre-wrap" }}>{f.notas}</span></Dato>}
+        {f.notas && (
+          <Dato etiqueta="Descripción">
+            <div style={{ whiteSpace: "pre-wrap", background: "#eef4fb", borderLeft: "4px solid #2f4f8f", borderRadius: 4, padding: "8px 12px", marginTop: 3, color: "#1c2f52", fontWeight: 500, lineHeight: 1.45 }}>{f.notas}</div>
+          </Dato>
+        )}
         <Dato etiqueta="Creado/a">{`${fechaHora(f.creado).slice(0, 10)} por ${f.creadoPor ?? "—"}`}</Dato>
         <Dato etiqueta="Modificado">{`${fechaHora(f.actualizado).slice(0, 10)} por ${f.actualizadoPor ?? "—"}`}</Dato>
         {f.revisado && <Dato etiqueta="Última revisión de los archivos">{`${fechaHora(f.revisado)} por ${f.revisadoPor ?? "—"}`}</Dato>}

@@ -31,8 +31,6 @@ async function escenario() {
     items: async (id) => (id === "arq" ? [archivo] : []),
     version: async () => "modelo-v1",
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
-    crearTarea: async () => ({ estado: 201, cuerpo: { id: "todo1" } }),
-    actualizarTarea: async (_id, cuerpo) => ({ estado: 200, cuerpo: { status: cuerpo.status } }),
   };
   const ctx = (id: string, isAdmin = false): Ctx => ({
     projectId: "P",
@@ -63,7 +61,7 @@ test("cuando el responsable avisado abre el archivo desde la extensión queda en
   const [linea] = await e.aperturas();
   assert.equal(linea.usuario, "Luz");
   assert.equal(linea.version, 1);
-  assert.equal(linea.detalle, "Abrió la versión 1 de «modelo.rvt» como responsable de «Revisa»; lo avisó la tarea de Trimble FLUJO-01 del 11-11-2026 13:38 (2 minutos antes).");
+  assert.equal(linea.detalle, "Abrió la versión 1 de «modelo.rvt» como responsable de «Revisa».");
   assert.equal(ACCIONES["archivo-abierto"], "Abrió el archivo");
   // Opening it again doesn't repeat it.
   e.minutos(30);
@@ -82,7 +80,7 @@ test("no se anota a quien no recibió el aviso: el del paso siguiente, quien sub
   await decidir(e.ctx("luz"), { archivoId: a.id, versionId: a.versionId, texto: "" }, "aprobar");
   e.minutos(60 * 3);
   assert.equal(await e.abre("pepe"), true);
-  assert.match((await e.aperturas())[0].detalle, /^Abrió la versión 1 de «modelo.rvt» como responsable de «Aprueba»; lo avisó la tarea de Trimble FLUJO-01 del .+ \(3 horas antes\)\.$/);
+  assert.equal((await e.aperturas())[0].detalle, "Abrió la versión 1 de «modelo.rvt» como responsable de «Aprueba».");
 });
 
 test("quien subió una versión rechazada queda anotado cuando la abre para corregirla", async () => {
@@ -92,7 +90,7 @@ test("quien subió una versión rechazada queda anotado cuando la abre para corr
   e.minutos(60 * 24 * 2);
   assert.equal(await e.abre("luz"), false, "it no longer waits for her");
   assert.equal(await e.abre("juan"), true);
-  assert.match((await e.aperturas())[0].detalle, /^Abrió la versión 1 de «modelo.rvt», que le rechazaron, para corregirla; lo avisó la tarea de Trimble FLUJO-01 del .+ \(2 días antes\)\.$/);
+  assert.equal((await e.aperturas())[0].detalle, "Abrió la versión 1 de «modelo.rvt», que le rechazaron, para corregirla.");
 });
 
 test("un miembro del grupo responsable cuenta como avisado; una versión nueva se anota otra vez; un archivo que no existe se rechaza", async () => {

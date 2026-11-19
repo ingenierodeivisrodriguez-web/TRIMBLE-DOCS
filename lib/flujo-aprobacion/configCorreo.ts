@@ -1,11 +1,11 @@
 /**
  * «Correos de aviso» (phase 2 of the extension's e-mails, 11-11-2026): what
  * each project's administrators set: whether the extension sends its e-mails,
- * whether the Trimble ToDo is still created (Trimble sends its own e-mail, so
- * turning it off leaves only the extension's), which notices send an e-mail,
- * the subject and opening line of each one (with data in braces), who gets a
- * copy and the extension's address in this project. Pure: the browser uses it
- * too, for the preview.
+ * which notices send an e-mail, the subject and opening line of each one (with
+ * data in braces), who gets a copy and the extension's address in this
+ * project. Since 19-11-2026 the e-mail is the flows' only notice (no Trimble
+ * ToDos: the «Crear también la tarea de Trimble» box is gone, and a saved
+ * `tareasTrimble` is ignored). Pure: the browser uses it too, for the preview.
  */
 
 export interface TextoCorreo {
@@ -14,10 +14,8 @@ export interface TextoCorreo {
 }
 
 export interface ConfigCorreo {
-  /** Send the extension's e-mails. */
+  /** Send the extension's e-mails (off: nobody gets the flows' notices). */
   activo: boolean;
-  /** Also create the Trimble ToDo (and its e-mail). Off: only the extension's e-mail. */
-  tareasTrimble: boolean;
   /** Which notices send an e-mail: a step that waits for someone, a rejected file to its uploader. */
   eventos: { revision: boolean; correccion: boolean };
   /** The daily reminder to whoever has files waiting in an overdue flow (phase 3). */
@@ -37,7 +35,6 @@ export const TEXTOS_INICIALES: ConfigCorreo["textos"] = {
 
 export const CONFIG_INICIAL: ConfigCorreo = {
   activo: true,
-  tareasTrimble: true,
   eventos: { revision: true, correccion: true },
   recordatorios: true,
   textos: TEXTOS_INICIALES,
@@ -99,7 +96,6 @@ export function conInicial(datos: unknown): ConfigCorreo {
   };
   return {
     activo: bool(d.activo, true),
-    tareasTrimble: bool(d.tareasTrimble, true),
     eventos: { revision: bool(ev.revision, true), correccion: bool(ev.correccion, true) },
     recordatorios: bool(d.recordatorios, true),
     textos: { revision: t("revision"), correccion: t("correccion") },
@@ -160,8 +156,8 @@ export function revisarConfigCorreo(body: unknown, projectId: string): { config:
   const ext = idDeExtension(typeof b.enlace === "string" ? b.enlace : typeof b.idExtension === "string" ? b.idExtension : "", projectId);
   if (ext.error) return { config: null, error: ext.error };
   const config: ConfigCorreo = { ...base, textos, copia, idExtension: ext.id };
-  if (!config.tareasTrimble && !config.activo) {
-    return { config: null, error: "Si no se crean las tareas de Trimble, los correos de la extensión deben quedar activos: si no, nadie recibe avisos." };
+  if (!config.activo) {
+    return { config: null, error: "Los correos de la extensión deben quedar activos: son el único aviso de los flujos (no se crean tareas en Trimble). Para no enviar un aviso, desmárcalo en «Cuándo»." };
   }
   return { config, error: null };
 }
@@ -170,9 +166,8 @@ export function revisarConfigCorreo(body: unknown, projectId: string): { config:
 export function advertenciasCorreo(c: ConfigCorreo, configurado: boolean): string[] {
   const out: string[] = [];
   if (c.activo && !configurado) out.push("No hay cuenta de Gmail en Vercel: los correos no saldrán hasta ponerla.");
-  if (!c.tareasTrimble && !c.eventos.revision) out.push("Nadie recibirá aviso cuando le toque un paso (sin tarea de Trimble ni correo).");
-  if (!c.tareasTrimble && !c.eventos.correccion) out.push("Nadie recibirá aviso cuando le rechacen un archivo (sin tarea de Trimble ni correo).");
-  if (c.activo && !c.eventos.revision && !c.eventos.correccion) out.push("Los correos están activos pero no hay ningún aviso marcado: no saldrá ninguno.");
+  if (!c.eventos.revision) out.push("Nadie recibirá aviso cuando le toque un paso.");
+  if (!c.eventos.correccion) out.push("Nadie recibirá aviso cuando le rechacen un archivo.");
   return out;
 }
 
@@ -184,7 +179,6 @@ export function cambiosCorreo(antes: ConfigCorreo, despues: ConfigCorreo): strin
   const out: string[] = [];
   const si = (cond: boolean, t: string) => cond && out.push(t);
   si(antes.activo !== despues.activo, `Correos de la extensión: ${despues.activo ? "activos" : "apagados"}`);
-  si(antes.tareasTrimble !== despues.tareasTrimble, `Crear también la tarea de Trimble: ${sino(despues.tareasTrimble)}`);
   si(antes.eventos.revision !== despues.eventos.revision, `Correo cuando a alguien le toca un paso: ${sino(despues.eventos.revision)}`);
   si(antes.eventos.correccion !== despues.eventos.correccion, `Correo cuando rechazan un archivo: ${sino(despues.eventos.correccion)}`);
   si(antes.recordatorios !== despues.recordatorios, `Recordatorio diario de vencidos: ${sino(despues.recordatorios)}`);

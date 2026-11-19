@@ -16,7 +16,6 @@ import { fechaHora } from "../compras/formato";
 import { buildFileViewerUrl } from "../format";
 import { copiarUltimaVersion, leerArchivo, leerEstadoVisor, Lado } from "../publicar/copiar";
 import type { ProjectGroup, ProjectUser } from "../trimbleApi";
-import { cerrarTarea } from "./avisos";
 import { NOMBRE_EXTENSION, TIPO_TAREA } from "./nombre";
 import { esIdTrimble, FlujoError } from "./errores";
 import { GrupoEquipo, IntentoTrimble, PASOS_PRUEBA, PasoPrueba, PersonaEquipo, PruebaResponse, TAREA_PRUEBA, VersionTrimble } from "./types";
@@ -59,6 +58,34 @@ export function nombrePersona(p: unknown): string {
 export function corto(r: Respuesta): string {
   const t = typeof r.cuerpo === "string" ? r.cuerpo : JSON.stringify(r.cuerpo ?? "");
   return t.length > 200 ? `${t.slice(0, 200)}…` : t;
+}
+
+/**
+ * States tried to close a ToDo, in order: Trimble doesn't document the values
+ * for its API (10-11-2026), so "CLOSED" and then "DONE". Only this test closes
+ * ToDos since 19-11-2026 (the flows no longer create them).
+ */
+export const ESTADOS_CIERRE = ["CLOSED", "DONE"] as const;
+
+/**
+ * Closes a ToDo with PATCH /todos/{id} { status }, trying each state; an answer
+ * that says another status is taken as refused. Never throws.
+ */
+export async function cerrarTarea(actualizar: (cuerpo: Record<string, unknown>) => Promise<Respuesta>): Promise<{ ok: boolean; estado: string | null; mensaje: string }> {
+  let ultima: Respuesta | null = null;
+  try {
+    for (const status of ESTADOS_CIERRE) {
+      const r = await actualizar({ status });
+      const dice = (r.cuerpo as { status?: unknown } | null)?.status;
+      if (ok(r) && (typeof dice !== "string" || dice.toUpperCase() === status)) return { ok: true, estado: status, mensaje: `Trimble la dejó en estado ${status}.` };
+      ultima = r;
+      // Without permission, or the ToDo is gone: another state won't help.
+      if (r.estado === 401 || r.estado === 403 || r.estado === 404) break;
+    }
+  } catch (err) {
+    return { ok: false, estado: null, mensaje: `No se pudo cerrar: ${err instanceof Error ? err.message : String(err)}` };
+  }
+  return { ok: false, estado: null, mensaje: ultima ? `Trimble no la cerró (${ultima.estado}): ${corto(ultima)}` : "Trimble no la cerró." };
 }
 
 /** A file's versions as Trimble lists them, oldest first; null when the answer isn't a list. */

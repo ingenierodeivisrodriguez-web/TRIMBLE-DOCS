@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { Caller } from "../propiedades/service";
 import type { FolderPermissions, ProjectUser, RawFolderItem } from "../trimbleApi";
+import type { Correo, MensajeCorreo } from "./correo";
 import { FlujoError } from "./errores";
 import { listarArchivos } from "./revision";
 import { cambiarEstado, Ctx, equipo, estado, guardarFlujo, historial, permisosFlujo, TrimbleFlujo } from "./service";
@@ -30,7 +31,8 @@ const ARBOL: Record<string, RawFolderItem[]> = { arq: [item("modelo", "modelo.rv
 
 function escenario(o: { permisos?: Record<string, FolderPermissions> } = {}) {
   const store = memoryStore();
-  const tareas: Record<string, unknown>[] = [];
+  const correos: MensajeCorreo[] = [];
+  const correo: Correo = { desde: "avisos@gmail.com", enviar: async (m) => void correos.push(m) };
   const tc: TrimbleFlujo = {
     async carpeta() {
       throw new FlujoError("No se usa.", 500);
@@ -46,18 +48,14 @@ function escenario(o: { permisos?: Record<string, FolderPermissions> } = {}) {
     permisos: async (id) => o.permisos?.[id] ?? { direct: { acl: {}, inheritance: true }, inherited: {} },
     items: async (id) => ARBOL[id] ?? [],
     version: async () => null,
-    crearTarea: async (cuerpo) => {
-      tareas.push(cuerpo);
-      return { estado: 201, cuerpo: { id: "todo" } };
-    },
     lado: { projectId: "P", servidor: "https://falso", cliente: { pedir: async () => ({ estado: 404, cuerpo: null }) } },
   };
   const caller = (id: string, isAdmin = false): Caller => {
     const p = PERSONAS.find((x) => x.id === id)!;
     return { id, name: `${p.firstName} ${p.lastName}`, isAdmin, memberOfGroups: async () => new Set() };
   };
-  const como = (id: string, isAdmin = false): Ctx => ({ projectId: "P", caller: caller(id, isAdmin), store, tc, ahora: () => new Date("2026-11-09T15:00:00Z") });
-  return { store, tareas, admin: como("ana", true), juan: como("juan"), pepe: como("pepe"), como };
+  const como = (id: string, isAdmin = false): Ctx => ({ projectId: "P", caller: caller(id, isAdmin), store, tc, correo, ahora: () => new Date("2026-11-09T15:00:00Z") });
+  return { store, correos, admin: como("ana", true), juan: como("juan"), pepe: como("pepe"), como };
 }
 
 const RESP = { revisa: { tipo: "grupo", id: "g-arq" }, aprueba: { tipo: "persona", id: "pepe" } };
@@ -85,8 +83,8 @@ test("cualquier miembro crea un flujo con sus archivos y el responsable de cada 
     { id: "p2", nombre: "Aprueba", responsable: { tipo: "persona", id: "pepe", nombre: "Pepe Gómez" } },
   ]);
   assert.deepEqual(f.archivos, [ARCHIVOS.modelo, ARCHIVOS.detalle]);
-  assert.match(r.mensaje!, /^«Aprobar diseño arquitectónico Torre 1»: 2 archivos nuevos\. Se avisó a los revisores con 1 tarea de Trimble\./);
-  assert.deepEqual(e.tareas[0].assignees, [{ id: "g-arq", type: "GROUP" }]);
+  assert.match(r.mensaje!, /^«Aprobar diseño arquitectónico Torre 1»: 2 archivos nuevos\. Se avisó a los revisores con 1 correo\./);
+  assert.deepEqual(e.correos.map((m) => m.para.correo), ["juan@obra.co"], "the group's member (Juan), one e-mail with both files");
   const registrados = (await listarArchivos(e.juan)).archivos;
   assert.deepEqual(
     registrados.map((a) => [a.nombre, a.estado, a.pasoNombre, a.responsables.join(", ")]),

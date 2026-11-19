@@ -2,9 +2,9 @@
  * The single screen's list of flows, as pure functions: one row per flow with
  * how many files it has, how many wait for the caller, who reviews and
  * approves, its due date, where its documents stand (por revisar, por aprobar,
- * aprobado, rechazado: owner's request of 09-11-2026), whether it is closed by
- * a first decision, and the filters (owner, user, group, state, due date,
- * "tengo por revisar").
+ * aprobado, rechazado: owner's request of 09-11-2026), whether it is closed
+ * (every file approved: its last decision), and the filters (owner, user,
+ * group, state, due date, "tengo por revisar").
  */
 import { codigoFlujo, nombreResponsable } from "./flujos";
 import { ESPERANDO } from "./registro";
@@ -32,7 +32,7 @@ export interface FilaFlujo {
   detalleEstado: string;
   /** Past its due date with files still waiting (active flows only). */
   vencido: boolean;
-  /** Its first decision: from then on it can't be edited, activated or deactivated. */
+  /** Its last decision, when every file is approved: from then on it can't be edited, activated or deactivated. */
   cierre: Cierre | null;
   /** Files with a newer version in Trimble than the one the flow reviews (the flow keeps its own). */
   conVersionNueva: number;

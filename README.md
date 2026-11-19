@@ -4495,9 +4495,10 @@ aprobado, en la sección siguiente). Hay que volver a ejecutar
 
 - **Cualquier miembro del proyecto** crea un flujo con **Nuevo**. Lo cambian
   (archivos, pasos, responsables, activar o desactivar, revisar permisos)
-  **quien lo creó y los administradores** del proyecto en Trimble, hasta su
-  primera decisión (después queda cerrado; ver «Estado del documento y flujo
-  cerrado»).
+  **quien lo creó y los administradores** del proyecto en Trimble, hasta que
+  todos sus archivos quedan aprobados (desde el 19-11-2026; antes, hasta su
+  primera decisión; ver «Cierre con la última decisión, sin tareas de Trimble
+  y descripción resaltada»).
 - **Archivos del flujo**: en el explorador del formulario cada archivo tiene su
   casilla; se marcan varios, de distintas carpetas, y «Marcar todos» marca los
   de la carpeta abierta (hasta 100 por flujo). Los marcados salen arriba con ✕
@@ -4627,6 +4628,8 @@ Aceptó el plan tal como se propuso. No cambia la base de datos.
   **Estado** ofrece Por revisar, Por aprobar, Aprobado, Rechazado y
   Desactivado.
 
+(Desde el 19-11-2026 lo cierra la **última** decisión: ver «Cierre con la última decisión, sin tareas de Trimble y descripción resaltada».)
+
 **Flujo cerrado**: desde la **primera decisión** (aprobar o rechazar un paso,
 en cualquiera de sus archivos) **nadie** puede **editar, activar ni desactivar**
 el flujo, ni quien lo creó ni un administrador. Se cierra desde la primera
@@ -4723,6 +4726,8 @@ rechaza por una versión más nueva: la anota, `textoOtraVersion`), `lista.ts`
 corrección de una sola vez en el SQL.
 
 ### Reactivar el flujo y cerrar las tareas de Trimble (10-11-2026)
+
+(Desde el 19-11-2026 los flujos ya no crean ni cierran tareas de Trimble; «Reactivar el flujo» sigue igual y avisa por correo.)
 
 Pedido por el dueño, con una captura del aviso «1 archivo tiene una versión
 más nueva en Trimble…»: (1) solo cuando sale ese aviso, quien creó el flujo
@@ -4846,7 +4851,7 @@ al pasar el mouse.
 
 - **Detalles**: el recuadro gris «Flujo cerrado desde la primera decisión…»
   pasa a una etiqueta pequeña **«Cerrado»** junto al estado; el texto completo
-  sale al pasar el mouse.
+  sale al pasar el mouse (desde el 19-11-2026: «…desde la última decisión…»).
 - **Archivos**, en la tabla:
   - Bajo el nombre ya no salen la carpeta ni «Subió …»: van en el texto
     emergente del nombre (que sigue abriendo la versión en Trimble).
@@ -4869,6 +4874,8 @@ Código: `components/flujo-aprobacion/Archivos.tsx` (`conEspera`,
 `PanelFlujo.tsx` (etiqueta «Cerrado», `conPermisos`).
 
 ### Código de cada flujo y texto de las tareas de Trimble (11-11-2026)
+
+(Los códigos FLUJO-01 siguen; las tareas de Trimble se quitaron el 19-11-2026.)
 
 Pedido por el dueño con una captura de ToDo de Trimble: (1) códigos para los
 flujos («flujo 01»); (2) el título de la tarea, solo el del flujo; (3) la
@@ -5142,6 +5149,8 @@ Código: `enlaces.ts` (`nuevoToken`, `crearEnlace`, `abrirEnlace`,
 `POST /pendiente` y `GET /recordatorios` (cron), `vercel.json`;
 `FlujoAprobacionApp` pregunta `api.pendiente()` al cargar.
 
+(Desde el 19-11-2026 no hay casilla «Crear también la tarea de Trimble»: el correo es el único aviso.)
+
 ### Un archivo en varios flujos activos (19-11-2026)
 
 Pedido del dueño: quitar el aviso «… ya está en el flujo activo «…»: un archivo
@@ -5184,6 +5193,69 @@ flujo y ya no tiene `archivo-cambio-flujo`; se quitó `conflictosArchivos`
 `registro.test.ts`, `service.test.ts` y `decisiones.test.ts` (el mismo archivo
 en dos flujos, cada uno decide por su cuenta).
 
+### Cierre con la última decisión, sin tareas de Trimble y descripción resaltada (19-11-2026)
+
+Pedido del dueño, con dos capturas (el panel de «Revisión de informe de
+tensionamiento» y el historial de «planes de suministro» con líneas «Cerró la
+tarea de Trimble» y «Avisó (tarea de Trimble)»): «1. cambia la regla "la
+primera decisión cierra el flujo" para que sea la última decisión la que
+cierra el flujo, ejemplo pepe tiene que revisar y juan tiene que aprobar
+entonces cuando juan apruebe el flujo se cierra. 2. elimina totalmente la
+creación de tareas en trimble al crear y cerrar flujos. 3. resalta el texto de
+la descripción…». Sin cambios de SQL.
+
+**1. La última decisión cierra el flujo.**
+
+- Un flujo queda **cerrado** cuando **todos sus archivos** (sin contar los
+  retirados) quedan **aprobados en su último paso**. Con un solo archivo:
+  Pepe revisa (el flujo sigue abierto), Juan aprueba (se cierra).
+- Con varios archivos, se cierra cuando se aprueba el último que faltaba.
+  Aprobar un paso intermedio o **rechazar** no lo cierra (el rechazado espera
+  su corrección).
+- Mientras está abierto, quien lo creó o un administrador lo puede **editar**
+  (por ejemplo, cambiar el responsable de «Aprueba» después de que Pepe
+  revisó), **activar** o **desactivar**. Cada archivo en proceso conserva su
+  copia de los pasos, y el responsable que vale es el del flujo como está
+  ahora. Ojo: si se cambia el responsable de un paso que ya espera, a la
+  persona nueva no le llega correo en ese momento.
+- Cerrado: nadie edita, activa ni desactiva (tampoco un administrador); se
+  puede comentar, sacar el PDF y, si hay una versión nueva, **«Reactivar el
+  flujo»**. Al reactivar, la versión nueva entra a revisión y el flujo **se
+  vuelve a abrir** hasta su nueva última aprobación.
+- La etiqueta **«Cerrado»** dice al pasar el mouse «Flujo cerrado desde la
+  última decisión (DD-MM-AAAA, de quién): todos sus archivos quedaron
+  aprobados…». La fecha y la persona son la última aprobación del flujo en el
+  historial.
+- Los flujos que estaban cerrados por una primera decisión y todavía tienen
+  archivos sin aprobar **quedan abiertos** otra vez. Los aprobados siguen
+  cerrados.
+
+**2. Sin tareas de Trimble.** Los flujos ya no crean ni cierran tareas (ToDo)
+en Trimble: ni al guardar, ni al pasar de paso, ni al rechazar, ni al
+reactivar. El único aviso es el **correo de la extensión** (y el recordatorio
+diario). Si no se puede enviar (no hay cuenta de Gmail en Vercel, o ese aviso
+está apagado), el historial dice «No se avisó a … : …». En «Correos de aviso»
+(oculta en el menú desde el 12-11-2026) ya no está la casilla «Crear también
+la tarea de Trimble», y los correos no se pueden apagar del todo (cada aviso
+sí, en «Cuándo»). «Abrió el archivo» ya no menciona la tarea. Las tareas que
+ya se habían creado **siguen en Trimble** como estaban (se pueden cerrar a
+mano en ToDo); las líneas viejas del historial («Avisó (tarea de Trimble)»,
+«Cerró la tarea de Trimble») se siguen viendo.
+
+**3. Descripción resaltada.** En el panel, la **Descripción** va en un
+recuadro azul claro con una franja azul a la izquierda y letra azul oscuro.
+
+Código: `cierresFlujos` en [`flujos.ts`](lib/flujo-aprobacion/flujos.ts)
+(reemplaza a `primerasDecisiones`; `service.ts` lo calcula con los archivos
+y las decisiones del historial); `avisos.ts` solo arma los avisos del correo;
+`notificar` en `decisiones.ts` solo envía correos; se borró `tareas.ts`;
+`TrimbleFlujo` ya no tiene `crearTarea`/`actualizarTarea`; `cerrarTarea`
+pasó a `prueba.ts` (solo la prueba de conexión oculta); `configCorreo.ts`
+sin `tareasTrimble`; `PanelFlujo.tsx` (descripción). Pruebas:
+`decisiones.test.ts` (Luz revisa y sigue abierto; Pepe aprueba y se cierra;
+dos archivos; un rechazo; reactivar lo vuelve a abrir), `lista.test.ts`,
+`reactivar.test.ts`, `correo.test.ts`.
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -5193,7 +5265,7 @@ en dos flujos, cada uno decide por su cuenta).
    archivos** en el explorador (varios a la vez, de distintas carpetas), los
    pasos (por ejemplo Revisa → Aprueba) con **su responsable** y, si quiere,
    fecha de vencimiento y descripción (todo en un cuadro flotante). **Guardar**: los archivos quedan pendientes,
-   el responsable del primer paso recibe la tarea de Trimble y el flujo queda
+   el responsable del primer paso recibe el correo de aviso y el flujo queda
    abierto en el panel de la derecha.
 3. **⋮ → Revisar permisos de Trimble**: corrija en Trimble lo que avise (por
    ejemplo, un responsable sin acceso a la carpeta de los archivos).
@@ -5202,7 +5274,7 @@ en dos flujos, cada uno decide por su cuenta).
    ahora**) el archivo muestra el aviso «Hay una versión más nueva en
    Trimble», pero el flujo sigue con la suya. Para revisarla, quien creó el
    flujo pulsa **«Reactivar el flujo…»**. Un archivo nuevo se agrega editando
-   el flujo (antes de la primera decisión).
+   el flujo (mientras no esté todo aprobado).
 5. Cada responsable pulsa **«Tienes N archivos por revisar»**, abre el flujo y
    en **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
    comentario si quiere) o rechaza con el motivo.
@@ -5216,39 +5288,36 @@ en dos flujos, cada uno decide por su cuenta).
 7. Un rechazado: quien lo subió ve el motivo en **Archivos → Subidos por
    mí**, corrige y sube la versión nueva con el mismo nombre en la misma
    carpeta. Esa versión aparece como aviso en el archivo; entra al flujo
-   cuando quien lo creó pulsa «Reactivar el flujo…» (y se cierra la tarea
-   «Corregir»). Las tareas de Trimble de cada paso se cierran solas al decidir.
+   cuando quien lo creó pulsa «Reactivar el flujo…». Cada aviso llega por
+   correo (los flujos no crean tareas en Trimble).
 8. La columna **Estado** dice en qué va cada flujo (Por revisar, Por aprobar,
-   Aprobado en verde, Rechazado en rojo). Desde la **primera decisión** el flujo
-   queda **cerrado**: ya no se edita, activa ni desactiva (revise archivos,
-   pasos y responsables antes de que alguien decida).
+   Aprobado en verde, Rechazado en rojo). Cuando **todos sus archivos quedan
+   aprobados** (la última decisión) el flujo queda **cerrado**: ya no se
+   edita, activa ni desactiva. Antes se puede editar, por ejemplo para cambiar
+   un responsable.
 9. **Trazabilidad**: ⬇ en el panel (un flujo) o **⋮ → Exportar trazabilidad**
    (todos, con filtros). Los comentarios del flujo quedan en su panel.
 
 ### Protocolo de prueba en Trimble real
 
 En un proyecto de pruebas, con dos usuarios (A administra, B modela) y un grupo
-de Trimble con al menos un miembro (actualizado el 10-11-2026: fases A y B,
-flujo cerrado, versión fija, reactivar y cierre de tareas):
+de Trimble con al menos un miembro (actualizado el 19-11-2026: fases A y B,
+flujo cerrado con la última decisión, versión fija, reactivar, sin tareas de
+Trimble):
 
-0. A abre **⋮ → Prueba de conexión con Trimble → tarea** y crea una tarea de
-   prueba: el resultado debe decir «Cerrar la tarea: Trimble la dejó en estado
-   CLOSED» (o DONE) y en ToDo de Trimble debe verse cerrada. Si dice «No se
-   pudo cerrar», los flujos no podrán cerrar sus tareas en este proyecto:
-   pegar ese resultado.
 1. B (que no es administrador) sube un `.rvt` y un `.pdf`, y crea un flujo
    «Prueba flujo» marcando los dos archivos, con dos pasos: Revisa = el
-   **grupo**, Aprueba = A. Al guardar deben quedar 2 archivos pendientes y
-   **una tarea de Trimble para el grupo** (si Trimble no acepta grupos, una por
-   miembro). Comprobar que llegó el correo.
+   **grupo**, Aprueba = A. Al guardar deben quedar 2 archivos pendientes, **un
+   correo a cada miembro del grupo** y **ninguna tarea nueva en ToDo de
+   Trimble**.
 2. Otro miembro que no creó el flujo no ve «Editar»; A (administrador) sí.
    B revisa los permisos de Trimble desde el ⋮. Antes de que nadie decida, B
    quita un archivo del flujo (queda **Retirado**, sin borrarse en Trimble) y
    lo vuelve a marcar. La columna Estado dice **Por revisar**.
-3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; tarea para A) y
-   rechaza el `.pdf` con motivo (tarea para B con el motivo). La tarea del
-   grupo debe quedar **cerrada** en ToDo de Trimble (ya no espera ningún
-   archivo) y el historial dice «Cerró la tarea de Trimble…».
+3. Un miembro del grupo aprueba el `.rvt` (pasa a Aprueba; correo para A) y
+   rechaza el `.pdf` con motivo (correo para B con el motivo). El historial
+   no tiene líneas de tareas de Trimble, y el flujo **sigue abierto**: B
+   todavía ve Editar.
 4. A aprueba el `.rvt` eligiendo **Ponerla también en una carpeta**:
    primero prueba la carpeta del propio archivo y una de solo lectura (deben
    rechazarse sin aprobar nada); luego una carpeta vacía donde tenga acceso
@@ -5256,11 +5325,10 @@ flujo cerrado, versión fija, reactivar y cierre de tareas):
    visor sin «Conversión en curso».
 5. B sube la versión corregida del `.pdf` con el mismo nombre: al abrir la
    extensión el `.pdf` sigue **Rechazado, versión 1**, con el aviso «Hay una
-   versión más nueva en Trimble: versión 2…», y no llega tarea. Un miembro que
+   versión más nueva en Trimble: versión 2…», y no llega correo. Un miembro que
    no creó el flujo no ve «Reactivar el flujo…»; B (que lo creó) sí: lo pulsa,
    confirma y el `.pdf` queda **Nueva versión pendiente, versión 2** desde
-   Revisa, con tarea para el grupo; la tarea «Corregir» de B queda cerrada y
-   el historial dice «Reactivó…». B mueve el `.rvt` a otra carpeta: el flujo
+   Revisa, con correo para el grupo, y el historial dice «Reactivó…». B mueve el `.rvt` a otra carpeta: el flujo
    lo sigue (solo cambia la ruta).
 6. B sube una versión nueva del `.rvt` (ya aprobado): sigue **Aprobado,
    versión 1**, con el aviso; «Ver la versión 2» abre la 2 en el visor; la
@@ -5275,10 +5343,10 @@ flujo cerrado, versión fija, reactivar y cierre de tareas):
    la nueva.
 8. B pone el `.rvt` también en otro flujo activo: debe dejarlo, y cada flujo
    lleva su propia revisión (lo que se decide en uno no cambia el otro).
-   Desde la decisión del paso 3, ni B ni A ven Editar,
-   Activar ni Desactivar en «Prueba flujo», y el panel dice «Flujo cerrado
-   desde la primera decisión (fecha, quién)», aunque se haya reactivado. El
-   Estado dice **Por revisar** (el `.pdf` corregido volvió a revisión).
+   Mientras el `.pdf` corregido espera, «Prueba flujo» sigue abierto (B y A
+   ven Editar). Cuando el grupo y A aprueban el `.pdf` (el último archivo),
+   ni B ni A ven Editar, Activar ni Desactivar, y la etiqueta «Cerrado» dice
+   «Flujo cerrado desde la última decisión (fecha, de A)».
 9. Trazabilidad: exportar el PDF general y el de un archivo; revisar que
    estén quién subió, quién revisó, decisiones con fecha, motivos, qué carpeta
    eligió el responsable y quién copió la versión ahí.

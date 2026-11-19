@@ -55,7 +55,6 @@ async function escenario(o: { destinoSoloLectura?: boolean; ajenoEnDestino?: boo
       const a = nube.archivos.get(id);
       return a ? a.versiones[a.versiones.length - 1].versionId : null;
     },
-    crearTarea: async () => ({ estado: 201, cuerpo: { id: "todo" } }),
     lado: { projectId: "P", servidor: p.servidor, cliente: p.cliente },
     fetch: nube.fetchFalso,
   };

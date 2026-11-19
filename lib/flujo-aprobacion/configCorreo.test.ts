@@ -15,9 +15,9 @@ test("los datos entre llaves se reemplazan; sin código no queda el separador al
 
 test("lo guardado sin algún dato toma el valor inicial; nada guardado es la configuración inicial", () => {
   assert.deepEqual(conInicial(null), CONFIG_INICIAL);
-  const c = conInicial({ activo: false, eventos: { correccion: false }, textos: { revision: { asunto: "Toca {paso}" } }, copia: ["a@b.co", "malo"], idExtension: "x y" });
+  const c = conInicial({ activo: false, tareasTrimble: true, eventos: { correccion: false }, textos: { revision: { asunto: "Toca {paso}" } }, copia: ["a@b.co", "malo"], idExtension: "x y" });
   assert.equal(c.activo, false);
-  assert.equal(c.tareasTrimble, true);
+  assert.equal("tareasTrimble" in c, false, "a saved «tarea de Trimble» is ignored since 19-11-2026");
   assert.deepEqual(c.eventos, { revision: true, correccion: false });
   assert.deepEqual(c.textos.revision, { asunto: "Toca {paso}", intro: TEXTOS_INICIALES.revision.intro });
   assert.deepEqual(c.textos.correccion, TEXTOS_INICIALES.correccion);
@@ -43,7 +43,7 @@ test("lo que manda la ventana se revisa: textos, datos conocidos, correos de cop
   assert.match(malo({ textos: { ...TEXTOS_INICIALES, correccion: { asunto: "Rechazado {archivo}", intro: "Lo rechazó {jefe}" } } }) ?? "", /Texto de «Archivo rechazado»: «\{jefe\}» no es un dato/);
   assert.match(malo({ copia: "jefe@obra" }) ?? "", /«jefe@obra» no es un correo válido/);
   assert.match(malo({ copia: "a@o.co b@o.co c@o.co d@o.co e@o.co f@o.co" }) ?? "", /caben hasta 5 correos/);
-  assert.match(malo({ activo: false, tareasTrimble: false }) ?? "", /los correos de la extensión deben quedar activos/);
+  assert.match(malo({ activo: false }) ?? "", /^Los correos de la extensión deben quedar activos: son el único aviso de los flujos \(no se crean tareas en Trimble\)/);
   assert.match(malo({ enlace: "https://web.connect.trimble.com/projects/OTRO/extension/abc12345/x" }) ?? "", /otro proyecto/);
 
   const saltos = revisarConfigCorreo({ ...valida(), textos: { revision: { asunto: "Toca\n{paso}", intro: "Hola\r\n{persona}" }, correccion: TEXTOS_INICIALES.correccion } }, P);
@@ -53,12 +53,13 @@ test("lo que manda la ventana se revisa: textos, datos conocidos, correos de cop
 test("las advertencias dicen quién se queda sin aviso, sin impedir guardar", () => {
   assert.deepEqual(advertenciasCorreo(CONFIG_INICIAL, true), []);
   assert.deepEqual(advertenciasCorreo(CONFIG_INICIAL, false), ["No hay cuenta de Gmail en Vercel: los correos no saldrán hasta ponerla."]);
-  const sinTareas = { ...CONFIG_INICIAL, tareasTrimble: false, eventos: { revision: true, correccion: false } };
-  assert.deepEqual(advertenciasCorreo(sinTareas, true), ["Nadie recibirá aviso cuando le rechacen un archivo (sin tarea de Trimble ni correo)."]);
+  const sinRechazo = { ...CONFIG_INICIAL, eventos: { revision: true, correccion: false } };
+  assert.deepEqual(advertenciasCorreo(sinRechazo, true), ["Nadie recibirá aviso cuando le rechacen un archivo."]);
+  assert.deepEqual(advertenciasCorreo({ ...CONFIG_INICIAL, eventos: { revision: false, correccion: false } }, true), ["Nadie recibirá aviso cuando le toque un paso.", "Nadie recibirá aviso cuando le rechacen un archivo."]);
 });
 
 test("el historial dice qué cambió en palabras", () => {
-  const despues = { ...CONFIG_INICIAL, tareasTrimble: false, copia: ["jefe@obra.co"], textos: { ...TEXTOS_INICIALES, revision: { asunto: "Revisar {flujo}", intro: TEXTOS_INICIALES.revision.intro } } };
-  assert.deepEqual(cambiosCorreo(CONFIG_INICIAL, despues), ["Crear también la tarea de Trimble: no", "Asunto de «Te toca un paso»: «Revisar {flujo}»", "Enviar copia a: jefe@obra.co"]);
+  const despues = { ...CONFIG_INICIAL, recordatorios: false, copia: ["jefe@obra.co"], textos: { ...TEXTOS_INICIALES, revision: { asunto: "Revisar {flujo}", intro: TEXTOS_INICIALES.revision.intro } } };
+  assert.deepEqual(cambiosCorreo(CONFIG_INICIAL, despues), ["Recordatorio diario de vencidos: no", "Asunto de «Te toca un paso»: «Revisar {flujo}»", "Enviar copia a: jefe@obra.co"]);
   assert.deepEqual(cambiosCorreo(CONFIG_INICIAL, CONFIG_INICIAL), []);
 });

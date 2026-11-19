@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import type { ClienteTrimble, Respuesta } from "../compras/cde";
 import { nubeFalsa } from "../publicar/pruebas/trimbleFalso";
 import type { ProjectGroup, ProjectUser } from "../trimbleApi";
-import { DepsPrueba, formatosTarea, pasoPrueba, versionesDe } from "./prueba";
+import { cerrarTarea, DepsPrueba, formatosTarea, pasoPrueba, versionesDe } from "./prueba";
 
 const persona = (id: string, firstName: string, lastName: string, extra: Partial<ProjectUser> = {}): ProjectUser => ({ id, firstName, lastName, email: `${id}@obra.co`, role: "USER", status: "ACTIVE", ...extra });
 
@@ -276,4 +276,26 @@ test("un paso desconocido o sin archivo se rechaza", async () => {
   const { paso } = escenario();
   await assert.rejects(() => paso("borrar"), /Paso no válido/);
   await assert.rejects(() => paso("archivo", { fileId: "../x" }), /Falta fileId/);
+});
+
+test("cerrar una tarea prueba «CLOSED» y luego «DONE»; sin permiso no insiste; una respuesta con otro estado no cuenta", async () => {
+  const pedidos: unknown[] = [];
+  const conDone = await cerrarTarea(async (cuerpo) => {
+    pedidos.push(cuerpo);
+    return cuerpo.status === "DONE" ? { estado: 200, cuerpo: { status: "DONE" } } : { estado: 400, cuerpo: { message: "status inválido" } };
+  });
+  assert.deepEqual(pedidos, [{ status: "CLOSED" }, { status: "DONE" }]);
+  assert.deepEqual(conDone, { ok: true, estado: "DONE", mensaje: "Trimble la dejó en estado DONE." });
+  assert.equal((await cerrarTarea(async () => ({ estado: 200, cuerpo: { status: "CLOSED" } }))).estado, "CLOSED");
+  let veces = 0;
+  const sinPermiso = await cerrarTarea(async () => {
+    veces++;
+    return { estado: 403, cuerpo: "Forbidden" };
+  });
+  assert.equal(sinPermiso.ok, false);
+  assert.equal(veces, 1);
+  assert.match(sinPermiso.mensaje, /Trimble no la cerró \(403\)/);
+  const ignora = await cerrarTarea(async () => ({ estado: 200, cuerpo: { status: "NEW" } }));
+  assert.equal(ignora.ok, false, "Trimble answered but the ToDo is still new");
+  assert.equal((await cerrarTarea(async () => Promise.reject(new Error("sin red")))).mensaje, "No se pudo cerrar: sin red");
 });

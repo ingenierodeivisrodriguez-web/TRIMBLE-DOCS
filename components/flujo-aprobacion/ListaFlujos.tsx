@@ -20,7 +20,7 @@ export const ESTADO_DOCUMENTO: Record<EstadoDocumento, { texto: string; color: s
 
 /** "Hover" text of the state: the count in words and, for a closed flow, since when. */
 export function ayudaEstado(fila: Pick<FilaFlujo, "detalleEstado" | "cierre">): string {
-  return `${fila.detalleEstado}.${fila.cierre ? ` Flujo cerrado desde la primera decisión (${describirCierre(fila.cierre)}): no se puede editar, activar ni desactivar.` : ""}`;
+  return `${fila.detalleEstado}.${fila.cierre ? ` Flujo cerrado desde la última decisión (${describirCierre(fila.cierre)}): todos sus archivos quedaron aprobados; no se puede editar, activar ni desactivar.` : ""}`;
 }
 
 export function EtiquetaEstado({ estado, ayuda, desactivado }: { estado: EstadoDocumento; ayuda?: string; desactivado?: boolean }) {
