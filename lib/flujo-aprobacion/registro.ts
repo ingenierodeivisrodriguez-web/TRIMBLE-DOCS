@@ -56,7 +56,7 @@ export interface Cambio {
   antes: ArchivoRegistro;
   cambios: Partial<ArchivoRegistro>;
   /** What goes to the history ("" when nothing does: a rename or a move inside the flow). */
-  accion: "" | "version-reemplazada" | "nueva-version" | "version-nueva-vista" | "version-reactivada" | "archivo-reaparecido" | "archivo-cambio-flujo";
+  accion: "" | "version-reemplazada" | "nueva-version" | "version-nueva-vista" | "version-reactivada" | "archivo-reaparecido";
 }
 
 export interface PlanRegistro {
@@ -75,10 +75,11 @@ function estadoAlReaparecer(r: ArchivoRegistro): EstadoArchivo {
 
 /**
  * What to create and change after reading a flow's files.
- * `registrados`: every registered file of the project (a file may come from another flow).
+ * `registrados`: the project's registered files; only this flow's count (a file
+ * in several flows has its own record in each, with its own review).
  */
 export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], vistos: ArchivoVisto[], momento: string): PlanRegistro {
-  const porFile = new Map(registrados.map((r) => [r.fileId, r]));
+  const porFile = new Map(registrados.filter((r) => r.flujoId === flujo.id).map((r) => [r.fileId, r]));
   const plan: PlanRegistro = { crear: [], actualizar: [], faltantes: [], sinCambios: 0 };
   const vistosIds = new Set<string>();
   for (const v of vistos) {
@@ -111,11 +112,6 @@ export function planRegistro(flujo: Flujo, registrados: ArchivoRegistro[], visto
         detectado: momento,
         actualizado: momento,
       });
-      continue;
-    }
-    if (r.flujoId !== flujo.id) {
-      // It was in another (inactive) flow: a new review with this one.
-      plan.actualizar.push({ id: r.id, antes: r, accion: "archivo-cambio-flujo", cambios: { ...deTrimble(v), ...nuevoTramite, flujoId: flujo.id, estado: "pendiente", versionAprobadaId: null, revisionAprobada: null, traslado: null } });
       continue;
     }
     if (r.versionId !== v.versionId) {
@@ -204,8 +200,6 @@ export function detalleCambio(c: Cambio, hito: string, fecha: (iso: string) => s
     }
     case "archivo-reaparecido":
       return `Volvió a aparecer en ${c.cambios.ruta ?? c.antes.ruta} (versión ${n ?? "?"}).`;
-    case "archivo-cambio-flujo":
-      return `Se movió a ${c.cambios.ruta ?? c.antes.ruta}: ahora lo revisa el flujo «${hito}» desde el primer paso.`;
     default:
       return "";
   }

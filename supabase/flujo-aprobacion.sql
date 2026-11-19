@@ -122,7 +122,7 @@ grant select, insert on public.aprobacion_historial to service_role;
 
 -- ------------------------------------------------------------------ fase 2
 -- Archivos de las carpetas de revisión, registrados al abrir la extensión o
--- con "Revisar ahora". Uno por archivo de Trimble. No se borra: un archivo que
+-- con "Revisar ahora". Uno por archivo de Trimble y flujo. No se borra: un archivo que
 -- ya no está queda "retirado".
 
 -- Cuándo y quién revisó por última vez las carpetas de un flujo, y quién lo
@@ -160,8 +160,7 @@ create table if not exists public.aprobacion_archivos (
   version_aprobada_id text,
   revision_aprobada integer,
   detectado timestamptz not null default now(),
-  actualizado timestamptz not null default now(),
-  unique (proyecto, file_id)
+  actualizado timestamptz not null default now()
 );
 
 create index if not exists aprobacion_archivos_flujo on public.aprobacion_archivos (flujo_id);
@@ -231,34 +230,8 @@ alter table public.aprobacion_flujos add column if not exists archivos jsonb not
 alter table public.aprobacion_flujos add column if not exists creado_por_id text;
 alter table public.aprobacion_flujos alter column destino drop not null;
 
--- Un archivo solo puede estar en un flujo activo del proyecto.
-create or replace function public.aprobacion_revisar_archivos() returns trigger
-language plpgsql
-set search_path = public
-as $$
-begin
-  perform pg_advisory_xact_lock(hashtext('aprobacion:' || new.proyecto));
-  if new.activo and exists (
-    select 1
-    from public.aprobacion_flujos f,
-         jsonb_array_elements(f.archivos) c,
-         jsonb_array_elements(new.archivos) n
-    where f.proyecto = new.proyecto
-      and f.id <> new.id
-      and f.activo
-      and c ->> 'id' = n ->> 'id'
-  ) then
-    raise exception 'archivo-en-otro-flujo' using errcode = 'P0001';
-  end if;
-  return new;
-end;
-$$;
-
-drop trigger if exists aprobacion_flujos_archivos on public.aprobacion_flujos;
-create trigger aprobacion_flujos_archivos
-  before insert or update on public.aprobacion_flujos
-  for each row execute function public.aprobacion_revisar_archivos();
-revoke all on function public.aprobacion_revisar_archivos() from public, anon, authenticated;
+-- (Hasta el 19-11-2026 un archivo solo podía estar en un flujo activo: ver
+-- «un archivo en varios flujos» al final.)
 
 -- Flujos de antes: los archivos que ya tenían registrados (no retirados) pasan
 -- a ser sus archivos elegidos. Solo se hace una vez (cuando todavía no tienen).
@@ -407,3 +380,13 @@ alter table public.aprobacion_enlaces_correo enable row level security;
 revoke all on public.aprobacion_enlaces_correo from anon, authenticated;
 revoke delete, truncate on table public.aprobacion_enlaces_correo from public, anon, authenticated, service_role;
 grant select, insert, update on public.aprobacion_enlaces_correo to service_role;
+
+-- ----------------------------------- un archivo en varios flujos (19-11-2026)
+-- Un archivo puede estar en varios flujos activos a la vez (revisar, aprobar,
+-- inspeccionar…): cada flujo lleva su propia revisión del archivo, en su propio
+-- registro. Se quita la regla de un solo flujo activo por archivo y la clave de
+-- un registro por archivo en el proyecto.
+drop trigger if exists aprobacion_flujos_archivos on public.aprobacion_flujos;
+drop function if exists public.aprobacion_revisar_archivos();
+alter table public.aprobacion_archivos drop constraint if exists aprobacion_archivos_proyecto_file_id_key;
+create unique index if not exists aprobacion_archivos_flujo_archivo on public.aprobacion_archivos (flujo_id, file_id);

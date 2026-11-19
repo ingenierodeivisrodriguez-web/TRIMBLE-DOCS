@@ -140,12 +140,15 @@ test("lo que no se vio queda para comprobarlo en Trimble; lo retirado que reapar
   assert.equal(p.actualizar[0].cambios.estado, "aprobado");
 });
 
-test("un archivo que llega desde otro flujo empieza de nuevo con este flujo", () => {
-  const c = planRegistro(flujo(), [registrado("modelo", 3, { flujoId: "f2", estado: "aprobado", versionAprobadaId: "modelo-v3", revisionAprobada: 3 })], [visto("modelo", 3)], AHORA).actualizar[0];
-  assert.equal(c.accion, "archivo-cambio-flujo");
-  assert.equal(c.cambios.flujoId, "f1");
-  assert.equal(c.cambios.estado, "pendiente");
-  assert.equal(c.cambios.revisionAprobada, null);
+test("un archivo que también está en otro flujo tiene en este su propia revisión, sin tocar la del otro", () => {
+  const p = planRegistro(flujo(), [registrado("modelo", 3, { flujoId: "f2", estado: "aprobado", versionAprobadaId: "modelo-v3", revisionAprobada: 3 })], [visto("modelo", 3)], AHORA);
+  assert.deepEqual(p.actualizar, []);
+  assert.deepEqual(p.faltantes, []);
+  assert.equal(p.crear.length, 1);
+  assert.equal(p.crear[0].flujoId, "f1");
+  assert.equal(p.crear[0].estado, "pendiente");
+  assert.equal(p.crear[0].versionAprobadaId, null);
+  assert.equal(p.crear[0].revision, 3);
 });
 
 test("renombrar o mover dentro del flujo solo actualiza la ruta, sin historial; lo igual no cambia", () => {

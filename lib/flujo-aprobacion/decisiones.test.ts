@@ -210,6 +210,33 @@ test("dos personas del grupo aprueban a la vez: la segunda recibe que ya se deci
 });
 
 /** The flow's own steps again (Revisa = group Arquitectura, Aprueba = Pepe), with a due date. */
+test("el mismo archivo en dos flujos activos: cada flujo lo decide por su cuenta", async () => {
+  const e = await escenario();
+  const otro = await guardarFlujo(e.admin, {
+    hito: "Inspeccionar Torre 1",
+    archivos: ["modelo"],
+    pasos: [{ nombre: "Inspecciona", responsable: { tipo: "persona", id: "juan" } }],
+  });
+  assert.match(otro.mensaje ?? "", /1 archivo nuevo/);
+  const g = otro.flujos.find((x) => x.hito === "Inspeccionar Torre 1")!;
+  const deModelo = async () => (await listarArchivos(e.admin)).archivos.filter((a) => a.fileId === "modelo");
+  const antes = await deModelo();
+  assert.equal(antes.length, 2);
+  const enA = antes.find((a) => a.flujoId === e.f.id)!;
+  const enB = antes.find((a) => a.flujoId === g.id)!;
+  const r = await decidir(e.ctx("juan"), { archivoId: enB.id, versionId: enB.versionId, texto: "Sin observaciones" }, "aprobar");
+  assert.equal(r.mensaje, "«modelo.rvt» queda aprobado (versión 1).");
+  let despues = await deModelo();
+  assert.equal(despues.find((a) => a.id === enB.id)!.estado, "aprobado");
+  assert.equal(despues.find((a) => a.id === enA.id)!.estado, "pendiente");
+  assert.equal(despues.find((a) => a.id === enA.id)!.pasoNombre, "Revisa");
+  // Reviewing the first flow again leaves the second one's record as it is.
+  await revisarFlujo(e.admin, { flujoId: e.f.id });
+  despues = await deModelo();
+  assert.equal(despues.length, 2);
+  assert.equal(despues.find((a) => a.id === enB.id)!.estado, "aprobado");
+});
+
 const mismosPasos = (f: { id: string; version: number; hito: string }, vence: string) => ({
   id: f.id,
   version: f.version,

@@ -11,7 +11,7 @@
 import { fechaHora } from "../compras/formato";
 import { avisarRevision, resumenAvisos } from "./decisiones";
 import { FlujoError } from "./errores";
-import { conflictosArchivos, puedeCambiar } from "./flujos";
+import { puedeCambiar } from "./flujos";
 import { detalleCambio, planReactivar } from "./registro";
 import { revisarFlujo } from "./revision";
 import { Ctx, estado } from "./service";
@@ -39,8 +39,6 @@ export async function reactivarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlu
   const momento = (ctx.ahora?.() ?? new Date()).toISOString();
   let flujo = f;
   if (!f.activo) {
-    const malos = conflictosArchivos(f, todos);
-    if (malos.length) throw new FlujoError(`No se puede reactivar: ${malos.join(" ")}`, 409, "conflicto");
     const activo = await ctx.store.actualizarFlujo(f.id, f.version, { activo: true, actualizado: momento, actualizadoPor: ctx.caller.name });
     if (!activo) throw new FlujoError("Otra persona cambió este flujo hace un momento: recarga para verlo.", 409, "version-conflict");
     flujo = activo;

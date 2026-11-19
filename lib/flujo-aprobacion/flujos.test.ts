@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cambiosFlujo, claveHito, conflictosArchivos, describirPasos, describirResponsables, idsDePasos, nombreDeRuta, puedeCambiar, revisarDatos } from "./flujos";
+import { cambiosFlujo, claveHito, describirPasos, describirResponsables, idsDePasos, nombreDeRuta, puedeCambiar, revisarDatos } from "./flujos";
 import type { ArchivoFlujo, Flujo, PasoFlujo } from "./types";
 
 const MODELO: ArchivoFlujo = { id: "modelo", ruta: "Obra / Diseño / Arquitectura / modelo.rvt", ancestros: ["raiz", "dis", "arq"] };
@@ -71,16 +71,6 @@ test("los pasos que ya existían conservan su id y los nuevos toman el siguiente
     { id: "p5", nombre: "Inventado" },
   ]);
   assert.deepEqual(idsDePasos([{ nombre: "Revisa", responsable: { tipo: "persona", id: "ana" } }], []), [{ id: "p1", nombre: "Revisa", responsable: { tipo: "persona", id: "ana" } }]);
-});
-
-test("un archivo solo puede estar en un flujo activo", () => {
-  const otro = flujo("f2", "Aprobar estructura", [PLANO]);
-  assert.deepEqual(conflictosArchivos({ archivos: [MODELO, PLANO] }, [otro]), [
-    "«Obra / Diseño / Estructura / E-101.pdf» ya está en el flujo activo «Aprobar estructura»: un archivo solo puede estar en un flujo activo.",
-  ]);
-  // Inactive flows and the flow itself don't count.
-  assert.deepEqual(conflictosArchivos({ archivos: [PLANO] }, [{ ...otro, activo: false }]), []);
-  assert.deepEqual(conflictosArchivos({ id: "f2", archivos: [PLANO] }, [otro]), []);
 });
 
 test("los pasos, sus responsables y los cambios del flujo se dicen en palabras", () => {

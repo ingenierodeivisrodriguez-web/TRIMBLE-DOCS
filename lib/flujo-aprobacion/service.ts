@@ -18,7 +18,6 @@ import {
   cambiosFlujo,
   claveHito,
   codigoFlujo,
-  conflictosArchivos,
   describirPasos,
   describirResponsables,
   diaVisible,
@@ -191,10 +190,6 @@ export async function guardarFlujo(ctx: Ctx, body: unknown): Promise<EstadoFlujo
   const pasos = conResponsables(idsDePasos(pasosIn, antes?.pasos ?? []), await equipo(ctx));
   const previos = new Map((antes?.archivos ?? []).map((a) => [a.id, a]));
   const archivos: ArchivoFlujo[] = await enTandas(archivosIds, async (id) => previos.get(id) ?? (await ctx.tc.archivo(id)));
-  if (antes?.activo ?? true) {
-    const malos = conflictosArchivos({ id: flujoId ?? undefined, archivos }, todos);
-    if (malos.length) throw new FlujoError(malos.join(" "), 409, "conflicto");
-  }
 
   const momento = iso(ctx);
   let guardado: Flujo;
@@ -254,10 +249,6 @@ export async function cambiarEstado(ctx: Ctx, body: unknown): Promise<EstadoFluj
   await exigirAbierto(ctx, f);
   if (o.version !== f.version) throw new FlujoError(conVersion, 409, "version-conflict");
   if (f.activo === o.activo) return estado(ctx);
-  if (o.activo) {
-    const malos = conflictosArchivos(f, todos);
-    if (malos.length) throw new FlujoError(`No se puede activar: ${malos.join(" ")}`, 409, "conflicto");
-  }
   const guardado = await ctx.store.actualizarFlujo(f.id, f.version, { activo: o.activo, actualizado: iso(ctx), actualizadoPor: ctx.caller.name });
   if (!guardado) throw new FlujoError(conVersion, 409, "version-conflict");
   await registrar(

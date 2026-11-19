@@ -133,21 +133,23 @@ test("el hito no se repite, aunque cambien tildes o mayúsculas", async () => {
   await assert.rejects(() => guardarFlujo(e.juan, nuevo({ hito: "APROBAR diseno arquitectonico torre 1", archivos: ["e101"] })), /Ya hay un flujo con ese título o hito/);
 });
 
-test("un archivo no puede estar en dos flujos activos; al desactivar uno queda libre, y no se reactiva si otro lo tomó", async () => {
+test("un archivo puede estar en dos flujos activos, cada uno con su propia revisión; desactivar y activar ya no choca", async () => {
   const e = escenario();
   const f = (await guardarFlujo(e.juan, nuevo())).flujos[0];
-  await assert.rejects(
-    () => guardarFlujo(e.juan, nuevo({ hito: "Aprobar estructura", archivos: ["e101", "modelo"] })),
-    /«Obra \/ Diseño \/ Arquitectura \/ modelo.rvt» ya está en el flujo activo «Aprobar diseño arquitectónico Torre 1»/
-  );
-  const off = (await cambiarEstado(e.juan, { id: f.id, version: f.version, activo: false })).flujos[0];
+  const r = await guardarFlujo(e.juan, nuevo({ hito: "Aprobar estructura", archivos: ["e101", "modelo"] }));
+  assert.match(r.mensaje!, /2 archivos nuevos/);
+  const g = r.flujos.find((x) => x.hito === "Aprobar estructura")!;
+  assert.equal(g.activo, true);
+  const delModelo = (await e.store.archivos("P")).filter((a) => a.fileId === "modelo");
+  assert.deepEqual(delModelo.map((a) => a.flujoId).sort(), [f.id, g.id].sort());
+  assert.ok(delModelo.every((a) => a.estado === "pendiente" && a.pasoActual === 0));
+  const off = (await cambiarEstado(e.juan, { id: f.id, version: f.version, activo: false })).flujos.find((x) => x.id === f.id)!;
   assert.equal(off.activo, false);
-  const otro = await guardarFlujo(e.juan, nuevo({ hito: "Aprobar modelo definitivo", archivos: ["modelo"] }));
-  assert.match(otro.mensaje!, /1 archivo que vuelve/, "the registered file moves to the new flow");
-  await assert.rejects(() => cambiarEstado(e.juan, { id: f.id, version: off.version, activo: true }), /No se puede activar: «Obra \/ Diseño \/ Arquitectura \/ modelo.rvt» ya está en el flujo activo/);
+  const on = (await cambiarEstado(e.juan, { id: f.id, version: off.version, activo: true })).flujos.find((x) => x.id === f.id)!;
+  assert.equal(on.activo, true);
   assert.deepEqual(
     (await historial(e.juan, f.id)).entradas.filter((x) => x.accion.startsWith("flujo-")).map((x) => x.accion),
-    ["flujo-desactivado", "flujo-creado"]
+    ["flujo-activado", "flujo-desactivado", "flujo-creado"]
   );
 });
 

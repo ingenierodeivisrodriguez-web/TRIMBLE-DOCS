@@ -4512,8 +4512,8 @@ aprobado, en la sección siguiente). Hay que volver a ejecutar
   (Pendiente) y el responsable del primer paso recibe la tarea de Trimble. Un
   archivo que se quita del flujo queda **Retirado** (no se borra nada, queda en
   el historial).
-- **Un archivo solo puede estar en un flujo activo** (la base de datos también
-  lo impide). Al desactivar un flujo sus archivos quedan libres para otro.
+- Al principio un archivo solo podía estar en un flujo activo; desde el
+  19-11-2026 puede estar en varios (ver «Un archivo en varios flujos activos»).
 - Se quitaron el bloque **«Quién hace qué»** y los papeles **Realiza** y
   **Consulta** como asignaciones: quien sube cada versión es quien la corrige
   si la rechazan, y todos en el proyecto ven los flujos.
@@ -4746,8 +4746,7 @@ se rechaza. Aceptó el plan con sus supuestos. Hay que volver a ejecutar
   pendiente de revisión»** desde el **primer paso** (con los pasos del flujo);
   el responsable recibe la **tarea de Trimble**. Los archivos sin versión nueva
   no cambian. La aprobación anterior sigue anotada («aprobada: v1»).
-- Si el flujo estaba **desactivado**, queda activo (si esos archivos no están
-  en otro flujo activo).
+- Si el flujo estaba **desactivado**, queda activo.
 - El flujo sigue **cerrado para editar**: pasos, responsables y archivos no
   cambian; reactivar solo hace entrar la versión nueva.
 - **Trazabilidad**: no se borra nada. El historial anota «Reactivó «…»: entra
@@ -5143,6 +5142,48 @@ Código: `enlaces.ts` (`nuevoToken`, `crearEnlace`, `abrirEnlace`,
 `POST /pendiente` y `GET /recordatorios` (cron), `vercel.json`;
 `FlujoAprobacionApp` pregunta `api.pendiente()` al cargar.
 
+### Un archivo en varios flujos activos (19-11-2026)
+
+Pedido del dueño: quitar el aviso «… ya está en el flujo activo «…»: un archivo
+solo puede estar en un flujo activo». Como la herramienta sirve para revisar,
+aprobar, inspeccionar o auditar, un mismo archivo puede necesitar varios
+procesos a la vez (por ejemplo, la aprobación del diseño y la inspección de
+calidad).
+
+- **Un archivo puede estar en varios flujos activos.** Crear, activar o
+  reactivar un flujo ya no se detiene por eso.
+- **Cada flujo lleva su propia revisión del archivo**: sus pasos,
+  responsables, firmas, versión fija, rechazo y corrección, carpeta de lo
+  aprobado, tareas de Trimble, correos y recordatorios. Aprobar o rechazar en
+  un flujo no cambia nada en el otro.
+- Una **versión nueva** que se sube a Trimble queda anotada en cada flujo
+  donde está el archivo («Hay una versión más nueva en Trimble»), y cada uno decide si
+  la hace entrar con «Reactivar el flujo».
+- El **tablero** cuenta el archivo en cada flujo donde está (son revisiones
+  distintas).
+- Antes, un archivo que pasaba de un flujo cerrado a uno nuevo «se movía» con
+  su registro (en el historial: «Archivo que cambió de flujo»). Ahora el flujo
+  nuevo empieza su propio registro y el flujo viejo conserva el suyo como
+  quedó. Las anotaciones viejas se siguen viendo igual.
+- **SQL**: quita el disparador `aprobacion_flujos_archivos` (y su función
+  `aprobacion_revisar_archivos`) y cambia la clave de `aprobacion_archivos`
+  de «un registro por archivo en el proyecto» (`proyecto, file_id`) a «uno por
+  archivo y flujo» (`flujo_id, file_id`, índice único
+  `aprobacion_archivos_flujo_archivo`). Hay que **volver a ejecutar
+  `supabase/flujo-aprobacion.sql`**. Se probó dos veces en PGlite, sobre una
+  base nueva y sobre una con el SQL de antes. Mientras no se ejecute, crear el
+  segundo flujo con el mismo archivo dice que falta correr el SQL.
+- Sigue igual: una carpeta en un solo flujo activo (solo flujos de antes del
+  09-11-2026) y la regla de no poner lo aprobado donde un archivo con ese
+  nombre va por un flujo activo.
+
+Código: `planRegistro` (`registro.ts`) solo mira los registros del propio
+flujo y ya no tiene `archivo-cambio-flujo`; se quitó `conflictosArchivos`
+(`flujos.ts`) de `guardarFlujo`, `cambiarEstado` y `reactivarFlujo`; el
+`memoryStore` exige un registro por `flujoId, fileId`. Pruebas:
+`registro.test.ts`, `service.test.ts` y `decisiones.test.ts` (el mismo archivo
+en dos flujos, cada uno decide por su cuenta).
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -5232,8 +5273,9 @@ flujo cerrado, versión fija, reactivar y cierre de tareas):
    nombre: debe quedar «En «carpeta» hay otro archivo con ese nombre» hasta
    que pulse «Reemplazar ahí», y lo copiado debe ser la versión aprobada, no
    la nueva.
-8. B intenta poner el `.rvt` en otro flujo activo: debe decir que ya está en
-   «Prueba flujo». Desde la decisión del paso 3, ni B ni A ven Editar,
+8. B pone el `.rvt` también en otro flujo activo: debe dejarlo, y cada flujo
+   lleva su propia revisión (lo que se decide en uno no cambia el otro).
+   Desde la decisión del paso 3, ni B ni A ven Editar,
    Activar ni Desactivar en «Prueba flujo», y el panel dice «Flujo cerrado
    desde la primera decisión (fecha, quién)», aunque se haya reactivado. El
    Estado dice **Por revisar** (el `.pdf` corregido volvió a revisión).

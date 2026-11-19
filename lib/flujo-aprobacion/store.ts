@@ -72,7 +72,8 @@ export interface FlujoStore {
 const SETUP_HINT = "La base de datos de Flujos documentales no está lista: ejecuta supabase/flujo-aprobacion.sql en el SQL Editor de Supabase.";
 export const HITO_REPETIDO = "Ya hay un flujo con ese título o hito en el proyecto (activo o desactivado): usa otro, o activa ese.";
 export const CARPETA_OCUPADA = "Una de las carpetas de revisión ya está en otro flujo activo: una carpeta solo puede estar en un flujo activo.";
-export const ARCHIVO_OCUPADO = "Uno de los archivos ya está en otro flujo activo: un archivo solo puede estar en un flujo activo.";
+/** Only while supabase/flujo-aprobacion.sql hasn't been run again after 19-11-2026 (a file in several active flows). */
+export const ARCHIVO_OCUPADO = "La base de datos todavía no deja poner un archivo en varios flujos activos: hay que volver a correr supabase/flujo-aprobacion.sql en Supabase.";
 
 type Fila = Record<string, unknown>;
 const t = (v: unknown) => (typeof v === "string" ? v : null);
@@ -256,7 +257,7 @@ function sinIndefinidos(f: Fila): Fila {
 function supabaseStore(): FlujoStore | null {
   const db = clienteSupabase((status, body) => {
     if (/carpeta-en-otro-flujo/.test(body)) return new StoreError(CARPETA_OCUPADA, 409);
-    if (/archivo-en-otro-flujo/.test(body)) return new StoreError(ARCHIVO_OCUPADO, 409);
+    if (/archivo-en-otro-flujo|aprobacion_archivos_proyecto_file_id_key/.test(body)) return new StoreError(ARCHIVO_OCUPADO, 409);
     if (/aprobacion_flujos_hito/.test(body)) return new StoreError(HITO_REPETIDO, 409);
     if (faltaTabla(body) || /PGRST204|42703/.test(body)) return new StoreError(SETUP_HINT);
     if (status === 409 || /23505/.test(body)) return new StoreError("Ya existe.", 409);
@@ -447,12 +448,11 @@ export function memoryStore(): FlujoStore {
   const copia = <T>(x: T): T => structuredClone(x);
   const ahora = () => new Date(Date.now() + contador).toISOString();
 
-  /** What the database refuses: a repeated title, a folder or a file in two active flows. */
+  /** What the database refuses: a repeated title or a folder in two active flows. */
   function revisar(f: Flujo) {
     const otros = [...flujos.values()].filter((x) => x.proyecto === f.proyecto && x.id !== f.id);
     if (otros.some((x) => x.hitoClave === f.hitoClave)) throw new StoreError(HITO_REPETIDO, 409);
     if (f.activo && otros.some((x) => x.activo && x.carpetas.some((c) => f.carpetas.some((n) => n.id === c.id)))) throw new StoreError(CARPETA_OCUPADA, 409);
-    if (f.activo && otros.some((x) => x.activo && x.archivos.some((c) => f.archivos.some((n) => n.id === c.id)))) throw new StoreError(ARCHIVO_OCUPADO, 409);
   }
 
   return {
@@ -523,7 +523,7 @@ export function memoryStore(): FlujoStore {
       return [...archivos.values()].filter((a) => a.proyecto === proyecto).sort((a, b) => a.ruta.localeCompare(b.ruta)).map(copia);
     },
     async crearArchivos(lista) {
-      if (lista.some((a) => [...archivos.values()].some((x) => x.proyecto === a.proyecto && x.fileId === a.fileId))) throw new StoreError("Ya existe.", 409);
+      if (lista.some((a) => [...archivos.values()].some((x) => x.flujoId === a.flujoId && x.fileId === a.fileId))) throw new StoreError("Ya existe.", 409);
       return lista.map((a) => {
         const nuevo = { ...copia(a), id: id() };
         archivos.set(nuevo.id, nuevo);

@@ -82,13 +82,13 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
       );
     }
 
-    // Newer versions (only noted), files that reappear or come from another flow, renames and moves.
+    // Newer versions (only noted), files that reappear, renames and moves.
     const aAvisar: ArchivoRegistro[] = [...creados];
     await enTandas(plan.actualizar, async (c: Cambio) => {
       const a = await ctx.store.actualizarArchivo(c.id, c.cambios);
       if (!c.accion) return;
       // A newer version waits for nobody: no ToDo.
-      if (ESPERANDO.includes(a.estado) && (c.accion === "version-reemplazada" || c.accion === "nueva-version" || c.accion === "archivo-cambio-flujo")) aAvisar.push(a);
+      if (ESPERANDO.includes(a.estado) && (c.accion === "version-reemplazada" || c.accion === "nueva-version")) aAvisar.push(a);
       const vn = c.accion === "version-nueva-vista" ? a.versionNueva : null;
       if (vn) {
         lineas.push({ ...linea(a, c.accion, detalleCambio(c, flujo.hito, fechaHora), { usuario: vn.subidoPor || null, usuarioId: vn.subidoPorId }, vn.subido), version: vn.revision });
@@ -127,7 +127,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
 
     const nuevasVersiones = plan.actualizar.filter((c) => c.accion === "nueva-version" || c.accion === "version-reemplazada" || c.accion === "version-nueva-vista").length;
     const soloVistas = nuevasVersiones > 0 && plan.actualizar.every((c) => c.accion !== "nueva-version" && c.accion !== "version-reemplazada");
-    const reaparecidos = plan.actualizar.filter((c) => c.accion === "archivo-reaparecido" || c.accion === "archivo-cambio-flujo").length;
+    const reaparecidos = plan.actualizar.filter((c) => c.accion === "archivo-reaparecido").length;
     const partes = [
       creados.length ? contar(creados.length, "archivo nuevo", "archivos nuevos") : "",
       nuevasVersiones ? `${contar(nuevasVersiones, "versión nueva", "versiones nuevas")} en Trimble${soloVistas ? " (el flujo sigue con la versión que tiene: ver el aviso en el archivo)" : ""}` : "",

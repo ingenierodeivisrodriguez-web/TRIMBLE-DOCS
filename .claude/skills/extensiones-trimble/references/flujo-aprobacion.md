@@ -213,8 +213,9 @@ El dueño dijo "Sí, fase 2" (04-11-2026). Decisiones tomadas por lo más simple
 - `planRegistro`: nuevo → `pendiente` con copia de `pasos` y `pasoActual 0`;
   versión distinta esperando → `version-reemplazada` (mismos pasos, paso 0);
   versión distinta tras aprobado/rechazado → `nueva-version` con los pasos
-  actuales del flujo (un trámite nuevo); viene de otro flujo →
-  `archivo-cambio-flujo` (pendiente, sin aprobada); retirado que vuelve →
+  actuales del flujo (un trámite nuevo); solo cuenta los registros del propio
+  flujo (desde el 19-11-2026 un archivo tiene un registro por flujo; antes
+  pasaba con `archivo-cambio-flujo`); retirado que vuelve →
   recupera su estado (`estadoAlReaparecer`); renombrado o movido dentro del
   flujo → solo ruta, sin historial.
 - Retirar: solo con recorrido completo, por un **administrador**, y si
@@ -452,8 +453,9 @@ Fase A (hecha el 09-11-2026):
 - `revisarFlujo`: `planRegistro` igual que antes; faltantes: **quitado del
   flujo → retirado al momento** (cualquiera, es configuración); 404 → retirado
   solo en la revisión de un administrador; el resto "no apareció".
-- `guardarFlujo`: valida, lee de Trimble solo los archivos nuevos, revisa
-  `conflictosArchivos` (un archivo en un solo flujo activo), guarda y **llama a
+- `guardarFlujo`: valida, lee de Trimble solo los archivos nuevos (desde el
+  19-11-2026 sin `conflictosArchivos`: un archivo puede estar en varios flujos
+  activos), guarda y **llama a
   `revisarFlujo` en la misma petición** (registra y avisa); devuelve `mensaje`.
   Ruta `POST /flujos` con `maxDuration = 120`. `tc.archivo` rechaza un archivo
   cuya ruta no pasa por la raíz del proyecto.
@@ -854,3 +856,15 @@ nombres de archivos, tablas `aprobacion_*`, código FLUJO-01. La pestaña
 «Flujos de aprobación» de Control de Obra es otra cosa: no se tocó. Solo si el dueño lo pide: revisión diaria con cuenta conectada,
 avance del hito, avisar por tarea cuando un flujo vence, poner una misma
 versión aprobada en varias carpetas (hoy, una por versión).
+Un archivo en varios flujos activos (19-11-2026, el dueño: «quiero que quites
+esta restricción», sobre el aviso «… ya está en el flujo activo …»): se quitó
+`conflictosArchivos` (guardar, activar, reactivar), el disparador
+`aprobacion_flujos_archivos` + función `aprobacion_revisar_archivos` y la
+clave `aprobacion_archivos_proyecto_file_id_key`; ahora índice único
+`aprobacion_archivos_flujo_archivo (flujo_id, file_id)` = un registro por
+archivo y flujo, cada uno con su revisión (firmas, versión fija, traslado,
+tareas, enlaces de correo por id de registro). `planRegistro` filtra por
+`flujoId`; `archivo-cambio-flujo` queda solo para anotaciones viejas
+(etiqueta en `trazabilidad.ts`). El error del disparador o de la clave vieja
+dice que falta volver a correr el SQL (`ARCHIVO_OCUPADO`). No se exige que
+esté decidido en los otros flujos (eso era la fase 2 descartada).

@@ -29,6 +29,7 @@ export const ACCIONES: Record<string, string> = {
   "tarea-no-cerrada": "Tarea de Trimble sin cerrar",
   "archivo-retirado": "Archivo retirado",
   "archivo-reaparecido": "Archivo que vuelve",
+  // Before 19-11-2026 a file had one record and moved between flows.
   "archivo-cambio-flujo": "Archivo que cambió de flujo",
   "aprobado-paso": "Aprobó un paso",
   aprobado: "Aprobó",

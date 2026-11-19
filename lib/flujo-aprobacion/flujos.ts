@@ -93,17 +93,6 @@ export function dentroDe(x: { id: string; ancestros: string[] }, carpetaId: stri
   return x.id === carpetaId || x.ancestros.includes(carpetaId);
 }
 
-/** The chosen files that already are in another active flow, in words; empty when none is. */
-export function conflictosArchivos(nuevo: { id?: string; archivos: ArchivoFlujo[] }, flujos: Flujo[]): string[] {
-  const otros = flujos.filter((f) => f.activo && f.id !== nuevo.id);
-  const avisos: string[] = [];
-  for (const a of nuevo.archivos) {
-    const otro = otros.find((f) => f.archivos.some((x) => x.id === a.id));
-    if (otro) avisos.push(`«${a.ruta}» ya está en el flujo activo «${otro.hito}»: un archivo solo puede estar en un flujo activo.`);
-  }
-  return avisos;
-}
-
 /** "Ana Ruiz", "Arquitectura (grupo)". */
 export function nombreResponsable(r: Pick<Responsable, "tipo" | "nombre">): string {
   return r.tipo === "grupo" ? `${r.nombre} (grupo)` : r.nombre;
