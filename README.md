@@ -5256,6 +5256,22 @@ sin `tareasTrimble`; `PanelFlujo.tsx` (descripción). Pruebas:
 dos archivos; un rechazo; reactivar lo vuelve a abrir), `lista.test.ts`,
 `reactivar.test.ts`, `correo.test.ts`.
 
+### «Realiza» con el nombre de quien creó el flujo (19-11-2026)
+
+Pedido del dueño, con una captura de «FLUJO-15 · checkeo de ascensores»: «en
+la fila realiza coloca el nombre del usuario creador del flujo, para mejor
+entendimiento». En el panel, **Pasos y responsables** ya no dice «Realiza:
+quien sube cada versión (y la corrige si la rechazan)» sino **«Realiza:
+Ana Ruiz»**: el nombre de quien creó el flujo, sin el correo que
+Trimble le agrega (el correo sigue en «Creado/a»). Al pasar el mouse dice
+«Quien creó el flujo. Si rechazan un archivo, el correo de corrección le
+llega a quien subió esa versión»: **la regla del rechazo no cambió**. Los
+flujos sin creador guardado siguen con el texto de antes. Sin SQL.
+
+Código: `nombreCreador` en [`flujos.ts`](lib/flujo-aprobacion/flujos.ts)
+(quita el «(correo)» del final del nombre) y la fila en `PanelFlujo.tsx`.
+Prueba en `flujos.test.ts`.
+
 ### Guía rápida
 
 1. Instale la extensión con

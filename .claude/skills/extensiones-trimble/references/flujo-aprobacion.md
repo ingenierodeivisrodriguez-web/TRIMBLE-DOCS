@@ -909,3 +909,9 @@ directamente (ajustes pedidos), sin SQL.
   Trimble.
 - Descripción: `PanelFlujo` la pone en un recuadro `#eef4fb` con borde
   izquierdo `#2f4f8f` y letra `#1c2f52`.
+- Mismo día, aparte: la fila «Realiza» del panel muestra a quien creó el
+  flujo (`nombreCreador(f.creadoPor)` en `flujos.ts`: quita el
+  « (correo)» que `resolveCaller` agrega al nombre; vacío → el texto de
+  antes). Solo es lo que se muestra: el correo de corrección de un rechazo
+  sigue yendo a quien subió esa versión (lo dice el tooltip). Si el dueño
+  pide que el rechazo le llegue al creador, eso es cambiar `avisoRechazo`.

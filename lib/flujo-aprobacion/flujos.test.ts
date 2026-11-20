@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { cambiosFlujo, claveHito, describirPasos, describirResponsables, idsDePasos, nombreDeRuta, puedeCambiar, revisarDatos } from "./flujos";
+import { cambiosFlujo, claveHito, describirPasos, describirResponsables, idsDePasos, nombreCreador, nombreDeRuta, puedeCambiar, revisarDatos } from "./flujos";
 import type { ArchivoFlujo, Flujo, PasoFlujo } from "./types";
 
 const MODELO: ArchivoFlujo = { id: "modelo", ruta: "Obra / Diseño / Arquitectura / modelo.rvt", ancestros: ["raiz", "dis", "arq"] };
@@ -100,4 +100,12 @@ test("cambia el flujo quien lo creó o un administrador del proyecto", () => {
   assert.equal(puedeCambiar(f, { id: "pepe", esAdmin: true }), true);
   // A flow from before (no creator id): only administrators.
   assert.equal(puedeCambiar({ creadoPorId: null }, { id: "juan", esAdmin: false }), false);
+});
+
+test("la fila «Realiza» muestra el nombre de quien creó el flujo, sin su correo", () => {
+  assert.equal(nombreCreador("Deivis Rodriguez (deivis@obra.co)"), "Deivis Rodriguez");
+  assert.equal(nombreCreador("Ana Ruiz"), "Ana Ruiz");
+  assert.equal(nombreCreador("Consorcio (Torre 2)"), "Consorcio (Torre 2)", "a parenthesis without an e-mail stays");
+  assert.equal(nombreCreador("ana@obra.co"), "ana@obra.co", "only the e-mail: it stays");
+  assert.equal(nombreCreador(null), "");
 });

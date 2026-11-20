@@ -3,7 +3,7 @@
 import { ReactNode, useEffect, useState } from "react";
 import { fechaHora } from "../../lib/compras/formato";
 import type { FlujoApi } from "../../lib/flujo-aprobacion/client";
-import { codigoFlujo, describirCierre, diaVisible, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
+import { codigoFlujo, describirCierre, diaVisible, nombreCreador, nombreResponsable, puedeCambiar } from "../../lib/flujo-aprobacion/flujos";
 import type { FilaFlujo } from "../../lib/flujo-aprobacion/lista";
 import type { ArchivoInfo, EstadoFlujos } from "../../lib/flujo-aprobacion/types";
 import { botonPeligro, botonSecundario } from "../compras/estilos";
@@ -97,7 +97,7 @@ export default function PanelFlujo({
   const [generando, setGenerando] = useState(false);
   // Whoever created the flow, or a project administrator.
   const puede = puedeCambiar(f, { id: datos.yo, esAdmin: datos.esAdmin });
-  // Closed by its first decision: nobody edits, activates or deactivates it (09-11-2026).
+  // Closed by its last decision (all files approved): nobody edits, activates or deactivates it (19-11-2026).
   const editable = puede && !fila.cierre;
 
   useEffect(() => setDesactivar(pedirDesactivar && !fila.cierre), [pedirDesactivar, f.id, fila.cierre]);
@@ -259,8 +259,8 @@ export default function PanelFlujo({
         )}
         <Dato etiqueta="Fecha de vencimiento">{f.vence ? <span style={{ color: fila.vencido ? "#c0392b" : undefined }}>{diaVisible(f.vence)}{fila.vencido ? " (vencido, con archivos esperando decisión)" : ""}</span> : "Sin fecha"}</Dato>
         <Dato etiqueta="Pasos y responsables">
-          <div>
-            <strong>Realiza:</strong> quien sube cada versión (y la corrige si la rechazan)
+          <div title="Quien creó el flujo. Si rechazan un archivo, el correo de corrección le llega a quien subió esa versión.">
+            <strong>Realiza:</strong> {nombreCreador(f.creadoPor) || "quien sube cada versión (y la corrige si la rechazan)"}
           </div>
           {f.pasos.map((p) => (
             <div key={p.id}>

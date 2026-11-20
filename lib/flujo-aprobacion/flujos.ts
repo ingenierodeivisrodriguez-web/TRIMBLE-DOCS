@@ -102,6 +102,12 @@ export function nombreResponsable(r: Pick<Responsable, "tipo" | "nombre">): stri
   return r.tipo === "grupo" ? `${r.nombre} (grupo)` : r.nombre;
 }
 
+/** The «Realiza» row of the panel: who created the flow, without the e-mail Trimble adds to the name ("Ana Ruiz (ana@obra.co)" → "Ana Ruiz"); "" when unknown. */
+export function nombreCreador(creadoPor: string | null | undefined): string {
+  const n = (creadoPor ?? "").trim();
+  return n.replace(/\s*\([^)]*@[^)]*\)\s*$/, "").trim() || n;
+}
+
 /** "Realiza → Revisa → Aprueba". */
 export function describirPasos(pasos: Pick<PasoFlujo, "nombre">[]): string {
   return ["Realiza", ...pasos.map((p) => p.nombre)].join(" → ");
