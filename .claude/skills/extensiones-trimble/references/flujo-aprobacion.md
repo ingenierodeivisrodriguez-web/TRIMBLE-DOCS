@@ -915,3 +915,22 @@ directamente (ajustes pedidos), sin SQL.
   antes). Solo es lo que se muestra: el correo de corrección de un rechazo
   sigue yendo a quien subió esa versión (lo dice el tooltip). Si el dueño
   pide que el rechazo le llegue al creador, eso es cambiar `avisoRechazo`.
+
+## Revisión al abrir: archivos sin acceso en una línea (20-11-2026)
+
+Un usuario sin acceso a varias carpetas veía un párrafo «Revisión incompleta
+(no se pudo leer …)» por cada flujo activo: la revisión al abrir usa la
+sesión de quien entra sobre todos los flujos activos. Ahora:
+
+- `Lectura.porTiempo` (`recorrido.ts`) separa «se acabó el tiempo» de
+  «no se pudo leer».
+- `ResumenRevision.sinAcceso` = hay `noLeidos` (los `fallidos` sin corte
+  por tiempo + los que no aparecieron a un no administrador) y no hubo nuevos,
+  versiones nuevas, retirados ni reaparecidos. `noLeidos` lleva las rutas.
+- `avisoRevision.ts` (sirve en el navegador): `repartirRevision` →
+  `{ noticias, sinAcceso }`; `textoSinAcceso(n)`; `detalleSinAcceso(r)`.
+  `RevisionCarpetas` muestra las noticias como antes y los sin acceso en una
+  línea con «Ver cuáles» (también dentro del recuadro, si hay noticias).
+- El `mensaje` y las reglas no cambian (no se retira lo que no se vio), ni qué flujos
+  se revisan al abrir (revisar solo los de quien entra retrasaría ver
+  versiones nuevas).

@@ -161,6 +161,8 @@ test("un archivo que Trimble ya no tiene solo se retira en la revisión de un ad
   // A member's review doesn't retire.
   const miembro = await revisarFlujo(e.como("juan"), { flujoId: f.id });
   assert.match(miembro.mensaje, /1 archivo registrado no apareció en tu revisión; solo la de un administrador lo/);
+  assert.equal(miembro.sinAcceso, true, "nothing changed: one line on the screen");
+  assert.deepEqual(miembro.noLeidos, ["Obra / Arquitectura / modelo.rvt"]);
   assert.equal((await e.store.archivos("P")).find((x) => x.fileId === "modelo")?.estado, "pendiente");
 
   // A file that can't be read (no access) leaves it incomplete and is not retired.
@@ -168,6 +170,8 @@ test("un archivo que Trimble ya no tiene solo se retira en la revisión de un ad
   e.sinPermiso.add("modelo");
   const incompleta = await revisarFlujo(e.admin, { flujoId: f.id });
   assert.match(incompleta.mensaje, /Revisión incompleta \(no se pudo leer «Obra \/ Arquitectura \/ modelo.rvt»\)/);
+  assert.equal(incompleta.sinAcceso, true);
+  assert.deepEqual(incompleta.noLeidos, ["Obra / Arquitectura / modelo.rvt"]);
   assert.equal((await e.store.archivos("P")).find((x) => x.fileId === "modelo")?.estado, "pendiente");
   e.sinPermiso.delete("modelo");
   e.borrados.add("modelo");
@@ -184,6 +188,39 @@ test("un archivo que Trimble ya no tiene solo se retira en la revisión de un ad
   const vuelve = await revisarFlujo(e.admin, { flujoId: f.id });
   assert.equal(vuelve.mensaje, "«Aprobar arquitectura Torre 1»: 1 archivo que vuelve.");
   assert.equal((await e.store.archivos("P")).find((x) => x.fileId === "modelo")?.estado, "pendiente");
+});
+
+test("una carpeta que quien entra no ve en Trimble: sin acceso (una línea); con una novedad o sin tiempo, va al aviso", async () => {
+  const e = escenario();
+  const { f } = await conFlujo(e);
+  const completa = await revisarFlujo(e.como("juan"), { flujoId: f.id });
+  assert.equal(completa.sinAcceso, false);
+  assert.deepEqual(completa.noLeidos, []);
+
+  // Juan doesn't see «Torre 1»: its listing and the file fail.
+  const t1 = e.arbol.t1;
+  delete e.arbol.t1;
+  e.sinPermiso.add("detalle");
+  const sinVer = await revisarFlujo(e.como("juan"), { flujoId: f.id });
+  assert.equal(sinVer.completo, false);
+  assert.equal(sinVer.sinAcceso, true);
+  assert.deepEqual(sinVer.noLeidos, ["Obra / Arquitectura / Torre 1 / detalle.dwg"]);
+  assert.match(sinVer.mensaje, /^«Aprobar arquitectura Torre 1»: sin cambios\. Revisión incompleta/);
+
+  // The same, with a newer version of another file: that is news, so it keeps the notice.
+  e.arbol.arq[0] = e.archivo("modelo", "modelo.rvt", 2, PERSONAS[2]);
+  const conNovedad = await revisarFlujo(e.como("juan"), { flujoId: f.id });
+  assert.equal(conNovedad.nuevasVersiones, 1);
+  assert.equal(conNovedad.sinAcceso, false);
+
+  // Out of time is not a matter of access.
+  e.arbol.t1 = t1;
+  e.sinPermiso.delete("detalle");
+  let t = 0;
+  const sinTiempo = await revisarFlujo({ ...e.como("juan"), reloj: () => (t += 30_000), limites: { tiempoMs: 50_000, paralelo: 1 } }, { flujoId: f.id });
+  assert.equal(sinTiempo.completo, false);
+  assert.equal(sinTiempo.sinAcceso, false);
+  assert.deepEqual(sinTiempo.noLeidos, []);
 });
 
 test("dos revisiones del mismo flujo a la vez: la segunda no registra nada", async () => {

@@ -5272,6 +5272,39 @@ Código: `nombreCreador` en [`flujos.ts`](lib/flujo-aprobacion/flujos.ts)
 (quita el «(correo)» del final del nombre) y la fila en `PanelFlujo.tsx`.
 Prueba en `flujos.test.ts`.
 
+### Archivos que quien entra no puede ver: una sola línea (20-11-2026)
+
+Pedido del dueño, con una captura de otro usuario: al abrir la extensión le
+salía un recuadro grande con un párrafo por flujo («sin cambios. Revisión
+incompleta (no se pudo leer «SATORI / 04_CONTRATACION_Y_COMPRAS / …»): lo que
+no se vio no se marcó como retirado»). La causa: al abrir, se revisan los
+archivos de **todos los flujos activos con la cuenta de quien entra**, y ese
+usuario no tiene acceso en Trimble a esas carpetas. No cambiaba nada, pero
+llenaba la pantalla.
+
+Ahora, cuando en un flujo **lo único** que pasó es que no se pudieron leer o
+no aparecieron archivos (casi siempre, carpetas sin acceso), y no hubo nada
+nuevo, ese flujo ya no sale en el recuadro. En su lugar hay **una línea**:
+«En 4 flujos hay archivos que tu cuenta no puede ver en Trimble: esos no se
+revisaron, y no cambia nada. **Ver cuáles**». «Ver cuáles» abre la lista de
+esos flujos con las rutas de los archivos. Al pasar el mouse explica que
+esos archivos los revisa quien sí los ve (por ejemplo, un administrador)
+cuando abre la extensión.
+
+- Si en ese mismo flujo hay una novedad (versión nueva, archivo nuevo,
+  retirado o que vuelve), sale en el recuadro como antes.
+- Si la revisión se cortó **por tiempo**, también sigue en el recuadro: no es
+  un tema de acceso.
+- Si solo hay flujos sin acceso, queda la línea delgada de siempre bajo las
+  tarjetas, con la frase y «Ver cuáles» al lado.
+- No cambia ninguna regla: lo que no se ve no se marca como retirado.
+
+Código: `recorrido.ts` dice si se acabó el tiempo (`porTiempo`);
+`revision.ts` devuelve `sinAcceso` y `noLeidos` (rutas) en el resumen;
+[`avisoRevision.ts`](lib/flujo-aprobacion/avisoRevision.ts) reparte lo que
+va al recuadro y lo que va a la línea; `RevisionCarpetas.tsx` lo muestra.
+Pruebas en `revision.test.ts` y `avisoRevision.test.ts`.
+
 ### Guía rápida
 
 1. Instale la extensión con

@@ -392,6 +392,14 @@ export interface ResumenRevision {
   sinCambios: number;
   carpetas: number;
   mensaje: string;
+  /**
+   * Nothing changed, and all the review missed were files the caller's session
+   * couldn't read or didn't see (usually folders without access in Trimble), not
+   * time: the screen sums these flows up in one line (20-11-2026).
+   */
+  sinAcceso?: boolean;
+  /** Paths of the files this review couldn't read or didn't see (not when time ran out). */
+  noLeidos?: string[];
 }
 
 /** A registered file as the screens show it. */

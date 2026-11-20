@@ -104,7 +104,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     const elegidosIds = new Set(flujo.archivos.map((a) => a.id));
     const borrados = new Set(r.borrados);
     let retirados = 0;
-    let noVistos = 0;
+    const noVistos: string[] = [];
     for (const a of plan.faltantes) {
       const motivo = !elegidosIds.has(a.fileId)
         ? `Se quitó del flujo «${flujo.hito}».`
@@ -112,7 +112,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
           ? "Ya no está en Trimble (se borró, o se movió a una carpeta que no se ve)."
           : null;
       if (!motivo) {
-        if (borrados.has(a.fileId)) noVistos++;
+        if (borrados.has(a.fileId)) noVistos.push(a.ruta);
         continue;
       }
       const hecho = await ctx.store.actualizarArchivo(a.id, { estado: "retirado", actualizado: momento });
@@ -136,9 +136,13 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
     ].filter(Boolean);
     const avisos = [
       r.completo ? "" : ` Revisión incompleta (${r.motivo}): lo que no se vio no se marcó como retirado.`,
-      noVistos > 0 ? ` ${contar(noVistos, "archivo registrado no apareció", "archivos registrados no aparecieron")} en tu revisión; solo la de un administrador los confirma como retirados.` : "",
+      noVistos.length > 0 ? ` ${contar(noVistos.length, "archivo registrado no apareció", "archivos registrados no aparecieron")} en tu revisión; solo la de un administrador los confirma como retirados.` : "",
       resumenAvisos(avisados, "a los revisores"),
     ].join("");
+    // Only files this session couldn't read or see, and nothing new: one line on the screen.
+    const rutaDe = new Map(elegidos.map((a) => [a.id, a.ruta]));
+    const noLeidos = r.porTiempo ? [] : [...r.fallidos.map((id) => rutaDe.get(id) ?? id), ...noVistos];
+    const sinAcceso = noLeidos.length > 0 && !creados.length && !nuevasVersiones && !retirados && !reaparecidos;
     return {
       ...base,
       completo: r.completo,
@@ -149,6 +153,8 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
       sinCambios: plan.sinCambios,
       carpetas: r.carpetas,
       mensaje: `«${flujo.hito}»: ${partes.length ? partes.join(", ") : "sin cambios"}.${avisos}`,
+      sinAcceso,
+      noLeidos,
     };
   } finally {
     await ctx.store.terminarRevision(flujo.id, ahoraDe(ctx).toISOString(), ctx.caller.name);

@@ -26,6 +26,8 @@ export interface Lectura {
   /** Files that couldn't be read now. */
   fallidos: string[];
   completo: boolean;
+  /** It stopped because time ran out (otherwise anything unread just couldn't be read: usually no access). */
+  porTiempo: boolean;
   /** Folders listed. */
   carpetas: number;
   /** Why it is incomplete, in words. */
@@ -77,7 +79,9 @@ export async function leerArchivos(elegidos: CarpetaFlujo[], deps: DepsLectura, 
     if (!listados.has(folderId)) listados.set(folderId, deps.items(folderId).catch(() => null));
     return listados.get(folderId)!;
   };
+  let porTiempo = false;
   const sinTiempo = (resto: CarpetaFlujo[]) => {
+    porTiempo = true;
     resto.forEach((a) => fallidos.add(a.id));
     motivos.add("se acabó el tiempo de esta revisión");
   };
@@ -143,6 +147,7 @@ export async function leerArchivos(elegidos: CarpetaFlujo[], deps: DepsLectura, 
     borrados,
     fallidos: [...fallidos],
     completo: fallidos.size === 0,
+    porTiempo,
     carpetas: listados.size,
     motivo: [...motivos].slice(0, 3).join("; "),
   };
