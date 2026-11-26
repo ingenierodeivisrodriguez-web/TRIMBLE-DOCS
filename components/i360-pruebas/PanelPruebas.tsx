@@ -7,7 +7,7 @@
 import { useEffect, useRef, useState } from "react";
 import type * as WorkspaceAPI from "trimble-connect-workspace-api";
 import { IMAGENES } from "../../lib/i360-pruebas/imagenes";
-import { aMetros, rad, unidadProbable, type Vec3 } from "../../lib/i360-pruebas/unidades";
+import { aMetros, camaraTrimble, diferenciaAngular, direccionCamara, unidadProbable, type Vec3 } from "../../lib/i360-pruebas/unidades";
 import { leerToque, superficie } from "../../lib/ra/anclaje";
 import type { ContextoPruebas } from "./ShellPruebas";
 import { bloque, boton, conTiempo, PanelRegistro, useRegistro } from "./Registro";
@@ -70,10 +70,13 @@ export default function PanelPruebas({ api, projectName, escuchar }: ContextoPru
               nombre: props[0]?.product?.name,
               psets: (props[0]?.properties ?? []).map((s) => s.name).slice(0, 15),
             });
-          const padres = await conTiempo(
-            viewer.getHierarchyParents(toque.modelId, [toque.runtimeId], 2 as Jerarquia, true),
-          ).catch((e) => e as Error);
-          anotar("Jerarquía espacial (contención)", padres instanceof Error ? "falla" : "ok", padres instanceof Error ? padres : padres.map((p) => p.name));
+          // 1 = SpatialHierarchy, 2 = SpatialContainment (const enum values of the SDK).
+          for (const [tipo, nombre] of [[1, "jerarquía espacial"], [2, "contención espacial"]] as const) {
+            const padres = await conTiempo(
+              viewer.getHierarchyParents(toque.modelId, [toque.runtimeId], tipo as Jerarquia, true),
+            ).catch((e) => e as Error);
+            anotar(`Padres (${nombre})`, padres instanceof Error ? "falla" : "ok", padres instanceof Error ? padres : padres.map((p) => p.name));
+          }
         } catch (err) {
           anotar("Punto", "falla", err);
         } finally {
@@ -123,11 +126,21 @@ export default function PanelPruebas({ api, projectName, escuchar }: ContextoPru
     }
   }
 
+  // removeIcon() without arguments failed in the viewer ("reading 'id'"): pass the icons back.
   async function quitarIconos() {
-    await conTiempo(viewer.removeIcon()).then(
-      () => anotar("T0.2 Íconos", "info", "removeIcon respondió."),
-      (e) => anotar("T0.2 Íconos", "falla", e),
-    );
+    try {
+      const actuales = await conTiempo(viewer.getIcon());
+      if (!actuales.length) return anotar("T0.2 Quitar íconos", "info", "No hay íconos.");
+      await conTiempo(viewer.removeIcon(actuales));
+      const quedan = await conTiempo(viewer.getIcon());
+      anotar("T0.2 Quitar íconos (con la lista de getIcon)", quedan.length === 0 ? "ok" : "falla", { antes: actuales.length, quedan: quedan.length });
+      if (quedan.length) {
+        await conTiempo(viewer.removeIcon(quedan.map((i) => ({ ...i, id: i.id }))));
+        anotar("T0.2 Quitar íconos (segundo intento)", "info", { quedan: (await conTiempo(viewer.getIcon())).length });
+      }
+    } catch (e) {
+      anotar("T0.2 Quitar íconos", "falla", e);
+    }
   }
 
   async function vistasDesdeElPunto() {
@@ -136,14 +149,25 @@ export default function PanelPruebas({ api, projectName, escuchar }: ContextoPru
     try {
       const antes = await conTiempo(viewer.getCamera());
       anotar("Cámara", "info", { camaraAntes: antes });
-      for (const yaw of [0, 90, 180, 270]) {
-        await conTiempo(viewer.setCamera({ position: v3(ojo), yaw: rad(yaw), pitch: 0 }, { animationTime: 0 }));
+      // First run showed the viewer's convention: pitch 0 looks straight down (π/2 is level) and
+      // the view direction is yaw + 90° counter-clockwise from +X. Here the azimuth (counter-clockwise
+      // from +X, as the plan's rumbo) is converted and each result is checked against getCamera.
+      for (const azimut of [0, 90, 180, 270]) {
+        await conTiempo(viewer.setCamera({ position: v3(ojo), ...camaraTrimble(azimut) }, { animationTime: 0 }));
         await new Promise((r) => setTimeout(r, 1500));
+        const cam = await conTiempo(viewer.getCamera());
         const imagen = await conTiempo(viewer.getSnapshot(), 15000);
-        setVistas((v) => [...v, { yaw, imagen }]);
+        setVistas((v) => [...v, { yaw: azimut, imagen }]);
+        if (cam.position && cam.lookAt) {
+          const d = direccionCamara(cam.position, cam.lookAt);
+          anotar(`Cámara azimut ${azimut}°`, diferenciaAngular(d.azimut, azimut) < 1 && Math.abs(d.elevacion) < 1 ? "ok" : "falla", {
+            azimutObtenido: Number(d.azimut.toFixed(2)),
+            elevacion: Number(d.elevacion.toFixed(2)),
+            yaw: cam.yaw,
+            pitch: cam.pitch,
+          });
+        } else anotar(`Cámara azimut ${azimut}°`, "info", { cam });
       }
-      const despues = await conTiempo(viewer.getCamera());
-      anotar("Cámara desde el punto", "ok", { camaraDespues: despues, nota: "¿Las 4 vistas muestran el espacio desde la altura del trípode, mirando en 4 direcciones?" });
     } catch (err) {
       anotar("Cámara desde el punto", "falla", err);
     }
@@ -163,6 +187,8 @@ export default function PanelPruebas({ api, projectName, escuchar }: ContextoPru
       sphereRadius: 1,
       position: v3(ojo),
       headingInDegrees: 0,
+      // The viewer answered "Quaternion must be provided" without it (optional in the SDK types).
+      quaternion: { x: 0, y: 0, z: 0, w: 1 },
       fovLeft: -180,
       fovRight: 180,
       fovTop: 90,
@@ -235,14 +261,14 @@ export default function PanelPruebas({ api, projectName, escuchar }: ContextoPru
 
       <div style={bloque}>
         <b>3. Modelo visto desde el punto</b>
-        <p style={{ margin: "4px 0" }}>Pone la cámara a 1,50 m sobre el punto y toma 4 imágenes (0°, 90°, 180°, 270°).</p>
+        <p style={{ margin: "4px 0" }}>Pone la cámara a 1,50 m sobre el punto, mirando horizontal, y toma 4 imágenes (azimut 0°, 90°, 180°, 270° desde el eje X del modelo); el registro comprueba la dirección.</p>
         <button style={boton} onClick={vistasDesdeElPunto} disabled={!punto}>Tomar 4 vistas</button>
         <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 4, marginTop: 6 }}>
           {vistas.map((v) => (
             <figure key={v.yaw} style={{ margin: 0 }}>
               {/* eslint-disable-next-line @next/next/no-img-element */}
               <img src={v.imagen} alt={`Vista ${v.yaw}°`} style={{ width: "100%" }} />
-              <figcaption style={{ fontSize: 11 }}>yaw {v.yaw}°</figcaption>
+              <figcaption style={{ fontSize: 11 }}>azimut {v.yaw}°</figcaption>
             </figure>
           ))}
         </div>
