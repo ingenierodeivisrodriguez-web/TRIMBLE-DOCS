@@ -120,3 +120,16 @@ export function textoTraslado(t: Traslado | null, fecha: (iso: string) => string
       return `Copia a ${donde} pendiente`;
   }
 }
+
+/**
+ * The folder last used to put this flow's approved versions in (the latest copy
+ * that reached a folder), proposed when choosing one again (26-11-2026).
+ */
+export function ultimaCarpeta(archivos: Pick<ArchivoRegistro, "traslado">[]): { id: string; ruta: string } | null {
+  const usadas = archivos
+    .map((a) => a.traslado)
+    .filter((t): t is Traslado => !!t && !!t.carpetaId && (t.estado === "hecho" || t.estado === "en-curso"))
+    .sort((p, q) => (q.fecha ?? "").localeCompare(p.fecha ?? ""));
+  const t = usadas[0];
+  return t?.carpetaId ? { id: t.carpetaId, ruta: t.carpetaRuta } : null;
+}

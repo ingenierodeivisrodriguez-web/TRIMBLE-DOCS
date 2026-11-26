@@ -402,6 +402,15 @@ export interface ResumenRevision {
   noLeidos?: string[];
 }
 
+/** What deciding several files at once did (26-11-2026): each file's result, the notices, and the approved versions to copy now. */
+export interface ResultadoVarios {
+  mensaje: string;
+  resultados: { archivoId: string; nombre: string; ok: boolean; texto: string }[];
+  avisos: string[];
+  /** Approved versions that go to a folder: the browser asks for each copy, one after the other. */
+  copiar: { archivoId: string; nombre: string; carpetaId: string | null }[];
+}
+
 /** A registered file as the screens show it. */
 export interface ArchivoInfo extends ArchivoRegistro {
   hito: string;

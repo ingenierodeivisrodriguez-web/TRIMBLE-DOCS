@@ -78,3 +78,43 @@ export function avisoRechazo(a: ArchivoRegistro, firma: Firma, flujo: Pick<Flujo
     },
   };
 }
+
+/**
+ * Versions rejected together (several files chosen in the panel, 26-11-2026):
+ * one notice per uploader with all their files and the reason, instead of one
+ * e-mail per file. `sinQuien`: files Trimble didn't say who uploaded.
+ */
+export function avisosRechazo(
+  items: { a: ArchivoRegistro; firma: Firma }[],
+  flujo: Pick<Flujo, "hito"> & Partial<Pick<Flujo, "notas" | "vence" | "codigo">>,
+  enlace: (a: ArchivoRegistro) => string
+): { avisos: Aviso[]; sinQuien: number } {
+  const porQuien = new Map<string, { a: ArchivoRegistro; firma: Firma }[]>();
+  let sinQuien = 0;
+  for (const it of items) {
+    if (!it.a.subidoPorId) {
+      sinQuien++;
+      continue;
+    }
+    porQuien.set(it.a.subidoPorId, [...(porQuien.get(it.a.subidoPorId) ?? []), it]);
+  }
+  const avisos = [...porQuien.values()].map((grupo) => {
+    const { a, firma } = grupo[0];
+    const uno = avisoRechazo(a, firma, flujo, enlace(a))!;
+    if (grupo.length === 1 || !uno.correo) return uno;
+    const carpetas = [...new Set(grupo.map((x) => x.a.ruta.slice(0, Math.max(0, x.a.ruta.length - x.a.nombre.length - 3))))];
+    const pasos = [...new Set(grupo.map((x) => x.firma.paso))];
+    return {
+      ...uno,
+      titulo: recorte(`Corregir ${grupo.length} archivos (rechazados) — ${flujo.hito}`, 120),
+      archivos: grupo.map((x) => x.a.id),
+      correo: {
+        ...uno.correo,
+        paso: pasos.join(" / "),
+        archivos: grupo.map((x) => ({ nombre: x.a.nombre, revision: x.firma.revision ?? x.a.revision ?? null, enlace: enlace(x.a), nueva: false })),
+        rechazo: { quien: firma.quien, motivo: firma.comentario, carpeta: carpetas.length === 1 ? carpetas[0] : "cada uno en la suya" },
+      },
+    };
+  });
+  return { avisos, sinQuien };
+}

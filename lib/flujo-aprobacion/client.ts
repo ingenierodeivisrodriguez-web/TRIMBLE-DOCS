@@ -3,7 +3,7 @@ import type { CarpetaInfo } from "../publicar/types";
 import type { FiltroTraza, Traza } from "./trazabilidad";
 import type { EstadoCorreos } from "./correo";
 import type { Pendiente } from "./enlaces";
-import type { ArchivoInfo, AvisoPermisos, Comentario, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResumenRevision, Traslado } from "./types";
+import type { ArchivoInfo, AvisoPermisos, Comentario, EntradaHistorial, Equipo, EstadoFlujos, PasoPrueba, PermisosCarpeta, PruebaResponse, ResultadoVarios, ResumenRevision, Traslado } from "./types";
 
 export interface DatosFlujoEnvio {
   id?: string;
@@ -36,6 +36,8 @@ export interface FlujoApi {
   /** Approves or rejects the step a file waits for, on the version seen (phase 3). */
   /** `destino`: the folder where the approved version goes (approving the last step of a flow without destination). */
   decidir(decision: "aprobar" | "rechazar", archivoId: string, versionId: string | null, texto: string, destino?: string | null): Promise<{ mensaje: string; aviso: string | null; traslado: Traslado | null }>;
+  /** Approves or rejects several files of one flow at once, with one comment and (last step) one folder for all (26-11-2026). */
+  decidirVarios(decision: "aprobar" | "rechazar", flujoId: string, archivos: { archivoId: string; versionId: string | null }[], texto: string, destino?: string | null): Promise<ResultadoVarios>;
   /** Copies the approved version (to `carpetaId`, or where it went before), confirms an upload, or replaces a file seen there. */
   traslado(paso: "trasladar" | "confirmar" | "reemplazar", archivoId: string, siVersion?: string | null, carpetaId?: string | null): Promise<{ traslado: Traslado | null; mensaje: string }>;
   /** Each file with what happened to it, for the filter (phase 5). */
@@ -81,6 +83,7 @@ export function flujoApi(projectId: string, auth: TokenSource): FlujoApi {
     revisar: (flujoId) => post("/revisar", { flujoId }),
     archivos: () => request("/archivos"),
     decidir: (decision, archivoId, versionId, texto, destino) => post(`/${decision}`, { archivoId, versionId, texto, ...(destino ? { destino } : {}) }),
+    decidirVarios: (decision, flujoId, archivos, texto, destino) => post("/decidir-varios", { decision, flujoId, archivos, texto, ...(destino ? { destino } : {}) }),
     traslado: (paso, archivoId, siVersion, carpetaId) => post("/trasladar", { paso, archivoId, ...(siVersion ? { siVersion } : {}), ...(carpetaId ? { carpetaId } : {}) }),
     trazabilidad: (filtro) => {
       const q = new URLSearchParams(Object.entries(filtro).filter(([, v]) => v));

@@ -934,3 +934,34 @@ sesión de quien entra sobre todos los flujos activos. Ahora:
 - El `mensaje` y las reglas no cambian (no se retira lo que no se vio), ni qué flujos
   se revisan al abrir (revisar solo los de quien entra retrasaría ver
   versiones nuevas).
+
+## Plan de 3 fases del 26-11-2026 (aprobado: «Sí, fase 1»)
+
+Pedido del dueño con capturas del FLUJO-14 (24 planos): 1) aprobar/rechazar
+varios archivos a la vez (selección múltiple, sin perder el individual);
+2) «Poner en una carpeta» eligiendo el destino una sola vez; 3) que cada
+flujo lo vean solo los implicados (quien lo creó = «Realiza», y los
+responsables de cada paso) y los administradores del proyecto vean todos.
+
+- **Fase 1 (hecha):** `decidirVarios(ctx, { flujoId, archivos: [{ archivoId,
+  versionId }], texto, destino? }, decision)` en `decisiones.ts`, ruta
+  `decidir-varios` (maxDuration 300). Mismas reglas que `decidir` por
+  archivo (`aplicarDecision` compartida: nota de versión más nueva,
+  `decidirArchivo` optimista, línea de historial); uno que falla no frena a
+  los demás (`resultados` con `ok`/`texto`). La carpeta se lee una vez
+  (`carpetaParaAprobados`) y `chocaConRevision` se mira por archivo; solo
+  aplica a los que están en su último paso. Avisos: `avisarRevision` ya
+  agrupa por paso y responsables (un correo con la lista);
+  `avisosRechazo` agrupa por quien subió. Las copias NO se hacen en el
+  servidor: vuelve `copiar` y el navegador llama `traslado("trasladar")`
+  uno por uno con avance. Pantalla: casillas solo si hay 2+ decidibles,
+  `DecidirVarios` en `Archivos.tsx` propone `ultimaCarpeta(delFlujo)`.
+  `ResultadoVarios` vive en `types.ts`.
+- **Fase 2 (pendiente):** casillas en los aprobados sin carpeta + «Poner los
+  seleccionados en una carpeta…» (una vez), copias en cadena con resumen;
+  reutilizar `ultimaCarpeta` y el bucle de copias de `DecidirVarios`.
+- **Fase 3 (pendiente):** visibilidad en el servidor (lista, tablero,
+  archivos, historial, comentarios, PDF/trazabilidad, decidir, enlaces del
+  correo): administradores todo; creador; responsables (persona o miembro del
+  grupo); quien ya firmó. Pregunta abierta al dueño: ¿también quien subió
+  algún archivo del flujo (recibe el correo de rechazo)? Recomendado: sí.

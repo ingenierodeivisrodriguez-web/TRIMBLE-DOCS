@@ -57,6 +57,16 @@ async function archivoDe(ctx: Ctx, archivoId: unknown): Promise<ArchivoRegistro>
   return a;
 }
 
+/** The folder read once (several files approved together): of this project, and not read-only for the caller. */
+export async function carpetaParaAprobados(ctx: Ctx, carpetaId: unknown): Promise<CarpetaFlujo> {
+  if (!esIdTrimble(carpetaId)) throw new FlujoError("La carpeta elegida no es válida.");
+  const c = await ctx.tc.carpeta(carpetaId);
+  if (c.permiso === "READ") {
+    throw new FlujoError(`Solo tienes lectura en «${c.ruta}»: elige una carpeta donde Trimble te deje subir archivos (acceso completo), o pide ese permiso en Trimble.`, 403, "sin-acceso");
+  }
+  return { id: c.id, ruta: c.ruta, ancestros: c.ancestros };
+}
+
 /**
  * A folder chosen to put an approved version in: of this project, where
  * Trimble doesn't give the caller read-only access (the owner: "previamente
@@ -64,11 +74,7 @@ async function archivoDe(ctx: Ctx, archivoId: unknown): Promise<ArchivoRegistro>
  * without permission), and not where the copy would come back to review.
  */
 export async function carpetaElegida(ctx: Ctx, a: ArchivoRegistro, carpetaId: unknown): Promise<CarpetaFlujo> {
-  if (!esIdTrimble(carpetaId)) throw new FlujoError("La carpeta elegida no es válida.");
-  const c = await ctx.tc.carpeta(carpetaId);
-  if (c.permiso === "READ") {
-    throw new FlujoError(`Solo tienes lectura en «${c.ruta}»: elige una carpeta donde Trimble te deje subir archivos (acceso completo), o pide ese permiso en Trimble.`, 403, "sin-acceso");
-  }
+  const c = await carpetaParaAprobados(ctx, carpetaId);
   const [registrados, flujos] = await Promise.all([ctx.store.archivos(ctx.projectId), ctx.store.flujos(ctx.projectId)]);
   const choca = chocaConRevision(a, c, registrados, flujos);
   if (choca) throw new FlujoError(choca, 409, "carpeta-en-revision");

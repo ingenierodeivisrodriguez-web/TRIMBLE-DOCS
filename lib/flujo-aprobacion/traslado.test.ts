@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { aprobador, carpetaDeRevision, chocaConRevision, puedeTrasladar, situacionDestino, subcarpetas, textoTraslado, trasladoInicial } from "./traslado";
+import { aprobador, carpetaDeRevision, chocaConRevision, puedeTrasladar, situacionDestino, subcarpetas, textoTraslado, trasladoInicial, ultimaCarpeta } from "./traslado";
 import type { Firma, Traslado } from "./types";
 
 const ARQ = { id: "arq", ruta: "Obra / Arquitectura", ancestros: ["raiz"] };
@@ -75,4 +75,13 @@ test("no se pone la versión aprobada en su propia carpeta ni donde un archivo c
   assert.match(chocaConRevision(a, T1, [registro("b", "t1", "modelo.RVT")], flujos)!, /En «Obra \/ Arquitectura \/ Torre 1» está «modelo.RVT», que va por el flujo «Aprobar Torre 1»/);
   assert.equal(chocaConRevision(a, T1, [registro("b", "t1", "modelo.rvt", "f2")], flujos), null, "an inactive flow doesn't review it");
   assert.equal(chocaConRevision(a, T1, [registro("b", "t1", "modelo.rvt", "f1", "retirado")], flujos), null, "a retired file doesn't either");
+});
+
+test("se propone la última carpeta donde el flujo puso una versión aprobada", () => {
+  const t = (carpetaId: string | null, fecha: string, estado: Traslado["estado"] = "hecho"): { traslado: Traslado } => ({
+    traslado: { ...trasladoInicial({ versionAprobadaId: "v1", revisionAprobada: 1, traslado: null }), estado, carpetaId, carpetaRuta: carpetaId ? `Obra / ${carpetaId}` : "", fecha },
+  });
+  assert.equal(ultimaCarpeta([]), null);
+  assert.deepEqual(ultimaCarpeta([t("Entrega", "2026-11-20T10:00:00Z"), t("Aprobados", "2026-11-25T10:00:00Z"), t("Otra", "2026-11-26T10:00:00Z", "error")]), { id: "Aprobados", ruta: "Obra / Aprobados" });
+  assert.equal(ultimaCarpeta([{ traslado: null }, t(null, "2026-11-26T10:00:00Z")]), null);
 });

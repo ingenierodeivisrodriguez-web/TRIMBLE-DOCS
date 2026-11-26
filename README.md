@@ -5305,6 +5305,49 @@ Código: `recorrido.ts` dice si se acabó el tiempo (`porTiempo`);
 va al recuadro y lo que va a la línea; `RevisionCarpetas.tsx` lo muestra.
 Pruebas en `revision.test.ts` y `avisoRevision.test.ts`.
 
+### Aprobar o rechazar varios archivos a la vez (26-11-2026, fase 1 de 3)
+
+Pedido del dueño, con capturas del FLUJO-14 «Planos PDF -DWG» (24 archivos):
+«al momento de revisar y aprobar tenemos la única opción de hacerlo de manera
+individual, necesitamos hacerlo con varios archivos al tiempo, con una opción
+de selección múltiple y también hacerlo individual». Es la fase 1 del plan
+aprobado (fase 2: «Poner en una carpeta» eligiendo el destino una vez; fase 3:
+cada persona ve solo sus flujos). Sin SQL.
+
+- En **Archivos** del panel, cuando hay **dos o más** archivos que te toca
+  decidir, cada uno trae una **casilla**, y la casilla de arriba los marca
+  todos. Al marcar, aparece una barra: «**N archivos seleccionados** en
+  «Revisa»…», un solo **comentario** (obligatorio para rechazar: el mismo
+  motivo para todos) y los botones **Aprobar N** y **Rechazar N**. El botón
+  **Decidir** de cada archivo sigue igual.
+- Si alguno está en su **último paso**, ahí mismo se elige **una vez** qué
+  hacer con lo aprobado: «Dejarlas donde están» o «Ponerlas también en una
+  carpeta (la misma para todas)». Se propone la **última carpeta que se usó
+  en ese flujo**.
+- Cada archivo se revisa como si se decidiera solo: que sea tu turno, que la
+  versión no haya cambiado y que nadie haya decidido antes. El que no se puede
+  decidir no frena a los demás. Al final sale el resumen («3 archivos pasan al
+  paso siguiente. 1 archivo no se pudo decidir») con el motivo de cada uno.
+- **Correos:** quien sigue recibe **un solo correo** con la lista de
+  archivos. Si se rechazan, cada persona que los subió recibe **un correo con
+  los suyos** y el motivo. El botón «Abrir el archivo» del correo de rechazo
+  queda solo cuando es un archivo; con varios, cada uno trae su enlace en la
+  lista.
+- Las copias a la carpeta se hacen **después**, una por una, con el avance en
+  pantalla («Copiando 3 de 24…»), para que muchos planos no se corten por
+  tiempo. Lo que quede en espera (otro archivo con ese nombre) sale en el
+  resumen y en su archivo, con su botón.
+- Hasta 100 archivos por vez (lo mismo que admite un flujo).
+
+Código: `decidirVarios` y `mensajeVarios` en
+[`decisiones.ts`](lib/flujo-aprobacion/decisiones.ts) (comparte con
+`decidir` la parte de cada archivo, `aplicarDecision`), ruta
+`/api/flujo-aprobacion/decidir-varios`; `avisosRechazo` en `avisos.ts`
+(un aviso por persona que subió); `carpetaParaAprobados` en
+`trasladar.ts` (la carpeta se lee una vez); `ultimaCarpeta` en
+`traslado.ts`; la barra `DecidirVarios` en `Archivos.tsx`. Pruebas en
+`decidirVarios.test.ts` y `traslado.test.ts`.
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -5326,7 +5369,9 @@ Pruebas en `revision.test.ts` y `avisoRevision.test.ts`.
    el flujo (mientras no esté todo aprobado).
 5. Cada responsable pulsa **«Tienes N archivos por revisar»**, abre el flujo y
    en **Archivos → Me toca → Decidir** abre el archivo en Trimble, aprueba (con
-   comentario si quiere) o rechaza con el motivo.
+   comentario si quiere) o rechaza con el motivo. Para decidir **varios a la
+   vez**, marca sus casillas (o la de arriba, para todos) y usa **Aprobar N** o
+   **Rechazar N** en la barra que aparece.
 6. Al aprobar el último paso, el responsable elige **Dejarla donde está** o
    **Ponerla también en una carpeta** (una donde Trimble le deje subir
    archivos). Si después la quiere poner en una carpeta, usa **«Poner en una

@@ -232,7 +232,8 @@ export function armarCorreo(
     mas ? p(`… y ${mas} más.`) : "",
     p(escapar(comoSigue), `color:${GRIS};font-size:13px`),
     `<div style="margin:18px 0 4px">${botonCorreo(etiqueta, comun.enlace, true)}${
-      d.tipo === "correccion" && archivo ? botonCorreo("Abrir el archivo", archivo.enlace, false) : ""
+      // Several rejected files (decided together): each one has its link in the list.
+      d.tipo === "correccion" && archivo && d.archivos.length === 1 ? botonCorreo("Abrir el archivo", archivo.enlace, false) : ""
     }</div>`,
   ].join("");
   return { asunto, texto, html: marcoCorreo(comun.proyecto, contenido, pie, aviso) };
