@@ -1,0 +1,10 @@
+{
+  "url": "https://trimble-docs.vercel.app/inspeccion-360/visor",
+  "title": "Inspección 360°",
+  "description": "Puntos de captura de fotos 360° ubicados en el modelo 3D (código, torre, piso, unidad, espacio, zona y coordenadas). Clic en un punto: sus fotos 360 por fecha, guardadas en la carpeta «Inspección 360» del proyecto. Nunca escribe en el modelo.",
+  "icon": "https://trimble-docs.vercel.app/icon-inspeccion-360.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "panel",
+  "enabled": true
+}

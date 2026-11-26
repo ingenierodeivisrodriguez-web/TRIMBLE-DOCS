@@ -17,6 +17,7 @@ ambos lugares** para Trimble Connect:
 | **Requisitos BIM (LOIN)** — qué se modela, con qué detalle y con qué información por disciplina y etapa, y (fases siguientes) la auditoría de los modelos contra eso | Menú lateral del proyecto (requisitos y matriz) **y** panel del visor 3D (asociación con los modelos) | `/loin` | `/manifest-loin.json` |
 | **Realidad aumentada** — modelos BIM preparados para verlos desde el celular a escala real, fijos en el punto de un QR (preparar el modelo, crear los QR, verlo en el celular con cortes, transparencia y colorear; guía en `/ra/guia`) | Menú lateral del proyecto (modelos preparados) **y** panel del visor 3D (preparar) | `/ra` | `/manifest-ra.json` |
 | **Publicar entre proyectos** — publicar documentos y carpetas en otro proyecto (carpeta de recepción por proyecto, versiones nuevas copiadas al abrir, cambios del destino nunca pisados, actividad) | Menú lateral del proyecto | `/publicar` | `/manifest-publicar.json` |
+| **Inspección 360°** — puntos de captura de fotos 360° ubicados en el modelo (código, torre, piso, unidad, espacio, zona, coordenadas) y sus fotos por fecha, guardadas en la carpeta «Inspección 360» del CDE (primera etapa: puntos y fotos) | Panel del visor 3D | `/inspeccion-360/visor` | `/manifest-inspeccion-360-visor.json` |
 | **Flujo de aprobación** — revisión y aprobación de entregables por flujos con título o hito, y copia de lo aprobado a la carpeta destino (fases 0 a 5 en código: configuración, registro, aprobar y rechazar con avisos, copia al destino, trazabilidad y PDF; desde el 06-11-2026 todo en una sola pantalla con panel de detalles, fecha de vencimiento, notas y comentarios; desde el 09-11-2026 quien crea el flujo marca sus archivos y elige el responsable de cada paso, sin carpeta destino, y al aprobar el último paso el responsable decide si pone la versión en una carpeta donde tenga permiso; falta la prueba completa en Trimble real) | Menú lateral del proyecto | `/flujo-aprobacion` | `/manifest-flujo-aprobacion.json` |
 
 Además, **`/bim-apps`** es la página web pública del negocio ("BIM Apps para
@@ -48,6 +49,7 @@ el visor para la selección y su propia base de datos (Supabase) para los valore
 - [Requisitos BIM (LOIN) (proyecto)](#requisitos-bim-loin-proyecto)
 - [Realidad aumentada con QR (en construcción)](#realidad-aumentada-con-qr-en-construcción)
 - [Publicar entre proyectos (proyecto)](#publicar-entre-proyectos-proyecto)
+- [Inspección 360° (visor 3D)](#inspección-360-visor-3d)
 - [Cómo funciona (común a ambas extensiones)](#cómo-funciona-común-a-ambas-extensiones)
 - [Estructura del proyecto](#estructura-del-proyecto)
 - [Configurar y desplegar en Vercel](#configurar-y-desplegar-en-vercel)
@@ -5445,6 +5447,61 @@ Trimble):
    estén quién subió, quién revisó, decisiones con fecha, motivos, qué carpeta
    eligió el responsable y quién copió la versión ahí.
 
+## Inspección 360° (visor 3D)
+
+Primera etapa de Inspección 360° según el plan del dueño (aprobado el 26-11-2026; el plan
+no está en el repositorio público). Muestra en el visor 3D los **puntos donde se toman las fotos 360°**; al hacer
+clic en un punto, el panel muestra sus datos y **sus fotos por fecha**, de la más nueva a la
+más vieja, con un visor 360 en el panel y a pantalla completa.
+
+**Cómo se usa**
+
+1. Un administrador del proyecto abre el panel **Inspección 360°** del visor y en **⚙** fija el
+   **código del proyecto** (2 a 6 letras, por ejemplo `MAL`) y, si quiere, los **editores**
+   (personas que, además de los administradores, crean puntos y suben fotos).
+2. **+ Nuevo punto**: clic en el piso del modelo donde va el trípode (un clic en un muro se
+   rechaza). Se escriben torre, piso, unidad, espacio, zona, altura del trípode (1,50 m) y una
+   referencia física. El código se arma solo (`MAL-TR1-P05-APT501-C01`, el número sigue al
+   último de esa unidad) y **nunca se reutiliza**.
+3. El punto aparece como **ícono** a la altura del trípode (azul con fotos, gris sin fotos,
+   naranja el elegido). Clic en el ícono (o en la lista) abre su ficha: código, torre, piso,
+   unidad, espacio, zona, referencia, coordenadas (m, marco del visor), altura, rumbo y quién
+   lo creó. **Ir al punto** pone la cámara del visor en el trípode.
+4. **Subir foto 360**: se elige el JPG equirrectangular (2:1, hasta 60 MB). El panel lee de la
+   foto su tamaño y la **fecha de la cámara** (o propone la del archivo), hace la miniatura,
+   y la persona confirma fecha, hora y observaciones. La foto queda en el CDE en
+   `Inspección 360/TR1/P05/APT501/C01/MAL-TR1-P05-APT501-C01_20261126-0930_360.jpg` (fecha
+   AAAAMMDD-HHMM solo en el nombre, para que la carpeta ordene por fecha; en pantalla
+   DD-MM-AAAA).
+5. **Fotos por fecha**: clic en una fecha la descarga (desde el CDE, a través del servidor) y
+   la muestra en el visor 360; **Pantalla completa ↗** la abre en una pestaña propia.
+6. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
+   **desactiva** con motivo. Nada se borra.
+
+**Cómo funciona**
+
+- Datos: `supabase/inspeccion-360.sql` (tablas `i360_config`, `i360_puntos`,
+  `i360_capturas`, `i360_fotos`, re-ejecutable, RLS sin políticas, sin `delete`) y el bucket
+  privado `i360-fotos` solo para la **copia temporal** de la foto: el navegador la sube allí
+  con un enlace firmado (Vercel no deja pasar más de 4,5 MB), el servidor la copia a su
+  carpeta del CDE con el token del usuario (nombre fijo, `If-None-Match: *`; un reintento
+  nunca crea otro archivo) y la borra de Supabase. La miniatura (512 × 256) va en la base
+  para listar fechas sin descargar fotos.
+- Por decisión del 26-11-2026 las tablas son **propias por proyecto**; la unión con empresas,
+  licencias, roles y estructura de Control de Obra (decisión D1 del plan) viene después.
+- Capas como Realidad aumentada: `app/api/inspeccion-360/**` → `lib/inspeccion-360/routes.ts`
+  → `service.ts` (reglas y permisos) + `validate.ts` → `store.ts` (Supabase o memoria).
+  Reglas puras con pruebas: `codigos.ts`, `fechas.ts` (Bogotá, UTC−5), `jpeg.ts` (tamaño,
+  fecha EXIF y proyección sin decodificar la foto), `camara.ts` (convención de la cámara del
+  visor medida en la Fase 0).
+- Visor 360: Photo Sphere Viewer (MIT). Fotos más anchas que lo que acepta la tarjeta de video
+  se reducen en el navegador antes de mostrarlas.
+- Íconos con `viewer.addIcon` (imágenes PNG embebidas) y clic con `viewer.onIconPicked`
+  (`providedId`), comprobados en la Fase 0; `removeIcon` siempre con la lista de `getIcon`.
+
+**Pendiente**: calibrar el rumbo de cada foto, comparar dos fechas lado a lado, la página del
+menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
+
 ## Cómo funciona (común a ambas extensiones)
 
 - **Frontend**: Next.js (App Router) + React, usando el paquete oficial
@@ -5658,6 +5715,7 @@ Repite estos pasos por cada extensión (necesitas ser administrador del proyecto
    | Requisitos BIM (LOIN) | `https://trimble-docs.vercel.app/manifest-loin.json` |
    | Realidad aumentada | `https://trimble-docs.vercel.app/manifest-ra.json` |
    | Publicar entre proyectos | `https://trimble-docs.vercel.app/manifest-publicar.json` |
+   | Inspección 360° (panel del visor) | `https://trimble-docs.vercel.app/manifest-inspeccion-360-visor.json` |
    | Flujo de aprobación (ejecutar antes `supabase/flujo-aprobacion.sql`) | `https://trimble-docs.vercel.app/manifest-flujo-aprobacion.json` |
 
 5. Selecciona **Add**. La extensión deberia aparecer en el menu lateral del
