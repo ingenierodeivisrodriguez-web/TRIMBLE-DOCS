@@ -5387,6 +5387,38 @@ usa «Aprobar N» de la fase 1; se detiene si la carpeta se rechaza para todos
 o la sesión venció); la barra `PonerVarios` en `Archivos.tsx`, que llama la
 ruta de siempre (`trasladar`) por cada archivo. Pruebas en `copias.test.ts`.
 
+### Cada persona ve solo sus flujos (26-11-2026, fase 3 de 3)
+
+Tercera parte del pedido: «que los flujos solo las puedan visualizar los
+implicados o los responsables "el que realiza, y los responsables de cada
+paso", y solo quien tenga el rol de administrador en trimble del proyecto pueda
+ver todos los flujos». A la pregunta de si quien subió archivos también lo ve,
+el dueño respondió «Sí, también». Sin SQL.
+
+- Los **administradores del proyecto en Trimble** ven todos los flujos.
+- Los demás ven solo los flujos donde participan: los que **crearon**
+  («Realiza»), donde son **responsables de un paso** (la persona, o un miembro
+  del grupo responsable), donde **subieron un archivo** (o una versión más
+  nueva), y donde ya **firmaron** un archivo o pusieron una versión aprobada en
+  una carpeta.
+- Se aplica en el servidor: la lista y el tablero, los archivos, el
+  historial, los comentarios, la trazabilidad y su PDF, y «Revisar ahora». Si
+  alguien pide un flujo que no es suyo, recibe «Este flujo no es tuyo…». La
+  revisión al abrir la extensión recorre solo los flujos que ve esa persona.
+- Debajo de la lista, quien no es administrador lee «Ves los flujos donde
+  participas…»; si no tiene ninguno, la lista le explica cuáles le
+  aparecerán.
+- Lo demás no cambia: cualquier miembro crea un flujo; decide solo el
+  responsable del paso; editar sigue siendo de quien lo creó o de un
+  administrador.
+
+Código: `veFlujo`, `idsVisibles`, `flujosVisibles` y `exigirVisible` en
+[`visibilidad.ts`](lib/flujo-aprobacion/visibilidad.ts) (los grupos se
+preguntan a Trimble una sola vez); se usan en `estado`, `historial`,
+`trazabilidad`, `comentarios`/`comentar` (`service.ts`) y en
+`revisarFlujo`/`listarArchivos` (`revision.ts`). Pruebas en
+`visibilidad.test.ts`.
+
 ### Guía rápida
 
 1. Instale la extensión con

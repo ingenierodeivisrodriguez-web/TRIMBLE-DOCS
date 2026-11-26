@@ -969,8 +969,16 @@ responsables de cada paso) y los administradores del proyecto vean todos.
   `FlujoAprobacionApp` y si no la barra se cerraría a mitad). `PonerVarios`
   propone `ultimaCarpeta`, deja fuera los que ya están en esa carpeta y, si
   la carpeta se rechaza para todos, muestra el error y reabre el explorador.
-- **Fase 3 (pendiente):** visibilidad en el servidor (lista, tablero,
-  archivos, historial, comentarios, PDF/trazabilidad, decidir, enlaces del
-  correo): administradores todo; creador; responsables (persona o miembro del
-  grupo); quien ya firmó. Pregunta abierta al dueño: ¿también quien subió
-  algún archivo del flujo (recibe el correo de rechazo)? Recomendado: sí.
+- **Fase 3 (hecha; el dueño: «Sí, también» a que quien subió archivos lo vea):**
+  `visibilidad.ts`. Ve el flujo: administrador (todo, sin preguntar grupos);
+  `creadoPorId`; responsable persona o miembro de grupo en `flujo.pasos` o
+  en los `pasos` guardados de cada archivo; `subidoPorId` o
+  `versionNueva.subidoPorId`; `firmas[].quienId`; `traslado.porId`. No se
+  usan los firmantes del historial (`decisiones` no trae ids). Filtrado en
+  `estado`, `listarArchivos`, `historial` (sin flujo: solo líneas de flujos
+  visibles; las líneas sin flujo, como «correos-config», solo para
+  administradores), `trazabilidad`, `comentarios`/`comentar` y
+  `revisarFlujo` → 403 `no-visible`. Decidir, trasladar, permisos y
+  reactivar ya exigían ser responsable, quien aprobó, creador o
+  administrador. `guardarFlujo` sigue mirando todos los títulos (un título
+  repetido de un flujo ajeno se rechaza igual).

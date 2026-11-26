@@ -14,6 +14,7 @@ import { nombreResponsable } from "./flujos";
 import { LIMITES, leerArchivos } from "./recorrido";
 import { Cambio, detalleCambio, ESPERANDO, meToca, planRegistro, responsablesArchivo } from "./registro";
 import type { Ctx } from "./service";
+import { exigirVisible, flujosVisibles } from "./visibilidad";
 import type { ArchivoInfo, ArchivoRegistro, EntradaHistorial, ResumenRevision } from "./types";
 
 /** How long one review holds its flow (a stuck one frees itself). */
@@ -37,6 +38,7 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
   if (typeof o.flujoId !== "string" || !UUID.test(o.flujoId)) throw new FlujoError("El flujo no es válido.");
   const flujo = await ctx.store.flujo(o.flujoId);
   if (!flujo || flujo.proyecto !== ctx.projectId) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
+  await exigirVisible(ctx, flujo.id);
   const base: ResumenRevision = { flujoId: flujo.id, hito: flujo.hito, ocupado: false, completo: false, nuevos: 0, nuevasVersiones: 0, retirados: 0, reaparecidos: 0, sinCambios: 0, carpetas: 0, mensaje: "" };
   if (!flujo.activo) return { ...base, mensaje: `«${flujo.hito}» está desactivado: no se revisa.` };
 
@@ -161,9 +163,10 @@ export async function revisarFlujo(ctx: Ctx, body: unknown): Promise<ResumenRevi
   }
 }
 
-/** Every registered file with its flow, the step it waits for, who has it and whether it is the caller's turn. */
+/** The registered files of the flows the caller sees, with the step each waits for, who has it and whether it is the caller's turn. */
 export async function listarArchivos(ctx: Ctx): Promise<{ yo: string; esAdmin: boolean; archivos: ArchivoInfo[] }> {
-  const [flujos, archivos] = await Promise.all([ctx.store.flujos(ctx.projectId), ctx.store.archivos(ctx.projectId)]);
+  const { flujos, archivos: todos, visibles } = await flujosVisibles(ctx);
+  const archivos = todos.filter((a) => visibles.has(a.flujoId));
   const porId = new Map(flujos.map((f) => [f.id, f]));
   const resp = new Map(archivos.map((a) => [a.id, responsablesArchivo(a, porId.get(a.flujoId))]));
   const grupos = [...new Set([...resp.values()].flat().filter((r) => r.tipo === "grupo").map((r) => r.id))];

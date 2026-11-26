@@ -259,8 +259,10 @@ test("la trazabilidad de un archivo cuenta quién subió, quién aprobó y quié
     ]
   );
   assert.equal(r.hitos[e.f.id], "FLUJO-01 · Aprobar Torre 1", "the PDF names the flow with its code");
-  const una = await trazabilidad(e.como("luz"), new URLSearchParams({ archivoId: r.trazas[0].archivo.id }));
-  assert.equal(una.trazas.length, 1, "any member can read it");
+  const una = await trazabilidad(e.como("juan"), new URLSearchParams({ archivoId: r.trazas[0].archivo.id }));
+  assert.equal(una.trazas.length, 1, "whoever uploaded it reads it");
+  await assert.rejects(() => trazabilidad(e.como("luz"), new URLSearchParams({ archivoId: r.trazas[0].archivo.id })), /Este flujo no es tuyo/);
+  assert.equal((await trazabilidad(e.como("luz"), new URLSearchParams({}))).trazas.length, 0, "someone not involved sees none");
   await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ desde: "04-11-2026" })), /Las fechas no son válidas/);
   await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ desde: "2026-11-05", hasta: "2026-11-01" })), /posterior a la final/);
   await assert.rejects(() => trazabilidad(e.admin, new URLSearchParams({ estado: "borrado" })), /El estado no es válido/);

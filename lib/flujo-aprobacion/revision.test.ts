@@ -248,7 +248,7 @@ test("cada archivo dice qué paso espera, quién es su responsable y si me toca;
   const dePepe = await listarArchivos(e.como("pepe", ["g-arq"]));
   assert.equal(dePepe.archivos.find((a) => a.fileId === "modelo")?.meToca, true);
   const sinGrupo = await listarArchivos(e.como("pepe"));
-  assert.equal(sinGrupo.archivos.find((a) => a.fileId === "modelo")?.meToca, false);
+  assert.equal(sinGrupo.archivos.find((a) => a.fileId === "modelo"), undefined, "outside the group Pepe isn't involved: he doesn't see the flow");
 });
 
 test("un flujo desactivado no se revisa", async () => {

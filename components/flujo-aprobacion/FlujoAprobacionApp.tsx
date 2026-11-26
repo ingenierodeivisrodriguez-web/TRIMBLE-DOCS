@@ -281,6 +281,7 @@ export default function FlujoAprobacionApp({ api, projectId, projectName }: { ap
               onDesactivar={(f) => setPanel({ tipo: "detalle", id: f.id, desactivar: true })}
               onReactivar={(f) => setPanel({ tipo: "detalle", id: f.id, reactivar: true })}
               onPdf={(f) => void pdf(f)}
+              esAdmin={datos.esAdmin}
             />
           )}
         </div>

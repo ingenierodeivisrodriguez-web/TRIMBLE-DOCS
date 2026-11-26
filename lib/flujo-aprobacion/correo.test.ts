@@ -245,8 +245,9 @@ async function escenario(conCorreo = true, config?: Record<string, unknown>) {
     ],
   });
   const modelo = async () => (await listarArchivos(ctx("deivis"))).archivos.find((a) => a.fileId === "modelo")!;
-  const lineas = async () => (await historial(ctx("deivis"), null, null)).entradas.filter((e) => e.accion.startsWith("correo-"));
-  const todas = async () => (await historial(ctx("deivis"), null, null)).entradas;
+  // The whole project's history (lines without a flow too) is read as an administrator.
+  const lineas = async () => (await historial(ctx("deivis", true), null, null)).entradas.filter((e) => e.accion.startsWith("correo-"));
+  const todas = async () => (await historial(ctx("deivis", true), null, null)).entradas;
   return { ctx, enviados, modelo, lineas, todas };
 }
 

@@ -76,6 +76,7 @@ export default function ListaFlujos({
   onDesactivar,
   onReactivar,
   onPdf,
+  esAdmin,
 }: {
   filas: FilaFlujo[];
   /** Flows before filtering. */
@@ -93,6 +94,8 @@ export default function ListaFlujos({
   /** Opens its details asking to confirm "Reactivar el flujo". */
   onReactivar: (f: Flujo) => void;
   onPdf: (f: Flujo) => void;
+  /** Administrators see every flow; anyone else only theirs (26-11-2026). */
+  esAdmin: boolean;
 }) {
   const cambiar = (c: Partial<FiltroLista>) => onFiltro({ ...filtro, ...c });
   const hayFiltro = !!(filtro.propietario || filtro.quien || filtro.estado || filtro.vence || filtro.porRevisar || filtro.texto || filtro.tarjeta);
@@ -157,7 +160,9 @@ export default function ListaFlujos({
               <tr>
                 <td style={{ ...td, color: "var(--tc-gray-500)" }} colSpan={7}>
                   {total === 0
-                    ? "Todavía no hay flujos en este proyecto. Crea el primero con «Nuevo»."
+                    ? esAdmin
+                      ? "Todavía no hay flujos en este proyecto. Crea el primero con «Nuevo»."
+                      : "No tienes flujos todavía: aquí aparecen los que creas, aquellos donde eres responsable de un paso y aquellos donde subiste archivos. Crea uno con «Nuevo»."
                     : filtro.tarjeta
                       ? VACIO_TARJETA[filtro.tarjeta]
                       : "Ningún flujo cumple estos filtros."}
@@ -224,6 +229,7 @@ export default function ListaFlujos({
       {filas.length > 0 && (
         <p style={{ fontSize: 12.5, color: "var(--tc-gray-500)", margin: "6px 0 0" }}>
           {filas.length === total ? `${total} ${total === 1 ? "flujo" : "flujos"}` : `${filas.length} de ${total} flujos`}
+          {!esAdmin && " · Ves los flujos donde participas (los creaste, eres responsable de un paso o subiste archivos); los administradores del proyecto ven todos."}
         </p>
       )}
     </div>

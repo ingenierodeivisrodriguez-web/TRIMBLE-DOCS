@@ -236,10 +236,12 @@ test("el flujo guarda su vencimiento y sus notas, y el cambio queda en el histor
   await assert.rejects(() => guardarFlujo(e.juan, nuevo({ hito: "Otro", archivos: ["e101"], vence: "2026-13-01" })), /fecha de vencimiento no es válida/);
 });
 
-test("cualquier miembro comenta un flujo; los comentarios quedan con quién y cuándo, en orden", async () => {
+test("quien ve el flujo lo comenta; los comentarios quedan con quién y cuándo, en orden", async () => {
   const e = escenario();
   const { comentarios, comentar } = await import("./service");
-  const f = (await guardarFlujo(e.admin, nuevo())).flujos[0];
+  const f = (await guardarFlujo(e.juan, nuevo())).flujos[0];
+  await assert.rejects(() => comentar(e.como("ido"), { flujoId: f.id, texto: "Hola" }), /Este flujo no es tuyo/);
+  await assert.rejects(() => comentarios(e.como("ido"), f.id), /Este flujo no es tuyo/);
   await comentar(e.admin, { flujoId: f.id, texto: "  Recuerden subir los planos en PDF y DWG.  " });
   const r = await comentar(e.juan, { flujoId: f.id, texto: "Listo, subo hoy." });
   assert.deepEqual(

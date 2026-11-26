@@ -2,7 +2,8 @@
  * "Flujo de aprobación": the configuration. Any member of the project creates
  * a flow with its title or milestone, the files that go through it and its
  * steps, each with its responsible; whoever created it and the project
- * administrators (Trimble's) change it; everyone in the project sees it. File
+ * administrators (Trimble's) change it; since 26-11-2026 only the people
+ * involved and the administrators see it (visibilidad.ts). File
  * paths and names of people and groups always come from Trimble, never from
  * the browser. Nothing is deleted: flows are deactivated, files taken out of
  * a flow are retired, and every change goes to the history.
@@ -34,6 +35,7 @@ import { nombrePersona } from "./prueba";
 import { revisarFlujo } from "./revision";
 import { armarTrazas, FiltroTraza, Traza } from "./trazabilidad";
 import { HITO_REPETIDO, FlujoStore } from "./store";
+import { exigirVisible, flujosVisibles, NO_VISIBLE } from "./visibilidad";
 import type { ArchivoFlujo, AvisoPermisos, CarpetaFlujo, Cierre, Comentario, Equipo, EstadoFlujos, EntradaHistorial, Flujo, PasoFlujo, PermisosCarpeta, Responsable } from "./types";
 
 /** A folder or file of this project as Trimble has it: its path in words and the folder ids above it. */
@@ -127,10 +129,15 @@ async function exigirAbierto(ctx: Ctx, f: Flujo) {
   if (c) throw new FlujoError(textoCerrado(f.hito, c), 409, "flujo-cerrado");
 }
 
-/** Every flow of the project, which ones are closed, who is asking and whether they administer it. */
+/**
+ * The flows the caller sees (administrators: all of them; anyone else, the
+ * ones they are involved in: 26-11-2026), which ones are closed, who is asking
+ * and whether they administer the project.
+ */
 export async function estado(ctx: Ctx): Promise<EstadoFlujos> {
-  const [flujos, cerrados] = await Promise.all([ctx.store.flujos(ctx.projectId), cierres(ctx)]);
-  return { esAdmin: ctx.caller.isAdmin, yo: ctx.caller.id, flujos, cierres: cerrados };
+  const [{ flujos, visibles }, cerrados] = await Promise.all([flujosVisibles(ctx), cierres(ctx)]);
+  const suyos = flujos.filter((f) => visibles.has(f.id));
+  return { esAdmin: ctx.caller.isAdmin, yo: ctx.caller.id, flujos: suyos, cierres: Object.fromEntries(Object.entries(cerrados).filter(([id]) => visibles.has(id))) };
 }
 
 /** The steps as the browser sent them (responsible: only its type and id). */
@@ -320,11 +327,19 @@ export async function permisosFlujo(ctx: Ctx, flujoId: string): Promise<{ avisos
 
 /** The history, newest first (of one flow, or of one registered file, when given). */
 export async function historial(ctx: Ctx, flujoId: string | null, archivoId: string | null = null): Promise<{ entradas: EntradaHistorial[] }> {
-  const entradas = await ctx.store.historial(ctx.projectId, {
+  const { archivos, visibles } = await flujosVisibles(ctx);
+  if (flujoId && !visibles.has(idFlujo(flujoId))) throw new FlujoError(NO_VISIBLE, 403, "no-visible");
+  if (archivoId) {
+    const a = archivos.find((x) => x.id === idFlujo(archivoId));
+    if (a && !visibles.has(a.flujoId)) throw new FlujoError(NO_VISIBLE, 403, "no-visible");
+  }
+  const todas = await ctx.store.historial(ctx.projectId, {
     flujoId: flujoId ? idFlujo(flujoId) : undefined,
     archivoId: archivoId ? idFlujo(archivoId) : undefined,
     limite: archivoId ? 500 : 300,
   });
+  // Without a flow: only the lines of the flows the caller sees (administrators: everything).
+  const entradas = ctx.caller.isAdmin ? todas : todas.filter((e) => !!e.flujoId && visibles.has(e.flujoId));
   // By when it happened (an upload's date is Trimble's, not when it was noted).
   const cuando = (e: EntradaHistorial) => e.ocurrido ?? e.creado;
   return { entradas: entradas.sort((a, b) => cuando(b).localeCompare(cuando(a)) || b.id - a.id) };
@@ -353,25 +368,34 @@ export async function trazabilidad(ctx: Ctx, q: { get(nombre: string): string | 
   if ((desde && !DIA.test(desde)) || (hasta && !DIA.test(hasta))) throw new FlujoError("Las fechas no son válidas.");
   if (desde && hasta && desde > hasta) throw new FlujoError("La fecha inicial es posterior a la final.");
   const filtro: FiltroTraza = { flujoId, estado: estado as FiltroTraza["estado"], desde, hasta, texto: opcional("texto")?.slice(0, 100) };
-  const [flujos, archivos, entradas] = await Promise.all([ctx.store.flujos(ctx.projectId), ctx.store.archivos(ctx.projectId), ctx.store.historialArchivos(ctx.projectId)]);
+  const [{ flujos: todos, archivos: registrados, visibles }, entradas] = await Promise.all([flujosVisibles(ctx), ctx.store.historialArchivos(ctx.projectId)]);
+  if (flujoId && !visibles.has(flujoId)) throw new FlujoError(NO_VISIBLE, 403, "no-visible");
+  // Only the flows the caller sees (26-11-2026).
+  const flujos = todos.filter((f) => visibles.has(f.id));
+  const archivos = registrados.filter((a) => visibles.has(a.flujoId));
   const hitos = new Map(flujos.map((f) => [f.id, f.codigo ? `${codigoFlujo(f.codigo)} · ${f.hito}` : f.hito]));
   const elegidos = archivoId ? archivos.filter((a) => a.id === archivoId) : archivos;
-  if (archivoId && !elegidos.length) throw new FlujoError("Ese archivo no está registrado en este proyecto.", 404);
+  if (archivoId && !elegidos.length) {
+    if (registrados.some((a) => a.id === archivoId)) throw new FlujoError(NO_VISIBLE, 403, "no-visible");
+    throw new FlujoError("Ese archivo no está registrado en este proyecto.", 404);
+  }
   return { trazas: armarTrazas(elegidos, entradas, hitos, filtro), filtro, hitos: Object.fromEntries(hitos), por: ctx.caller.name };
 }
 
-/** A flow's comments, oldest first (any project member). */
+/** A flow's comments, oldest first (whoever sees the flow). */
 export async function comentarios(ctx: Ctx, flujoId: string): Promise<{ comentarios: Comentario[] }> {
   const flujo = await ctx.store.flujo(idFlujo(flujoId));
   if (!flujo || flujo.proyecto !== ctx.projectId) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
+  await exigirVisible(ctx, flujo.id);
   return { comentarios: await ctx.store.comentarios(flujo.id) };
 }
 
-/** { flujoId, texto }: adds a comment to a flow (any project member). Comments are never edited or deleted. */
+/** { flujoId, texto }: adds a comment to a flow (whoever sees it). Comments are never edited or deleted. */
 export async function comentar(ctx: Ctx, body: unknown): Promise<{ comentarios: Comentario[] }> {
   const o = obj(body);
   const flujo = await ctx.store.flujo(idFlujo(o.flujoId));
   if (!flujo || flujo.proyecto !== ctx.projectId) throw new FlujoError("Ese flujo no existe en este proyecto.", 404);
+  await exigirVisible(ctx, flujo.id);
   const texto = typeof o.texto === "string" ? o.texto.trim() : "";
   if (!texto) throw new FlujoError("Escribe el comentario.");
   if (texto.length > 2000) throw new FlujoError("El comentario admite hasta 2000 caracteres.");
