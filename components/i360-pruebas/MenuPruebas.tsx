@@ -6,6 +6,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import * as WorkspaceAPI from "trimble-connect-workspace-api";
+import { cuerpoPuntoDeVista, resumenProyecto } from "../../lib/i360-pruebas/datos";
 import { candidatosBcf } from "../../lib/i360-pruebas/destino";
 import { pickRegion, type RegionInfo } from "../../lib/trimbleApi";
 import type { ContextoPruebas } from "./ShellPruebas";
@@ -39,7 +40,10 @@ export default function MenuPruebas({ api, projectId, projectName, token, escuch
   const [baseManual, setBaseManual] = useState("");
   const [bcf, setBcf] = useState<BcfListo | null>(null);
   const [guid, setGuid] = useState("");
+  const [ultimoTema, setUltimoTema] = useState("");
+  const [archivos, setArchivos] = useState<{ id: string; name: string }[]>([]);
   const tcApi = useRef<string>("");
+  const raiz = useRef<string>("");
 
   useEffect(
     () =>
@@ -80,10 +84,8 @@ export default function MenuPruebas({ api, projectId, projectName, token, escuch
       if (!tcApi.current) await regionDelProyecto();
       const p = await relevo("GET", `${tcApi.current}/projects/${projectId}`);
       const cuerpo = (p.cuerpo ?? {}) as Record<string, unknown>;
-      const utiles = Object.fromEntries(
-        Object.entries(cuerpo).filter(([k]) => /size|quota|storage|licen|tier|location|type|access|created|modified/i.test(k)),
-      );
-      anotar("T0.1 Proyecto", p.estado === 200 ? "ok" : "falla", { estado: p.estado, claves: Object.keys(cuerpo), utiles });
+      if (typeof cuerpo.rootId === "string") raiz.current = cuerpo.rootId;
+      anotar("T0.1 Proyecto y licencia (sin nombres ni correos)", p.estado === 200 ? "ok" : "falla", { estado: p.estado, ...resumenProyecto(cuerpo) });
       const u = await relevo("GET", `${MAESTRO}/users/me`);
       const cu = (u.cuerpo ?? {}) as Record<string, unknown>;
       const sinDatosPersonales = Object.fromEntries(Object.entries(cu).filter(([k]) => /licen|tier|type|status|role|subscription/i.test(k)));
@@ -125,6 +127,24 @@ export default function MenuPruebas({ api, projectId, projectName, token, escuch
   }
 
   // ---------------------------------------------------------------- T0.5 custom file action
+
+  async function listarArchivos() {
+    try {
+      if (!raiz.current) {
+        if (!tcApi.current) await regionDelProyecto();
+        const p = await relevo("GET", `${tcApi.current}/projects/${projectId}`);
+        const r = (p.cuerpo as { rootId?: string } | undefined)?.rootId;
+        if (r) raiz.current = r;
+      }
+      const items = await relevo("GET", `${tcApi.current}/folders/${encodeURIComponent(raiz.current)}/items`);
+      const lista = Array.isArray(items.cuerpo) ? (items.cuerpo as { id: string; name: string; type: string }[]) : [];
+      const soloArchivos = lista.filter((i) => i.type === "FILE").map((i) => ({ id: i.id, name: i.name }));
+      setArchivos(soloArchivos);
+      anotar("T0.5 Archivos de la carpeta raíz", items.estado === 200 ? "ok" : "falla", { estado: items.estado, archivos: soloArchivos.length, carpetas: lista.length - soloArchivos.length });
+    } catch (err) {
+      anotar("T0.5 Archivos", "falla", err);
+    }
+  }
 
   async function accionArchivo() {
     const fileId = archivo.trim();
@@ -195,15 +215,30 @@ export default function MenuPruebas({ api, projectId, projectName, token, escuch
       ...(bcf.tipos[0] ? { topic_type: bcf.tipos[0] } : {}),
       ...(bcf.estados[0] ? { topic_status: bcf.estados[0] } : {}),
     });
-    anotar("T0.6 Crear tema", tema.estado >= 200 && tema.estado < 300 ? "ok" : "falla", tema);
-    const temaGuid = (tema.cuerpo as { guid?: string } | undefined)?.guid;
-    if (!temaGuid) return;
-    const comentario = await relevo("POST", `${raiz}/topics/${temaGuid}/comments`, { comment: "Comentario de prueba (Fase 0)." });
-    anotar("T0.6 Comentario", comentario.estado >= 200 && comentario.estado < 300 ? "ok" : "falla", comentario);
-    if (guid.trim()) {
-      const vp = await relevo("POST", `${raiz}/topics/${temaGuid}/viewpoints`, { components: { selection: [{ ifc_guid: guid.trim() }] } });
-      anotar("T0.6 Punto de vista con IFCGUID", vp.estado >= 200 && vp.estado < 300 ? "ok" : "falla", vp);
-    }
+    const t = (tema.cuerpo ?? {}) as { guid?: string; server_assigned_id?: string; topic_type?: string; topic_status?: string };
+    anotar("T0.6 Crear tema", tema.estado >= 200 && tema.estado < 300 ? "ok" : "falla", { estado: tema.estado, guid: t.guid, id: t.server_assigned_id, tipo: t.topic_type, estadoTema: t.topic_status, error: tema.estado >= 300 ? tema.cuerpo : undefined });
+    if (!t.guid) return;
+    setUltimoTema(t.guid);
+    const comentario = await relevo("POST", `${raiz}/topics/${t.guid}/comments`, { comment: "Comentario de prueba (Fase 0)." });
+    anotar("T0.6 Comentario", comentario.estado >= 200 && comentario.estado < 300 ? "ok" : "falla", { estado: comentario.estado });
+    await puntoDeVista(t.guid);
+  }
+
+  /** Viewpoint with the IFCGUID typed below and, if the embedded viewer is open, its camera and snapshot. */
+  async function puntoDeVista(temaGuid: string) {
+    if (!bcf) return;
+    const emb = visorEmbebido.current;
+    const camara = emb ? await conTiempo(emb.viewer.getCamera()).catch(() => null) : null;
+    const imagen = emb ? await conTiempo(emb.viewer.getSnapshot(), 15000).catch(() => null) : null;
+    const cuerpo = cuerpoPuntoDeVista({ version: bcf.version, guid: guid.trim(), camara, imagen });
+    if (!Object.keys(cuerpo).length) return anotar("T0.6 Punto de vista", "info", "Sin IFCGUID ni visor embebido abierto: no se crea punto de vista.");
+    const vp = await relevo("POST", `${bcf.base}/bcf/${bcf.version}/projects/${projectId}/topics/${temaGuid}/viewpoints`, cuerpo);
+    anotar("T0.6 Punto de vista", vp.estado >= 200 && vp.estado < 300 ? "ok" : "falla", {
+      estado: vp.estado,
+      con: Object.keys(cuerpo),
+      respuesta: vp.estado >= 300 ? vp.cuerpo : (vp.cuerpo as { guid?: string } | undefined)?.guid,
+      nota: "Abra el tema en Temas (BCF) de Trimble y revise si selecciona el elemento, la cámara y la imagen.",
+    });
   }
 
   return (
@@ -235,9 +270,21 @@ export default function MenuPruebas({ api, projectId, projectName, token, escuch
       <div style={bloque}>
         <b>T0.5 Botón propio sobre un archivo del explorador</b>
         <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 6 }}>
-          <input value={archivo} onChange={(e) => setArchivo(e.target.value)} placeholder="id de un archivo (foto JPG del proyecto)" style={{ flex: "1 1 260px", padding: 6 }} />
+          <button style={boton} onClick={listarArchivos}>Listar archivos de la carpeta raíz</button>
+          <input value={archivo} onChange={(e) => setArchivo(e.target.value)} placeholder="id de un archivo (o elíjalo de la lista)" style={{ flex: "1 1 260px", padding: 6 }} />
           <button style={boton} onClick={accionArchivo}>Agregar botón</button>
         </div>
+        {archivos.length > 0 && (
+          <ul style={{ margin: "6px 0 0", paddingLeft: 18, maxHeight: 140, overflow: "auto" }}>
+            {archivos.map((a) => (
+              <li key={a.id}>
+                <button style={{ ...boton, border: "none", padding: "2px 4px", textAlign: "left" }} onClick={() => setArchivo(a.id)}>
+                  {a.name}
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
 
       <div style={bloque}>
@@ -252,9 +299,11 @@ export default function MenuPruebas({ api, projectId, projectName, token, escuch
           <div style={{ marginTop: 8 }}>
             <p style={{ margin: "4px 0" }}>Servicio encontrado: {bcf.base} (BCF {bcf.version}). Crear un tema de prueba en <b>este</b> proyecto:</p>
             <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
-              <input value={guid} onChange={(e) => setGuid(e.target.value)} placeholder="IFCGUID opcional para el punto de vista" style={{ flex: "1 1 260px", padding: 6 }} />
+              <input value={guid} onChange={(e) => setGuid(e.target.value)} placeholder="IFCGUID para el punto de vista (por ejemplo el del informe del visor)" style={{ flex: "1 1 260px", padding: 6 }} />
               <button style={boton} onClick={crearTema}>Crear tema de prueba</button>
+              <button style={boton} onClick={() => puntoDeVista(ultimoTema)} disabled={!ultimoTema}>Agregar punto de vista al último tema</button>
             </div>
+            <p style={{ margin: "4px 0 0", color: "#546E7A" }}>Si el visor embebido está abierto, el punto de vista lleva también su cámara y su imagen.</p>
           </div>
         )}
       </div>
