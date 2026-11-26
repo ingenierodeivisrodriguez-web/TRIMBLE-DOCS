@@ -1,0 +1,10 @@
+{
+  "url": "https://trimble-docs.vercel.app/i360-pruebas/visor",
+  "title": "Inspección 360 (pruebas)",
+  "description": "TEMPORAL — pruebas técnicas de la Fase 0 de Inspección 360° en el visor 3D: íconos, cámara desde un punto, panorama y ventana nueva. Instalar solo en un proyecto de prueba.",
+  "icon": "https://trimble-docs.vercel.app/icon-i360-pruebas.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["3dviewer"],
+  "type": "panel",
+  "enabled": true
+}

@@ -1,0 +1,9 @@
+{
+  "url": "https://trimble-docs.vercel.app/i360-pruebas",
+  "title": "Inspección 360 (pruebas)",
+  "description": "TEMPORAL — pruebas técnicas de la Fase 0 de Inspección 360°: visor 3D embebido, botón sobre archivos, servicio BCF y datos del proyecto. Instalar solo en un proyecto de prueba.",
+  "icon": "https://trimble-docs.vercel.app/icon-i360-pruebas.svg",
+  "infoUrl": "https://trimble-docs.vercel.app",
+  "extensionType": ["project"],
+  "enabled": true
+}
