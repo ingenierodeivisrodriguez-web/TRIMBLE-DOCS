@@ -957,9 +957,18 @@ responsables de cada paso) y los administradores del proyecto vean todos.
   uno por uno con avance. Pantalla: casillas solo si hay 2+ decidibles,
   `DecidirVarios` en `Archivos.tsx` propone `ultimaCarpeta(delFlujo)`.
   `ResultadoVarios` vive en `types.ts`.
-- **Fase 2 (pendiente):** casillas en los aprobados sin carpeta + «Poner los
-  seleccionados en una carpeta…» (una vez), copias en cadena con resumen;
-  reutilizar `ultimaCarpeta` y el bucle de copias de `DecidirVarios`.
+- **Fase 2 (hecha, «Sí, fase 2»):** solo navegador, sin ruta nueva. En
+  `copias.ts`: `esperaCarpeta` (antes `sinCarpeta` en `Archivos.tsx`),
+  `copiarUnoPorUno(lista, copiarUno, avance)` (uno que falla no frena a los
+  demás; `sin-acceso` o 401 detienen todo → `detenido`) y `textoCopias`; lo
+  usan `DecidirVarios` y la barra nueva `PonerVarios`. En `Archivos.tsx` la
+  selección es `{ tanda: "decidir" | "carpeta", ids }`: casillas de una tanda
+  cuando tiene 2+ filas, la otra tanda apagada mientras hay marcados;
+  `enTrabajo` congela los archivos de la barra mientras decide o copia (la
+  lista puede recargarse por el sondeo de copias en curso de
+  `FlujoAprobacionApp` y si no la barra se cerraría a mitad). `PonerVarios`
+  propone `ultimaCarpeta`, deja fuera los que ya están en esa carpeta y, si
+  la carpeta se rechaza para todos, muestra el error y reabre el explorador.
 - **Fase 3 (pendiente):** visibilidad en el servidor (lista, tablero,
   archivos, historial, comentarios, PDF/trazabilidad, decidir, enlaces del
   correo): administradores todo; creador; responsables (persona o miembro del

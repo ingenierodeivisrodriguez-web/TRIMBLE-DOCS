@@ -5350,6 +5350,43 @@ Código: `decidirVarios` y `mensajeVarios` en
 `traslado.ts`; la barra `DecidirVarios` en `Archivos.tsx`. Pruebas en
 `decidirVarios.test.ts` y `traslado.test.ts`.
 
+### Poner varios aprobados en una carpeta eligiéndola una vez (26-11-2026, fase 2 de 3)
+
+Segunda parte del mismo pedido: «al momento de PONER EN UNA CARPETA sea
+suficiente con seleccionar una única vez EL DESTINO donde se dirigen los
+documentos». Sin SQL ni cambios en el servidor.
+
+- En **Archivos → Todos**, cada versión aprobada que **tú puedes poner en
+  una carpeta** (la aprobaste en el último paso, o eres administrador) y que
+  todavía no está en una (o cuya copia falló) trae una **casilla**, cuando
+  hay dos o más. La casilla de arriba las marca todas.
+- Al marcar aparece la barra «**N aprobados seleccionados** para poner en una
+  carpeta», con la carpeta propuesta (**la última que se usó en ese flujo**),
+  «Cambiar» para elegir otra en el explorador y el botón **Poner N en
+  «carpeta»**. Las copias van una por una con el avance en pantalla
+  («Copiando 3 de 12…») y al final sale el resumen («Se copiaron 10 de 12 a
+  «Obra / Aprobados»») con el motivo de cada uno que no fue.
+- Los que **ya están en esa carpeta** no se copian (la copia sería una
+  versión nueva del mismo archivo y volvería a revisión): la barra lo avisa
+  antes de pulsar.
+- Si la carpeta es de **solo lectura** para ti, se detiene en el primero, lo
+  dice en la barra y abre el explorador para elegir otra: no intenta los
+  demás.
+- Si en la carpeta ya hay un archivo con ese nombre que **no llegó por el
+  flujo**, ese queda en espera con su botón «Reemplazar ahí», como siempre
+  (regla 2: no se reemplaza sin preguntar).
+- Las casillas para **decidir** y las de **poner en carpeta** no se mezclan:
+  mientras hay marcados de una clase, las otras quedan apagadas. Si en
+  pantalla hay de las dos, la línea de ayuda trae «Seleccionar: los N que te
+  tocan · los M aprobados por poner en una carpeta».
+- El botón «Poner en una carpeta…» de cada archivo sigue igual.
+
+Código: `esperaCarpeta`, `copiarUnoPorUno` y `textoCopias` en
+[`copias.ts`](lib/flujo-aprobacion/copias.ts) (el mismo bucle de copias que
+usa «Aprobar N» de la fase 1; se detiene si la carpeta se rechaza para todos
+o la sesión venció); la barra `PonerVarios` en `Archivos.tsx`, que llama la
+ruta de siempre (`trasladar`) por cada archivo. Pruebas en `copias.test.ts`.
+
 ### Guía rápida
 
 1. Instale la extensión con
@@ -5377,7 +5414,8 @@ Código: `decidirVarios` y `mensajeVarios` en
 6. Al aprobar el último paso, el responsable elige **Dejarla donde está** o
    **Ponerla también en una carpeta** (una donde Trimble le deje subir
    archivos). Si después la quiere poner en una carpeta, usa **«Poner en una
-   carpeta…»** en el archivo. Si algo queda en espera (otro archivo con ese
+   carpeta…»** en el archivo, o marca **varios aprobados** en **Archivos →
+   Todos** y los pone juntos eligiendo la carpeta una vez. Si algo queda en espera (otro archivo con ese
    nombre) o falla, el archivo lo dice y quien aprobó o un administrador lo
    resuelve. (En los flujos de antes con carpeta destino, la versión aprobada
    pasa sola a esa carpeta.)
