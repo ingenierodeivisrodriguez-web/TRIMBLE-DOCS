@@ -5545,7 +5545,16 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
    DD-MM-AAAA).
 5. **Fotos por fecha**: clic en una fecha la descarga (desde el CDE, a través del servidor) y
    la muestra en el visor 360; **Pantalla completa ↗** la abre en una pestaña propia.
-6. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
+6. **Comparar fechas ⇆** (cuando el punto tiene dos o más fotos en el CDE, sin contar las
+   anuladas): muestra las dos fotos una encima de la otra, «antes» a la izquierda y «después»
+   a la derecha de una **barra vertical** que se arrastra hacia los lados (o con las flechas
+   del teclado). Empieza con las dos fechas más recientes; cada lista solo deja elegir una
+   fecha «antes» más vieja que «después». Al mover o acercar una foto, la otra se mueve igual.
+   Si la cámara quedó mirando hacia otro lado ese día, **Alinear «antes»** (−5°, −1°, barra,
+   +1°, +5°) gira esa foto hasta que coincida; el giro queda guardado **por foto en ese
+   navegador** (no en la base, ni para otras personas). **Pantalla completa ↗** abre la
+   comparación en una pestaña propia con la misma barra y la misma vista.
+7. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
    **desactiva** con motivo. Nada se borra.
 
 **Cómo funciona**
@@ -5566,11 +5575,19 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
   visor medida en la Fase 0).
 - Visor 360: Photo Sphere Viewer (MIT). Fotos más anchas que lo que acepta la tarjeta de video
   se reducen en el navegador antes de mostrarlas.
+- Comparación (`components/inspeccion-360/Comparador360.tsx`): dos visores en el mismo lugar;
+  el de «después» se recorta con `clip-path` en la barra, así cada lado recibe sus propios
+  clics. Las cámaras se siguen con `position-updated` / `zoom-updated` → `rotate()` / `zoom()`
+  (Photo Sphere Viewer dispara el evento dentro de la misma llamada, así que una bandera corta
+  el eco). El giro es `sphereCorrection.pan` de cada foto, guardado en `localStorage`
+  (`i360-giro:<captura>`). Reglas puras con pruebas en `lib/inspeccion-360/comparar.ts`. En
+  pantalla completa cada foto va a lo sumo a 8192 px (dos texturas a la vez en la tarjeta de
+  video); en el panel quedan en memoria a lo sumo 3 fotos descargadas.
 - Íconos con `viewer.addIcon` (imágenes PNG embebidas) y clic con `viewer.onIconPicked`
   (`providedId`), comprobados en la Fase 0; `removeIcon` siempre con la lista de `getIcon`.
 
-**Pendiente**: calibrar el rumbo de cada foto, comparar dos fechas lado a lado, la página del
-menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
+**Pendiente**: calibrar el rumbo de cada foto (y guardar el giro de alineación en la base para
+todos), la página del menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
 
 ## Cómo funciona (común a ambas extensiones)
 

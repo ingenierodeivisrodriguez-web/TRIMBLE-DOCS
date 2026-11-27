@@ -1,24 +1,35 @@
 "use client";
 
 // The selected capture point: its data (code, tower, floor, unit, space, zone, coordinates…),
-// its photos by date (newest first) and the 360° viewer of the chosen date.
+// its photos by date (newest first), the 360° viewer of the chosen date and the before/after
+// comparison of two dates.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { I360Api } from "../../lib/inspeccion-360/client";
+import { capturasComparables, type Pareja, parejaInicial, puedeSer } from "../../lib/inspeccion-360/comparar";
 import { fmtFecha, fmtFechaHora } from "../../lib/inspeccion-360/fechas";
 import type { CapturaVista, PuntoVista } from "../../lib/inspeccion-360/types";
 import { acceptButton, baseInput, C, labelStyle, linkButton, message, Notice } from "../presupuesto/ui";
+import Comparador360, { type VistaCamara } from "./Comparador360";
 import { megas, urlParaVisor } from "./imagen";
 import SubirFoto from "./SubirFoto";
 import Visor360 from "./Visor360";
 
-interface Vista {
+/** A downloaded photo, ready for the viewer (kept for a while so switching dates does not download again). */
+interface FotoLista {
   capturaId: string;
   url: string;
   blob: Blob;
   ancho: number | null;
+  /** DD-MM-AAAA HH:MM */
+  fecha: string;
   titulo: string;
 }
+
+/** Downloaded photos kept in memory at most (each can weigh up to 60 MB). */
+const MAX_EN_MEMORIA = 3;
+const COLOR_ANTES = "#455a64";
+const COLOR_DESPUES = "#EF6C00";
 
 const boton: React.CSSProperties = { ...linkButton, border: "1px solid var(--tc-gray-300)", fontSize: 12, padding: "4px 8px" };
 const fila: React.CSSProperties = { display: "flex", gap: 6, fontSize: 12, padding: "2px 0", borderBottom: "1px solid var(--tc-gray-100)" };
@@ -45,12 +56,20 @@ export default function FichaPunto({
   const [error, setError] = useState("");
   const [subiendo, setSubiendo] = useState(false);
   const [editando, setEditando] = useState(false);
-  const [vista, setVista] = useState<Vista | null>(null);
+  const [vista, setVista] = useState<FotoLista | null>(null);
   const [cargando, setCargando] = useState<{ id: string; texto: string } | null>(null);
   const [anulando, setAnulando] = useState<string | null>(null);
   const [motivo, setMotivo] = useState("");
-  const vistaRef = useRef<Vista | null>(null);
-  vistaRef.current = vista;
+  const [pareja, setPareja] = useState<Pareja | null>(null);
+  const [comparadas, setComparadas] = useState<{ antes: FotoLista; despues: FotoLista } | null>(null);
+  const [progreso, setProgreso] = useState("");
+  const enMemoria = useRef(new Map<string, FotoLista>());
+  const activas = useRef<string[]>([]);
+  activas.current = [vista?.capturaId, comparadas?.antes.capturaId, comparadas?.despues.capturaId, pareja?.antesId, pareja?.despuesId].filter((x): x is string => !!x);
+  const division = useRef(50);
+  const camara = useRef<VistaCamara | undefined>(undefined);
+
+  const comparables = useMemo(() => capturasComparables(capturas ?? []), [capturas]);
 
   async function recargar() {
     try {
@@ -60,28 +79,59 @@ export default function FichaPunto({
     }
   }
 
+  function soltarMemoria() {
+    for (const f of enMemoria.current.values()) URL.revokeObjectURL(f.url);
+    enMemoria.current.clear();
+  }
+
   useEffect(() => {
     setCapturas(null);
     setVista(null);
+    setPareja(null);
+    setComparadas(null);
     setError("");
+    soltarMemoria();
     recargar();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [punto.id]);
 
-  useEffect(() => () => {
-    if (vistaRef.current) URL.revokeObjectURL(vistaRef.current.url);
-  }, []);
+  useEffect(() => soltarMemoria, []);
+
+  /** The photo of a capture, from memory or downloaded from the CDE (through the server). */
+  async function obtener(c: CapturaVista, avisar: (texto: string) => void): Promise<FotoLista> {
+    const guardada = enMemoria.current.get(c.id);
+    if (guardada) {
+      enMemoria.current.delete(c.id);
+      enMemoria.current.set(c.id, guardada);
+      return guardada;
+    }
+    if (!c.foto || c.foto.estado !== "en_cde") throw new Error("La foto todavía no está en Trimble Connect.");
+    avisar("Descargando…");
+    const blob = await api.foto(c.foto.id, (n, t) => avisar(t ? `Descargando ${Math.round((100 * n) / t)} % de ${megas(t)}…` : `Descargando ${megas(n)}…`));
+    avisar("Preparando la foto…");
+    const url = await urlParaVisor(blob, c.foto.ancho);
+    const fecha = fmtFechaHora(c.tomadaEn);
+    const foto: FotoLista = { capturaId: c.id, url, blob, ancho: c.foto.ancho, fecha, titulo: `${punto.codigo} · ${fecha}` };
+    enMemoria.current.set(c.id, foto);
+    // Drop the oldest photos nobody is looking at.
+    for (const [id, f] of enMemoria.current) {
+      if (enMemoria.current.size <= MAX_EN_MEMORIA) break;
+      if (id === c.id || activas.current.includes(id)) continue;
+      URL.revokeObjectURL(f.url);
+      enMemoria.current.delete(id);
+    }
+    return foto;
+  }
 
   async function ver(c: CapturaVista) {
     if (!c.foto || c.foto.estado !== "en_cde" || cargando) return;
     setError("");
+    setPareja(null);
+    setComparadas(null);
     setCargando({ id: c.id, texto: "Descargando…" });
     try {
-      const blob = await api.foto(c.foto.id, (n, t) => setCargando({ id: c.id, texto: t ? `Descargando ${Math.round((100 * n) / t)} % de ${megas(t)}…` : `Descargando ${megas(n)}…` }));
-      setCargando({ id: c.id, texto: "Preparando la foto…" });
-      const url = await urlParaVisor(blob, c.foto.ancho);
-      if (vistaRef.current) URL.revokeObjectURL(vistaRef.current.url);
-      setVista({ capturaId: c.id, url, blob, ancho: c.foto.ancho, titulo: `${punto.codigo} · ${fmtFechaHora(c.tomadaEn)}` });
+      const foto = await obtener(c, (texto) => setCargando({ id: c.id, texto }));
+      setVista(foto);
     } catch (err) {
       setError(message(err));
     } finally {
@@ -89,12 +139,50 @@ export default function FichaPunto({
     }
   }
 
-  /** Opens the photo in a tab of its own and hands it over (the tab has no Trimble session). */
-  function pantallaCompleta() {
-    if (!vista) return;
+  // The two photos of the comparison, each time the pair changes.
+  useEffect(() => {
+    if (!pareja || !capturas) return;
+    const a = capturas.find((c) => c.id === pareja.antesId);
+    const d = capturas.find((c) => c.id === pareja.despuesId);
+    if (!a || !d) return;
+    let cancelado = false;
+    setError("");
+    (async () => {
+      try {
+        const antes = await obtener(a, (t) => !cancelado && setProgreso(`Foto «antes»: ${t}`));
+        const despues = await obtener(d, (t) => !cancelado && setProgreso(`Foto «después»: ${t}`));
+        if (!cancelado) setComparadas({ antes, despues });
+      } catch (err) {
+        if (!cancelado) setError(message(err));
+      } finally {
+        if (!cancelado) setProgreso("");
+      }
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pareja?.antesId, pareja?.despuesId]);
+
+  function comparar() {
+    const p = capturas ? parejaInicial(capturas) : null;
+    if (!p) return;
+    setVista(null);
+    division.current = 50;
+    camara.current = undefined;
+    setPareja(p);
+  }
+
+  function cerrarComparacion() {
+    setPareja(null);
+    setComparadas(null);
+    setProgreso("");
+  }
+
+  /** Opens a tab of its own and hands it the photos already downloaded (the tab has no Trimble session). */
+  function abrirPantalla(datos: Record<string, unknown>) {
     const ventana = window.open("/inspeccion-360/pantalla", "_blank");
     if (!ventana) return setError("El navegador bloqueó la ventana nueva: permita ventanas emergentes para trimble-docs.vercel.app.");
-    const datos = { tipo: "i360-foto", blob: vista.blob, ancho: vista.ancho, titulo: vista.titulo };
     const alMensaje = (ev: MessageEvent) => {
       if (ev.source !== ventana || ev.origin !== window.location.origin || (ev.data as { tipo?: string })?.tipo !== "i360-listo") return;
       ventana.postMessage(datos, window.location.origin);
@@ -102,6 +190,23 @@ export default function FichaPunto({
     };
     window.addEventListener("message", alMensaje);
     setTimeout(() => window.removeEventListener("message", alMensaje), 60_000);
+  }
+
+  function pantallaCompleta() {
+    if (vista) abrirPantalla({ tipo: "i360-foto", blob: vista.blob, ancho: vista.ancho, titulo: vista.titulo });
+  }
+
+  function pantallaCompletaComparar() {
+    if (!comparadas) return;
+    const lado = (f: FotoLista) => ({ id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha });
+    abrirPantalla({
+      tipo: "i360-comparar",
+      titulo: `${punto.codigo} · ${comparadas.antes.fecha} → ${comparadas.despues.fecha}`,
+      antes: lado(comparadas.antes),
+      despues: lado(comparadas.despues),
+      division: division.current,
+      vista: camara.current,
+    });
   }
 
   async function reintentar(c: CapturaVista) {
@@ -123,6 +228,7 @@ export default function FichaPunto({
       await api.anular(c.id, motivo);
       setAnulando(null);
       setMotivo("");
+      if (pareja && (pareja.antesId === c.id || pareja.despuesId === c.id)) cerrarComparacion();
       await recargar();
       alCambiar();
     } catch (err) {
@@ -135,6 +241,26 @@ export default function FichaPunto({
       <span style={{ color: "var(--tc-gray-500)", minWidth: 92 }}>{etiqueta}</span>
       <span style={{ wordBreak: "break-word" }}>{valor || "—"}</span>
     </div>
+  );
+
+  const elegir = (lado: "antes" | "despues") => (
+    <label style={{ flex: "1 1 140px", fontSize: 12 }}>
+      <span style={{ display: "block", fontWeight: 600, color: lado === "antes" ? COLOR_ANTES : COLOR_DESPUES, marginBottom: 2 }}>{lado === "antes" ? "Antes" : "Después"}</span>
+      <select
+        value={pareja ? (lado === "antes" ? pareja.antesId : pareja.despuesId) : ""}
+        onChange={(e) => pareja && setPareja(lado === "antes" ? { ...pareja, antesId: e.target.value } : { ...pareja, despuesId: e.target.value })}
+        style={{ ...baseInput, width: "100%", fontSize: 12 }}
+      >
+        {comparables.map((c) => {
+          const actual = pareja && (lado === "antes" ? pareja.antesId : pareja.despuesId) === c.id;
+          return (
+            <option key={c.id} value={c.id} disabled={!actual && !!pareja && !puedeSer(lado, c, pareja, comparables)}>
+              {fmtFechaHora(c.tomadaEn)}
+            </option>
+          );
+        })}
+      </select>
+    </label>
   );
 
   return (
@@ -179,25 +305,64 @@ export default function FichaPunto({
         />
       )}
 
-      {vista && (
+      {vista && !pareja && (
         <div style={{ marginTop: 10 }}>
           <Visor360 url={vista.url} titulo={vista.titulo} />
           <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
             <button style={boton} onClick={pantallaCompleta}>Pantalla completa ↗</button>
-            <button style={boton} onClick={() => { URL.revokeObjectURL(vista.url); setVista(null); }}>Cerrar foto</button>
+            <button style={boton} onClick={() => setVista(null)}>Cerrar foto</button>
           </div>
         </div>
       )}
 
-      <h3 style={{ fontSize: 13, margin: "12px 0 4px" }}>Fotos por fecha</h3>
+      {pareja && (
+        <div style={{ marginTop: 10, border: "1px solid var(--tc-gray-200)", borderRadius: 6, padding: 6, background: "#fbfcfe" }}>
+          <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginBottom: 6 }}>
+            {elegir("antes")}
+            {elegir("despues")}
+          </div>
+          {comparadas ? (
+            <Comparador360
+              antes={{ id: comparadas.antes.capturaId, url: comparadas.antes.url, fecha: comparadas.antes.fecha }}
+              despues={{ id: comparadas.despues.capturaId, url: comparadas.despues.url, fecha: comparadas.despues.fecha }}
+              division={division.current}
+              alCambiarDivision={(v) => (division.current = v)}
+              alMoverCamara={(v) => (camara.current = v)}
+            />
+          ) : (
+            <div style={{ height: 300, background: "#111", color: "#fff", borderRadius: 4, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 12, padding: 12, textAlign: "center" }}>
+              {progreso || "Preparando la comparación…"}
+            </div>
+          )}
+          {comparadas && progreso && <p style={{ fontSize: 11.5, margin: "4px 0 0" }}>{progreso}</p>}
+          <p style={{ fontSize: 11.5, margin: "6px 0 0", color: "var(--tc-gray-600)" }}>
+            Arrastre la barra blanca hacia los lados para ver antes y después. Al mover una foto, la otra gira con ella. Si no miran hacia el mismo lado, use «Alinear» (queda guardado en este navegador).
+          </p>
+          <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
+            <button style={boton} onClick={pantallaCompletaComparar} disabled={!comparadas}>Pantalla completa ↗</button>
+            <button style={boton} onClick={cerrarComparacion}>Cerrar comparación</button>
+          </div>
+        </div>
+      )}
+
+      <div style={{ display: "flex", alignItems: "center", gap: 6, margin: "12px 0 4px" }}>
+        <h3 style={{ fontSize: 13, margin: 0, flex: 1 }}>Fotos por fecha</h3>
+        {comparables.length >= 2 && !pareja && (
+          <button style={{ ...boton, borderColor: COLOR_DESPUES, color: COLOR_DESPUES }} onClick={comparar} title="Comparar dos fechas con una barra que se mueve hacia los lados">
+            Comparar fechas ⇆
+          </button>
+        )}
+      </div>
       {error && <Notice kind="error" style={{ marginBottom: 6 }}>{error}</Notice>}
       {capturas === null && <p style={{ fontSize: 12 }}>Cargando…</p>}
       {capturas?.length === 0 && <p style={{ fontSize: 12, color: "var(--tc-gray-500)" }}>Este punto todavía no tiene fotos.</p>}
       {capturas?.map((c) => {
-        const elegida = vista?.capturaId === c.id;
+        const lado = pareja?.antesId === c.id ? "antes" : pareja?.despuesId === c.id ? "despues" : null;
+        const elegida = !pareja && vista?.capturaId === c.id;
+        const borde = lado === "antes" ? COLOR_ANTES : lado === "despues" ? COLOR_DESPUES : elegida ? "#EF6C00" : "var(--tc-gray-200)";
         const lista = c.foto?.estado === "en_cde" && c.estado !== "subiendo";
         return (
-          <div key={c.id} style={{ border: `1px solid ${elegida ? "#EF6C00" : "var(--tc-gray-200)"}`, borderRadius: 6, padding: 6, marginBottom: 6, background: c.estado === "anulada" ? "#f5f5f5" : "#fff" }}>
+          <div key={c.id} style={{ border: `${lado ? 2 : 1}px solid ${borde}`, borderRadius: 6, padding: 6, marginBottom: 6, background: c.estado === "anulada" ? "#f5f5f5" : "#fff" }}>
             <button onClick={() => ver(c)} disabled={!lista} title={lista ? "Ver la foto 360" : undefined} style={{ display: "flex", gap: 8, width: "100%", border: "none", background: "transparent", padding: 0, cursor: lista ? "pointer" : "default", textAlign: "left", fontFamily: "inherit" }}>
               {c.foto?.miniatura ? (
                 // eslint-disable-next-line @next/next/no-img-element
@@ -207,6 +372,11 @@ export default function FichaPunto({
               )}
               <div style={{ fontSize: 12, minWidth: 0 }}>
                 <b style={{ fontSize: 13 }}>{fmtFechaHora(c.tomadaEn)}</b>
+                {lado && (
+                  <span style={{ marginLeft: 6, background: lado === "antes" ? COLOR_ANTES : COLOR_DESPUES, color: "#fff", fontSize: 10.5, fontWeight: 600, padding: "1px 6px", borderRadius: 3 }}>
+                    {lado === "antes" ? "Antes" : "Después"}
+                  </span>
+                )}
                 <div style={{ color: "var(--tc-gray-500)" }}>{c.inspectorNombre}</div>
                 {c.estado === "subiendo" && <div style={{ color: "#8a6d00" }}>Subiendo…</div>}
                 {c.estado === "error" && <div style={{ color: "#b3261e" }}>No pasó a Trimble Connect{c.foto?.error ? `: ${c.foto.error}` : ""}</div>}

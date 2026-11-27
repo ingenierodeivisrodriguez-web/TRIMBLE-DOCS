@@ -8,7 +8,7 @@ import { useEffect, useRef, useState } from "react";
 
 type ViewerPSV = { setPanorama(url: string, o?: { caption?: string; transition?: boolean | number }): Promise<boolean>; destroy(): void };
 
-const LANG = {
+export const LANG = {
   zoom: "Zoom",
   zoomOut: "Alejar",
   zoomIn: "Acercar",
