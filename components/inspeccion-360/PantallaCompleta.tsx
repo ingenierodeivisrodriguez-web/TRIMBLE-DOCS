@@ -2,19 +2,23 @@
 
 // The 360° photo, or the before/after comparison of two dates, in a tab of its own. This tab has
 // no Trimble Connect session: the panel that opened it hands over the photos it already
-// downloaded (postMessage, same origin only), and saves an alignment on the tab's behalf.
+// downloaded (postMessage, same origin only), saves an alignment on the tab's behalf and, when
+// a neighbouring point is clicked in the photo, walks there and sends the new photo.
 
 import { useEffect, useRef, useState } from "react";
 import { normalizarGiro } from "../../lib/inspeccion-360/comparar";
 import Comparador360, { type FotoComparada, type VistaCamara } from "./Comparador360";
 import { maxTextura, urlParaVisor } from "./imagen";
-import Visor360 from "./Visor360";
+import Visor360, { type MarcadorPunto, type VistaFoto } from "./Visor360";
 
 type Lado = { id?: string; blob?: Blob; ancho?: number | null; fecha?: string; giro?: number; giroPor?: string | null; giroEn?: string | null; giroVisto?: number };
 type Guardado = { giro: number; giroPor: string | null; giroEn: string | null };
 type Mensaje = {
   tipo?: string;
   titulo?: string;
+  capturaId?: unknown;
+  marcadores?: unknown;
+  volver?: unknown;
   blob?: Blob;
   ancho?: number | null;
   giro?: number;
@@ -31,7 +35,7 @@ type Mensaje = {
 };
 
 type Contenido =
-  | { tipo: "foto"; url: string; titulo: string; giro: number }
+  | { tipo: "foto"; capturaId: string | null; url: string; titulo: string; giro: number; marcadores: MarcadorPunto[]; vista?: VistaFoto; volver: { puntoId: string; etiqueta: string } | null }
   | { tipo: "comparar"; antes: FotoComparada; despues: FotoComparada; division: number; vista?: VistaCamara; puedeAlinear: boolean; girosIniciales: Record<string, number> };
 
 function ladoValido(l: Lado | undefined): l is Lado & { id: string; blob: Blob; fecha: string } {
@@ -41,6 +45,23 @@ function ladoValido(l: Lado | undefined): l is Lado & { id: string; blob: Blob; 
 const giroDe = (v: unknown) => (typeof v === "number" ? normalizarGiro(v) : 0);
 const textoDe = (v: unknown) => (typeof v === "string" ? v : null);
 
+const esNumero = (n: unknown): n is number => typeof n === "number" && Number.isFinite(n);
+
+function marcadoresDe(v: unknown): MarcadorPunto[] {
+  if (!Array.isArray(v)) return [];
+  return v.filter((m): m is MarcadorPunto => !!m && typeof m.puntoId === "string" && esNumero(m.yaw) && esNumero(m.pitch) && typeof m.etiqueta === "string" && typeof m.detalle === "string");
+}
+
+function volverDe(v: unknown): { puntoId: string; etiqueta: string } | null {
+  const o = v as { puntoId?: unknown; etiqueta?: unknown } | null;
+  return o && typeof o.puntoId === "string" && typeof o.etiqueta === "string" ? { puntoId: o.puntoId, etiqueta: o.etiqueta } : null;
+}
+
+function vistaDe(v: unknown): VistaFoto | undefined {
+  const o = v as Partial<VistaFoto> | null;
+  return o && esNumero(o.yaw) && esNumero(o.pitch) && esNumero(o.zoom) ? { yaw: o.yaw, pitch: o.pitch, zoom: o.zoom } : undefined;
+}
+
 /** How long to wait for the panel to answer a save (it calls the server and reloads the dates). */
 const ESPERA_PANEL_MS = 45_000;
 
@@ -49,6 +70,12 @@ export default function PantallaCompleta() {
   const [esperando, setEsperando] = useState(true);
   const pedidos = useRef(new Map<number, (m: Mensaje) => void>());
   const siguiente = useRef(0);
+  const actual = useRef<Contenido | null>(null);
+  actual.current = contenido;
+  const camara = useRef<VistaFoto | undefined>(undefined);
+  // Walking to another point: its code until the panel sends its photo.
+  const [yendo, setYendo] = useState<string | null>(null);
+  const [aviso, setAviso] = useState("");
 
   useEffect(() => {
     const alMensaje = async (ev: MessageEvent) => {
@@ -57,8 +84,19 @@ export default function PantallaCompleta() {
       if (d.tipo === "i360-giro-guardado" && typeof d.pedido === "number") {
         pedidos.current.get(d.pedido)?.(d);
       } else if (d.tipo === "i360-foto" && d.blob instanceof Blob) {
-        const url = await urlParaVisor(d.blob, d.ancho ?? null, maxTextura());
-        setContenido({ tipo: "foto", url, titulo: d.titulo ?? "", giro: giroDe(d.giro) });
+        const capturaId = typeof d.capturaId === "string" ? d.capturaId : null;
+        const datos = { titulo: d.titulo ?? "", giro: giroDe(d.giro), marcadores: marcadoresDe(d.marcadores), volver: volverDe(d.volver) };
+        const previo = actual.current;
+        if (previo?.tipo === "foto" && capturaId && previo.capturaId === capturaId) {
+          // The same photo: only its neighbours, turn or «Volver» changed.
+          setContenido({ ...previo, ...datos });
+        } else {
+          const url = await urlParaVisor(d.blob, d.ancho ?? null, maxTextura());
+          if (previo?.tipo === "foto") setTimeout(() => URL.revokeObjectURL(previo.url), 5000);
+          setContenido({ tipo: "foto", capturaId, url, vista: vistaDe(d.vista), ...datos });
+        }
+        setYendo(null);
+        setAviso("");
         document.title = `${d.titulo ?? "Foto 360"} — Inspección 360°`;
       } else if (d.tipo === "i360-comparar" && ladoValido(d.antes) && ladoValido(d.despues)) {
         // Two photos on the GPU at once: each one at most 8192 px wide.
@@ -111,10 +149,44 @@ export default function PantallaCompleta() {
     if (r.error) throw Object.assign(new Error(r.error), { code: r.codigo });
   }
 
+  /** Asks the panel to walk to a point (a neighbour in the photo, or back); it sends the new photo. */
+  function ir(puntoId: string, etiqueta: string) {
+    const panel = window.opener as Window | null;
+    if (!panel || panel.closed) return setAviso("El panel Inspección 360° que abrió esta pestaña ya no está abierto: para pasar a otro punto, ábralo de nuevo desde el panel.");
+    setAviso("");
+    setYendo(etiqueta);
+    panel.postMessage({ tipo: "i360-ir-a-punto", puntoId, vista: camara.current }, window.location.origin);
+    setTimeout(() => setYendo((y) => (y === etiqueta ? null : y)), 60_000);
+  }
+
   if (contenido?.tipo === "foto") {
+    const volver = contenido.volver;
+    const sobre: React.CSSProperties = { position: "absolute", zIndex: 200, fontFamily: "system-ui, sans-serif", fontSize: 13, borderRadius: 4 };
     return (
       <div style={{ position: "fixed", inset: 0, background: "#111" }}>
-        <Visor360 url={contenido.url} titulo={contenido.titulo} giro={contenido.giro} alto="100%" />
+        <Visor360
+          url={contenido.url}
+          titulo={contenido.titulo}
+          giro={contenido.giro}
+          vista={contenido.vista}
+          marcadores={contenido.marcadores}
+          alElegirMarcador={(id) => ir(id, contenido.marcadores.find((m) => m.puntoId === id)?.etiqueta ?? "el punto")}
+          alMoverCamara={(v) => (camara.current = v)}
+          alto="100%"
+        />
+        {volver && (
+          <button
+            onClick={() => ir(volver.puntoId, volver.etiqueta.replace(/^Volver a /, ""))}
+            style={{ ...sobre, top: 12, left: 12, border: "2px solid #fff", background: "rgba(239,108,0,.92)", color: "#fff", fontWeight: 600, padding: "6px 12px", cursor: "pointer", boxShadow: "0 2px 8px rgba(0,0,0,.5)" }}
+          >
+            ← {volver.etiqueta}
+          </button>
+        )}
+        {(yendo || aviso) && (
+          <div style={{ ...sobre, top: volver ? 56 : 12, left: 12, right: 12, maxWidth: 520, background: aviso ? "rgba(179,38,30,.92)" : "rgba(0,0,0,.75)", color: "#fff", padding: "6px 10px" }}>
+            {aviso || `Pasando a ${yendo}…`}
+          </div>
+        )}
       </div>
     );
   }

@@ -5564,7 +5564,23 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
    inferior. Esa pestaña no tiene sesión de Trimble: le pide al panel que la abrió que guarde,
    así que el panel debe seguir abierto; si ya no está, el giro queda «sin guardar» y el
    aviso pide guardarlo desde el panel.
-7. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
+7. **Recorrido entre puntos**: en la foto de un punto aparecen, como **círculos naranjas sobre
+   el piso** donde estuvo su trípode, los puntos vecinos activos, con fotos, de la misma torre
+   y piso y a menos de 20 m (al pasar el ratón: código, espacio y distancia). Clic en un
+   círculo abre ese punto (su ficha en el panel, su ícono naranja en el modelo) en la **fecha
+   más cercana** a la de la foto de donde viene, **mirando hacia el mismo lado del modelo**.
+   **← Volver a …** regresa al punto anterior, y desde allí se puede volver otra vez. Funciona
+   igual en **pantalla completa**: la pestaña le pide al panel que cambie de punto y el panel
+   le manda la foto nueva (el panel debe seguir abierto).
+   Para dibujar los vecinos hace falta el **rumbo** del punto (hacia dónde mira la foto en el
+   modelo), una vez por punto: un editor pulsa **Calibrar rumbo** con la foto abierta, hace
+   clic en la foto sobre un elemento que también esté en el modelo (canto de una puerta,
+   columna, esquina de un muro) y luego clic en ese mismo elemento en el modelo 3D. El panel
+   muestra el rumbo calculado y los vecinos ya dibujados con él para revisarlo, y se guarda
+   con **Guardar rumbo** (en `rumbo_grados` del punto, para todos; con control de versión).
+   Como todas las fechas de un punto quedan alineadas entre sí con el giro, un rumbo sirve
+   para todas. **Ir al punto** también usa el rumbo: el modelo mira hacia donde mira la foto.
+8. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
    **desactiva** con motivo. Nada se borra.
 
 **Cómo funciona**
@@ -5604,11 +5620,22 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
   con pruebas en `lib/inspeccion-360/comparar.ts`. En
   pantalla completa cada foto va a lo sumo a 8192 px (dos texturas a la vez en la tarjeta de
   video); en el panel quedan en memoria a lo sumo 3 fotos descargadas.
+- Recorrido (`lib/inspeccion-360/recorrido.ts`, reglas puras con pruebas): el rumbo es el
+  azimut del modelo (antihorario desde +X, como `camara.ts`) hacia donde mira la foto en yaw 0
+  (yaw de Photo Sphere Viewer: radianes, crece hacia la derecha, con el giro de la foto ya
+  aplicado). Calibración: `rumbo = azimut(trípode → clic en el modelo) + yaw del clic en la
+  foto`; un vecino va en `yaw = rumbo − azimut(trípode → vecino)` y `pitch` hacia el piso
+  de su trípode. Al pasar de A a B: `yaw_B = yaw_A + rumbo_B − rumbo_A`. Los círculos son
+  marcadores de `@photo-sphere-viewer/markers-plugin` (MIT, misma versión del visor). El
+  enlace con la pestaña de pantalla completa de una foto vive en
+  `components/inspeccion-360/enlacePantalla.ts` (la ficha se crea de nuevo en cada punto):
+  la pestaña manda `i360-ir-a-punto` y el panel le manda cada foto nueva (`i360-foto`, con
+  sus vecinos y «Volver»). Sin cambios en la base: `rumbo_grados` ya existía.
 - Íconos con `viewer.addIcon` (imágenes PNG embebidas) y clic con `viewer.onIconPicked`
   (`providedId`), comprobados en la Fase 0; `removeIcon` siempre con la lista de `getIcon`.
 
-**Pendiente**: calibrar el rumbo de cada foto respecto al modelo (el giro de alineación solo
-iguala las fechas entre sí), la página del menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
+**Pendiente**: el recorrido dentro de «Comparar fechas» (pasar al vecino con las dos fechas a la
+vez), la página del menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
 
 ## Cómo funciona (común a ambas extensiones)
 

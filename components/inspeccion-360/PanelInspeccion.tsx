@@ -14,7 +14,7 @@ import { leerToque } from "../../lib/ra/anclaje";
 import type { ShellContext } from "../trimble/ExtensionShell";
 import { C, linkButton, message, Notice } from "../presupuesto/ui";
 import ConfigInspeccion from "./ConfigInspeccion";
-import FichaPunto from "./FichaPunto";
+import FichaPunto, { type Entrada } from "./FichaPunto";
 import { ICONOS } from "./iconos";
 import NuevoPunto, { type Toque } from "./NuevoPunto";
 
@@ -39,6 +39,10 @@ export default function PanelInspeccion({
   const [verInactivos, setVerInactivos] = useState(false);
   const [error, setError] = useState("");
   const [aviso, setAviso] = useState("");
+  // Set when the point was reached walking from another one in the photos.
+  const [entrada, setEntrada] = useState<(Entrada & { puntoId: string }) | null>(null);
+  // Waiting for a click in the model to calibrate a point's rumbo.
+  const calibrando = useRef<((lugar: { x: number; y: number; z: number } | null) => void) | null>(null);
   const iconos = useRef(new Map<number, string>());
   const modoRef = useRef<Modo>("lista");
   modoRef.current = modo;
@@ -107,9 +111,21 @@ export default function PanelInspeccion({
           const primero = Array.isArray(lista) ? lista[0] : undefined;
           const puntoId = iconos.current.get(primero?.providedId ?? primero?.id ?? -1);
           if (puntoId) {
+            if (calibrando.current) cancelarClicModelo();
+            setEntrada(null);
             setElegidoId(puntoId);
             setModo("lista");
           }
+        }
+        if (evento === "viewer.onPicked" && calibrando.current) {
+          const t = leerToque(datos);
+          if (!t) return setError("Haga clic sobre un elemento del modelo (no en el vacío).");
+          setError("");
+          const responder = calibrando.current;
+          calibrando.current = null;
+          viewer.activateTool("reset").catch(() => {});
+          responder({ x: t.posicion[0], y: t.posicion[1], z: t.posicion[2] });
+          return;
         }
         if (evento === "viewer.onPicked" && modoRef.current === "tomando") {
           const t = leerToque(datos);
@@ -140,6 +156,35 @@ export default function PanelInspeccion({
     viewer.activateTool("reset").catch(() => {});
     setToque(null);
     setModo("lista");
+  }
+
+  /** The point sheet waits for a click in the model (calibrating the rumbo): its position, or null if cancelled. */
+  function pedirClicModelo(): Promise<{ x: number; y: number; z: number } | null> {
+    calibrando.current?.(null);
+    return new Promise((responder) => {
+      calibrando.current = responder;
+      viewer
+        .activateTool("picking", { instruction: { title: "Calibrar rumbo", text: "Haga clic en el mismo elemento que marcó en la foto." } })
+        .catch((err) => {
+          calibrando.current = null;
+          setError(`No se pudo activar el clic en el modelo: ${message(err)}`);
+          responder(null);
+        });
+    });
+  }
+
+  function cancelarClicModelo() {
+    const responder = calibrando.current;
+    calibrando.current = null;
+    viewer.activateTool("reset").catch(() => {});
+    responder?.(null);
+  }
+
+  /** Opens a point chosen from the list or the model (not walking from another photo). */
+  function elegir(id: string | null) {
+    if (calibrando.current) cancelarClicModelo();
+    setEntrada(null);
+    setElegidoId(id);
   }
 
   async function irAlPunto(p: PuntoVista) {
@@ -215,7 +260,7 @@ export default function PanelInspeccion({
             setToque(null);
             setModo("lista");
             await recargar();
-            setElegidoId(p.id);
+            elegir(p.id);
           }}
         />
       )}
@@ -228,9 +273,17 @@ export default function PanelInspeccion({
             punto={elegido}
             puedeEditar={Boolean(estado?.puedeEditar)}
             modeloCargado={modelos.has(elegido.modelId)}
-            alVolver={() => setElegidoId(null)}
+            alVolver={() => elegir(null)}
             alIrAlPunto={() => irAlPunto(elegido)}
             alCambiar={recargar}
+            puntos={puntos ?? []}
+            entrada={entrada?.puntoId === elegido.id ? entrada : null}
+            alIrAPunto={(id, e) => {
+              setEntrada({ ...e, puntoId: id });
+              setElegidoId(id);
+            }}
+            alPedirClicModelo={pedirClicModelo}
+            alCancelarClicModelo={cancelarClicModelo}
           />
         </div>
       )}
@@ -249,7 +302,7 @@ export default function PanelInspeccion({
               {lista.map((p) => (
                 <button
                   key={p.id}
-                  onClick={() => setElegidoId(p.id)}
+                  onClick={() => elegir(p.id)}
                   style={{ display: "flex", width: "100%", gap: 6, alignItems: "center", textAlign: "left", border: "none", borderBottom: "1px solid var(--tc-gray-100)", background: "transparent", padding: "5px 2px", cursor: "pointer", fontFamily: "inherit", opacity: p.estado === "inactivo" ? 0.55 : 1 }}
                 >
                   <span style={{ width: 10, height: 10, borderRadius: 5, background: p.estado === "inactivo" ? "#bdbdbd" : p.capturas ? "#1565C0" : "#78909C", flex: "0 0 auto" }} />

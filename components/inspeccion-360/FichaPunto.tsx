@@ -2,7 +2,8 @@
 
 // The selected capture point: its data (code, tower, floor, unit, space, zone, coordinates…),
 // its photos by date (newest first), the 360° viewer of the chosen date and the before/after
-// comparison of two dates.
+// comparison of two dates. In the photo, the neighbouring points appear on the floor (once the
+// point's rumbo is calibrated) and a click walks to them; «← Volver» walks back.
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { I360Api } from "../../lib/inspeccion-360/client";
@@ -13,7 +14,21 @@ import { acceptButton, baseInput, C, labelStyle, linkButton, message, Notice } f
 import Comparador360, { type VistaCamara } from "./Comparador360";
 import { megas, urlParaVisor } from "./imagen";
 import SubirFoto from "./SubirFoto";
-import Visor360 from "./Visor360";
+import { azimutEntre, capturaMasCercana, distanciaHorizontal, rumboDesdeCalibracion, vecinos, yawEquivalente } from "../../lib/inspeccion-360/recorrido";
+import { abrirPantallaFoto, alPedirPuntoDesdePantalla, enviarAPantallaFoto, pantallaFotoAbierta } from "./enlacePantalla";
+import Visor360, { type MarcadorPunto, type VistaFoto } from "./Visor360";
+
+/** How a point is reached by walking from another one in the photos. */
+export interface Entrada {
+  /** Date of the photo it came from: the closest date of this point opens. */
+  fecha: string;
+  /** Where to look on arrival. */
+  vista?: VistaFoto;
+  /** The point it came from, for «← Volver». */
+  volver?: { puntoId: string; codigo: string };
+}
+
+type Calibracion = { paso: "foto" } | { paso: "modelo"; yaw: number; pitch: number } | { paso: "confirmar"; yaw: number; pitch: number; rumbo: number; distancia: number };
 
 /** A downloaded photo, ready for the viewer (kept for a while so switching dates does not download again). */
 interface FotoLista {
@@ -21,6 +36,7 @@ interface FotoLista {
   url: string;
   blob: Blob;
   ancho: number | null;
+  tomadaEn: string;
   /** DD-MM-AAAA HH:MM */
   fecha: string;
   titulo: string;
@@ -42,6 +58,11 @@ export default function FichaPunto({
   alVolver,
   alIrAlPunto,
   alCambiar,
+  puntos,
+  entrada,
+  alIrAPunto,
+  alPedirClicModelo,
+  alCancelarClicModelo,
 }: {
   api: I360Api;
   punto: PuntoVista;
@@ -51,6 +72,15 @@ export default function FichaPunto({
   alIrAlPunto: () => void;
   /** The point or its photos changed: reload the list of points. */
   alCambiar: () => void;
+  /** Every point of the project (its neighbours appear in the photo). */
+  puntos: PuntoVista[];
+  /** Set when this point was reached walking from another one. */
+  entrada?: Entrada | null;
+  /** Walks to another point (the panel selects it). */
+  alIrAPunto: (puntoId: string, entrada: Entrada) => void;
+  /** Waits for a click in the 3D model (to calibrate the rumbo); null when cancelled. */
+  alPedirClicModelo?: () => Promise<{ x: number; y: number; z: number } | null>;
+  alCancelarClicModelo?: () => void;
 }) {
   const [capturas, setCapturas] = useState<CapturaVista[] | null>(null);
   const [error, setError] = useState("");
@@ -63,6 +93,12 @@ export default function FichaPunto({
   const [pareja, setPareja] = useState<Pareja | null>(null);
   const [comparadas, setComparadas] = useState<{ antes: FotoLista; despues: FotoLista } | null>(null);
   const [progreso, setProgreso] = useState("");
+  // Where the photo opens looking (arriving from another point); undefined keeps the camera.
+  const [vistaAbrir, setVistaAbrir] = useState<VistaFoto | undefined>(undefined);
+  const [calib, setCalib] = useState<Calibracion | null>(null);
+  const [guardandoRumbo, setGuardandoRumbo] = useState(false);
+  const camaraFoto = useRef<VistaFoto | undefined>(undefined);
+  const entradaUsada = useRef(false);
   const enMemoria = useRef(new Map<string, FotoLista>());
   const activas = useRef<string[]>([]);
   activas.current = [vista?.capturaId, comparadas?.antes.capturaId, comparadas?.despues.capturaId, pareja?.antesId, pareja?.despuesId].filter((x): x is string => !!x);
@@ -73,11 +109,19 @@ export default function FichaPunto({
   // Full screen tabs still open (to stop listening when the panel closes).
   const pantallas = useRef(new Set<() => void>());
   // The tab's requests run with this render's functions (the point may have changed since it opened).
-  const acciones = useRef({ guardarDesdePantalla: async (_c: string, _g: number, _a: number) => ({ error: "", codigo: undefined as string | undefined, guardado: null as { giro: number; giroPor: string | null; giroEn: string | null } | null }) });
+  const acciones = useRef<{ guardarDesdePantalla: typeof guardarDesdePantalla; irA: typeof irA } | null>(null);
 
   const comparables = useMemo(() => capturasComparables(capturas ?? []), [capturas]);
   const capturaDe = (id: string) => capturas?.find((c) => c.id === id);
   const giroGuardado = (id: string) => capturaDe(id)?.giroGrados ?? 0;
+  // Neighbours drawn in the photo; while confirming a calibration, with the new rumbo to check it.
+  const rumboVigente = calib?.paso === "confirmar" ? calib.rumbo : punto.rumboGrados;
+  const listaVecinos = useMemo(() => vecinos({ ...punto, rumboGrados: rumboVigente }, puntos), [punto, puntos, rumboVigente]);
+  const marcadores = useMemo<MarcadorPunto[]>(
+    () => listaVecinos.map((v) => ({ puntoId: v.puntoId, yaw: v.yaw, pitch: v.pitch, etiqueta: v.etiqueta, detalle: `${v.codigo} · ${v.espacio || "sin espacio"} · a ${v.distancia.toLocaleString("es-CO")} m — clic para ir` })),
+    [listaVecinos],
+  );
+  const volver = entrada?.volver;
   const paraComparar = (f: FotoLista) => {
     const c = capturaDe(f.capturaId);
     return { id: f.capturaId, url: f.url, fecha: f.fecha, giro: c?.giroGrados ?? 0, giroPor: c?.giroPor ?? null, giroEn: c?.giroEn ?? null };
@@ -110,6 +154,21 @@ export default function FichaPunto({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [punto.id]);
 
+  // Arriving from another point: open the date closest to the photo it came from, looking the same way.
+  useEffect(() => {
+    if (!capturas || !entrada || entradaUsada.current) return;
+    entradaUsada.current = true;
+    const c = capturaMasCercana(capturas, entrada.fecha);
+    if (c) ver(c, entrada.vista);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [capturas]);
+
+  // A neighbour clicked in the full screen tab walks from this point.
+  useEffect(() => {
+    alPedirPuntoDesdePantalla((id, v) => acciones.current?.irA(id, v));
+    return () => alPedirPuntoDesdePantalla(null);
+  }, []);
+
   useEffect(
     () => () => {
       soltarMemoria();
@@ -132,7 +191,7 @@ export default function FichaPunto({
     avisar("Preparando la foto…");
     const url = await urlParaVisor(blob, c.foto.ancho);
     const fecha = fmtFechaHora(c.tomadaEn);
-    const foto: FotoLista = { capturaId: c.id, url, blob, ancho: c.foto.ancho, fecha, titulo: `${punto.codigo} · ${fecha}` };
+    const foto: FotoLista = { capturaId: c.id, url, blob, ancho: c.foto.ancho, tomadaEn: c.tomadaEn, fecha, titulo: `${punto.codigo} · ${fecha}` };
     enMemoria.current.set(c.id, foto);
     // Drop the oldest photos nobody is looking at.
     for (const [id, f] of enMemoria.current) {
@@ -144,14 +203,17 @@ export default function FichaPunto({
     return foto;
   }
 
-  async function ver(c: CapturaVista) {
+  /** Opens a date's photo; `llegada` = where to look when arriving from another point. */
+  async function ver(c: CapturaVista, llegada?: VistaFoto) {
     if (!c.foto || c.foto.estado !== "en_cde" || cargando) return;
     setError("");
     setPareja(null);
     setComparadas(null);
+    cancelarCalibracion();
     setCargando({ id: c.id, texto: "Descargando…" });
     try {
       const foto = await obtener(c, (texto) => setCargando({ id: c.id, texto }));
+      setVistaAbrir(llegada);
       setVista(foto);
     } catch (err) {
       setError(message(err));
@@ -188,6 +250,7 @@ export default function FichaPunto({
   function comparar() {
     const p = capturas ? parejaInicial(capturas) : null;
     if (!p) return;
+    cancelarCalibracion();
     setVista(null);
     division.current = 50;
     camara.current = undefined;
@@ -200,7 +263,6 @@ export default function FichaPunto({
     setProgreso("");
   }
 
-  /** Opens a tab of its own and hands it the photos already downloaded (the tab has no Trimble session). */
   /**
    * Opens a tab of its own and hands it the photos already downloaded. The tab has no Trimble
    * session, so it asks this panel to save an alignment; the panel listens until the tab closes.
@@ -217,8 +279,8 @@ export default function FichaPunto({
         entregado = true;
         ventana.postMessage(datos, origen);
       } else if (d?.tipo === "i360-guardar-giro" && typeof d.pedido === "number" && typeof d.capturaId === "string" && typeof d.giro === "number" && typeof d.anterior === "number") {
-        const r = await acciones.current.guardarDesdePantalla(d.capturaId, d.giro, d.anterior);
-        if (!ventana.closed) ventana.postMessage({ tipo: "i360-giro-guardado", pedido: d.pedido, ...r }, origen);
+        const r = await acciones.current?.guardarDesdePantalla(d.capturaId, d.giro, d.anterior);
+        if (r && !ventana.closed) ventana.postMessage({ tipo: "i360-giro-guardado", pedido: d.pedido, ...r }, origen);
       }
     };
     window.addEventListener("message", alMensaje);
@@ -245,10 +307,84 @@ export default function FichaPunto({
     const actual = (await recargar())?.find((c) => c.id === capturaId) ?? guardada;
     return { error, codigo, guardado: actual ? { giro: actual.giroGrados, giroPor: actual.giroPor, giroEn: actual.giroEn } : null };
   }
-  acciones.current = { guardarDesdePantalla };
+  /** Walks to a neighbouring point (or back): its closest date opens looking the same way in the model. */
+  function irA(puntoId: string, desde?: VistaFoto) {
+    const destino = puntos.find((p) => p.id === puntoId);
+    if (!destino || !vista) return;
+    const v = desde ?? camaraFoto.current;
+    cancelarCalibracion();
+    alIrAPunto(puntoId, {
+      fecha: vista.tomadaEn,
+      vista: v ? { yaw: yawEquivalente(v.yaw, punto.rumboGrados, destino.rumboGrados), pitch: 0, zoom: v.zoom } : undefined,
+      volver: { puntoId: punto.id, codigo: punto.codigo },
+    });
+  }
+  acciones.current = { guardarDesdePantalla, irA };
+
+  /** What the single photo full screen tab shows: the photo, its turn, the neighbours and «Volver». */
+  function datosPantallaFoto(f: FotoLista, vistaTab: VistaFoto | undefined) {
+    return {
+      tipo: "i360-foto",
+      capturaId: f.capturaId,
+      blob: f.blob,
+      ancho: f.ancho,
+      titulo: f.titulo,
+      giro: giroGuardado(f.capturaId),
+      marcadores,
+      vista: vistaTab,
+      volver: volver ? { puntoId: volver.puntoId, etiqueta: `Volver a ${volver.codigo}` } : null,
+    };
+  }
 
   function pantallaCompleta() {
-    if (vista) abrirPantalla({ tipo: "i360-foto", blob: vista.blob, ancho: vista.ancho, titulo: vista.titulo, giro: giroGuardado(vista.capturaId) });
+    if (!vista) return;
+    const e = abrirPantallaFoto(datosPantallaFoto(vista, camaraFoto.current));
+    if (e) setError(e);
+  }
+
+  // The full screen tab follows the photo open here (another date, another point, new neighbours).
+  useEffect(() => {
+    if (vista && pantallaFotoAbierta()) enviarAPantallaFoto(datosPantallaFoto(vista, vistaAbrir));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [vista, vistaAbrir, marcadores, capturas]);
+
+  function empezarCalibracion() {
+    setError("");
+    setCalib({ paso: "foto" });
+  }
+
+  function cancelarCalibracion() {
+    if (calib?.paso === "modelo") alCancelarClicModelo?.();
+    setCalib(null);
+  }
+
+  /** Step 1 done (the element clicked in the photo): wait for the same element in the model. */
+  async function clicCalibracion(p: { yaw: number; pitch: number }) {
+    if (!alPedirClicModelo) return;
+    setCalib({ paso: "modelo", ...p });
+    const lugar = await alPedirClicModelo();
+    if (!lugar) return setCalib((c) => (c?.paso === "modelo" ? null : c));
+    const distancia = distanciaHorizontal(punto, lugar);
+    if (distancia < 0.5) {
+      setError("Ese elemento del modelo está a menos de 0,5 m del trípode: elija uno más lejano (puerta, columna, esquina de un muro).");
+      return setCalib({ paso: "foto" });
+    }
+    setError("");
+    setCalib({ paso: "confirmar", ...p, rumbo: rumboDesdeCalibracion(p.yaw, azimutEntre(punto, lugar)), distancia: Math.round(distancia * 10) / 10 });
+  }
+
+  async function guardarRumbo() {
+    if (calib?.paso !== "confirmar") return;
+    setGuardandoRumbo(true);
+    try {
+      await api.editarPunto(punto.id, { version: punto.version, rumboGrados: calib.rumbo });
+      setCalib(null);
+      alCambiar();
+    } catch (err) {
+      setError(message(err));
+    } finally {
+      setGuardandoRumbo(false);
+    }
   }
 
   function pantallaCompletaComparar() {
@@ -376,11 +512,88 @@ export default function FichaPunto({
 
       {vista && !pareja && (
         <div style={{ marginTop: 10 }}>
-          <Visor360 url={vista.url} titulo={vista.titulo} giro={giroGuardado(vista.capturaId)} />
-          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+          {volver && (
+            <button style={{ ...boton, marginBottom: 4, borderColor: "#EF6C00", color: "#EF6C00" }} onClick={() => irA(volver.puntoId)} title="Volver al punto de donde vino, en la fecha más cercana">
+              ← Volver a {volver.codigo}
+            </button>
+          )}
+          <Visor360
+            url={vista.url}
+            titulo={vista.titulo}
+            giro={giroGuardado(vista.capturaId)}
+            vista={vistaAbrir}
+            marcadores={marcadores}
+            alElegirMarcador={(id) => irA(id)}
+            alClicFoto={calib?.paso === "foto" ? clicCalibracion : undefined}
+            marcaCalibracion={calib && calib.paso !== "foto" ? { yaw: calib.yaw, pitch: calib.pitch } : null}
+            alMoverCamara={(v) => (camaraFoto.current = v)}
+          />
+          <div style={{ display: "flex", gap: 6, marginTop: 4, flexWrap: "wrap" }}>
             <button style={boton} onClick={pantallaCompleta}>Pantalla completa ↗</button>
-            <button style={boton} onClick={() => setVista(null)}>Cerrar foto</button>
+            <button
+              style={boton}
+              onClick={() => {
+                cancelarCalibracion();
+                setVista(null);
+              }}
+            >
+              Cerrar foto
+            </button>
+            {puedeEditar && !calib && alPedirClicModelo && (
+              <button style={boton} onClick={empezarCalibracion} title="Un clic en la foto y otro en el modelo 3D sobre el mismo elemento">
+                {punto.rumboGrados === null ? "Calibrar rumbo" : "Recalibrar rumbo"}
+              </button>
+            )}
           </div>
+          {calib && (
+            <div style={{ marginTop: 6, padding: 8, border: "1px solid #ff8a80", borderRadius: 6, background: "#fff5f5", fontSize: 12 }}>
+              <b>Calibrar rumbo</b>
+              {calib.paso === "foto" && (
+                <p style={{ margin: "4px 0" }}>
+                  1 de 2 · Haga clic en la foto sobre un elemento que también esté en el modelo 3D: el canto de una puerta, una columna, la esquina de un muro. Puede girar la foto antes de hacer clic.
+                </p>
+              )}
+              {calib.paso === "modelo" && <p style={{ margin: "4px 0" }}>2 de 2 · Ahora haga clic en el modelo 3D, a la derecha, sobre ese mismo elemento.</p>}
+              {calib.paso === "confirmar" && (
+                <>
+                  <p style={{ margin: "4px 0" }}>
+                    Rumbo calculado: <b>{calib.rumbo.toLocaleString("es-CO")}°</b> {punto.rumboGrados === null ? "(el punto no tenía rumbo)" : `(antes: ${punto.rumboGrados.toLocaleString("es-CO")}°)`}. Elemento a {calib.distancia.toLocaleString("es-CO")} m del trípode.
+                  </p>
+                  <p style={{ margin: "4px 0" }}>
+                    {marcadores.length
+                      ? "Antes de guardar, revise en la foto que los puntos vecinos (círculos naranjas) queden donde estuvieron sus trípodes."
+                      : "No hay puntos vecinos con fotos para revisarlo: después de guardar, compruebe con «Ir al punto» que el modelo mire hacia el mismo lado que la foto."}
+                  </p>
+                </>
+              )}
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap", marginTop: 4 }}>
+                {calib.paso === "confirmar" && (
+                  <button style={{ ...boton, borderColor: C.accept, background: C.accept, color: "#fff", fontWeight: 600 }} onClick={guardarRumbo} disabled={guardandoRumbo}>
+                    {guardandoRumbo ? "Guardando…" : "Guardar rumbo"}
+                  </button>
+                )}
+                {calib.paso === "confirmar" && (
+                  <button style={boton} onClick={() => setCalib({ paso: "foto" })}>
+                    Repetir
+                  </button>
+                )}
+                <button style={boton} onClick={cancelarCalibracion}>
+                  Cancelar
+                </button>
+              </div>
+            </div>
+          )}
+          {!calib && (
+            <p style={{ fontSize: 11.5, margin: "6px 0 0", color: "var(--tc-gray-600)" }}>
+              {punto.rumboGrados === null
+                ? puedeEditar
+                  ? "Calibre el rumbo (un clic en la foto y otro en el modelo) para ver en la foto los puntos vecinos y pasar de uno a otro."
+                  : "Este punto no tiene el rumbo calibrado: cuando un editor lo calibre, en la foto se verán los puntos vecinos para pasar de uno a otro."
+                : marcadores.length
+                  ? "Los círculos naranjas son los puntos vecinos de este piso: haga clic en uno para ir a sus fotos."
+                  : "No hay otros puntos con fotos en este piso a menos de 20 m."}
+            </p>
+          )}
         </div>
       )}
 
