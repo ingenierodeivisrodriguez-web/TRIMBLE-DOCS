@@ -1,6 +1,7 @@
 // Everything that comes from the browser is checked here before the service uses it.
 import { ServiceError } from "../propiedades/service";
 import { errorSegmento, normalizarSegmento } from "./codigos";
+import { normalizarGiro } from "./comparar";
 import { CambiosPunto, MAX_BYTES_FOTO, MAX_MINIATURA, NuevaSubida, NuevoPunto, Vec3 } from "./types";
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -135,6 +136,16 @@ export function validarNuevaSubida(body: unknown, ahora: Date): NuevaSubida {
     alto: entero(b.alto, "Alto"),
     miniatura,
   };
+}
+
+/** The turn to save and the saved one the person was looking at (to notice another person's change). */
+export function validarAlineacion(body: unknown): { giro: number; anterior: number } {
+  const o = objeto(body);
+  const grados = (v: unknown, que: string) => {
+    if (typeof v !== "number" || !Number.isFinite(v) || Math.abs(v) > 360) throw malo(`${que}: escriba un número de grados entre −180 y 180.`);
+    return normalizarGiro(v);
+  };
+  return { giro: grados(o.giro, "Giro"), anterior: grados(o.anterior, "Giro anterior") };
 }
 
 export function validarMotivo(body: unknown): string {

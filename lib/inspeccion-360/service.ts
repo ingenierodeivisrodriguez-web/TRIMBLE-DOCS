@@ -19,7 +19,7 @@ import {
   PuntoVista,
   SubidaResponse,
 } from "./types";
-import { validarCambiosPunto, validarConfig, validarId, validarMotivo, validarNuevaSubida, validarNuevoPunto } from "./validate";
+import { validarAlineacion, validarCambiosPunto, validarConfig, validarId, validarMotivo, validarNuevaSubida, validarNuevoPunto } from "./validate";
 
 /**
  * Rules of Inspección 360° (first stage, owner's decisions of 26-11-2026):
@@ -212,6 +212,9 @@ export async function iniciarSubida(ctx: Ctx, body: unknown): Promise<SubidaResp
     creado: ahora,
     actualizado: ahora,
     actualizadoPor: null,
+    giroGrados: 0,
+    giroPor: null,
+    giroEn: null,
   };
   const fotoId = randomUUID();
   const rutaTemporal = `${ctx.projectId}/${fotoId}.jpg`;
@@ -325,6 +328,32 @@ export async function anularCaptura(ctx: Ctx, id: string, body: unknown): Promis
   const anulada = await ctx.store.actualizarCaptura(ctx.projectId, captura.id, { estado: "anulada", motivo, actualizadoPor: ctx.caller.name || ctx.caller.id });
   const [foto] = await ctx.store.fotosDe(ctx.projectId, [captura.id]);
   return vistaCaptura(ctx, anulada, foto, true);
+}
+
+/**
+ * Saves the turn that lines a photo up with the other dates of its point, so everyone sees the
+ * photos aligned. Only editors; another person's newer turn is never overwritten silently.
+ */
+export async function alinearCaptura(ctx: Ctx, id: string, body: unknown): Promise<CapturaVista> {
+  await exigirEditor(ctx);
+  const { giro, anterior } = validarAlineacion(body);
+  const captura = await ctx.store.obtenerCaptura(ctx.projectId, validarId(id));
+  if (!captura) throw new ServiceError("Esa captura no existe en este proyecto.", 404, "no-existe");
+  if (captura.estado === "anulada") throw new ServiceError("La captura está anulada: no se alinea.", 409, "anulada");
+  let guardada = captura;
+  if (captura.giroGrados !== giro) {
+    try {
+      guardada = await ctx.store.alinearCaptura(ctx.projectId, captura.id, anterior, giro, ctx.caller.name || ctx.caller.id);
+    } catch (err) {
+      if (!(err instanceof ConflictoVersion)) throw err;
+      const actual = await ctx.store.obtenerCaptura(ctx.projectId, captura.id);
+      const g = actual ? `${actual.giroGrados.toLocaleString("es-CO")}°` : "otro";
+      const quien = actual?.giroPor ? ` (${actual.giroPor})` : "";
+      throw new ServiceError(`Otra persona${quien} guardó un giro de ${g} para esta foto mientras usted la alineaba. Se cargó ese giro: revíselo y vuelva a guardar si hace falta.`, 409, "giro-conflicto");
+    }
+  }
+  const fotos = await ctx.store.fotosDe(ctx.projectId, [captura.id]);
+  return vistaCaptura(ctx, guardada, fotos.find((f) => f.tipo === "360"), true);
 }
 
 /** Which CDE file to stream for a photo (any member may see it). */

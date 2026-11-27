@@ -5,16 +5,18 @@
 // downloaded (postMessage, same origin only).
 
 import { useEffect, useState } from "react";
+import { normalizarGiro } from "../../lib/inspeccion-360/comparar";
 import Comparador360, { type FotoComparada, type VistaCamara } from "./Comparador360";
 import { maxTextura, urlParaVisor } from "./imagen";
 import Visor360 from "./Visor360";
 
-type Lado = { id?: string; blob?: Blob; ancho?: number | null; fecha?: string };
+type Lado = { id?: string; blob?: Blob; ancho?: number | null; fecha?: string; giro?: number };
 type Mensaje = {
   tipo?: string;
   titulo?: string;
   blob?: Blob;
   ancho?: number | null;
+  giro?: number;
   antes?: Lado;
   despues?: Lado;
   division?: number;
@@ -22,12 +24,14 @@ type Mensaje = {
 };
 
 type Contenido =
-  | { tipo: "foto"; url: string; titulo: string }
+  | { tipo: "foto"; url: string; titulo: string; giro: number }
   | { tipo: "comparar"; antes: FotoComparada; despues: FotoComparada; division: number; vista?: VistaCamara };
 
-function ladoValido(l: Lado | undefined): l is Required<Lado> {
+function ladoValido(l: Lado | undefined): l is Required<Omit<Lado, "giro">> & Lado {
   return !!l && typeof l.id === "string" && l.blob instanceof Blob && typeof l.fecha === "string";
 }
+
+const giroDe = (v: unknown) => (typeof v === "number" ? normalizarGiro(v) : 0);
 
 export default function PantallaCompleta() {
   const [contenido, setContenido] = useState<Contenido | null>(null);
@@ -39,7 +43,7 @@ export default function PantallaCompleta() {
       if (ev.origin !== window.location.origin || ev.source !== window.opener || !d) return;
       if (d.tipo === "i360-foto" && d.blob instanceof Blob) {
         const url = await urlParaVisor(d.blob, d.ancho ?? null, maxTextura());
-        setContenido({ tipo: "foto", url, titulo: d.titulo ?? "" });
+        setContenido({ tipo: "foto", url, titulo: d.titulo ?? "", giro: giroDe(d.giro) });
         document.title = `${d.titulo ?? "Foto 360"} — Inspección 360°`;
       } else if (d.tipo === "i360-comparar" && ladoValido(d.antes) && ladoValido(d.despues)) {
         // Two photos on the GPU at once: each one at most 8192 px wide.
@@ -48,8 +52,8 @@ export default function PantallaCompleta() {
         const division = typeof d.division === "number" && d.division >= 0 && d.division <= 100 ? d.division : 50;
         setContenido({
           tipo: "comparar",
-          antes: { id: d.antes.id, url: ua, fecha: d.antes.fecha },
-          despues: { id: d.despues.id, url: ud, fecha: d.despues.fecha },
+          antes: { id: d.antes.id, url: ua, fecha: d.antes.fecha, giro: giroDe(d.antes.giro) },
+          despues: { id: d.despues.id, url: ud, fecha: d.despues.fecha, giro: giroDe(d.despues.giro) },
           division,
           vista: d.vista,
         });
@@ -68,7 +72,7 @@ export default function PantallaCompleta() {
   if (contenido?.tipo === "foto") {
     return (
       <div style={{ position: "fixed", inset: 0, background: "#111" }}>
-        <Visor360 url={contenido.url} titulo={contenido.titulo} alto="100%" />
+        <Visor360 url={contenido.url} titulo={contenido.titulo} giro={contenido.giro} alto="100%" />
       </div>
     );
   }

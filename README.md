@@ -5550,17 +5550,25 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
    a la derecha de una **barra vertical** que se arrastra hacia los lados (o con las flechas
    del teclado). Empieza con las dos fechas más recientes; cada lista solo deja elegir una
    fecha «antes» más vieja que «después». Al mover o acercar una foto, la otra se mueve igual.
-   Si la cámara quedó mirando hacia otro lado ese día, **Alinear «antes»** (−5°, −1°, barra,
-   +1°, +5°) gira esa foto hasta que coincida; el giro queda guardado **por foto en ese
-   navegador** (no en la base, ni para otras personas). **Pantalla completa ↗** abre la
-   comparación en una pestaña propia con la misma barra y la misma vista.
+   Si la cámara quedó mirando hacia otro lado ese día, un editor (o administrador) elige en
+   **Alinear** la foto «Antes» o «Después», la gira (−5°, −1°, barra, +1°, +5°) hasta que
+   coincida y pulsa **Guardar alineación**: el giro queda **en la base, por foto**, con quién
+   y cuándo, y **todas las personas del proyecto** ven esas fotos ya alineadas (también al
+   ver una sola fecha y a pantalla completa). **Deshacer** vuelve al giro guardado. Si otra
+   persona guardó otro giro mientras tanto, no se pisa: sale su valor y su nombre para
+   revisar. Quien no es editor ve las fotos alineadas, sin los controles. Un giro que haya
+   quedado en el navegador con la primera versión (26-11-2026) se carga como «sin guardar»
+   para que un editor lo guarde. **Pantalla completa ↗** abre la comparación en una pestaña
+   propia con la misma barra, la misma vista y los mismos giros.
 7. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
    **desactiva** con motivo. Nada se borra.
 
 **Cómo funciona**
 
 - Datos: `supabase/inspeccion-360.sql` (tablas `i360_config`, `i360_puntos`,
-  `i360_capturas`, `i360_fotos`, re-ejecutable, RLS sin políticas, sin `delete`) y el bucket
+  `i360_capturas`, `i360_fotos`, re-ejecutable, RLS sin políticas, sin `delete`; el bloque 2
+  agrega a `i360_capturas` el giro de alineación `giro_grados` (−180 sin incluir a 180, en
+  décimas; 0 = como salió de la cámara), `giro_por` y `giro_en`) y el bucket
   privado `i360-fotos` solo para la **copia temporal** de la foto: el navegador la sube allí
   con un enlace firmado (Vercel no deja pasar más de 4,5 MB), el servidor la copia a su
   carpeta del CDE con el token del usuario (nombre fijo, `If-None-Match: *`; un reintento
@@ -5579,15 +5587,19 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
   el de «después» se recorta con `clip-path` en la barra, así cada lado recibe sus propios
   clics. Las cámaras se siguen con `position-updated` / `zoom-updated` → `rotate()` / `zoom()`
   (Photo Sphere Viewer dispara el evento dentro de la misma llamada, así que una bandera corta
-  el eco). El giro es `sphereCorrection.pan` de cada foto, guardado en `localStorage`
-  (`i360-giro:<captura>`). Reglas puras con pruebas en `lib/inspeccion-360/comparar.ts`. En
+  el eco). El giro es `sphereCorrection.pan` de cada foto; se guarda con
+  `PUT /api/inspeccion-360/capturas/<id>/giro` `{ giro, anterior }` (solo editores): el
+  servidor actualiza solo si el giro guardado sigue siendo `anterior` (si no, 409
+  `giro-conflicto` con el valor y el nombre de quien lo cambió). Crear capturas no escribe el
+  giro, así que las subidas siguen funcionando aunque falte correr el bloque 2. Reglas puras
+  con pruebas en `lib/inspeccion-360/comparar.ts`. En
   pantalla completa cada foto va a lo sumo a 8192 px (dos texturas a la vez en la tarjeta de
   video); en el panel quedan en memoria a lo sumo 3 fotos descargadas.
 - Íconos con `viewer.addIcon` (imágenes PNG embebidas) y clic con `viewer.onIconPicked`
   (`providedId`), comprobados en la Fase 0; `removeIcon` siempre con la lista de `getIcon`.
 
-**Pendiente**: calibrar el rumbo de cada foto (y guardar el giro de alineación en la base para
-todos), la página del menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
+**Pendiente**: calibrar el rumbo de cada foto respecto al modelo (el giro de alineación solo
+iguala las fechas entre sí), la página del menú del proyecto y la unión con Control de Obra (fases siguientes del plan).
 
 ## Cómo funciona (común a ambas extensiones)
 

@@ -63,7 +63,10 @@ export function giroEnRadianes(grados: number): number {
   return (normalizarGiro(grados) * Math.PI) / 180;
 }
 
-/** Where a photo's turn is kept in the browser (per capture, so it holds for every pair). */
+/**
+ * Where the first version (26-11-2026) kept a photo's turn in the browser. The turn now lives in
+ * the database for everyone; a turn still found here is offered to an editor to save.
+ */
 export function claveGiro(capturaId: string): string {
   return `i360-giro:${capturaId}`;
 }
@@ -78,8 +81,8 @@ function almacenNavegador(): Almacen | null {
   }
 }
 
-/** The turn saved for the photo of a capture (0 when there is none or storage is blocked). */
-export function leerGiro(capturaId: string, almacen: Almacen | null = almacenNavegador()): number {
+/** The turn this browser kept for the photo of a capture (0 when there is none or storage is blocked). */
+export function leerGiroLocal(capturaId: string, almacen: Almacen | null = almacenNavegador()): number {
   try {
     const v = almacen?.getItem(claveGiro(capturaId));
     return v === null || v === undefined ? 0 : normalizarGiro(Number(v));
@@ -88,12 +91,16 @@ export function leerGiro(capturaId: string, almacen: Almacen | null = almacenNav
   }
 }
 
-export function guardarGiro(capturaId: string, grados: number, almacen: Almacen | null = almacenNavegador()): void {
+/** Forgets the browser's turn (once saved in the database, or discarded). */
+export function borrarGiroLocal(capturaId: string, almacen: Almacen | null = almacenNavegador()): void {
   try {
-    const g = normalizarGiro(grados);
-    if (g === 0) almacen?.removeItem(claveGiro(capturaId));
-    else almacen?.setItem(claveGiro(capturaId), String(g));
+    almacen?.removeItem(claveGiro(capturaId));
   } catch {
-    // Private mode or storage full: the turn just lasts while the page is open.
+    // Storage blocked: nothing to forget.
   }
+}
+
+/** The turn a photo starts with: the saved one; while nothing is saved, an editor gets the browser's old one to save. */
+export function giroInicial(guardado: number, local: number, puedeAlinear: boolean): number {
+  return guardado === 0 && puedeAlinear ? local : guardado;
 }

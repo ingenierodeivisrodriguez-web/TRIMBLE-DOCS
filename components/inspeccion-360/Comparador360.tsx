@@ -2,13 +2,14 @@
 
 // Before/after comparison of two 360° photos of the same point: both photos stacked, the "después"
 // one cut at a vertical bar the person drags sideways, and both cameras turning and zooming
-// together. A photo taken with the camera facing another way is lined up by turning "antes"; the
-// turn is kept per photo in this browser.
+// together. A photo taken with the camera facing another way is lined up by turning it; an editor
+// saves the turn in the database so everyone sees the photos aligned.
 
 import "@photo-sphere-viewer/core/index.css";
 import type { Viewer as VisorPSV } from "@photo-sphere-viewer/core";
 import { useEffect, useRef, useState } from "react";
-import { divisionConTecla, divisionDesdePuntero, giroEnRadianes, guardarGiro, leerGiro, normalizarGiro } from "../../lib/inspeccion-360/comparar";
+import { borrarGiroLocal, divisionConTecla, divisionDesdePuntero, giroEnRadianes, giroInicial, leerGiroLocal, normalizarGiro } from "../../lib/inspeccion-360/comparar";
+import { fmtFecha } from "../../lib/inspeccion-360/fechas";
 import { LANG } from "./Visor360";
 
 export interface FotoComparada {
@@ -17,6 +18,10 @@ export interface FotoComparada {
   url: string;
   /** Date and time shown on the photo (DD-MM-AAAA HH:MM). */
   fecha: string;
+  /** The turn saved in the database (degrees). */
+  giro: number;
+  giroPor?: string | null;
+  giroEn?: string | null;
 }
 
 export interface VistaCamara {
@@ -25,8 +30,10 @@ export interface VistaCamara {
   zoom: number;
 }
 
-const COLOR_ANTES = "#455a64";
-const COLOR_DESPUES = "#EF6C00";
+type Lado = "antes" | "despues";
+
+const COLOR: Record<Lado, string> = { antes: "#455a64", despues: "#EF6C00" };
+const NOMBRE: Record<Lado, string> = { antes: "«antes»", despues: "«después»" };
 
 const boton: React.CSSProperties = { border: "1px solid var(--tc-gray-300, #c9ced6)", background: "#fff", borderRadius: 4, fontSize: 12, padding: "3px 7px", cursor: "pointer", fontFamily: "inherit" };
 
@@ -34,12 +41,17 @@ function etiqueta(color: string, lado: "left" | "right"): React.CSSProperties {
   return { position: "absolute", top: 8, [lado]: 8, background: color, color: "#fff", fontSize: 11.5, fontWeight: 600, padding: "3px 8px", borderRadius: 3, whiteSpace: "nowrap", boxShadow: "0 1px 3px rgba(0,0,0,.4)" };
 }
 
+const grados = (g: number) => `${g.toLocaleString("es-CO")}°`;
+
 export default function Comparador360({
   antes,
   despues,
   alto = 300,
   division: divisionInicial = 50,
   vista,
+  puedeAlinear = false,
+  alGuardarGiro,
+  alCambiarGiro,
   alCambiarDivision,
   alMoverCamara,
 }: {
@@ -50,6 +62,12 @@ export default function Comparador360({
   division?: number;
   /** Where the cameras start looking (from another comparison, for full screen). */
   vista?: VistaCamara;
+  /** Editors turn the photos and save the turn; everyone else sees them as saved. */
+  puedeAlinear?: boolean;
+  /** Saves a photo's turn; `anterior` is the saved turn on screen. Rejects with the server's message. */
+  alGuardarGiro?: (capturaId: string, giro: number, anterior: number) => Promise<void>;
+  /** The turn shown for a photo changed (saved or not), e.g. to open full screen as it is. */
+  alCambiarGiro?: (capturaId: string, giro: number) => void;
   alCambiarDivision?: (division: number) => void;
   alMoverCamara?: (vista: VistaCamara) => void;
 }) {
@@ -59,12 +77,26 @@ export default function Comparador360({
   const visorAntes = useRef<VisorPSV | null>(null);
   const visorDespues = useRef<VisorPSV | null>(null);
   const cargadas = useRef({ antes: "", despues: "" });
-  const props = useRef({ antes, despues, vista, alMoverCamara });
-  props.current = { antes, despues, vista, alMoverCamara };
   const [division, setDivision] = useState(divisionInicial);
-  const [giro, setGiro] = useState(() => leerGiro(antes.id));
   const [arrastrando, setArrastrando] = useState(false);
   const [error, setError] = useState("");
+  // Turns on screen that differ from the saved ones, by capture.
+  const [giros, setGiros] = useState<Record<string, number>>({});
+  const [lado, setLado] = useState<Lado>("antes");
+  const [guardando, setGuardando] = useState(false);
+  const [aviso, setAviso] = useState<{ error: boolean; texto: string } | null>(null);
+
+  const local = (f: FotoComparada) => leerGiroLocal(f.id);
+  const valor = (f: FotoComparada) => giros[f.id] ?? giroInicial(f.giro, local(f), puedeAlinear);
+  const gA = valor(antes);
+  const gD = valor(despues);
+  const foto: Record<Lado, FotoComparada> = { antes, despues };
+  const pendiente = (f: FotoComparada) => valor(f) !== f.giro;
+  const hayPendiente = puedeAlinear && (pendiente(antes) || pendiente(despues));
+  const delNavegador = (f: FotoComparada) => puedeAlinear && f.giro === 0 && giros[f.id] === undefined && local(f) !== 0;
+
+  const props = useRef({ antes, despues, vista, alMoverCamara, gA, gD });
+  props.current = { antes, despues, vista, alMoverCamara, gA, gD };
 
   // Both viewers, created once; then each photo change only swaps the panorama (the camera stays).
   useEffect(() => {
@@ -73,7 +105,7 @@ export default function Comparador360({
       try {
         const { Viewer } = await import("@photo-sphere-viewer/core");
         if (cancelado || !capaAntes.current || !capaDespues.current) return;
-        const { antes: a, despues: d, vista: v } = props.current;
+        const { antes: a, despues: d, vista: v, gA: ga, gD: gd } = props.current;
         const crear = (contenedor: HTMLDivElement, url: string, giroGrados: number) =>
           new Viewer({
             container: contenedor,
@@ -88,8 +120,8 @@ export default function Comparador360({
             mousewheelCtrlKey: false,
             lang: LANG,
           });
-        visorAntes.current = crear(capaAntes.current, a.url, leerGiro(a.id));
-        visorDespues.current = crear(capaDespues.current, d.url, leerGiro(d.id));
+        visorAntes.current = crear(capaAntes.current, a.url, ga);
+        visorDespues.current = crear(capaDespues.current, d.url, gd);
         cargadas.current = { antes: a.url, despues: d.url };
 
         // Moving either photo moves the other. PSV fires the event synchronously inside rotate()/zoom(),
@@ -133,33 +165,82 @@ export default function Comparador360({
     };
   }, []);
 
-  // Another "antes" date: its own saved turn goes with it.
+  // Another date: the panorama changes and takes its own turn with it.
   useEffect(() => {
     const v = visorAntes.current;
     if (!v || cargadas.current.antes === antes.url) return;
     cargadas.current.antes = antes.url;
-    const g = leerGiro(antes.id);
-    setGiro(g);
-    v.setPanorama(antes.url, { transition: false, sphereCorrection: { pan: giroEnRadianes(g) } }).catch((err) => setError(String(err)));
-  }, [antes.url, antes.id]);
+    v.setPanorama(antes.url, { transition: false, sphereCorrection: { pan: giroEnRadianes(props.current.gA) } }).catch((err) => setError(String(err)));
+  }, [antes.url]);
 
   useEffect(() => {
     const v = visorDespues.current;
     if (!v || cargadas.current.despues === despues.url) return;
     cargadas.current.despues = despues.url;
-    v.setPanorama(despues.url, { transition: false, sphereCorrection: { pan: giroEnRadianes(leerGiro(despues.id)) } }).catch((err) => setError(String(err)));
-  }, [despues.url, despues.id]);
+    v.setPanorama(despues.url, { transition: false, sphereCorrection: { pan: giroEnRadianes(props.current.gD) } }).catch((err) => setError(String(err)));
+  }, [despues.url]);
 
-  function moverBarra(valor: number) {
-    setDivision(valor);
-    alCambiarDivision?.(valor);
+  // The turn on screen goes to the viewer (and to whoever opens full screen).
+  useEffect(() => {
+    visorAntes.current?.setOption("sphereCorrection", { pan: giroEnRadianes(gA) });
+    alCambiarGiro?.(antes.id, gA);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gA, antes.id]);
+
+  useEffect(() => {
+    visorDespues.current?.setOption("sphereCorrection", { pan: giroEnRadianes(gD) });
+    alCambiarGiro?.(despues.id, gD);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [gD, despues.id]);
+
+  function moverBarra(v: number) {
+    setDivision(v);
+    alCambiarDivision?.(v);
   }
 
-  function girar(grados: number) {
-    const g = normalizarGiro(grados);
-    setGiro(g);
-    guardarGiro(antes.id, g);
-    visorAntes.current?.setOption("sphereCorrection", { pan: giroEnRadianes(g) });
+  /** Turns the chosen photo from its latest turn (two quick clicks add up). */
+  function girar(nuevo: (actual: number) => number) {
+    const f = foto[lado];
+    setAviso(null);
+    setGiros((x) => ({ ...x, [f.id]: normalizarGiro(nuevo(x[f.id] ?? giroInicial(f.giro, local(f), puedeAlinear))) }));
+  }
+
+  async function guardar() {
+    if (!alGuardarGiro) return;
+    setGuardando(true);
+    setAviso(null);
+    const guardadas: string[] = [];
+    try {
+      for (const f of [antes, despues]) {
+        if (!pendiente(f)) continue;
+        const g = valor(f);
+        try {
+          await alGuardarGiro(f.id, g, f.giro);
+        } catch (err) {
+          // Another person's turn (or an error): show the saved one again.
+          setGiros((x) => {
+            const { [f.id]: _quitar, ...resto } = x;
+            return resto;
+          });
+          borrarGiroLocal(f.id);
+          throw err;
+        }
+        borrarGiroLocal(f.id);
+        setGiros((x) => ({ ...x, [f.id]: g }));
+        guardadas.push(f === antes ? NOMBRE.antes : NOMBRE.despues);
+      }
+      setAviso({ error: false, texto: `Alineación guardada (${guardadas.join(" y ")}): todas las personas del proyecto verán estas fotos así.` });
+    } catch (err) {
+      setAviso({ error: true, texto: err instanceof Error ? err.message : String(err) });
+    } finally {
+      setGuardando(false);
+    }
+  }
+
+  function deshacer() {
+    for (const f of [antes, despues]) borrarGiroLocal(f.id);
+    setGiros((x) => ({ ...x, [antes.id]: antes.giro, [despues.id]: despues.giro }));
+    setAviso(null);
   }
 
   function alPuntero(ev: React.PointerEvent) {
@@ -167,7 +248,10 @@ export default function Comparador360({
     if (r) moverBarra(divisionDesdePuntero(ev.clientX, r.left, r.width));
   }
 
+  const elegida = foto[lado];
   const resto = 100 - division;
+  const guardadoPor = (f: FotoComparada) => (f.giro !== 0 && f.giroPor ? `${grados(f.giro)}, guardado por ${f.giroPor}${f.giroEn ? ` el ${fmtFecha(f.giroEn)}` : ""}` : null);
+
   return (
     <div>
       <div ref={marco} style={{ position: "relative", width: "100%", height: alto, background: "#111", borderRadius: 4, overflow: "hidden", userSelect: "none" }}>
@@ -176,10 +260,10 @@ export default function Comparador360({
 
         {/* Each date's label lives in its own side of the bar. */}
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", clipPath: `inset(0 ${resto}% 0 0)`, zIndex: 5 }}>
-          <span style={etiqueta(COLOR_ANTES, "left")}>Antes · {antes.fecha}</span>
+          <span style={etiqueta(COLOR.antes, "left")}>Antes · {antes.fecha}</span>
         </div>
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", clipPath: `inset(0 0 0 ${division}%)`, zIndex: 5 }}>
-          <span style={etiqueta(COLOR_DESPUES, "right")}>Después · {despues.fecha}</span>
+          <span style={etiqueta(COLOR.despues, "right")}>Después · {despues.fecha}</span>
         </div>
 
         <div
@@ -219,27 +303,67 @@ export default function Comparador360({
         {error && <div style={{ position: "absolute", inset: 0, color: "#fff", padding: 12, fontSize: 13, zIndex: 7, background: "rgba(0,0,0,.6)" }}>No se pudo mostrar la comparación: {error}</div>}
       </div>
 
-      <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 6, fontSize: 12 }}>
-        <span style={{ color: "var(--tc-gray-600, #555)", marginRight: 2 }} title="Si las dos fotos no miran hacia el mismo lado, gire «antes» hasta que coincidan">
-          Alinear «antes»:
-        </span>
-        <button style={boton} onClick={() => girar(giro - 5)} title="Girar la foto «antes» −5°">−5°</button>
-        <button style={boton} onClick={() => girar(giro - 1)} title="Girar la foto «antes» −1°">−1°</button>
-        <input
-          type="range"
-          min={-180}
-          max={180}
-          step={1}
-          value={giro}
-          onChange={(e) => girar(Number(e.target.value))}
-          aria-label="Giro de la foto «antes» en grados"
-          style={{ flex: "1 1 90px", minWidth: 70 }}
-        />
-        <button style={boton} onClick={() => girar(giro + 1)} title="Girar la foto «antes» +1°">+1°</button>
-        <button style={boton} onClick={() => girar(giro + 5)} title="Girar la foto «antes» +5°">+5°</button>
-        <b style={{ minWidth: 42, textAlign: "right" }}>{giro.toLocaleString("es-CO")}°</b>
-        {giro !== 0 && <button style={boton} onClick={() => girar(0)} title="Quitar el giro">0°</button>}
-      </div>
+      {puedeAlinear ? (
+        <div style={{ marginTop: 6, fontSize: 12 }}>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+            <span style={{ color: "var(--tc-gray-600, #555)", marginRight: 2 }} title="Si las dos fotos no miran hacia el mismo lado, gire una hasta que coincidan">
+              Alinear:
+            </span>
+            {(["antes", "despues"] as const).map((l) => (
+              <button
+                key={l}
+                onClick={() => setLado(l)}
+                aria-pressed={lado === l}
+                style={{ ...boton, borderColor: COLOR[l], background: lado === l ? COLOR[l] : "#fff", color: lado === l ? "#fff" : COLOR[l], fontWeight: 600 }}
+              >
+                {l === "antes" ? "Antes" : "Después"}
+                {pendiente(foto[l]) ? " •" : ""}
+              </button>
+            ))}
+            <b style={{ marginLeft: "auto" }}>{grados(valor(elegida))}</b>
+          </div>
+          <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4, marginTop: 4 }}>
+            <button style={boton} onClick={() => girar((g) => g - 5)} title={`Girar la foto ${NOMBRE[lado]} −5°`}>−5°</button>
+            <button style={boton} onClick={() => girar((g) => g - 1)} title={`Girar la foto ${NOMBRE[lado]} −1°`}>−1°</button>
+            <input
+              type="range"
+              min={-180}
+              max={180}
+              step={1}
+              value={valor(elegida)}
+              onChange={(e) => {
+                const v = Number(e.target.value);
+                girar(() => v);
+              }}
+              aria-label={`Giro de la foto ${NOMBRE[lado]} en grados`}
+              style={{ flex: "1 1 90px", minWidth: 70 }}
+            />
+            <button style={boton} onClick={() => girar((g) => g + 1)} title={`Girar la foto ${NOMBRE[lado]} +1°`}>+1°</button>
+            <button style={boton} onClick={() => girar((g) => g + 5)} title={`Girar la foto ${NOMBRE[lado]} +5°`}>+5°</button>
+          </div>
+          {(delNavegador(antes) || delNavegador(despues)) && (
+            <div style={{ marginTop: 4, color: "#8a6d00" }}>Se cargó el giro que había quedado guardado solo en este navegador: guárdelo para que todos lo vean.</div>
+          )}
+          {hayPendiente && (
+            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 6, marginTop: 6, padding: 6, background: "#fff7e0", border: "1px solid #e6c65c", borderRadius: 4 }}>
+              <span style={{ flex: "1 1 120px" }}>Alineación sin guardar.</span>
+              <button style={{ ...boton, borderColor: "#2e6b22", background: "#2e6b22", color: "#fff", fontWeight: 600 }} onClick={guardar} disabled={guardando}>
+                {guardando ? "Guardando…" : "Guardar alineación"}
+              </button>
+              <button style={boton} onClick={deshacer} disabled={guardando}>Deshacer</button>
+            </div>
+          )}
+          {aviso && <div style={{ marginTop: 4, color: aviso.error ? "#b3261e" : "#2e6b22" }}>{aviso.texto}</div>}
+          {!hayPendiente && guardadoPor(elegida) && <div style={{ marginTop: 4, color: "var(--tc-gray-500, #777)" }}>Giro {NOMBRE[lado]}: {guardadoPor(elegida)}.</div>}
+        </div>
+      ) : (
+        (guardadoPor(antes) || guardadoPor(despues)) && (
+          <div style={{ marginTop: 6, fontSize: 12, color: "var(--tc-gray-500, #777)" }}>
+            Fotos alineadas{guardadoPor(antes) ? ` · «antes» ${guardadoPor(antes)}` : ""}
+            {guardadoPor(despues) ? ` · «después» ${guardadoPor(despues)}` : ""}.
+          </div>
+        )
+      )}
     </div>
   );
 }

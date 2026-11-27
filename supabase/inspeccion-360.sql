@@ -149,3 +149,25 @@ $$;
 insert into public.i360_migraciones (bloque, descripcion)
 values (1, 'Puntos de captura en el modelo y fotos 360 por fecha (tablas propias por proyecto)')
 on conflict (bloque) do nothing;
+
+-- ================================================================ bloque 2: alineación de fotos
+-- La cámara no siempre queda mirando hacia el mismo lado en cada visita. En «Comparar fechas» un
+-- editor gira cada foto hasta que coincida con las otras fechas del mismo punto y la guarda: el
+-- giro queda aquí para que cualquier persona del proyecto vea las fotos ya alineadas.
+-- giro_grados: de -180 (sin incluir) a 180, en décimas de grado; 0 = como salió de la cámara.
+
+alter table public.i360_capturas add column if not exists giro_grados numeric(4,1) not null default 0;
+alter table public.i360_capturas add column if not exists giro_por    text;
+alter table public.i360_capturas add column if not exists giro_en     timestamptz;
+
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'i360_capturas_giro_rango' and conrelid = 'public.i360_capturas'::regclass) then
+    alter table public.i360_capturas add constraint i360_capturas_giro_rango check (giro_grados > -180 and giro_grados <= 180);
+  end if;
+end;
+$$;
+
+insert into public.i360_migraciones (bloque, descripcion)
+values (2, 'Giro de alineación de cada foto 360 (comparar fechas), visible para todo el proyecto')
+on conflict (bloque) do nothing;

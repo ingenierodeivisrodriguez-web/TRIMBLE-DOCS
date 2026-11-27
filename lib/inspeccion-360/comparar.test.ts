@@ -6,8 +6,9 @@ import {
   divisionConTecla,
   divisionDesdePuntero,
   giroEnRadianes,
-  guardarGiro,
-  leerGiro,
+  giroInicial,
+  borrarGiroLocal,
+  leerGiroLocal,
   normalizarGiro,
   parejaInicial,
   puedeSer,
@@ -28,6 +29,9 @@ function captura(id: string, tomadaEn: string, estado: EstadoCaptura = "lista", 
     creado: tomadaEn,
     actualizado: tomadaEn,
     actualizadoPor: null,
+    giroGrados: 0,
+    giroPor: null,
+    giroEn: null,
     foto: foto === null ? null : ({ id: `f-${id}`, estado: foto, ancho: 8192 } as CapturaVista["foto"]),
     puedeAnular: false,
   };
@@ -96,22 +100,27 @@ describe("giro de una foto para alinearla con la otra", () => {
     assert.ok(Math.abs(giroEnRadianes(90) - Math.PI / 2) < 1e-12);
   });
 
-  it("se guarda por foto en el navegador; 0° borra la marca y sin almacenamiento vale 0", () => {
-    const datos = new Map<string, string>();
+  it("el giro que quedó en el navegador (primera versión) se lee y se olvida; sin almacenamiento vale 0", () => {
+    const datos = new Map<string, string>([[claveGiro("c1"), "37.5"]]);
     const almacen = {
       getItem: (k: string) => datos.get(k) ?? null,
       setItem: (k: string, v: string) => void datos.set(k, v),
       removeItem: (k: string) => void datos.delete(k),
     };
-    assert.equal(leerGiro("c1", almacen), 0);
-    guardarGiro("c1", 37.5, almacen);
-    assert.equal(datos.get(claveGiro("c1")), "37.5");
-    assert.equal(leerGiro("c1", almacen), 37.5);
-    guardarGiro("c1", 360, almacen);
+    assert.equal(leerGiroLocal("c1", almacen), 37.5);
+    assert.equal(leerGiroLocal("c2", almacen), 0);
+    borrarGiroLocal("c1", almacen);
     assert.equal(datos.has(claveGiro("c1")), false);
-    assert.equal(leerGiro("c1", null), 0);
-    const roto = { getItem: () => { throw new Error("bloqueado"); }, setItem: () => { throw new Error("lleno"); }, removeItem: () => {} };
-    assert.equal(leerGiro("c1", roto), 0);
-    assert.doesNotThrow(() => guardarGiro("c1", 10, roto));
+    assert.equal(leerGiroLocal("c1", null), 0);
+    const roto = { getItem: () => { throw new Error("bloqueado"); }, setItem: () => {}, removeItem: () => { throw new Error("bloqueado"); } };
+    assert.equal(leerGiroLocal("c1", roto), 0);
+    assert.doesNotThrow(() => borrarGiroLocal("c1", roto));
+  });
+
+  it("manda el giro guardado; si no hay ninguno, un editor recibe el del navegador para guardarlo", () => {
+    assert.equal(giroInicial(25, 37.5, true), 25);
+    assert.equal(giroInicial(0, 37.5, true), 37.5);
+    assert.equal(giroInicial(0, 37.5, false), 0);
+    assert.equal(giroInicial(0, 0, true), 0);
   });
 });

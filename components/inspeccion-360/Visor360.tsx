@@ -5,8 +5,14 @@
 
 import "@photo-sphere-viewer/core/index.css";
 import { useEffect, useRef, useState } from "react";
+import { giroEnRadianes } from "../../lib/inspeccion-360/comparar";
 
-type ViewerPSV = { setPanorama(url: string, o?: { caption?: string; transition?: boolean | number }): Promise<boolean>; destroy(): void };
+type Correccion = { pan: number };
+type ViewerPSV = {
+  setPanorama(url: string, o?: { caption?: string; transition?: boolean | number; sphereCorrection?: Correccion }): Promise<boolean>;
+  setOption(o: "sphereCorrection", v: Correccion): void;
+  destroy(): void;
+};
 
 export const LANG = {
   zoom: "Zoom",
@@ -25,10 +31,13 @@ export const LANG = {
   webglError: "El navegador no puede mostrar fotos 360 (WebGL)",
 };
 
-export default function Visor360({ url, titulo, alto = 240 }: { url: string; titulo?: string; alto?: number | string }) {
+/** `giro`: the photo's saved alignment turn in degrees (the same one the comparison uses). */
+export default function Visor360({ url, titulo, alto = 240, giro = 0 }: { url: string; titulo?: string; alto?: number | string; giro?: number }) {
   const contenedor = useRef<HTMLDivElement>(null);
   const visor = useRef<ViewerPSV | null>(null);
   const [error, setError] = useState("");
+  const giroRef = useRef(giro);
+  giroRef.current = giro;
 
   useEffect(() => {
     let cancelado = false;
@@ -47,9 +56,10 @@ export default function Visor360({ url, titulo, alto = 240 }: { url: string; tit
             touchmoveTwoFingers: false,
             mousewheelCtrlKey: false,
             lang: LANG,
+            sphereCorrection: { pan: giroEnRadianes(giroRef.current) },
           }) as unknown as ViewerPSV;
         } else {
-          await visor.current.setPanorama(url, { caption: titulo, transition: false });
+          await visor.current.setPanorama(url, { caption: titulo, transition: false, sphereCorrection: { pan: giroEnRadianes(giroRef.current) } });
         }
       } catch (err) {
         if (!cancelado) setError(err instanceof Error ? err.message : String(err));
@@ -59,6 +69,10 @@ export default function Visor360({ url, titulo, alto = 240 }: { url: string; tit
       cancelado = true;
     };
   }, [url, titulo]);
+
+  useEffect(() => {
+    visor.current?.setOption("sphereCorrection", { pan: giroEnRadianes(giro) });
+  }, [giro]);
 
   useEffect(
     () => () => {

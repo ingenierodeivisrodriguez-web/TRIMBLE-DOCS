@@ -9,7 +9,7 @@ import { CARPETA_INICIAL, type Captura, type ConfigI360, type Foto, type Punto }
  */
 
 export const BUCKET = "i360-fotos";
-const SETUP_HINT = "Faltan las tablas de Inspección 360° en Supabase: ejecuta supabase/inspeccion-360.sql en el SQL Editor.";
+const SETUP_HINT = "Faltan tablas o campos de Inspección 360° en Supabase: ejecuta (otra vez) supabase/inspeccion-360.sql en el SQL Editor.";
 
 /** The temporary copy of a photo while it goes to the CDE (Supabase Storage, private bucket). */
 export interface ArchivosI360 {
@@ -39,6 +39,8 @@ export interface I360Store {
   obtenerCaptura(projectId: string, id: string): Promise<Captura | null>;
   crearCaptura(c: Captura): Promise<Captura>;
   actualizarCaptura(projectId: string, id: string, cambios: Partial<Captura>): Promise<Captura>;
+  /** Saves the turn only if the stored one is still `anterior` (else ConflictoVersion: another person changed it). */
+  alinearCaptura(projectId: string, id: string, anterior: number, giro: number, quien: string): Promise<Captura>;
   fotosDe(projectId: string, capturaIds: string[]): Promise<Foto[]>;
   obtenerFoto(projectId: string, id: string): Promise<Foto | null>;
   crearFoto(f: Foto): Promise<Foto>;
@@ -62,7 +64,8 @@ const CAMPOS_PUNTO: Record<keyof Punto, string> = {
   version: "version", creado: "creado", creadoPor: "creado_por", creadoPorNombre: "creado_por_nombre",
   actualizado: "actualizado", actualizadoPor: "actualizado_por",
 };
-const CAMPOS_CAPTURA: Record<keyof Captura, string> = {
+// The turn is written only by alinearCaptura (so creating a capture works before block 2 of the SQL is run).
+const CAMPOS_CAPTURA: Record<Exclude<keyof Captura, "giroGrados" | "giroPor" | "giroEn">, string> = {
   id: "id", projectId: "project_id", puntoId: "punto_id", tomadaEn: "tomada_en", observaciones: "observaciones",
   estado: "estado", motivo: "motivo", inspectorId: "inspector_id", inspectorNombre: "inspector_nombre",
   creado: "creado", actualizado: "actualizado", actualizadoPor: "actualizado_por",
@@ -92,6 +95,7 @@ const deCaptura = (f: Fila): Captura => ({
   estado: (["subiendo", "lista", "error", "anulada"].includes(txt(f.estado)) ? f.estado : "error") as Captura["estado"],
   motivo: txt(f.motivo), inspectorId: txt(f.inspector_id), inspectorNombre: txt(f.inspector_nombre),
   creado: txt(f.creado), actualizado: txt(f.actualizado), actualizadoPor: nul(f.actualizado_por),
+  giroGrados: Number(f.giro_grados) || 0, giroPor: nul(f.giro_por), giroEn: nul(f.giro_en),
 });
 const deFoto = (f: Fila): Foto => ({
   id: txt(f.id), projectId: txt(f.project_id), capturaId: txt(f.captura_id), tipo: f.tipo === "convencional" ? "convencional" : "360",
@@ -222,6 +226,15 @@ function supabaseStore(): I360Store | null {
       const cuerpo = { ...aFila(CAMPOS_CAPTURA, resto), actualizado: new Date().toISOString() };
       return primera(await json<Fila[]>(`/i360_capturas?project_id=${eq(projectId)}&id=${eq(id)}`, { method: "PATCH", headers: ret, body: JSON.stringify(cuerpo) }), deCaptura, "la captura");
     },
+    async alinearCaptura(projectId, id, anterior, giro, quien) {
+      const ahora = new Date().toISOString();
+      const cuerpo = { giro_grados: giro, giro_por: quien, giro_en: ahora, actualizado: ahora, actualizado_por: quien };
+      const filas = await json<Fila[]>(`/i360_capturas?project_id=${eq(projectId)}&id=${eq(id)}&giro_grados=eq.${anterior}`, { method: "PATCH", headers: ret, body: JSON.stringify(cuerpo) });
+      if (filas[0]) return deCaptura(filas[0]);
+      const existe = await json<Fila[]>(`/i360_capturas?project_id=${eq(projectId)}&id=${eq(id)}&select=id`);
+      if (!existe[0]) throw new StoreError("No se encontró la captura.", 404);
+      throw new ConflictoVersion();
+    },
     async fotosDe(projectId, capturaIds) {
       const salida: Foto[] = [];
       for (let i = 0; i < capturaIds.length; i += 100) {
@@ -330,6 +343,15 @@ export function memoryStore(archivos: ArchivosI360 = archivosEnMemoria()): I360S
       const c = capturas.get(id);
       if (!c || c.projectId !== projectId) throw new StoreError("No se encontró la captura.", 404);
       const nuevo = { ...c, ...cambios, id, projectId, actualizado: ahora() };
+      capturas.set(id, nuevo);
+      return copia(nuevo);
+    },
+    async alinearCaptura(projectId, id, anterior, giro, quien) {
+      const c = capturas.get(id);
+      if (!c || c.projectId !== projectId) throw new StoreError("No se encontró la captura.", 404);
+      if (c.giroGrados !== anterior) throw new ConflictoVersion();
+      const t = ahora();
+      const nuevo = { ...c, giroGrados: giro, giroPor: quien, giroEn: t, actualizado: t, actualizadoPor: quien };
       capturas.set(id, nuevo);
       return copia(nuevo);
     },

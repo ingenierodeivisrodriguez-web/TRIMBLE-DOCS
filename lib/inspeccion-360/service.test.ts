@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { ClienteTrimble, Respuesta } from "../compras/cde";
 import type { Caller } from "../propiedades/service";
-import { anularCaptura, archivoFoto, confirmarSubida, crearPunto, Ctx, editarPunto, estado, guardarConfig, iniciarSubida, listarCapturas, listarPuntos } from "./service";
+import { alinearCaptura, anularCaptura, archivoFoto, confirmarSubida, crearPunto, Ctx, editarPunto, estado, guardarConfig, iniciarSubida, listarCapturas, listarPuntos } from "./service";
 import { archivosEnMemoria, memoryStore } from "./store";
 
 const P = "BUJGfcZ3AEI";
@@ -293,5 +293,69 @@ describe("fotos por fecha", () => {
     const a = await anularCaptura(e.ctx(ADMIN), s.captura.id, { motivo: "Foto del punto equivocado" });
     assert.equal(a.estado, "anulada");
     assert.equal((await listarCapturas(e.ctx(ADMIN), p.id))[0].estado, "anulada");
+  });
+});
+
+describe("alineación de las fotos (giro guardado para todos)", () => {
+  async function fotoLista(e: ReturnType<typeof entorno>) {
+    await conCodigo(e, ["luis2"]);
+    const p = await crearPunto(e.ctx(ADMIN), nuevoPunto);
+    const bytes = jpeg();
+    const s = await iniciarSubida(e.ctx(LUIS), { puntoId: p.id, tomadaEn: "2026-11-26T09:30:00-05:00", nombreOriginal: "IMG_001.jpg", tamano: bytes.length, ancho: 2048, alto: 1024, miniatura: MINI });
+    e.archivos.contenido.set(`${P}/${s.captura.foto!.id}.jpg`, bytes);
+    await confirmarSubida(e.ctx(LUIS), s.captura.foto!.id);
+    return { p, id: s.captura.id };
+  }
+
+  it("una foto nueva sale sin giro; un editor lo guarda y cualquier persona lo ve con quién y cuándo", async () => {
+    const e = entorno();
+    const { p, id } = await fotoLista(e);
+    assert.equal((await listarCapturas(e.ctx(MARTA), p.id))[0].giroGrados, 0);
+    const a = await alinearCaptura(e.ctx(LUIS), id, { giro: 30.46, anterior: 0 });
+    assert.equal(a.giroGrados, 30.5);
+    assert.equal(a.foto?.estado, "en_cde");
+    const [vista] = await listarCapturas(e.ctx(MARTA), p.id);
+    assert.equal(vista.giroGrados, 30.5);
+    assert.equal(vista.giroPor, "Luis Inspector");
+    assert.ok(vista.giroEn);
+  });
+
+  it("el giro queda entre −180° y 180°; un valor que no es número se rechaza", async () => {
+    const e = entorno();
+    const { id } = await fotoLista(e);
+    assert.equal((await alinearCaptura(e.ctx(ADMIN), id, { giro: 200, anterior: 0 })).giroGrados, -160);
+    await assert.rejects(alinearCaptura(e.ctx(ADMIN), id, { giro: "30", anterior: -160 }), /grados/);
+    await assert.rejects(alinearCaptura(e.ctx(ADMIN), id, { giro: 1000, anterior: -160 }), /grados/);
+  });
+
+  it("quien solo mira no puede guardar el giro", async () => {
+    const e = entorno();
+    const { id } = await fotoLista(e);
+    await assert.rejects(alinearCaptura(e.ctx(MARTA), id, { giro: 10, anterior: 0 }), /editores/);
+  });
+
+  it("no pisa en silencio el giro que otra persona guardó mientras tanto", async () => {
+    const e = entorno();
+    const { p, id } = await fotoLista(e);
+    await alinearCaptura(e.ctx(ADMIN), id, { giro: 25, anterior: 0 });
+    // Luis was still looking at 0°.
+    await assert.rejects(alinearCaptura(e.ctx(LUIS), id, { giro: 40, anterior: 0 }), (err: Error & { status?: number; code?: string }) => {
+      assert.equal(err.status, 409);
+      assert.equal(err.code, "giro-conflicto");
+      assert.match(err.message, /25°/);
+      assert.match(err.message, /Ana Admin/);
+      return true;
+    });
+    assert.equal((await listarCapturas(e.ctx(MARTA), p.id))[0].giroGrados, 25);
+    // Same value as the saved one: nothing to do, no conflict.
+    assert.equal((await alinearCaptura(e.ctx(LUIS), id, { giro: 25, anterior: 0 })).giroGrados, 25);
+    assert.equal((await alinearCaptura(e.ctx(LUIS), id, { giro: 40, anterior: 25 })).giroGrados, 40);
+  });
+
+  it("una captura anulada no se alinea", async () => {
+    const e = entorno();
+    const { id } = await fotoLista(e);
+    await anularCaptura(e.ctx(ADMIN), id, { motivo: "Foto del punto equivocado" });
+    await assert.rejects(alinearCaptura(e.ctx(ADMIN), id, { giro: 10, anterior: 0 }), /anulada/);
   });
 });

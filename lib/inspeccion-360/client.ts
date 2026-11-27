@@ -18,6 +18,8 @@ export interface I360Api {
   /** Retries moving an already uploaded photo to the CDE. */
   confirmar(fotoId: string): Promise<CapturaVista>;
   anular(capturaId: string, motivo: string): Promise<CapturaVista>;
+  /** Saves the turn that aligns the photo; `anterior` is the saved turn the person was looking at. */
+  alinear(capturaId: string, giro: number, anterior: number): Promise<CapturaVista>;
   /** The photo's bytes from the CDE (through the server), reporting progress. */
   foto(fotoId: string, alAvanzar?: Progreso, signal?: AbortSignal): Promise<Blob>;
 }
@@ -70,6 +72,7 @@ export function i360Api(projectId: string, auth: TokenSource): I360Api {
     },
     confirmar: (fotoId) => request<CapturaVista>(`/subidas/${encodeURIComponent(fotoId)}/confirmar`, { method: "POST" }),
     anular: (capturaId, motivo) => request<CapturaVista>(`/capturas/${encodeURIComponent(capturaId)}/anular`, json({ motivo })),
+    alinear: (capturaId, giro, anterior) => request<CapturaVista>(`/capturas/${encodeURIComponent(capturaId)}/giro`, { method: "PUT", body: JSON.stringify({ giro, anterior }) }),
     async foto(fotoId, alAvanzar, signal) {
       const url = `/api/inspeccion-360/fotos/${encodeURIComponent(fotoId)}/contenido?projectId=${encodeURIComponent(projectId)}`;
       const send = (token: string) => fetch(url, { headers: { Authorization: `Bearer ${token}` }, signal });

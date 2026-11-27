@@ -68,8 +68,16 @@ export default function FichaPunto({
   activas.current = [vista?.capturaId, comparadas?.antes.capturaId, comparadas?.despues.capturaId, pareja?.antesId, pareja?.despuesId].filter((x): x is string => !!x);
   const division = useRef(50);
   const camara = useRef<VistaCamara | undefined>(undefined);
+  // The turn each photo shows right now (saved or not yet), to open full screen as it is.
+  const girosVistos = useRef<Record<string, number>>({});
 
   const comparables = useMemo(() => capturasComparables(capturas ?? []), [capturas]);
+  const capturaDe = (id: string) => capturas?.find((c) => c.id === id);
+  const giroGuardado = (id: string) => capturaDe(id)?.giroGrados ?? 0;
+  const paraComparar = (f: FotoLista) => {
+    const c = capturaDe(f.capturaId);
+    return { id: f.capturaId, url: f.url, fecha: f.fecha, giro: c?.giroGrados ?? 0, giroPor: c?.giroPor ?? null, giroEn: c?.giroEn ?? null };
+  };
 
   async function recargar() {
     try {
@@ -193,12 +201,12 @@ export default function FichaPunto({
   }
 
   function pantallaCompleta() {
-    if (vista) abrirPantalla({ tipo: "i360-foto", blob: vista.blob, ancho: vista.ancho, titulo: vista.titulo });
+    if (vista) abrirPantalla({ tipo: "i360-foto", blob: vista.blob, ancho: vista.ancho, titulo: vista.titulo, giro: giroGuardado(vista.capturaId) });
   }
 
   function pantallaCompletaComparar() {
     if (!comparadas) return;
-    const lado = (f: FotoLista) => ({ id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha });
+    const lado = (f: FotoLista) => ({ id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha, giro: girosVistos.current[f.capturaId] ?? giroGuardado(f.capturaId) });
     abrirPantalla({
       tipo: "i360-comparar",
       titulo: `${punto.codigo} · ${comparadas.antes.fecha} → ${comparadas.despues.fecha}`,
@@ -207,6 +215,15 @@ export default function FichaPunto({
       division: division.current,
       vista: camara.current,
     });
+  }
+
+  /** Saves a photo's turn for everyone and reloads the dates (also after a refusal, to show the saved turn). */
+  async function guardarGiro(capturaId: string, giro: number, anterior: number) {
+    try {
+      await api.alinear(capturaId, giro, anterior);
+    } finally {
+      await recargar();
+    }
   }
 
   async function reintentar(c: CapturaVista) {
@@ -307,7 +324,7 @@ export default function FichaPunto({
 
       {vista && !pareja && (
         <div style={{ marginTop: 10 }}>
-          <Visor360 url={vista.url} titulo={vista.titulo} />
+          <Visor360 url={vista.url} titulo={vista.titulo} giro={giroGuardado(vista.capturaId)} />
           <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
             <button style={boton} onClick={pantallaCompleta}>Pantalla completa ↗</button>
             <button style={boton} onClick={() => setVista(null)}>Cerrar foto</button>
@@ -323,8 +340,11 @@ export default function FichaPunto({
           </div>
           {comparadas ? (
             <Comparador360
-              antes={{ id: comparadas.antes.capturaId, url: comparadas.antes.url, fecha: comparadas.antes.fecha }}
-              despues={{ id: comparadas.despues.capturaId, url: comparadas.despues.url, fecha: comparadas.despues.fecha }}
+              antes={paraComparar(comparadas.antes)}
+              despues={paraComparar(comparadas.despues)}
+              puedeAlinear={puedeEditar}
+              alGuardarGiro={guardarGiro}
+              alCambiarGiro={(id, g) => (girosVistos.current[id] = g)}
               division={division.current}
               alCambiarDivision={(v) => (division.current = v)}
               alMoverCamara={(v) => (camara.current = v)}
@@ -336,7 +356,10 @@ export default function FichaPunto({
           )}
           {comparadas && progreso && <p style={{ fontSize: 11.5, margin: "4px 0 0" }}>{progreso}</p>}
           <p style={{ fontSize: 11.5, margin: "6px 0 0", color: "var(--tc-gray-600)" }}>
-            Arrastre la barra blanca hacia los lados para ver antes y después. Al mover una foto, la otra gira con ella. Si no miran hacia el mismo lado, use «Alinear» (queda guardado en este navegador).
+            Arrastre la barra blanca hacia los lados para ver antes y después. Al mover una foto, la otra gira con ella.
+            {puedeEditar
+              ? " Si no miran hacia el mismo lado, gire una con «Alinear» y pulse «Guardar alineación»: todas las personas del proyecto las verán alineadas."
+              : " Las fotos se ven con la alineación que guardó un editor."}
           </p>
           <div style={{ display: "flex", gap: 6, marginTop: 6 }}>
             <button style={boton} onClick={pantallaCompletaComparar} disabled={!comparadas}>Pantalla completa ↗</button>

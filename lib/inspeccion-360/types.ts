@@ -70,6 +70,11 @@ export interface Captura {
   creado: string;
   actualizado: string;
   actualizadoPor: string | null;
+  /** Turn of the photo (degrees, −180 excluded to 180) that lines it up with the other dates of the point; 0 = as taken. */
+  giroGrados: number;
+  /** Who saved the turn, and when. */
+  giroPor: string | null;
+  giroEn: string | null;
 }
 
 export interface Foto {
