@@ -47,9 +47,11 @@ export default function Comparador360({
   antes,
   despues,
   alto = 300,
+  llenar = false,
   division: divisionInicial = 50,
   vista,
   puedeAlinear = false,
+  girosIniciales,
   alGuardarGiro,
   alCambiarGiro,
   alCambiarDivision,
@@ -58,13 +60,17 @@ export default function Comparador360({
   antes: FotoComparada;
   despues: FotoComparada;
   alto?: number | string;
+  /** Fill the parent's height (full screen): the photos take what the controls leave. */
+  llenar?: boolean;
   /** Where the bar starts (0–100 %). */
   division?: number;
   /** Where the cameras start looking (from another comparison, for full screen). */
   vista?: VistaCamara;
   /** Editors turn the photos and save the turn; everyone else sees them as saved. */
   puedeAlinear?: boolean;
-  /** Saves a photo's turn; `anterior` is the saved turn on screen. Rejects with the server's message. */
+  /** Turns not saved yet, by capture (brought from the panel to full screen). */
+  girosIniciales?: Record<string, number>;
+  /** Saves a photo's turn; `anterior` is the saved turn on screen. Rejects with the server's message (code "giro-conflicto" when another person saved first). */
   alGuardarGiro?: (capturaId: string, giro: number, anterior: number) => Promise<void>;
   /** The turn shown for a photo changed (saved or not), e.g. to open full screen as it is. */
   alCambiarGiro?: (capturaId: string, giro: number) => void;
@@ -81,7 +87,7 @@ export default function Comparador360({
   const [arrastrando, setArrastrando] = useState(false);
   const [error, setError] = useState("");
   // Turns on screen that differ from the saved ones, by capture.
-  const [giros, setGiros] = useState<Record<string, number>>({});
+  const [giros, setGiros] = useState<Record<string, number>>(() => girosIniciales ?? {});
   const [lado, setLado] = useState<Lado>("antes");
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState<{ error: boolean; texto: string } | null>(null);
@@ -180,6 +186,25 @@ export default function Comparador360({
     v.setPanorama(despues.url, { transition: false, sphereCorrection: { pan: giroEnRadianes(props.current.gD) } }).catch((err) => setError(String(err)));
   }, [despues.url]);
 
+  // The saved turn changed (saved here, in full screen or by another person): a turn on screen that
+  // was just the old saved one follows the new one; a turn the person moved and did not save stays.
+  const guardadosPrevios = useRef<Record<string, number>>({});
+  useEffect(() => {
+    const seguir: string[] = [];
+    for (const f of [antes, despues]) {
+      const previo = guardadosPrevios.current[f.id];
+      if (previo !== undefined && previo !== f.giro && giros[f.id] === previo) seguir.push(f.id);
+      guardadosPrevios.current[f.id] = f.giro;
+    }
+    if (seguir.length)
+      setGiros((x) => {
+        const y = { ...x };
+        for (const id of seguir) delete y[id];
+        return y;
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [antes.id, antes.giro, despues.id, despues.giro]);
+
   // The turn on screen goes to the viewer (and to whoever opens full screen).
   useEffect(() => {
     visorAntes.current?.setOption("sphereCorrection", { pan: giroEnRadianes(gA) });
@@ -217,12 +242,14 @@ export default function Comparador360({
         try {
           await alGuardarGiro(f.id, g, f.giro);
         } catch (err) {
-          // Another person's turn (or an error): show the saved one again.
-          setGiros((x) => {
-            const { [f.id]: _quitar, ...resto } = x;
-            return resto;
-          });
-          borrarGiroLocal(f.id);
+          // Another person saved another turn: show theirs. Any other failure keeps this one unsaved, to retry.
+          if ((err as { code?: string } | null)?.code === "giro-conflicto") {
+            setGiros((x) => {
+              const { [f.id]: _quitar, ...resto } = x;
+              return resto;
+            });
+            borrarGiroLocal(f.id);
+          }
           throw err;
         }
         borrarGiroLocal(f.id);
@@ -253,8 +280,11 @@ export default function Comparador360({
   const guardadoPor = (f: FotoComparada) => (f.giro !== 0 && f.giroPor ? `${grados(f.giro)}, guardado por ${f.giroPor}${f.giroEn ? ` el ${fmtFecha(f.giroEn)}` : ""}` : null);
 
   return (
-    <div>
-      <div ref={marco} style={{ position: "relative", width: "100%", height: alto, background: "#111", borderRadius: 4, overflow: "hidden", userSelect: "none" }}>
+    <div style={llenar ? { display: "flex", flexDirection: "column", height: "100%" } : undefined}>
+      <div
+        ref={marco}
+        style={{ position: "relative", width: "100%", ...(llenar ? { flex: "1 1 auto", minHeight: 0 } : { height: alto }), background: "#111", borderRadius: 4, overflow: "hidden", userSelect: "none" }}
+      >
         <div ref={capaAntes} style={{ position: "absolute", inset: 0 }} />
         <div ref={capaDespues} style={{ position: "absolute", inset: 0, clipPath: `inset(0 0 0 ${division}%)` }} />
 
@@ -304,7 +334,7 @@ export default function Comparador360({
       </div>
 
       {puedeAlinear ? (
-        <div style={{ marginTop: 6, fontSize: 12 }}>
+        <div style={{ marginTop: 6, fontSize: 12, ...(llenar ? { width: "100%", maxWidth: 760, alignSelf: "center" } : {}) }}>
           <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
             <span style={{ color: "var(--tc-gray-600, #555)", marginRight: 2 }} title="Si las dos fotos no miran hacia el mismo lado, gire una hasta que coincidan">
               Alinear:

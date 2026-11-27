@@ -5559,7 +5559,11 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
    revisar. Quien no es editor ve las fotos alineadas, sin los controles. Un giro que haya
    quedado en el navegador con la primera versión (26-11-2026) se carga como «sin guardar»
    para que un editor lo guarde. **Pantalla completa ↗** abre la comparación en una pestaña
-   propia con la misma barra, la misma vista y los mismos giros.
+   propia con la misma barra, la misma vista y los mismos giros (también los que estaban sin
+   guardar), y con los mismos controles de **Alinear** y **Guardar alineación** en la parte
+   inferior. Esa pestaña no tiene sesión de Trimble: le pide al panel que la abrió que guarde,
+   así que el panel debe seguir abierto; si ya no está, el giro queda «sin guardar» y el
+   aviso pide guardarlo desde el panel.
 7. Una captura equivocada se **anula** con motivo (queda en la lista); un punto se
    **desactiva** con motivo. Nada se borra.
 
@@ -5591,7 +5595,12 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
   `PUT /api/inspeccion-360/capturas/<id>/giro` `{ giro, anterior }` (solo editores): el
   servidor actualiza solo si el giro guardado sigue siendo `anterior` (si no, 409
   `giro-conflicto` con el valor y el nombre de quien lo cambió). Crear capturas no escribe el
-  giro, así que las subidas siguen funcionando aunque falte correr el bloque 2. Reglas puras
+  giro, así que las subidas siguen funcionando aunque falte correr el bloque 2. Desde pantalla
+  completa la pestaña manda `i360-guardar-giro` (postMessage, mismo origen) al panel, que
+  llama al servidor con su token, recarga las fechas y contesta `i360-giro-guardado` con el
+  giro que quedó guardado; el panel escucha hasta que la pestaña se cierra. Solo un choque
+  (`giro-conflicto`) reemplaza el giro en pantalla por el de la otra persona; cualquier otro
+  fallo lo deja «sin guardar» para reintentar. Reglas puras
   con pruebas en `lib/inspeccion-360/comparar.ts`. En
   pantalla completa cada foto va a lo sumo a 8192 px (dos texturas a la vez en la tarjeta de
   video); en el panel quedan en memoria a lo sumo 3 fotos descargadas.

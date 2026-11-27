@@ -70,6 +70,10 @@ export default function FichaPunto({
   const camara = useRef<VistaCamara | undefined>(undefined);
   // The turn each photo shows right now (saved or not yet), to open full screen as it is.
   const girosVistos = useRef<Record<string, number>>({});
+  // Full screen tabs still open (to stop listening when the panel closes).
+  const pantallas = useRef(new Set<() => void>());
+  // The tab's requests run with this render's functions (the point may have changed since it opened).
+  const acciones = useRef({ guardarDesdePantalla: async (_c: string, _g: number, _a: number) => ({ error: "", codigo: undefined as string | undefined, guardado: null as { giro: number; giroPor: string | null; giroEn: string | null } | null }) });
 
   const comparables = useMemo(() => capturasComparables(capturas ?? []), [capturas]);
   const capturaDe = (id: string) => capturas?.find((c) => c.id === id);
@@ -79,11 +83,14 @@ export default function FichaPunto({
     return { id: f.capturaId, url: f.url, fecha: f.fecha, giro: c?.giroGrados ?? 0, giroPor: c?.giroPor ?? null, giroEn: c?.giroEn ?? null };
   };
 
-  async function recargar() {
+  async function recargar(): Promise<CapturaVista[] | null> {
     try {
-      setCapturas(await api.capturas(punto.id));
+      const lista = await api.capturas(punto.id);
+      setCapturas(lista);
+      return lista;
     } catch (err) {
       setError(message(err));
+      return null;
     }
   }
 
@@ -103,7 +110,13 @@ export default function FichaPunto({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [punto.id]);
 
-  useEffect(() => soltarMemoria, []);
+  useEffect(
+    () => () => {
+      soltarMemoria();
+      for (const limpiar of [...pantallas.current]) limpiar();
+    },
+    [],
+  );
 
   /** The photo of a capture, from memory or downloaded from the CDE (through the server). */
   async function obtener(c: CapturaVista, avisar: (texto: string) => void): Promise<FotoLista> {
@@ -188,17 +201,51 @@ export default function FichaPunto({
   }
 
   /** Opens a tab of its own and hands it the photos already downloaded (the tab has no Trimble session). */
+  /**
+   * Opens a tab of its own and hands it the photos already downloaded. The tab has no Trimble
+   * session, so it asks this panel to save an alignment; the panel listens until the tab closes.
+   */
   function abrirPantalla(datos: Record<string, unknown>) {
     const ventana = window.open("/inspeccion-360/pantalla", "_blank");
     if (!ventana) return setError("El navegador bloqueó la ventana nueva: permita ventanas emergentes para trimble-docs.vercel.app.");
-    const alMensaje = (ev: MessageEvent) => {
-      if (ev.source !== ventana || ev.origin !== window.location.origin || (ev.data as { tipo?: string })?.tipo !== "i360-listo") return;
-      ventana.postMessage(datos, window.location.origin);
-      window.removeEventListener("message", alMensaje);
+    const origen = window.location.origin;
+    let entregado = false;
+    const alMensaje = async (ev: MessageEvent) => {
+      if (ev.source !== ventana || ev.origin !== origen) return;
+      const d = ev.data as { tipo?: string; pedido?: unknown; capturaId?: unknown; giro?: unknown; anterior?: unknown } | null;
+      if (d?.tipo === "i360-listo" && !entregado) {
+        entregado = true;
+        ventana.postMessage(datos, origen);
+      } else if (d?.tipo === "i360-guardar-giro" && typeof d.pedido === "number" && typeof d.capturaId === "string" && typeof d.giro === "number" && typeof d.anterior === "number") {
+        const r = await acciones.current.guardarDesdePantalla(d.capturaId, d.giro, d.anterior);
+        if (!ventana.closed) ventana.postMessage({ tipo: "i360-giro-guardado", pedido: d.pedido, ...r }, origen);
+      }
     };
     window.addEventListener("message", alMensaje);
-    setTimeout(() => window.removeEventListener("message", alMensaje), 60_000);
+    const limpiar = () => {
+      window.removeEventListener("message", alMensaje);
+      clearInterval(revisar);
+      pantallas.current.delete(limpiar);
+    };
+    const revisar = setInterval(() => ventana.closed && limpiar(), 5000);
+    pantallas.current.add(limpiar);
   }
+
+  /** An alignment saved from the full screen tab: the server's answer and the turn now saved. */
+  async function guardarDesdePantalla(capturaId: string, giro: number, anterior: number) {
+    let error = "";
+    let codigo: string | undefined;
+    let guardada: CapturaVista | undefined;
+    try {
+      guardada = await api.alinear(capturaId, giro, anterior);
+    } catch (err) {
+      error = message(err);
+      codigo = (err as { code?: string } | null)?.code;
+    }
+    const actual = (await recargar())?.find((c) => c.id === capturaId) ?? guardada;
+    return { error, codigo, guardado: actual ? { giro: actual.giroGrados, giroPor: actual.giroPor, giroEn: actual.giroEn } : null };
+  }
+  acciones.current = { guardarDesdePantalla };
 
   function pantallaCompleta() {
     if (vista) abrirPantalla({ tipo: "i360-foto", blob: vista.blob, ancho: vista.ancho, titulo: vista.titulo, giro: giroGuardado(vista.capturaId) });
@@ -206,7 +253,11 @@ export default function FichaPunto({
 
   function pantallaCompletaComparar() {
     if (!comparadas) return;
-    const lado = (f: FotoLista) => ({ id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha, giro: girosVistos.current[f.capturaId] ?? giroGuardado(f.capturaId) });
+    const lado = (f: FotoLista) => {
+      const c = capturaDe(f.capturaId);
+      const giro = c?.giroGrados ?? 0;
+      return { id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha, giro, giroPor: c?.giroPor ?? null, giroEn: c?.giroEn ?? null, giroVisto: girosVistos.current[f.capturaId] ?? giro };
+    };
     abrirPantalla({
       tipo: "i360-comparar",
       titulo: `${punto.codigo} · ${comparadas.antes.fecha} → ${comparadas.despues.fecha}`,
@@ -214,6 +265,7 @@ export default function FichaPunto({
       despues: lado(comparadas.despues),
       division: division.current,
       vista: camara.current,
+      puedeAlinear: puedeEditar,
     });
   }
 
