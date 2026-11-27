@@ -5544,7 +5544,11 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
    AAAAMMDD-HHMM solo en el nombre, para que la carpeta ordene por fecha; en pantalla
    DD-MM-AAAA).
 5. **Fotos por fecha**: clic en una fecha la descarga (desde el CDE, a través del servidor) y
-   la muestra en el visor 360; **Pantalla completa ↗** la abre en una pestaña propia.
+   la muestra en el visor 360; **Pantalla completa ↗** la abre en una pestaña propia. Arriba a
+   la derecha de esa pestaña, **Fecha · DD-MM-AAAA HH:MM ▼** despliega las fotos del punto
+   (miniatura, fecha e inspector; la anulada solo si es la que está en pantalla): al elegir
+   una, el panel la descarga (con el avance en la pestaña) y la abre en los dos lados,
+   mirando hacia el mismo lado.
 6. **Comparar fechas ⇆** (cuando el punto tiene dos o más fotos en el CDE, sin contar las
    anuladas): muestra las dos fotos una encima de la otra, «antes» a la izquierda y «después»
    a la derecha de una **barra vertical** que se arrastra hacia los lados (o con las flechas
@@ -5563,7 +5567,12 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
    guardar), y con los mismos controles de **Alinear** y **Guardar alineación** en la parte
    inferior. Esa pestaña no tiene sesión de Trimble: le pide al panel que la abrió que guarde,
    así que el panel debe seguir abierto; si ya no está, el giro queda «sin guardar» y el
-   aviso pide guardarlo desde el panel.
+   aviso pide guardarlo desde el panel. En esa pestaña las etiquetas **Antes · fecha ▼** y
+   **Después · fecha ▼** despliegan las fotos del punto (miniatura, fecha e inspector) para
+   comparar otra fecha sin volver al panel: la misma regla de las listas del panel deja en
+   gris, con el motivo, las fechas que no pueden ir en ese lado. El panel descarga la foto
+   elegida y se la pasa a la pestaña con su giro guardado (el avance se ve sobre las fotos);
+   la comparación del panel no cambia.
 7. **Recorrido entre puntos**: en la foto de un punto aparecen, como **círculos naranjas sobre
    el piso** donde estuvo su trípode, los puntos vecinos activos, con fotos, de la misma torre
    y piso y a menos de 20 m (al pasar el ratón: código, espacio y distancia). Clic en un
@@ -5614,7 +5623,12 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
   giro, así que las subidas siguen funcionando aunque falte correr el bloque 2. Desde pantalla
   completa la pestaña manda `i360-guardar-giro` (postMessage, mismo origen) al panel, que
   llama al servidor con su token, recarga las fechas y contesta `i360-giro-guardado` con el
-  giro que quedó guardado; el panel escucha hasta que la pestaña se cierra. Solo un choque
+  giro que quedó guardado; el panel escucha hasta que la pestaña se cierra. Otra fecha elegida
+  en la pestaña va como `i360-pedir-foto` (con las dos fotos en pantalla); el panel contesta
+  `i360-avance` mientras descarga y `i360-foto-pedida` con la foto, su giro y la lista de
+  fechas al día (`opcionesFecha` en `comparar.ts`; la pestaña la revisa con `opcionesFechaDe`,
+  que solo acepta miniaturas JPEG en data URL). La lista desplegable con miniaturas está en
+  `components/inspeccion-360/ElegirFecha.tsx`. Solo un choque
   (`giro-conflicto`) reemplaza el giro en pantalla por el de la otra persona; cualquier otro
   fallo lo deja «sin guardar» para reintentar. Reglas puras
   con pruebas en `lib/inspeccion-360/comparar.ts`. En
@@ -5630,7 +5644,10 @@ más vieja, con un visor 360 en el panel y a pantalla completa.
   enlace con la pestaña de pantalla completa de una foto vive en
   `components/inspeccion-360/enlacePantalla.ts` (la ficha se crea de nuevo en cada punto):
   la pestaña manda `i360-ir-a-punto` y el panel le manda cada foto nueva (`i360-foto`, con
-  sus vecinos y «Volver»). Sin cambios en la base: `rumbo_grados` ya existía.
+  sus vecinos, «Volver» y las fechas del punto). Otra fecha elegida allí va como
+  `i360-ver-fecha`: la ficha la abre también en el panel (la pestaña sigue al panel, como
+  siempre) y avisa el avance o el error con `i360-estado`; si el panel tiene abierta una
+  comparación, la foto solo va a la pestaña. Sin cambios en la base: `rumbo_grados` ya existía.
 - Íconos con `viewer.addIcon` (imágenes PNG embebidas) y clic con `viewer.onIconPicked`
   (`providedId`), comprobados en la Fase 0; `removeIcon` siempre con la lista de `getIcon`.
 

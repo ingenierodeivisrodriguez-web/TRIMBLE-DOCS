@@ -3,13 +3,15 @@
 // Before/after comparison of two 360° photos of the same point: both photos stacked, the "después"
 // one cut at a vertical bar the person drags sideways, and both cameras turning and zooming
 // together. A photo taken with the camera facing another way is lined up by turning it; an editor
-// saves the turn in the database so everyone sees the photos aligned.
+// saves the turn in the database so everyone sees the photos aligned. In full screen each date's
+// label opens the list of the point's photos to compare another date.
 
 import "@photo-sphere-viewer/core/index.css";
 import type { Viewer as VisorPSV } from "@photo-sphere-viewer/core";
 import { useEffect, useRef, useState } from "react";
-import { borrarGiroLocal, divisionConTecla, divisionDesdePuntero, giroEnRadianes, giroInicial, leerGiroLocal, normalizarGiro } from "../../lib/inspeccion-360/comparar";
+import { borrarGiroLocal, divisionConTecla, divisionDesdePuntero, giroEnRadianes, giroInicial, leerGiroLocal, motivoFechaNo, normalizarGiro, type OpcionFecha } from "../../lib/inspeccion-360/comparar";
 import { fmtFecha } from "../../lib/inspeccion-360/fechas";
+import { BotonFecha, ListaFechas } from "./ElegirFecha";
 import { LANG } from "./Visor360";
 
 export interface FotoComparada {
@@ -30,7 +32,7 @@ export interface VistaCamara {
   zoom: number;
 }
 
-type Lado = "antes" | "despues";
+export type Lado = "antes" | "despues";
 
 const COLOR: Record<Lado, string> = { antes: "#455a64", despues: "#EF6C00" };
 const NOMBRE: Record<Lado, string> = { antes: "«antes»", despues: "«después»" };
@@ -56,6 +58,9 @@ export default function Comparador360({
   alCambiarGiro,
   alCambiarDivision,
   alMoverCamara,
+  fechas,
+  alElegirFecha,
+  estadoFecha,
 }: {
   antes: FotoComparada;
   despues: FotoComparada;
@@ -76,6 +81,11 @@ export default function Comparador360({
   alCambiarGiro?: (capturaId: string, giro: number) => void;
   alCambiarDivision?: (division: number) => void;
   alMoverCamara?: (vista: VistaCamara) => void;
+  /** The point's dates: given (with alElegirFecha), each label opens the list to compare another date. */
+  fechas?: readonly OpcionFecha[];
+  alElegirFecha?: (lado: Lado, capturaId: string) => void;
+  /** A date being brought (or why it could not be), shown on the photos. */
+  estadoFecha?: { texto: string; error: boolean } | null;
 }) {
   const marco = useRef<HTMLDivElement>(null);
   const capaAntes = useRef<HTMLDivElement>(null);
@@ -91,6 +101,8 @@ export default function Comparador360({
   const [lado, setLado] = useState<Lado>("antes");
   const [guardando, setGuardando] = useState(false);
   const [aviso, setAviso] = useState<{ error: boolean; texto: string } | null>(null);
+  // The date list open on the photos, if any.
+  const [menu, setMenu] = useState<Lado | null>(null);
 
   const local = (f: FotoComparada) => leerGiroLocal(f.id);
   const valor = (f: FotoComparada) => giros[f.id] ?? giroInicial(f.giro, local(f), puedeAlinear);
@@ -277,6 +289,9 @@ export default function Comparador360({
 
   const elegida = foto[lado];
   const resto = 100 - division;
+  const conFechas = !!fechas?.length && !!alElegirFecha;
+  const rotulo = (l: Lado) => `${l === "antes" ? "Antes" : "Después"} · ${foto[l].fecha}`;
+  const rotuloEstilo = (l: Lado) => ({ ...etiqueta(COLOR[l], l === "antes" ? "left" : "right"), ...(conFechas ? { fontSize: 13, padding: "5px 10px" } : {}) });
   const guardadoPor = (f: FotoComparada) => (f.giro !== 0 && f.giroPor ? `${grados(f.giro)}, guardado por ${f.giroPor}${f.giroEn ? ` el ${fmtFecha(f.giroEn)}` : ""}` : null);
 
   return (
@@ -290,11 +305,39 @@ export default function Comparador360({
 
         {/* Each date's label lives in its own side of the bar. */}
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", clipPath: `inset(0 ${resto}% 0 0)`, zIndex: 5 }}>
-          <span style={etiqueta(COLOR.antes, "left")}>Antes · {antes.fecha}</span>
+          {conFechas ? (
+            <BotonFecha texto={rotulo("antes")} abierto={menu === "antes"} alPulsar={() => setMenu((m) => (m === "antes" ? null : "antes"))} estilo={rotuloEstilo("antes")} titulo="Elegir otra fecha para la foto «antes»" />
+          ) : (
+            <span style={rotuloEstilo("antes")}>{rotulo("antes")}</span>
+          )}
         </div>
         <div style={{ position: "absolute", inset: 0, pointerEvents: "none", clipPath: `inset(0 0 0 ${division}%)`, zIndex: 5 }}>
-          <span style={etiqueta(COLOR.despues, "right")}>Después · {despues.fecha}</span>
+          {conFechas ? (
+            <BotonFecha texto={rotulo("despues")} abierto={menu === "despues"} alPulsar={() => setMenu((m) => (m === "despues" ? null : "despues"))} estilo={rotuloEstilo("despues")} titulo="Elegir otra fecha para la foto «después»" />
+          ) : (
+            <span style={rotuloEstilo("despues")}>{rotulo("despues")}</span>
+          )}
         </div>
+        {/* The list opens outside the layers cut by the bar, so it is never cut. */}
+        {menu && conFechas && (
+          <ListaFechas
+            opciones={fechas!}
+            elegida={foto[menu].id}
+            titulo={menu === "antes" ? "Foto «antes»" : "Foto «después»"}
+            motivoNo={(o) => motivoFechaNo(menu, o, { antesId: antes.id, despuesId: despues.id }, fechas!)}
+            alElegir={(id) => alElegirFecha!(menu, id)}
+            alCerrar={() => setMenu(null)}
+            estilo={menu === "antes" ? { top: 44, left: 8 } : { top: 44, right: 8 }}
+          />
+        )}
+        {estadoFecha && (
+          <div
+            role={estadoFecha.error ? "alert" : "status"}
+            style={{ position: "absolute", bottom: 12, left: "50%", transform: "translateX(-50%)", zIndex: 7, maxWidth: "min(560px, calc(100% - 24px))", background: estadoFecha.error ? "rgba(179,38,30,.94)" : "rgba(0,0,0,.78)", color: "#fff", fontSize: 13, padding: "6px 12px", borderRadius: 4, boxShadow: "0 1px 6px rgba(0,0,0,.5)", pointerEvents: "none" }}
+          >
+            {estadoFecha.texto}
+          </div>
+        )}
 
         <div
           role="slider"

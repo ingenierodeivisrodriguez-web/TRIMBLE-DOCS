@@ -3,11 +3,12 @@
 // The selected capture point: its data (code, tower, floor, unit, space, zone, coordinates…),
 // its photos by date (newest first), the 360° viewer of the chosen date and the before/after
 // comparison of two dates. In the photo, the neighbouring points appear on the floor (once the
-// point's rumbo is calibrated) and a click walks to them; «← Volver» walks back.
+// point's rumbo is calibrated) and a click walks to them; «← Volver» walks back. The full screen
+// tabs choose other dates of the point: this panel downloads them (the tabs have no session).
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { I360Api } from "../../lib/inspeccion-360/client";
-import { capturasComparables, type Pareja, parejaInicial, puedeSer } from "../../lib/inspeccion-360/comparar";
+import { capturasComparables, opcionesFecha, type Pareja, parejaInicial, puedeSer } from "../../lib/inspeccion-360/comparar";
 import { fmtFecha, fmtFechaHora } from "../../lib/inspeccion-360/fechas";
 import type { CapturaVista, PuntoVista } from "../../lib/inspeccion-360/types";
 import { acceptButton, baseInput, C, labelStyle, linkButton, message, Notice } from "../presupuesto/ui";
@@ -15,7 +16,7 @@ import Comparador360, { type VistaCamara } from "./Comparador360";
 import { megas, urlParaVisor } from "./imagen";
 import SubirFoto from "./SubirFoto";
 import { azimutEntre, capturaMasCercana, distanciaHorizontal, rumboDesdeCalibracion, vecinos, yawEquivalente } from "../../lib/inspeccion-360/recorrido";
-import { abrirPantallaFoto, alPedirPuntoDesdePantalla, enviarAPantallaFoto, pantallaFotoAbierta } from "./enlacePantalla";
+import { abrirPantallaFoto, alPedirFechaDesdePantalla, alPedirPuntoDesdePantalla, avisarPantallaFoto, enviarAPantallaFoto, pantallaFotoAbierta } from "./enlacePantalla";
 import Visor360, { type MarcadorPunto, type VistaFoto } from "./Visor360";
 
 /** How a point is reached by walking from another one in the photos. */
@@ -109,7 +110,7 @@ export default function FichaPunto({
   // Full screen tabs still open (to stop listening when the panel closes).
   const pantallas = useRef(new Set<() => void>());
   // The tab's requests run with this render's functions (the point may have changed since it opened).
-  const acciones = useRef<{ guardarDesdePantalla: typeof guardarDesdePantalla; irA: typeof irA } | null>(null);
+  const acciones = useRef<{ guardarDesdePantalla: typeof guardarDesdePantalla; irA: typeof irA; fotoParaPantalla: typeof fotoParaPantalla; verDesdePantalla: typeof verDesdePantalla } | null>(null);
 
   const comparables = useMemo(() => capturasComparables(capturas ?? []), [capturas]);
   const capturaDe = (id: string) => capturas?.find((c) => c.id === id);
@@ -163,10 +164,14 @@ export default function FichaPunto({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [capturas]);
 
-  // A neighbour clicked in the full screen tab walks from this point.
+  // A neighbour clicked in the full screen tab walks from this point; a date chosen there opens.
   useEffect(() => {
     alPedirPuntoDesdePantalla((id, v) => acciones.current?.irA(id, v));
-    return () => alPedirPuntoDesdePantalla(null);
+    alPedirFechaDesdePantalla((id, v) => acciones.current?.verDesdePantalla(id, v));
+    return () => {
+      alPedirPuntoDesdePantalla(null);
+      alPedirFechaDesdePantalla(null);
+    };
   }, []);
 
   useEffect(
@@ -274,13 +279,20 @@ export default function FichaPunto({
     let entregado = false;
     const alMensaje = async (ev: MessageEvent) => {
       if (ev.source !== ventana || ev.origin !== origen) return;
-      const d = ev.data as { tipo?: string; pedido?: unknown; capturaId?: unknown; giro?: unknown; anterior?: unknown } | null;
+      const d = ev.data as { tipo?: string; pedido?: unknown; capturaId?: unknown; giro?: unknown; anterior?: unknown; enPantalla?: unknown } | null;
       if (d?.tipo === "i360-listo" && !entregado) {
         entregado = true;
         ventana.postMessage(datos, origen);
       } else if (d?.tipo === "i360-guardar-giro" && typeof d.pedido === "number" && typeof d.capturaId === "string" && typeof d.giro === "number" && typeof d.anterior === "number") {
         const r = await acciones.current?.guardarDesdePantalla(d.capturaId, d.giro, d.anterior);
         if (r && !ventana.closed) ventana.postMessage({ tipo: "i360-giro-guardado", pedido: d.pedido, ...r }, origen);
+      } else if (d?.tipo === "i360-pedir-foto" && typeof d.pedido === "number" && typeof d.capturaId === "string") {
+        // Another date chosen in the comparison tab: download it here and hand it over.
+        const pedido = d.pedido;
+        const enPantalla = Array.isArray(d.enPantalla) ? d.enPantalla.filter((x): x is string => typeof x === "string").slice(0, 2) : [];
+        const avance = (texto: string) => !ventana.closed && ventana.postMessage({ tipo: "i360-avance", pedido, texto }, origen);
+        const r = await acciones.current?.fotoParaPantalla(d.capturaId, enPantalla, avance);
+        if (r && !ventana.closed) ventana.postMessage({ tipo: "i360-foto-pedida", pedido, ...r }, origen);
       }
     };
     window.addEventListener("message", alMensaje);
@@ -319,7 +331,44 @@ export default function FichaPunto({
       volver: { puntoId: punto.id, codigo: punto.codigo },
     });
   }
-  acciones.current = { guardarDesdePantalla, irA };
+  /** A date chosen in the comparison tab: its photo (downloaded here) and the point's dates now. */
+  async function fotoParaPantalla(capturaId: string, enPantalla: string[], avance: (texto: string) => void) {
+    const c = capturaDe(capturaId);
+    if (!c) return { error: "Esa foto ya no está en la lista del punto en el panel: abra de nuevo la comparación desde el panel." };
+    try {
+      const f = await obtener(c, avance);
+      return { lado: ladoParaPantalla(f), fechas: opcionesFecha(capturas ?? [], [capturaId, ...enPantalla]) };
+    } catch (err) {
+      return { error: message(err) };
+    }
+  }
+
+  /**
+   * A date chosen in the single photo tab: it opens here too and the tab follows, as with any photo
+   * opened here; with a comparison open here, it only goes to the tab.
+   */
+  async function verDesdePantalla(capturaId: string, vistaTab?: VistaFoto) {
+    const c = capturaDe(capturaId);
+    if (!c?.foto || c.foto.estado !== "en_cde") return avisarPantallaFoto("Esa fecha ya no tiene la foto disponible en el panel.", true);
+    const avisar = (texto: string) => {
+      setCargando({ id: c.id, texto });
+      avisarPantallaFoto(texto, false);
+    };
+    try {
+      const foto = await obtener(c, avisar);
+      if (pareja || vista?.capturaId === foto.capturaId) enviarAPantallaFoto(datosPantallaFoto(foto, vistaTab));
+      else {
+        cancelarCalibracion();
+        setVistaAbrir(vistaTab);
+        setVista(foto);
+      }
+    } catch (err) {
+      avisarPantallaFoto(message(err), true);
+    } finally {
+      setCargando(null);
+    }
+  }
+  acciones.current = { guardarDesdePantalla, irA, fotoParaPantalla, verDesdePantalla };
 
   /** What the single photo full screen tab shows: the photo, its turn, the neighbours and «Volver». */
   function datosPantallaFoto(f: FotoLista, vistaTab: VistaFoto | undefined) {
@@ -333,6 +382,7 @@ export default function FichaPunto({
       marcadores,
       vista: vistaTab,
       volver: volver ? { puntoId: volver.puntoId, etiqueta: `Volver a ${volver.codigo}` } : null,
+      fechas: opcionesFecha(capturas ?? [], [f.capturaId]),
     };
   }
 
@@ -387,18 +437,22 @@ export default function FichaPunto({
     }
   }
 
+  /** One side of the comparison as the tab gets it: the photo, its saved turn and the turn shown here. */
+  function ladoParaPantalla(f: FotoLista) {
+    const c = capturaDe(f.capturaId);
+    const giro = c?.giroGrados ?? 0;
+    return { id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha, giro, giroPor: c?.giroPor ?? null, giroEn: c?.giroEn ?? null, giroVisto: girosVistos.current[f.capturaId] ?? giro };
+  }
+
   function pantallaCompletaComparar() {
     if (!comparadas) return;
-    const lado = (f: FotoLista) => {
-      const c = capturaDe(f.capturaId);
-      const giro = c?.giroGrados ?? 0;
-      return { id: f.capturaId, blob: f.blob, ancho: f.ancho, fecha: f.fecha, giro, giroPor: c?.giroPor ?? null, giroEn: c?.giroEn ?? null, giroVisto: girosVistos.current[f.capturaId] ?? giro };
-    };
     abrirPantalla({
       tipo: "i360-comparar",
       titulo: `${punto.codigo} · ${comparadas.antes.fecha} → ${comparadas.despues.fecha}`,
-      antes: lado(comparadas.antes),
-      despues: lado(comparadas.despues),
+      codigo: punto.codigo,
+      fechas: opcionesFecha(capturas ?? [], [comparadas.antes.capturaId, comparadas.despues.capturaId]),
+      antes: ladoParaPantalla(comparadas.antes),
+      despues: ladoParaPantalla(comparadas.despues),
       division: division.current,
       vista: camara.current,
       puedeAlinear: puedeEditar,

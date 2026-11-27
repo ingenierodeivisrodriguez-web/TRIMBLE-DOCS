@@ -2,7 +2,8 @@
 // be compared, the starting pair, the dividing bar and the per-photo turn that lines up photos
 // taken with the camera facing another way.
 
-import type { CapturaVista } from "./types";
+import { fmtFechaHora } from "./fechas";
+import { type CapturaVista, MAX_MINIATURA } from "./types";
 
 /** Captures with a photo already in the CDE that were not voided, newest first. */
 export function capturasComparables(capturas: readonly CapturaVista[]): CapturaVista[] {
@@ -23,12 +24,65 @@ export function parejaInicial(capturas: readonly CapturaVista[]): Pareja | null 
 }
 
 /** Whether `c` can be the "antes" photo (`lado` = "antes") or the "después" photo of the pair. */
-export function puedeSer(lado: "antes" | "despues", c: CapturaVista, pareja: Pareja, capturas: readonly CapturaVista[]): boolean {
+export function puedeSer<T extends { id: string; tomadaEn: string }>(lado: "antes" | "despues", c: T, pareja: Pareja, capturas: readonly T[]): boolean {
   const otra = capturas.find((x) => x.id === (lado === "antes" ? pareja.despuesId : pareja.antesId));
   if (!otra || otra.id === c.id) return false;
   const t = Date.parse(c.tomadaEn);
   const o = Date.parse(otra.tomadaEn);
   return lado === "antes" ? t <= o : t >= o;
+}
+
+/** A date the full screen tab can switch to (the tab has no session: the panel sends the list). */
+export interface OpcionFecha {
+  id: string;
+  /** DD-MM-AAAA HH:MM */
+  fecha: string;
+  tomadaEn: string;
+  inspector: string;
+  /** The photo's small JPEG (data URL), or "". */
+  miniatura: string;
+  anulada: boolean;
+}
+
+const MINIATURA = /^data:image\/jpeg;base64,[A-Za-z0-9+/=]+$/;
+
+/**
+ * The dates offered in full screen: the comparable ones plus `enPantalla` (the photos on screen,
+ * even a voided one opened from the list), newest first.
+ */
+export function opcionesFecha(capturas: readonly CapturaVista[], enPantalla: readonly string[] = []): OpcionFecha[] {
+  const lista = capturasComparables(capturas);
+  for (const id of enPantalla) {
+    const c = capturas.find((x) => x.id === id);
+    if (c && !lista.includes(c) && c.foto?.estado === "en_cde") lista.push(c);
+  }
+  return lista
+    .sort((a, b) => Date.parse(b.tomadaEn) - Date.parse(a.tomadaEn))
+    .map((c) => ({ id: c.id, fecha: fmtFechaHora(c.tomadaEn), tomadaEn: c.tomadaEn, inspector: c.inspectorNombre, miniatura: c.foto?.miniatura ?? "", anulada: c.estado === "anulada" }));
+}
+
+/** The list the tab received from the panel, checked: anything malformed is dropped. */
+export function opcionesFechaDe(v: unknown): OpcionFecha[] {
+  if (!Array.isArray(v)) return [];
+  const texto = (x: unknown) => typeof x === "string";
+  return v
+    .filter((o) => !!o && texto(o.id) && texto(o.fecha) && texto(o.tomadaEn) && Number.isFinite(Date.parse(o.tomadaEn)))
+    .map((o) => ({
+      id: o.id,
+      fecha: o.fecha,
+      tomadaEn: o.tomadaEn,
+      inspector: texto(o.inspector) ? o.inspector : "",
+      miniatura: texto(o.miniatura) && o.miniatura.length <= MAX_MINIATURA && MINIATURA.test(o.miniatura) ? o.miniatura : "",
+      anulada: o.anulada === true,
+    }));
+}
+
+/** Why a date cannot take that side of the pair (null when it can, or it is already there). */
+export function motivoFechaNo(lado: "antes" | "despues", o: OpcionFecha, pareja: Pareja, opciones: readonly OpcionFecha[]): string | null {
+  if (o.id === (lado === "antes" ? pareja.antesId : pareja.despuesId)) return null;
+  if (o.id === (lado === "antes" ? pareja.despuesId : pareja.antesId)) return lado === "antes" ? "Es la foto «después»" : "Es la foto «antes»";
+  if (puedeSer(lado, o, pareja, opciones)) return null;
+  return lado === "antes" ? "Es posterior a la foto «después»" : "Es anterior a la foto «antes»";
 }
 
 /** Position of the bar (0–100 % of the width) from the pointer. */

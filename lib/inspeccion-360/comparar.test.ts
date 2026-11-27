@@ -9,7 +9,10 @@ import {
   giroInicial,
   borrarGiroLocal,
   leerGiroLocal,
+  motivoFechaNo,
   normalizarGiro,
+  opcionesFecha,
+  opcionesFechaDe,
   parejaInicial,
   puedeSer,
 } from "./comparar";
@@ -67,6 +70,52 @@ describe("fechas que se pueden comparar", () => {
     assert.equal(puedeSer("antes", c2, pareja, lista), false);
     assert.equal(puedeSer("despues", c3, pareja, lista), true);
     assert.equal(puedeSer("despues", c1, pareja, lista), false);
+  });
+});
+
+describe("fechas para elegir en pantalla completa", () => {
+  const MINI = "data:image/jpeg;base64,/9j/4AAQ";
+
+  it("ofrece las fechas comparables con su fecha DD-MM-AAAA HH:MM, inspector y miniatura, de la más nueva a la más vieja", () => {
+    const conMini = lista.map((c) => (c.id === "c2" && c.foto ? { ...c, foto: { ...c.foto, miniatura: MINI } } : c));
+    const o = opcionesFecha(conMini);
+    assert.deepEqual(o.map((x) => x.id), ["c3", "c2", "c1"]);
+    assert.deepEqual(o[1], { id: "c2", fecha: "23-11-2026 09:30", tomadaEn: "2026-11-23T09:30:00-05:00", inspector: "Inspector", miniatura: MINI, anulada: false });
+    assert.equal(o[0].miniatura, "");
+  });
+
+  it("agrega la foto que está en pantalla aunque esté anulada, marcada; nunca una que no está en el CDE", () => {
+    const o = opcionesFecha(lista, ["anulada", "subiendo", "no-existe"]);
+    assert.deepEqual(o.map((x) => x.id), ["anulada", "c3", "c2", "c1"]);
+    assert.equal(o[0].anulada, true);
+    assert.deepEqual(opcionesFecha(lista, ["c2"]).map((x) => x.id), ["c3", "c2", "c1"]);
+  });
+
+  it("de lo que llega del panel descarta lo mal formado y miniaturas que no son JPEG", () => {
+    const o = opcionesFechaDe([
+      { id: "a", fecha: "20-11-2026 23:01", tomadaEn: "2026-11-20T23:01:00-05:00", inspector: "Ana", miniatura: MINI, anulada: false },
+      { id: "b", fecha: "21-11-2026 10:00", tomadaEn: "2026-11-21T10:00:00-05:00", miniatura: "javascript:alert(1)" },
+      { id: "c", fecha: "x", tomadaEn: "no es fecha" },
+      { id: 4, fecha: "x", tomadaEn: "2026-11-21T10:00:00-05:00" },
+      null,
+    ]);
+    assert.deepEqual(o.map((x) => x.id), ["a", "b"]);
+    assert.equal(o[0].miniatura, MINI);
+    assert.equal(o[1].miniatura, "");
+    assert.equal(o[1].inspector, "");
+    assert.deepEqual(opcionesFechaDe("nada"), []);
+  });
+
+  it("dice por qué una fecha no puede ser «antes» o «después»", () => {
+    const o = opcionesFecha(lista);
+    const [c3, c2, c1] = o;
+    const pareja = { antesId: "c2", despuesId: "c3" };
+    assert.equal(motivoFechaNo("antes", c1, pareja, o), null);
+    assert.equal(motivoFechaNo("antes", c2, pareja, o), null);
+    assert.equal(motivoFechaNo("antes", c3, pareja, o), "Es la foto «después»");
+    assert.equal(motivoFechaNo("despues", c1, pareja, o), "Es anterior a la foto «antes»");
+    assert.equal(motivoFechaNo("despues", c2, pareja, o), "Es la foto «antes»");
+    assert.equal(motivoFechaNo("antes", c3, { antesId: "c1", despuesId: "c2" }, o), "Es posterior a la foto «después»");
   });
 });
 
